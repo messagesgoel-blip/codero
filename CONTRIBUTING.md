@@ -4,10 +4,10 @@
 
 1. Create a feature branch from `main`.
 2. Claim/update task in `docs/agent-task-board.md`.
-2. Implement small, reviewable changes.
-3. Run `make ci` locally.
-4. Open a PR using the template.
-5. Include risk and rollback notes.
+3. Implement small, reviewable changes.
+4. Run `make ci` locally.
+5. Open a PR using the template.
+6. Include risk and rollback notes.
 
 See `AGENTS.md` and `docs/agent-preflight.md` for mandatory agent workflow.
 

@@ -64,7 +64,7 @@ func Load(path string) (*Config, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("%w: %s", ErrConfigNotFound, path)
 		}
-		return nil, fmt.Errorf("%w: %s: %v", ErrConfigUnreadable, path, err)
+		return nil, fmt.Errorf("%w: %s: %w", ErrConfigUnreadable, path, err)
 	}
 	defer f.Close()
 

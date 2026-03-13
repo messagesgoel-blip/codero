@@ -73,19 +73,19 @@ func daemonCmd(configPath *string) *cobra.Command {
 				if err := config.ValidateTokenScopes(cmd.Context(), cfg.GitHubToken, nil); err != nil {
 					var missingErr *config.ErrMissingScopes
 					if errors.As(err, &missingErr) {
-						fmt.Fprintf(os.Stderr, "codero: github token missing scopes: %s\n",
+						return fmt.Errorf("codero: github token missing scopes: %s",
 							strings.Join(missingErr.Missing, ", "))
-					} else {
-						fmt.Fprintf(os.Stderr, "codero: github scope check failed: %v\n", err)
 					}
-					os.Exit(1)
+					return fmt.Errorf("codero: github scope check failed: %w", err)
 				}
 			}
 
 			// Redis must be reachable before doing anything else.
-			if err := daemon.CheckRedis(cfg.Redis.Addr); err != nil {
-				fmt.Fprintf(os.Stderr, "codero: redis unavailable at %s: %v\n", cfg.Redis.Addr, err)
-				os.Exit(1)
+			if err := daemon.CheckRedis(cmd.Context(), &redis.Options{
+				Addr:     cfg.Redis.Addr,
+				Password: cfg.Redis.Password,
+			}); err != nil {
+				return fmt.Errorf("codero: redis unavailable at %s: %w", cfg.Redis.Addr, err)
 			}
 
 			if err := daemon.WritePID(cfg.PIDFile); err != nil {
@@ -109,10 +109,12 @@ func daemonCmd(configPath *string) *cobra.Command {
 				daemon.WatchRedis(ctx, client)
 			}()
 
-			// HandleSignals blocks until SIGTERM/SIGINT, then cancels ctx,
-			// waits for wg, and calls os.Exit. The defer above won't run on
-			// os.Exit, so PID removal is registered before blocking.
-			daemon.HandleSignals(cancel, &wg)
+			// HandleSignals blocks until SIGTERM/SIGINT, then cancels ctx and
+			// waits for wg. It returns 0 on clean shutdown, 1 on grace period
+			// exceeded. Returning (not os.Exit) lets the deferred PID removal run.
+			if exitCode := daemon.HandleSignals(cancel, &wg); exitCode != 0 {
+				return fmt.Errorf("codero: grace period exceeded, shutdown incomplete")
+			}
 			return nil
 		},
 	}
@@ -147,7 +149,10 @@ func statusCmd(configPath *string) *cobra.Command {
 
 			// Check Redis connectivity.
 			redisState := "ok"
-			if err := daemon.CheckRedis(cfg.Redis.Addr); err != nil {
+			if err := daemon.CheckRedis(cmd.Context(), &redis.Options{
+				Addr:     cfg.Redis.Addr,
+				Password: cfg.Redis.Password,
+			}); err != nil {
 				redisState = "unavailable"
 			}
 			fmt.Printf("redis: %s\n", redisState)
