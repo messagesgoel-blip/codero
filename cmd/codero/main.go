@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 	"sync"
 
 	"github.com/codero/codero/internal/config"
 	"github.com/codero/codero/internal/daemon"
+	loglib "github.com/codero/codero/internal/log"
 	redislib "github.com/codero/codero/internal/redis"
 	"github.com/codero/codero/internal/state"
 	"github.com/spf13/cobra"
@@ -67,7 +67,23 @@ func daemonCmd(configPath *string) *cobra.Command {
 				return fmt.Errorf("codero: config: %w", err)
 			}
 
+			if err := loglib.Init(cfg.LogLevel, cfg.LogPath); err != nil {
+				return fmt.Errorf("codero: log init: %w", err)
+			}
+
+			loglib.Info("codero: daemon starting",
+				loglib.FieldEventType, loglib.EventStartup,
+				loglib.FieldComponent, "daemon",
+				"pid", os.Getpid(),
+				"version", version,
+			)
+
 			if err := config.ValidateTokenScopes(cmd.Context(), cfg.GitHubToken, nil); err != nil {
+				loglib.Error("codero: github scope check failed",
+					loglib.FieldEventType, loglib.EventStartup,
+					loglib.FieldComponent, "daemon",
+					"error", err,
+				)
 				var missingErr *config.ErrMissingScopes
 				if errors.As(err, &missingErr) {
 					return fmt.Errorf("codero: github token missing scopes: %s", strings.Join(missingErr.Missing, ", "))
@@ -77,23 +93,43 @@ func daemonCmd(configPath *string) *cobra.Command {
 
 			// Redis must be reachable before doing anything else.
 			if err := daemon.CheckRedis(cmd.Context(), cfg.Redis.Addr, cfg.Redis.Password); err != nil {
+				loglib.Error("codero: redis unavailable",
+					loglib.FieldEventType, loglib.EventStartup,
+					loglib.FieldComponent, "daemon",
+					"error", err,
+					"addr", cfg.Redis.Addr,
+				)
 				return fmt.Errorf("codero: redis unavailable at %s: %w", cfg.Redis.Addr, err)
 			}
 
 			// Acquire PID file early to prevent duplicate daemon starts.
 			if err := daemon.WritePID(cfg.PIDFile); err != nil {
+				loglib.Error("codero: failed to write PID file",
+					loglib.FieldEventType, loglib.EventStartup,
+					loglib.FieldComponent, "daemon",
+					"error", err,
+					"pid_file", cfg.PIDFile,
+				)
 				return fmt.Errorf("codero: %w", err)
 			}
-			defer daemon.RemovePID(cfg.PIDFile)
 
 			// Open SQLite state store and run pending migrations.
 			db, err := state.Open(cfg.DBPath)
 			if err != nil {
+				loglib.Error("codero: state store open failed",
+					loglib.FieldEventType, loglib.EventStartup,
+					loglib.FieldComponent, "daemon",
+					"error", err,
+					"db_path", cfg.DBPath,
+				)
 				return fmt.Errorf("codero: state store: %w", err)
 			}
 			defer db.Close()
-			log.Printf("codero: state store opened at %s", cfg.DBPath)
-			log.Printf("codero: daemon started (pid %d)", os.Getpid())
+			loglib.Info("codero: state store opened",
+				loglib.FieldEventType, loglib.EventStartup,
+				loglib.FieldComponent, "daemon",
+				"db_path", cfg.DBPath,
+			)
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -104,6 +140,11 @@ func daemonCmd(configPath *string) *cobra.Command {
 			client := redislib.New(cfg.Redis.Addr, cfg.Redis.Password)
 			defer client.Close()
 			if err := client.LoadScripts(ctx); err != nil {
+				loglib.Error("codero: redis script load failed",
+					loglib.FieldEventType, loglib.EventStartup,
+					loglib.FieldComponent, "daemon",
+					"error", err,
+				)
 				return fmt.Errorf("codero: redis script load failed: %w", err)
 			}
 
@@ -114,9 +155,12 @@ func daemonCmd(configPath *string) *cobra.Command {
 				daemon.WatchRedis(ctx, client)
 			}()
 
-			// HandleSignals blocks until SIGTERM/SIGINT, then cancels ctx and
-			// waits for wg. It returns 0 on clean shutdown, 1 on grace period
-			// exceeded. Returning (not os.Exit) lets deferred cleanup run.
+			loglib.Info("codero: daemon started",
+				loglib.FieldEventType, loglib.EventStartup,
+				loglib.FieldComponent, "daemon",
+				"pid", os.Getpid(),
+			)
+
 			if exitCode := daemon.HandleSignals(cancel, &wg); exitCode != 0 {
 				return fmt.Errorf("codero: grace period exceeded, shutdown incomplete")
 			}

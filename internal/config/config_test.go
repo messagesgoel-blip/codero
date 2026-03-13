@@ -21,6 +21,7 @@ func TestLoadEnv_Defaults(t *testing.T) {
 	t.Setenv("CODERO_REDIS_PASS", "")
 	t.Setenv("CODERO_PID_FILE", "")
 	t.Setenv("CODERO_LOG_LEVEL", "")
+	t.Setenv("CODERO_LOG_PATH", "")
 	t.Setenv("CODERO_DB_PATH", "")
 
 	c := LoadEnv()
@@ -33,6 +34,9 @@ func TestLoadEnv_Defaults(t *testing.T) {
 	if c.LogLevel != "info" {
 		t.Errorf("LogLevel: got %q", c.LogLevel)
 	}
+	if c.LogPath != "" {
+		t.Errorf("LogPath: got %q", c.LogPath)
+	}
 	if c.DBPath != "/var/lib/codero/codero.db" {
 		t.Errorf("DBPath: got %q", c.DBPath)
 	}
@@ -43,6 +47,7 @@ func TestLoadEnv_Overrides(t *testing.T) {
 	t.Setenv("CODERO_REDIS_PASS", "secret")
 	t.Setenv("CODERO_PID_FILE", "/tmp/codero.pid")
 	t.Setenv("CODERO_LOG_LEVEL", "debug")
+	t.Setenv("CODERO_LOG_PATH", "/tmp/codero.log")
 	t.Setenv("CODERO_DB_PATH", "/tmp/codero.db")
 	t.Setenv("GITHUB_TOKEN", "ghp_test")
 	t.Setenv("CODERO_REPOS", " org/a , org/b ")
@@ -51,7 +56,7 @@ func TestLoadEnv_Overrides(t *testing.T) {
 	if c.Redis.Addr != "redis.example.com:6380" || c.Redis.Password != "secret" {
 		t.Fatalf("redis overrides not applied: %#v", c.Redis)
 	}
-	if c.PIDFile != "/tmp/codero.pid" || c.LogLevel != "debug" || c.DBPath != "/tmp/codero.db" {
+	if c.PIDFile != "/tmp/codero.pid" || c.LogLevel != "debug" || c.LogPath != "/tmp/codero.log" || c.DBPath != "/tmp/codero.db" {
 		t.Fatalf("override mismatch: %#v", c)
 	}
 	if len(c.Repos) != 2 || c.Repos[0] != "org/a" || c.Repos[1] != "org/b" {
@@ -68,6 +73,7 @@ redis:
   addr: "localhost:6379"
 pid_file: /tmp/test.pid
 log_level: debug
+log_path: /tmp/test.log
 db_path: /tmp/test.db
 `)
 	c, err := Load(path)
@@ -76,6 +82,9 @@ db_path: /tmp/test.db
 	}
 	if c.GitHubToken != "ghp_test" {
 		t.Errorf("GitHubToken: got %q", c.GitHubToken)
+	}
+	if c.LogPath != "/tmp/test.log" {
+		t.Errorf("LogPath: got %q", c.LogPath)
 	}
 	if c.DBPath != "/tmp/test.db" {
 		t.Errorf("DBPath: got %q", c.DBPath)

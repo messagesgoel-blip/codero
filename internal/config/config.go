@@ -51,6 +51,7 @@ type Config struct {
 	Redis       RedisConfig `yaml:"redis"`
 	PIDFile     string      `yaml:"pid_file"`
 	LogLevel    string      `yaml:"log_level"`
+	LogPath     string      `yaml:"log_path"`
 	DBPath      string      `yaml:"db_path"`
 }
 
@@ -117,6 +118,7 @@ func defaults() *Config {
 		},
 		PIDFile:  "/var/run/codero/codero.pid",
 		LogLevel: "info",
+		LogPath:  "",
 		DBPath:   "/var/lib/codero/codero.db",
 	}
 }
@@ -134,6 +136,9 @@ func applyEnvOverrides(c *Config) {
 	}
 	if v := os.Getenv("CODERO_LOG_LEVEL"); v != "" {
 		c.LogLevel = v
+	}
+	if v := os.Getenv("CODERO_LOG_PATH"); v != "" {
+		c.LogPath = v
 	}
 	if v := os.Getenv("CODERO_DB_PATH"); v != "" {
 		c.DBPath = v

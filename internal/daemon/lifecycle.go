@@ -2,12 +2,13 @@ package daemon
 
 import (
 	"context"
-	"log"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
 	"time"
+
+	loglib "github.com/codero/codero/internal/log"
 )
 
 const gracePeriod = 30 * time.Second
@@ -24,7 +25,10 @@ func HandleSignals(cancel context.CancelFunc, wg *sync.WaitGroup) int {
 	defer signal.Stop(ch)
 
 	<-ch
-	log.Println("codero: shutting down")
+	loglib.Info("codero: shutting down",
+		loglib.FieldEventType, loglib.EventShutdown,
+		loglib.FieldComponent, "daemon",
+	)
 	cancel()
 
 	done := make(chan struct{})
@@ -37,7 +41,10 @@ func HandleSignals(cancel context.CancelFunc, wg *sync.WaitGroup) int {
 	case <-done:
 		return 0
 	case <-time.After(gracePeriod):
-		log.Println("codero: grace period exceeded, forcing exit")
+		loglib.Warn("codero: grace period exceeded, forcing exit",
+			loglib.FieldEventType, loglib.EventShutdown,
+			loglib.FieldComponent, "daemon",
+		)
 		return 1
 	}
 }

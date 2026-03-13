@@ -3,10 +3,10 @@ package daemon
 import (
 	"context"
 	"errors"
-	"log"
 	"sync/atomic"
 	"time"
 
+	loglib "github.com/codero/codero/internal/log"
 	redislib "github.com/codero/codero/internal/redis"
 )
 
@@ -44,7 +44,10 @@ func WatchRedis(ctx context.Context, client *redislib.Client) {
 
 		if err := client.Ping(ctx); err != nil {
 			if degraded.CompareAndSwap(0, 1) {
-				log.Println("redis lost, halting dispatch")
+				loglib.Warn("redis lost, halting dispatch",
+					loglib.FieldEventType, loglib.EventSystem,
+					loglib.FieldComponent, "daemon",
+				)
 			}
 			// Reconnect loop with exponential backoff.
 			for {
@@ -61,7 +64,10 @@ func WatchRedis(ctx context.Context, client *redislib.Client) {
 				if err := client.Ping(ctx); err == nil {
 					degraded.Store(0)
 					backoff = time.Second
-					log.Println("redis restored")
+					loglib.Info("redis restored",
+						loglib.FieldEventType, loglib.EventSystem,
+						loglib.FieldComponent, "daemon",
+					)
 					break
 				}
 			}
