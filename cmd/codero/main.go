@@ -40,9 +40,8 @@ func daemonCmd() *cobra.Command {
 			cfg := config.Load()
 
 			// Redis must be reachable before doing anything else.
-			if err := daemon.CheckRedis(cfg.RedisAddr); err != nil {
-				fmt.Fprintf(os.Stderr, "codero: redis unavailable at %s: %v\n", cfg.RedisAddr, err)
-				os.Exit(1)
+			if err := daemon.CheckRedis(cmd.Context(), cfg.RedisAddr, cfg.RedisPass); err != nil {
+				return fmt.Errorf("codero: redis unavailable at %s: %w", cfg.RedisAddr, err)
 			}
 
 			if err := daemon.WritePID(cfg.PIDFile); err != nil {
@@ -60,16 +59,19 @@ func daemonCmd() *cobra.Command {
 				Addr:     cfg.RedisAddr,
 				Password: cfg.RedisPass,
 			})
+			defer client.Close()
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				daemon.WatchRedis(ctx, client)
 			}()
 
-			// HandleSignals blocks until SIGTERM/SIGINT, then cancels ctx,
-			// waits for wg, and calls os.Exit. The defer above won't run on
-			// os.Exit, so we register PID removal before blocking.
-			daemon.HandleSignals(cancel, &wg)
+			// HandleSignals returns exit code instead of calling os.Exit.
+			// Explicit cleanup before os.Exit since defers don't run.
+			exitCode := daemon.HandleSignals(cancel, &wg)
+			daemon.RemovePID(cfg.PIDFile)
+			client.Close()
+			os.Exit(exitCode)
 			return nil
 		},
 	}
@@ -93,15 +95,14 @@ func statusCmd() *cobra.Command {
 			}
 
 			if !daemon.ProcessRunning(pid) {
-				fmt.Printf("codero: stale PID file (pid %d)\n", pid)
-				os.Exit(1)
+				return fmt.Errorf("codero: stale PID file (pid %d)", pid)
 			}
 
 			fmt.Printf("codero: running (pid %d)\n", pid)
 
 			// Check Redis connectivity.
 			redisState := "ok"
-			if err := daemon.CheckRedis(cfg.RedisAddr); err != nil {
+			if err := daemon.CheckRedis(cmd.Context(), cfg.RedisAddr, cfg.RedisPass); err != nil {
 				redisState = "unavailable"
 			}
 			fmt.Printf("redis: %s\n", redisState)

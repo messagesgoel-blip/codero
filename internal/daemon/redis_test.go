@@ -1,15 +1,26 @@
 package daemon
 
 import (
+	"context"
 	"errors"
+	"net"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
 )
 
 func TestCheckRedis_FailsWithNamedError(t *testing.T) {
-	// Point at a port that is not listening.
-	err := CheckRedis("127.0.0.1:19999")
+	// Reserve an ephemeral port, then close it to guarantee the address is not listening.
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve port: %v", err)
+	}
+	addr := l.Addr().String()
+	if err := l.Close(); err != nil {
+		t.Fatalf("close listener: %v", err)
+	}
+
+	err = CheckRedis(context.Background(), addr, "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -20,7 +31,7 @@ func TestCheckRedis_FailsWithNamedError(t *testing.T) {
 
 func TestCheckRedis_SuccessWithMiniredis(t *testing.T) {
 	mr := miniredis.RunT(t)
-	err := CheckRedis(mr.Addr())
+	err := CheckRedis(context.Background(), mr.Addr(), "")
 	if err != nil {
 		t.Fatalf("CheckRedis against miniredis: %v", err)
 	}
