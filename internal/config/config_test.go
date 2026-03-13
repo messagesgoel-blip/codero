@@ -221,3 +221,32 @@ redis:
 		t.Errorf("Redis.Addr: env override not applied, got %q", c.Redis.Addr)
 	}
 }
+
+func TestLoad_WhitespaceOnlyRepo(t *testing.T) {
+	path := writeConfig(t, `
+github_token: ghp_test
+repos:
+  - "  "
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for whitespace-only repo, got nil")
+	}
+	if !errors.Is(err, ErrMissingRepos) {
+		t.Errorf("want ErrMissingRepos, got: %v", err)
+	}
+}
+
+func TestValidate_WhitespaceOnlyRepo(t *testing.T) {
+	c := &Config{
+		GitHubToken: "ghp_test",
+		Repos:       []string{"  "},
+	}
+	err := c.Validate()
+	if err == nil {
+		t.Fatal("expected error for whitespace-only repo, got nil")
+	}
+	if !errors.Is(err, ErrMissingRepos) {
+		t.Errorf("want ErrMissingRepos, got: %v", err)
+	}
+}

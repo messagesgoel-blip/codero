@@ -146,13 +146,18 @@ func applyEnvOverrides(c *Config) {
 	}
 }
 
-// validate checks that required fields are present.
+// Validate checks that required fields are present and non-empty.
 func (c *Config) Validate() error {
 	if strings.TrimSpace(c.GitHubToken) == "" {
 		return ErrMissingToken
 	}
 	if len(c.Repos) == 0 {
 		return ErrMissingRepos
+	}
+	for _, repo := range c.Repos {
+		if strings.TrimSpace(repo) == "" {
+			return ErrMissingRepos
+		}
 	}
 	return nil
 }
