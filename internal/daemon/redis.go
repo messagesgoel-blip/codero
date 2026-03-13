@@ -28,7 +28,11 @@ func CheckRedis(ctx context.Context, opts *redis.Options) error {
 	var lastErr error
 	for i := 0; i < 3; i++ {
 		if i > 0 {
-			time.Sleep(time.Second)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Second):
+			}
 		}
 		pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		_, lastErr = client.Ping(pingCtx).Result()

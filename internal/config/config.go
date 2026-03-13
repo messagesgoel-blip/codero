@@ -6,6 +6,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -26,6 +27,9 @@ var (
 	// ErrUnknownFields is returned when the config file contains unrecognised keys.
 	// Unknown fields are hard errors, not warnings.
 	ErrUnknownFields = errors.New("unknown fields in config")
+
+	// ErrMultipleDocuments is returned when the config file contains multiple YAML documents.
+	ErrMultipleDocuments = errors.New("multiple YAML documents not allowed in config")
 
 	// ErrMissingToken is returned when github_token is absent or empty.
 	ErrMissingToken = errors.New("github_token is required")
@@ -75,6 +79,14 @@ func Load(path string) (*Config, error) {
 		return nil, classifyYAMLError(err)
 	}
 
+	// Check for extra YAML documents (multi-document YAML is not allowed).
+	var dummy any
+	if err := dec.Decode(&dummy); err == nil {
+		return nil, ErrMultipleDocuments
+	} else if !errors.Is(err, io.EOF) {
+		return nil, classifyYAMLError(err)
+	}
+
 	applyEnvOverrides(c)
 
 	if err := c.Validate(); err != nil {
@@ -84,11 +96,19 @@ func Load(path string) (*Config, error) {
 }
 
 // LoadEnv builds a Config from environment variables only, using built-in
-// defaults for any unset variable. github_token and repos are not required
-// (they remain empty) — this loader is for non-daemon commands and tests.
+// defaults for any unset variable. Unlike Load, this loader populates
+// github_token from GITHUB_TOKEN and repos from CODERO_REPOS (comma-separated)
+// so daemon fallback can succeed without a config file.
 func LoadEnv() *Config {
 	c := defaults()
 	applyEnvOverrides(c)
+	// Also apply file-only fields from env for daemon fallback.
+	if v := os.Getenv("GITHUB_TOKEN"); v != "" {
+		c.GitHubToken = v
+	}
+	if v := os.Getenv("CODERO_REPOS"); v != "" {
+		c.Repos = strings.Split(v, ",")
+	}
 	return c
 }
 
@@ -105,7 +125,7 @@ func defaults() *Config {
 }
 
 // applyEnvOverrides overwrites Redis/PID/log fields from environment variables.
-// github_token and repos are never overridden via env — they are file-only.
+// github_token and repos are handled separately in LoadEnv for daemon fallback.
 func applyEnvOverrides(c *Config) {
 	if v := os.Getenv("CODERO_REDIS_ADDR"); v != "" {
 		c.Redis.Addr = v
@@ -133,15 +153,16 @@ func (c *Config) Validate() error {
 }
 
 // classifyYAMLError maps a yaml decoder error to the appropriate sentinel.
+// It wraps the original error to preserve the error chain for callers.
 func classifyYAMLError(err error) error {
 	var typeErr *yaml.TypeError
 	if errors.As(err, &typeErr) {
 		for _, msg := range typeErr.Errors {
 			if strings.Contains(msg, "not found in type") {
-				return fmt.Errorf("%w: %s", ErrUnknownFields, typeErr.Error())
+				return fmt.Errorf("%w: %w", ErrUnknownFields, typeErr)
 			}
 		}
-		return fmt.Errorf("%w: %s", ErrInvalidYAML, typeErr.Error())
+		return fmt.Errorf("%w: %w", ErrInvalidYAML, typeErr)
 	}
-	return fmt.Errorf("%w: %s", ErrInvalidYAML, err.Error())
+	return fmt.Errorf("%w: %w", ErrInvalidYAML, err)
 }

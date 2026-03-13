@@ -30,6 +30,7 @@ if [ "$coderabbit_status" -ne 0 ]; then
   set -e
   if [ "$pragent_status" -ne 0 ]; then
     echo "PR-Agent fallback also failed (exit $pragent_status). Review skipped — check logs." | tee -a "$SECOND_LOG"
+    exit 1
   fi
 fi
 
