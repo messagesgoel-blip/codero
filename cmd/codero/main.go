@@ -52,6 +52,13 @@ func daemonCmd() *cobra.Command {
 				os.Exit(1)
 			}
 
+			// Acquire PID file early to prevent duplicate daemon starts.
+			if err := daemon.WritePID(cfg.PIDFile); err != nil {
+				fmt.Fprintf(os.Stderr, "codero: %v\n", err)
+				os.Exit(1)
+			}
+			defer daemon.RemovePID(cfg.PIDFile)
+
 			// Open SQLite state store and run pending migrations.
 			// A migration failure is fatal — partial schema is not safe.
 			db, err := state.Open(cfg.DBPath)
@@ -61,12 +68,6 @@ func daemonCmd() *cobra.Command {
 			}
 			defer db.Close()
 			log.Printf("codero: state store opened at %s", cfg.DBPath)
-
-			if err := daemon.WritePID(cfg.PIDFile); err != nil {
-				fmt.Fprintf(os.Stderr, "codero: %v\n", err)
-				os.Exit(1)
-			}
-			defer daemon.RemovePID(cfg.PIDFile)
 
 			log.Printf("codero: daemon started (pid %d)", os.Getpid())
 
