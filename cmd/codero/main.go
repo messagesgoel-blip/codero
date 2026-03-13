@@ -95,7 +95,7 @@ func daemonCmd(configPath *string) *cobra.Command {
 
 			log.Printf("codero: daemon started (pid %d)", os.Getpid())
 
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(cmd.Context())
 			var wg sync.WaitGroup
 
 			// Monitor Redis connectivity after startup.
@@ -103,6 +103,7 @@ func daemonCmd(configPath *string) *cobra.Command {
 				Addr:     cfg.Redis.Addr,
 				Password: cfg.Redis.Password,
 			})
+			defer client.Close()
 			wg.Add(1)
 			go func() {
 				defer wg.Done()

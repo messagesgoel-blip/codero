@@ -107,7 +107,12 @@ func LoadEnv() *Config {
 		c.GitHubToken = v
 	}
 	if v := os.Getenv("CODERO_REPOS"); v != "" {
-		c.Repos = strings.Split(v, ",")
+		// Split by comma and trim whitespace from each repo.
+		for _, repo := range strings.Split(v, ",") {
+			if trimmed := strings.TrimSpace(repo); trimmed != "" {
+				c.Repos = append(c.Repos, trimmed)
+			}
+		}
 	}
 	return c
 }

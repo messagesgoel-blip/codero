@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"sync/atomic"
 	"time"
@@ -30,7 +31,7 @@ func CheckRedis(ctx context.Context, opts *redis.Options) error {
 		if i > 0 {
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return fmt.Errorf("redis check cancelled: %w", ctx.Err())
 			case <-time.After(time.Second):
 			}
 		}
