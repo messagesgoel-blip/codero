@@ -25,9 +25,11 @@ Default pattern:
 
 1. First pass local AI review (LiteLLM/Aider or equivalent).
 2. Second pass local CodeRabbit CLI review on uncommitted changes.
-3. Fix findings before commit.
+3. If CodeRabbit fails, run PR-Agent (`qodo-ai/pr-agent`) as fallback second pass via LiteLLM using the same model set policy.
+4. Fix findings before commit.
 
 If the repo ships `scripts/review/two-pass-review.sh`, use it as the default gate.
+In this repo, `scripts/review/two-pass-review.sh` is authoritative and includes CodeRabbit -> PR-Agent fallback behavior.
 
 ## 4) Validation Before Push
 
