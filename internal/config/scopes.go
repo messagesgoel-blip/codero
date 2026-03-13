@@ -67,6 +67,9 @@ func ValidateTokenScopes(ctx context.Context, token string, client *http.Client)
 	if resp.StatusCode == http.StatusUnauthorized {
 		return &ErrScopeCheck{Cause: fmt.Errorf("token rejected by GitHub API (401)")}
 	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return &ErrScopeCheck{Cause: fmt.Errorf("GitHub API returned unexpected status %d", resp.StatusCode)}
+	}
 
 	scopesHeader := resp.Header.Get("X-OAuth-Scopes")
 	granted := parseScopeHeader(scopesHeader)

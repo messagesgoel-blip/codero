@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 )
 
@@ -32,8 +33,12 @@ type rewriteTransport struct {
 
 func (rt *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	clone := req.Clone(req.Context())
-	clone.URL.Scheme = "http"
-	clone.URL.Host = rt.target[len("http://"):]
+	targetURL, err := url.Parse(rt.target)
+	if err != nil {
+		return nil, err
+	}
+	clone.URL.Scheme = targetURL.Scheme
+	clone.URL.Host = targetURL.Host
 	return rt.base.RoundTrip(clone)
 }
 
@@ -89,6 +94,18 @@ func TestValidateTokenScopes_Unauthorized(t *testing.T) {
 	err := ValidateTokenScopes(context.Background(), "ghp_bad", client)
 	if err == nil {
 		t.Fatal("expected error for 401, got nil")
+	}
+	var scopeErr *ErrScopeCheck
+	if !errors.As(err, &scopeErr) {
+		t.Fatalf("want *ErrScopeCheck, got %T: %v", err, err)
+	}
+}
+
+func TestValidateTokenScopes_ServerError(t *testing.T) {
+	_, client := mockScopeServer(t, "", http.StatusInternalServerError)
+	err := ValidateTokenScopes(context.Background(), "ghp_test", client)
+	if err == nil {
+		t.Fatal("expected error for 500, got nil")
 	}
 	var scopeErr *ErrScopeCheck
 	if !errors.As(err, &scopeErr) {
