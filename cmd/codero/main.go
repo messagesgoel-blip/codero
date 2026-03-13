@@ -107,8 +107,7 @@ func statusCmd() *cobra.Command {
 			}
 
 			if !daemon.ProcessRunning(pid) {
-				fmt.Printf("codero: stale PID file (pid %d)\n", pid)
-				os.Exit(1)
+				return fmt.Errorf("codero: stale PID file (pid %d)", pid)
 			}
 
 			fmt.Printf("codero: running (pid %d)\n", pid)
