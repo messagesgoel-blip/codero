@@ -10,23 +10,18 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// freeAddr binds an ephemeral TCP port and immediately releases it,
-// returning an address that is guaranteed not to be listening.
-// Using :0 avoids the flakiness of hard-coding a port that may be in use.
-func freeAddr(t *testing.T) string {
-	t.Helper()
+func TestCheckRedis_FailsWithNamedError(t *testing.T) {
+	// Reserve an ephemeral port, then close it to guarantee the address is not listening.
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("freeAddr: listen: %v", err)
+		t.Fatalf("reserve port: %v", err)
 	}
 	addr := l.Addr().String()
-	_ = l.Close()
-	return addr
-}
+	if err := l.Close(); err != nil {
+		t.Fatalf("close listener: %v", err)
+	}
 
-func TestCheckRedis_FailsWithNamedError(t *testing.T) {
-	addr := freeAddr(t)
-	err := CheckRedis(context.Background(), &redis.Options{Addr: addr})
+	err = CheckRedis(context.Background(), &redis.Options{Addr: addr})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
