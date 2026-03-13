@@ -75,6 +75,8 @@ func daemonCmd() *cobra.Command {
 			// HandleSignals blocks until SIGTERM/SIGINT, cancels ctx,
 			// waits for wg, and returns an exit code.
 			exitCode := daemon.HandleSignals(cancel, &wg)
+			// Explicit cleanup since os.Exit skips defers.
+			daemon.RemovePID(cfg.PIDFile)
 			os.Exit(exitCode)
 		},
 	}
