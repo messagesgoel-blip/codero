@@ -33,8 +33,10 @@ func WritePID(path string) error {
 	}
 	defer f.Close()
 
-	_, err = fmt.Fprintln(f, os.Getpid())
-	return err
+	if _, err = fmt.Fprintln(f, os.Getpid()); err != nil {
+		return fmt.Errorf("pid: write %s: %w", path, err)
+	}
+	return nil
 }
 
 // RemovePID deletes the PID file. Called on clean shutdown.

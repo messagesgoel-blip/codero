@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -84,7 +85,7 @@ func statusCmd() *cobra.Command {
 
 			pid, err := daemon.ReadPID(cfg.PIDFile)
 			if err != nil {
-				if os.IsNotExist(err) {
+				if errors.Is(err, os.ErrNotExist) {
 					fmt.Println("codero: not running")
 					return nil
 				}
