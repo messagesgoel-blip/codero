@@ -20,6 +20,7 @@ const gracePeriod = 30 * time.Second
 func HandleSignals(cancel context.CancelFunc, wg *sync.WaitGroup) int {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGTERM, syscall.SIGINT)
+	defer signal.Stop(ch)
 
 	<-ch
 	log.Println("codero: shutting down")
