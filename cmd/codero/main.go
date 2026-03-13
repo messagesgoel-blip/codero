@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/codero/codero/internal/config"
@@ -18,31 +19,70 @@ import (
 var version = "dev"
 
 func main() {
+	var configPath string
+
 	root := &cobra.Command{
 		Use:          "codero",
 		Short:        "codero — code review orchestration control plane",
 		SilenceUsage: true,
 	}
 
-	root.AddCommand(daemonCmd(), statusCmd(), versionCmd())
+	// --config / -c is a global flag available to all subcommands.
+	root.PersistentFlags().StringVarP(&configPath, "config", "c", "codero.yaml",
+		"path to codero YAML config file")
+
+	root.AddCommand(daemonCmd(&configPath), statusCmd(&configPath), versionCmd())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}
 }
 
+// loadConfig loads configuration from the YAML file at path.
+// If path is the default "codero.yaml" and the file does not exist, it falls
+// back to env-only loading so that existing env-based workflows keep working.
+// Any other error (wrong path, bad YAML, unknown fields) is returned as-is.
+func loadConfig(path string) (*config.Config, error) {
+	cfg, err := config.Load(path)
+	if err != nil {
+		if errors.Is(err, config.ErrConfigNotFound) && path == "codero.yaml" {
+			return config.LoadEnv(), nil
+		}
+		return nil, err
+	}
+	return cfg, nil
+}
+
 // daemonCmd starts the long-running daemon process.
-func daemonCmd() *cobra.Command {
+func daemonCmd(configPath *string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "daemon",
 		Short: "Start the codero daemon",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg := config.Load()
+			cfg, err := loadConfig(*configPath)
+			if err != nil {
+				return fmt.Errorf("codero: config: %w", err)
+			}
+			if err := cfg.Validate(); err != nil {
+				return fmt.Errorf("codero: config: %w", err)
+			}
+
+			// Validate GitHub token scopes before doing anything else.
+			// Scope check is daemon-only; status/version remain lightweight.
+			if cfg.GitHubToken != "" {
+				if err := config.ValidateTokenScopes(cmd.Context(), cfg.GitHubToken, nil); err != nil {
+					var missingErr *config.ErrMissingScopes
+					if errors.As(err, &missingErr) {
+						return fmt.Errorf("codero: github token missing scopes: %s",
+							strings.Join(missingErr.Missing, ", "))
+					}
+					return fmt.Errorf("codero: github scope check failed: %w", err)
+				}
+			}
 
 			// Redis must be reachable before doing anything else.
-			if err := daemon.CheckRedis(cmd.Context(), cfg.RedisAddr, cfg.RedisPass); err != nil {
-				fmt.Fprintf(os.Stderr, "codero: redis unavailable at %s: %v\n", cfg.RedisAddr, err)
-				os.Exit(1)
+			if err := daemon.CheckRedis(cmd.Context(), cfg.Redis.Addr, cfg.Redis.Password); err != nil {
+				return fmt.Errorf("codero: redis unavailable at %s: %w", cfg.Redis.Addr, err)
 			}
 
 			if err := daemon.WritePID(cfg.PIDFile); err != nil {
@@ -53,14 +93,15 @@ func daemonCmd() *cobra.Command {
 			log.Printf("codero: daemon started (pid %d)", os.Getpid())
 
 			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
 			var wg sync.WaitGroup
 
 			// Initialize Redis client and load Lua scripts.
 			// Startup fails fast if script loading fails.
-			client := redislib.New(cfg.RedisAddr, cfg.RedisPass)
+			client := redislib.New(cfg.Redis.Addr, cfg.Redis.Password)
+			defer client.Close()
 			if err := client.LoadScripts(ctx); err != nil {
-				fmt.Fprintf(os.Stderr, "codero: redis script load failed: %v\n", err)
-				os.Exit(1)
+				return fmt.Errorf("codero: redis script load failed: %w", err)
 			}
 
 			// Monitor Redis connectivity after startup.
@@ -70,21 +111,27 @@ func daemonCmd() *cobra.Command {
 				daemon.WatchRedis(ctx, client)
 			}()
 
-			// HandleSignals blocks until SIGTERM/SIGINT, then cancels ctx,
-			// waits for wg, and calls os.Exit.
-			daemon.HandleSignals(cancel, &wg)
+			// HandleSignals blocks until SIGTERM/SIGINT, then cancels ctx and
+			// waits for wg. It returns 0 on clean shutdown, 1 on grace period
+			// exceeded. Returning (not os.Exit) lets deferred cleanup run.
+			if exitCode := daemon.HandleSignals(cancel, &wg); exitCode != 0 {
+				return fmt.Errorf("codero: grace period exceeded, shutdown incomplete")
+			}
 			return nil
 		},
 	}
 }
 
 // statusCmd reads the PID file and reports daemon state.
-func statusCmd() *cobra.Command {
+func statusCmd(configPath *string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "Report daemon status",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg := config.Load()
+			cfg, err := loadConfig(*configPath)
+			if err != nil {
+				return fmt.Errorf("codero: config: %w", err)
+			}
 
 			pid, err := daemon.ReadPID(cfg.PIDFile)
 			if err != nil {
@@ -96,15 +143,14 @@ func statusCmd() *cobra.Command {
 			}
 
 			if !daemon.ProcessRunning(pid) {
-				fmt.Printf("codero: stale PID file (pid %d)\n", pid)
-				os.Exit(1)
+				return fmt.Errorf("codero: stale PID file (pid %d)", pid)
 			}
 
 			fmt.Printf("codero: running (pid %d)\n", pid)
 
 			// Check Redis connectivity.
 			redisState := "ok"
-			if err := daemon.CheckRedis(cmd.Context(), cfg.RedisAddr, cfg.RedisPass); err != nil {
+			if err := daemon.CheckRedis(cmd.Context(), cfg.Redis.Addr, cfg.Redis.Password); err != nil {
 				redisState = "unavailable"
 			}
 			fmt.Printf("redis: %s\n", redisState)
