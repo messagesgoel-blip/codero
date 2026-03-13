@@ -5,6 +5,13 @@ on:
     branches: ["**"]
   pull_request:
 
+# CodeRabbit runs as a GitHub Marketplace App (not as a CI workflow job).
+# Required Status Checks (configure in GitHub branch protection settings):
+# - lint
+# - unit
+# - build
+# - contract
+# - CodeRabbit Review (added automatically once the app is installed)
 jobs:
   lint:
     runs-on: ubuntu-latest
