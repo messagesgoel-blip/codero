@@ -10,8 +10,7 @@ import (
 
 	"github.com/codero/codero/internal/config"
 	"github.com/codero/codero/internal/daemon"
-	redislib "github.com/codero/codero/internal/redis"
-	"github.com/redis/go-redis/v9"
+	"github.com/codero/codero/internal/redis"
 	"github.com/spf13/cobra"
 )
 
@@ -41,13 +40,9 @@ func daemonCmd() *cobra.Command {
 			cfg := config.Load()
 
 			ctx := context.Background()
-			redisOpts := &redis.Options{
-				Addr:     cfg.RedisAddr,
-				Password: cfg.RedisPass,
-			}
 
 			// Redis must be reachable before doing anything else.
-			if err := daemon.CheckRedis(ctx, redisOpts); err != nil {
+			if err := redis.CheckHealth(ctx, cfg.RedisAddr, cfg.RedisPass); err != nil {
 				fmt.Fprintf(os.Stderr, "codero: redis unavailable at %s: %v\n", cfg.RedisAddr, err)
 				os.Exit(1)
 			}
@@ -64,18 +59,18 @@ func daemonCmd() *cobra.Command {
 			var wg sync.WaitGroup
 
 			// Monitor Redis connectivity after startup.
-			// All Redis clients are created through internal/redis — never via go-redis directly.
-			client := redislib.New(cfg.RedisAddr, cfg.RedisPass)
+			client := redis.New(cfg.RedisAddr, cfg.RedisPass)
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				daemon.WatchRedis(appCtx, client.Unwrap())
+				daemon.WatchRedis(appCtx, client)
 			}()
 
 			// HandleSignals blocks until SIGTERM/SIGINT, cancels ctx,
 			// waits for wg, and returns an exit code.
 			exitCode := daemon.HandleSignals(cancel, &wg)
 			// Explicit cleanup since os.Exit skips defers.
+			client.Close()
 			daemon.RemovePID(cfg.PIDFile)
 			os.Exit(exitCode)
 		},
@@ -107,11 +102,7 @@ func statusCmd() *cobra.Command {
 
 			// Check Redis connectivity.
 			redisState := "ok"
-			redisOpts := &redis.Options{
-				Addr:     cfg.RedisAddr,
-				Password: cfg.RedisPass,
-			}
-			if err := daemon.CheckRedis(context.Background(), redisOpts); err != nil {
+			if err := redis.CheckHealth(context.Background(), cfg.RedisAddr, cfg.RedisPass); err != nil {
 				redisState = "unavailable"
 			}
 			fmt.Printf("redis: %s\n", redisState)
