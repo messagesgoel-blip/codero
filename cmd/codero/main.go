@@ -11,8 +11,8 @@ import (
 
 	"github.com/codero/codero/internal/config"
 	"github.com/codero/codero/internal/daemon"
+	redislib "github.com/codero/codero/internal/redis"
 	"github.com/codero/codero/internal/state"
-	"github.com/redis/go-redis/v9"
 	"github.com/spf13/cobra"
 )
 
@@ -75,8 +75,8 @@ func daemonCmd(configPath *string) *cobra.Command {
 				return fmt.Errorf("codero: github scope check failed: %w", err)
 			}
 
-			redisOpts := &redis.Options{Addr: cfg.Redis.Addr, Password: cfg.Redis.Password}
-			if err := daemon.CheckRedis(cmd.Context(), redisOpts); err != nil {
+			// Redis must be reachable before doing anything else.
+			if err := daemon.CheckRedis(cmd.Context(), cfg.Redis.Addr, cfg.Redis.Password); err != nil {
 				return fmt.Errorf("codero: redis unavailable at %s: %w", cfg.Redis.Addr, err)
 			}
 
@@ -95,20 +95,29 @@ func daemonCmd(configPath *string) *cobra.Command {
 			log.Printf("codero: state store opened at %s", cfg.DBPath)
 			log.Printf("codero: daemon started (pid %d)", os.Getpid())
 
-			appCtx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			var wg sync.WaitGroup
 
-			client := redis.NewClient(redisOpts)
+			// Initialize Redis client and load Lua scripts.
+			// Startup fails fast if script loading fails.
+			client := redislib.New(cfg.Redis.Addr, cfg.Redis.Password)
 			defer client.Close()
+			if err := client.LoadScripts(ctx); err != nil {
+				return fmt.Errorf("codero: redis script load failed: %w", err)
+			}
+
+			// Monitor Redis connectivity after startup.
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				daemon.WatchRedis(appCtx, client)
+				daemon.WatchRedis(ctx, client)
 			}()
 
-			exitCode := daemon.HandleSignals(cancel, &wg)
-			if exitCode != 0 {
+			// HandleSignals blocks until SIGTERM/SIGINT, then cancels ctx and
+			// waits for wg. It returns 0 on clean shutdown, 1 on grace period
+			// exceeded. Returning (not os.Exit) lets deferred cleanup run.
+			if exitCode := daemon.HandleSignals(cancel, &wg); exitCode != 0 {
 				return fmt.Errorf("codero: grace period exceeded, shutdown incomplete")
 			}
 			return nil
@@ -143,8 +152,7 @@ func statusCmd(configPath *string) *cobra.Command {
 			fmt.Printf("codero: running (pid %d)\n", pid)
 
 			redisState := "ok"
-			redisOpts := &redis.Options{Addr: cfg.Redis.Addr, Password: cfg.Redis.Password}
-			if err := daemon.CheckRedis(cmd.Context(), redisOpts); err != nil {
+			if err := daemon.CheckRedis(cmd.Context(), cfg.Redis.Addr, cfg.Redis.Password); err != nil {
 				redisState = "unavailable"
 			}
 			fmt.Printf("redis: %s\n", redisState)

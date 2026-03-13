@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/redis/go-redis/v9"
 )
 
 func TestCheckRedis_FailsWithNamedError(t *testing.T) {
@@ -21,7 +20,7 @@ func TestCheckRedis_FailsWithNamedError(t *testing.T) {
 		t.Fatalf("close listener: %v", err)
 	}
 
-	err = CheckRedis(context.Background(), &redis.Options{Addr: addr})
+	err = CheckRedis(context.Background(), addr, "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -32,7 +31,7 @@ func TestCheckRedis_FailsWithNamedError(t *testing.T) {
 
 func TestCheckRedis_SuccessWithMiniredis(t *testing.T) {
 	mr := miniredis.RunT(t)
-	err := CheckRedis(context.Background(), &redis.Options{Addr: mr.Addr()})
+	err := CheckRedis(context.Background(), mr.Addr(), "")
 	if err != nil {
 		t.Fatalf("CheckRedis against miniredis: %v", err)
 	}

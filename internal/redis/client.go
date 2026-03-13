@@ -16,7 +16,8 @@ var ErrUnavailable = errors.New("redis unavailable")
 // All callers must obtain a Client via New; raw go-redis clients must not
 // be created outside this package.
 type Client struct {
-	rc *goredis.Client
+	rc      *goredis.Client
+	scripts *ScriptRegistry
 }
 
 // New creates a Client connected to addr with optional password.
@@ -27,6 +28,7 @@ func New(addr, password string) *Client {
 			Addr:     addr,
 			Password: password,
 		}),
+		scripts: NewScriptRegistry(),
 	}
 }
 
@@ -39,6 +41,16 @@ func (c *Client) Ping(ctx context.Context) error {
 		return fmt.Errorf("redis ping: %w", err)
 	}
 	return nil
+}
+
+// LoadScripts registers all Lua scripts on the Redis server and caches their SHAs.
+func (c *Client) LoadScripts(ctx context.Context) error {
+	return c.scripts.Load(ctx, c.rc)
+}
+
+// ScriptSHA returns the cached SHA for the named script.
+func (c *Client) ScriptSHA(name string) (string, error) {
+	return c.scripts.SHA(name)
 }
 
 // Close releases the underlying connection pool.
