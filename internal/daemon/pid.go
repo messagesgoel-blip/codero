@@ -24,7 +24,9 @@ func WritePID(path string) error {
 			return fmt.Errorf("pid: daemon already running (pid %d)", existing)
 		}
 		// Stale file — remove before writing.
-		_ = os.Remove(path)
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("pid: remove stale %s: %w", path, err)
+		}
 	}
 
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
