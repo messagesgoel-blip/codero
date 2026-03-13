@@ -86,6 +86,7 @@ func daemonCmd() *cobra.Command {
 					Addr:     cfg.RedisAddr,
 					Password: cfg.RedisPass,
 				})
+				defer client.Close()
 				wg.Add(1)
 				go func() {
 					defer wg.Done()

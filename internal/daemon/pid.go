@@ -42,10 +42,13 @@ func WritePID(path string) error {
 // RemovePID deletes the PID file. Called on clean shutdown.
 func RemovePID(path string) error {
 	err := os.Remove(path)
+	if err == nil {
+		return nil
+	}
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
-	return err
+	return fmt.Errorf("pid: remove %s: %w", path, err)
 }
 
 // ReadPID reads and returns the PID from the file.
