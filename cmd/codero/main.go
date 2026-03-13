@@ -10,7 +10,7 @@ import (
 
 	"github.com/codero/codero/internal/config"
 	"github.com/codero/codero/internal/daemon"
-	"github.com/redis/go-redis/v9"
+	redislib "github.com/codero/codero/internal/redis"
 	"github.com/spf13/cobra"
 )
 
@@ -56,14 +56,12 @@ func daemonCmd() *cobra.Command {
 			var wg sync.WaitGroup
 
 			// Monitor Redis connectivity after startup.
-			client := redis.NewClient(&redis.Options{
-				Addr:     cfg.RedisAddr,
-				Password: cfg.RedisPass,
-			})
+			// All Redis clients are created through internal/redis — never via go-redis directly.
+			client := redislib.New(cfg.RedisAddr, cfg.RedisPass)
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				daemon.WatchRedis(ctx, client)
+				daemon.WatchRedis(ctx, client.Unwrap())
 			}()
 
 			// HandleSignals blocks until SIGTERM/SIGINT, then cancels ctx,
