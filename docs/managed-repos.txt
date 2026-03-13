@@ -1,0 +1,6 @@
+# One absolute path per line.
+# Add repos that must enforce Codero two-pass pre-commit review.
+
+/home/sanjay/cacheflow_work
+/opt/docker/apps/cacheflow
+/opt/docker/apps/mathkit-v2
