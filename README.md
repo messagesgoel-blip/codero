@@ -43,5 +43,8 @@ Install pre-commit hook for a repo:
 - `docs/roadmaps/codero-roadmap-v5.md`
 - `docs/architecture.md`
 - `docs/module-intake-registry.md`
+- `AGENTS.md`
+- `docs/agent-task-board.md`
+- `docs/agent-preflight.md`
 - `docs/adr/`
 - `CONTRIBUTING.md`
