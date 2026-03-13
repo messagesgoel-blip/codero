@@ -3,6 +3,10 @@ Description=codero daemon
 After=network.target
 
 [Service]
+User=codero
+Group=codero
+RuntimeDirectory=codero
+EnvironmentFile=-/etc/codero/codero.env
 ExecStart=/usr/local/bin/codero daemon
 Restart=on-failure
 RestartSec=5

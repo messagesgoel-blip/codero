@@ -3,7 +3,6 @@ package daemon
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"sync/atomic"
 	"time"
@@ -17,11 +16,10 @@ var ErrRedisUnavailable = errors.New("redis unavailable")
 // degraded is set to 1 when Redis connectivity is lost after startup.
 var degraded atomic.Int32
 
-// CheckRedis attempts to PING Redis using the provided options and context.
+// CheckRedis attempts to PING the Redis server with the given options.
 // Returns nil on success. Retries 3 times with 1-second backoff.
-// Returns ErrRedisUnavailable (joined with the last error) if all attempts fail.
-// Pass the caller's context so the check can be cancelled; each attempt gets
-// a 3-second per-ping timeout derived from ctx.
+// Returns ErrRedisUnavailable if all attempts fail.
+// The caller-provided context can be used to cancel the check.
 func CheckRedis(ctx context.Context, opts *redis.Options) error {
 	client := redis.NewClient(opts)
 	defer client.Close()
@@ -31,7 +29,7 @@ func CheckRedis(ctx context.Context, opts *redis.Options) error {
 		if i > 0 {
 			select {
 			case <-ctx.Done():
-				return fmt.Errorf("redis check cancelled: %w", ctx.Err())
+				return ctx.Err()
 			case <-time.After(time.Second):
 			}
 		}
