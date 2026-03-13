@@ -2,40 +2,64 @@ package daemon
 
 import (
 	"context"
-	"log"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/codero/codero/internal/log"
 )
 
 const gracePeriod = 30 * time.Second
 
 // HandleSignals listens for SIGTERM and SIGINT.
 // On receipt: logs "codero: shutting down", calls cancel() on the root context,
-// waits for the provided WaitGroup, then exits 0.
-// Grace period: 30 seconds. After the grace period, exits 1 with a log line.
-func HandleSignals(cancel context.CancelFunc, wg *sync.WaitGroup) {
+// waits for the provided WaitGroup, then returns the exit code.
+// Grace period: 30 seconds. After the grace period, returns 1 with a log line.
+// Returns 0 on graceful shutdown, 1 if grace period exceeded.
+func HandleSignals(cancel context.CancelFunc, wg *sync.WaitGroup) int {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGTERM, syscall.SIGINT)
 
 	<-ch
-	log.Println("codero: shutting down")
+	log.Info("codero: shutting down",
+		log.FieldEventType, log.EventShutdown,
+		log.FieldComponent, "daemon",
+	)
 	cancel()
+
+	// Use a context to signal completion and allow the goroutine to exit on timeout.
+	ctx, waitCancel := context.WithCancel(context.Background())
+	defer waitCancel()
 
 	done := make(chan struct{})
 	go func() {
-		wg.Wait()
-		close(done)
+		defer close(done)
+		// Wait for either the wait group to finish or the timeout context to trigger.
+		waitDone := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(waitDone)
+		}()
+
+		select {
+		case <-waitDone:
+			// Graceful exit of this goroutine.
+		case <-ctx.Done():
+			// HandleSignals timed out.
+		}
 	}()
 
 	select {
 	case <-done:
-		os.Exit(0)
+		return 0
 	case <-time.After(gracePeriod):
-		log.Println("codero: grace period exceeded, forcing exit")
-		os.Exit(1)
+		log.Warn("codero: grace period exceeded, forcing exit",
+			log.FieldEventType, log.EventShutdown,
+			log.FieldComponent, "daemon",
+		)
+		return 1
 	}
 }
 

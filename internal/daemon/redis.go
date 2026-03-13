@@ -3,10 +3,10 @@ package daemon
 import (
 	"context"
 	"errors"
-	"log"
 	"sync/atomic"
 	"time"
 
+	"github.com/codero/codero/internal/log"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -19,17 +19,24 @@ var degraded atomic.Int32
 // CheckRedis attempts to PING the configured Redis address.
 // Returns nil on success. Retries 3 times with 1-second backoff.
 // Returns ErrRedisUnavailable if all attempts fail.
-func CheckRedis(addr string) error {
-	client := redis.NewClient(&redis.Options{Addr: addr})
+func CheckRedis(ctx context.Context, addr, pass string) error {
+	client := redis.NewClient(&redis.Options{
+		Addr:     addr,
+		Password: pass,
+	})
 	defer client.Close()
 
 	var lastErr error
 	for i := 0; i < 3; i++ {
 		if i > 0 {
-			time.Sleep(time.Second)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Second):
+			}
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		_, lastErr = client.Ping(ctx).Result()
+		pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		_, lastErr = client.Ping(pingCtx).Result()
 		cancel()
 		if lastErr == nil {
 			return nil
@@ -60,7 +67,10 @@ func WatchRedis(ctx context.Context, client *redis.Client) {
 
 		if err != nil {
 			if degraded.CompareAndSwap(0, 1) {
-				log.Println("redis lost, halting dispatch")
+				log.Warn("redis lost, halting dispatch",
+					log.FieldEventType, log.EventSystem,
+					log.FieldComponent, "daemon",
+				)
 			}
 			// Reconnect loop with exponential backoff.
 			for {
@@ -80,7 +90,10 @@ func WatchRedis(ctx context.Context, client *redis.Client) {
 				if retryErr == nil {
 					degraded.Store(0)
 					backoff = time.Second
-					log.Println("redis restored")
+					log.Info("redis restored",
+						log.FieldEventType, log.EventSystem,
+						log.FieldComponent, "daemon",
+					)
 					break
 				}
 			}

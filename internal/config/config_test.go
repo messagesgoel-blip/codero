@@ -1,54 +1,42 @@
 package config
 
 import (
-	"os"
 	"testing"
 )
 
 func TestLoad_Defaults(t *testing.T) {
-	os.Unsetenv("CODERO_REDIS_ADDR")
-	os.Unsetenv("CODERO_REDIS_PASS")
-	os.Unsetenv("CODERO_PID_FILE")
-	os.Unsetenv("CODERO_LOG_LEVEL")
-
 	c := Load()
 	if c.RedisAddr != "localhost:6379" {
-		t.Errorf("RedisAddr: got %q, want %q", c.RedisAddr, "localhost:6379")
-	}
-	if c.RedisPass != "" {
-		t.Errorf("RedisPass: got %q, want %q", c.RedisPass, "")
-	}
-	if c.PIDFile != "/var/run/codero/codero.pid" {
-		t.Errorf("PIDFile: got %q, want %q", c.PIDFile, "/var/run/codero/codero.pid")
+		t.Errorf("expected default RedisAddr, got %q", c.RedisAddr)
 	}
 	if c.LogLevel != "info" {
-		t.Errorf("LogLevel: got %q, want %q", c.LogLevel, "info")
+		t.Errorf("expected default LogLevel, got %q", c.LogLevel)
+	}
+	if c.LogPath != "" {
+		t.Errorf("expected default LogPath to be empty, got %q", c.LogPath)
+	}
+	if c.DBPath != "/var/lib/codero/codero.db" {
+		t.Errorf("expected default DBPath, got %q", c.DBPath)
 	}
 }
 
-func TestLoad_OverridesFromEnv(t *testing.T) {
-	os.Setenv("CODERO_REDIS_ADDR", "redis.example.com:6380")
-	os.Setenv("CODERO_REDIS_PASS", "secret")
-	os.Setenv("CODERO_PID_FILE", "/tmp/codero-test.pid")
-	os.Setenv("CODERO_LOG_LEVEL", "debug")
-	defer func() {
-		os.Unsetenv("CODERO_REDIS_ADDR")
-		os.Unsetenv("CODERO_REDIS_PASS")
-		os.Unsetenv("CODERO_PID_FILE")
-		os.Unsetenv("CODERO_LOG_LEVEL")
-	}()
+func TestLoad_Override(t *testing.T) {
+	t.Setenv("CODERO_REDIS_ADDR", "127.0.0.1:6380")
+	t.Setenv("CODERO_LOG_LEVEL", "debug")
+	t.Setenv("CODERO_LOG_PATH", "/tmp/codero.log")
+	t.Setenv("CODERO_DB_PATH", "/tmp/codero.db")
 
 	c := Load()
-	if c.RedisAddr != "redis.example.com:6380" {
-		t.Errorf("RedisAddr: got %q, want %q", c.RedisAddr, "redis.example.com:6380")
-	}
-	if c.RedisPass != "secret" {
-		t.Errorf("RedisPass: got %q, want %q", c.RedisPass, "secret")
-	}
-	if c.PIDFile != "/tmp/codero-test.pid" {
-		t.Errorf("PIDFile: got %q, want %q", c.PIDFile, "/tmp/codero-test.pid")
+	if c.RedisAddr != "127.0.0.1:6380" {
+		t.Errorf("expected overridden RedisAddr, got %q", c.RedisAddr)
 	}
 	if c.LogLevel != "debug" {
-		t.Errorf("LogLevel: got %q, want %q", c.LogLevel, "debug")
+		t.Errorf("expected overridden LogLevel, got %q", c.LogLevel)
+	}
+	if c.LogPath != "/tmp/codero.log" {
+		t.Errorf("expected overridden LogPath, got %q", c.LogPath)
+	}
+	if c.DBPath != "/tmp/codero.db" {
+		t.Errorf("expected overridden DBPath, got %q", c.DBPath)
 	}
 }

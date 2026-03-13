@@ -9,29 +9,39 @@ type Config struct {
 	RedisPass string // default: ""
 	PIDFile   string // default: "/var/run/codero/codero.pid"
 	LogLevel  string // default: "info"
+	LogPath   string // default: "" (stdout)
+	DBPath    string // default: "/var/lib/codero/codero.db"
 }
 
 // Load reads config from environment variables only.
-// CODERO_REDIS_ADDR, CODERO_REDIS_PASS, CODERO_PID_FILE, CODERO_LOG_LEVEL.
-// Returns defaults for any unset variable.
+// CODERO_REDIS_ADDR, CODERO_REDIS_PASS, CODERO_PID_FILE, CODERO_LOG_LEVEL,
+// CODERO_LOG_PATH, CODERO_DB_PATH. Returns defaults for any unset variable.
 func Load() *Config {
 	c := &Config{
 		RedisAddr: "localhost:6379",
 		RedisPass: "",
 		PIDFile:   "/var/run/codero/codero.pid",
 		LogLevel:  "info",
+		LogPath:   "",
+		DBPath:    "/var/lib/codero/codero.db",
 	}
-	if v := os.Getenv("CODERO_REDIS_ADDR"); v != "" {
+	if v, ok := os.LookupEnv("CODERO_REDIS_ADDR"); ok {
 		c.RedisAddr = v
 	}
-	if v := os.Getenv("CODERO_REDIS_PASS"); v != "" {
+	if v, ok := os.LookupEnv("CODERO_REDIS_PASS"); ok {
 		c.RedisPass = v
 	}
-	if v := os.Getenv("CODERO_PID_FILE"); v != "" {
+	if v, ok := os.LookupEnv("CODERO_PID_FILE"); ok {
 		c.PIDFile = v
 	}
-	if v := os.Getenv("CODERO_LOG_LEVEL"); v != "" {
+	if v, ok := os.LookupEnv("CODERO_LOG_LEVEL"); ok {
 		c.LogLevel = v
+	}
+	if v, ok := os.LookupEnv("CODERO_LOG_PATH"); ok {
+		c.LogPath = v
+	}
+	if v, ok := os.LookupEnv("CODERO_DB_PATH"); ok {
+		c.DBPath = v
 	}
 	return c
 }
