@@ -53,26 +53,34 @@ func RemovePID(path string) error {
 
 // ReadPID reads and returns the PID from the file.
 // Returns 0 and an error if the file does not exist or is malformed.
+// Rejects non-positive PID values.
 func ReadPID(path string) (int, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("pid: read %s: %w", path, err)
 	}
 	s := strings.TrimSpace(string(data))
 	pid, err := strconv.Atoi(s)
 	if err != nil {
 		return 0, fmt.Errorf("pid: malformed PID file %s: %w", path, err)
 	}
+	if pid <= 0 {
+		return 0, fmt.Errorf("pid: invalid PID value %d in %s", pid, path)
+	}
 	return pid, nil
 }
 
 // ProcessRunning returns true if a process with the given PID exists
-// and is alive (kill -0).
+// and is alive (kill -0). Returns true for EPERM (process exists but owned by
+// another user). Returns false for non-positive PIDs.
 func ProcessRunning(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
 	proc, err := os.FindProcess(pid)
 	if err != nil {
 		return false
 	}
 	err = proc.Signal(syscall.Signal(0))
-	return err == nil
+	return err == nil || errors.Is(err, syscall.EPERM)
 }
