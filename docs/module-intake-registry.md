@@ -10,4 +10,4 @@ Hard guardrail: no bulk copy from ghwatcher. Only module-level intake with contr
 | MI-002 | webhook dedup | ingestion/webhook | planned | pending | pending | pending | Priority A |
 | MI-003 | relay claim/ack/resolve | delivery/relay | planned | pending | pending | pending | Priority A |
 | MI-004 | session heartbeat lifecycle | session/liveness | planned | pending | pending | pending | Priority A |
-| MI-005 | mathkit-v2 two-pass local review gate | workflow/review-gate | integrated-v1 | docs/contracts/review-gate-v1.md | pending | docs/review-workflow.md | LiteLLM first pass + CodeRabbit second pass |
+| MI-005 | mathkit-v2 two-pass local review gate | workflow/review-gate | phase1-prep | docs/contracts/review-gate-v1.md | scripts/review/two-pass-review.sh | docs/review-workflow.md | LiteLLM first pass + CodeRabbit second pass; parity validation pending |

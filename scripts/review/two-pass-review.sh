@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Two-pass review gate:
 # 1) LiteLLM local first pass
-# 2) CodeRabbit local second pass
+# 2) CodeRabbit local second pass (fallback to PR-Agent if CodeRabbit fails)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_PATH="${CODERO_REPO_PATH:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
@@ -17,7 +17,22 @@ SECOND_LOG="$LOG_DIR/second-pass-$TS.log"
 echo "Running two-pass review for repo: $REPO_PATH"
 
 CODERO_REPO_PATH="$REPO_PATH" "$SCRIPT_DIR/local-first-pass.sh" | tee "$FIRST_LOG"
+set +e
 CODERO_REPO_PATH="$REPO_PATH" "$SCRIPT_DIR/coderabbit-second-pass.sh" "$@" | tee "$SECOND_LOG"
+coderabbit_status=$?
+set -e
+
+if [ "$coderabbit_status" -ne 0 ]; then
+  echo "CodeRabbit second pass failed (exit $coderabbit_status). Trying PR-Agent fallback..." | tee -a "$SECOND_LOG"
+  set +e
+  CODERO_REPO_PATH="$REPO_PATH" "$SCRIPT_DIR/pr-agent-second-pass.sh" "$@" | tee -a "$SECOND_LOG"
+  pragent_status=$?
+  set -e
+  if [ "$pragent_status" -ne 0 ]; then
+    echo "PR-Agent fallback also failed (exit $pragent_status). Review skipped — check logs." | tee -a "$SECOND_LOG"
+    exit 1
+  fi
+fi
 
 echo "Two-pass review completed."
 echo "Logs:"

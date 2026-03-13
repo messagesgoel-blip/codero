@@ -14,9 +14,10 @@ const gracePeriod = 30 * time.Second
 
 // HandleSignals listens for SIGTERM and SIGINT.
 // On receipt: logs "codero: shutting down", calls cancel() on the root context,
-// waits for the provided WaitGroup, then returns the exit code.
+// waits for the provided WaitGroup, then returns 0.
 // Grace period: 30 seconds. After the grace period, returns 1 with a log line.
-// Returns 0 on graceful shutdown, 1 if grace period exceeded.
+// The caller is responsible for exiting; returning (rather than calling os.Exit)
+// allows deferred cleanup (e.g. PID file removal) to run.
 func HandleSignals(cancel context.CancelFunc, wg *sync.WaitGroup) int {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGTERM, syscall.SIGINT)

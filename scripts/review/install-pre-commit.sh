@@ -19,18 +19,9 @@ fi
 
 CODERO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-if [ -f "$REPO_PATH/.git" ]; then
-  # linked worktree: .git is a file containing "gitdir: <path>"
-  GITDIR="$(sed 's/^gitdir: *//' "$REPO_PATH/.git")"
-  # If GITDIR is relative, resolve it relative to repo path.
-  if [ "${GITDIR#/}" = "$GITDIR" ]; then
-    GITDIR="$REPO_PATH/$GITDIR"
-  fi
-  HOOKS_DIR="$GITDIR/hooks"
-else
-  # normal repo layout
-  HOOKS_DIR="$REPO_PATH/.git/hooks"
-fi
+# git rev-parse --git-common-dir returns the common .git dir for both normal
+# repos and linked worktrees, so no manual .git file parsing is needed.
+HOOKS_DIR="$(git -C "$REPO_PATH" rev-parse --git-common-dir)/hooks"
 
 mkdir -p "$HOOKS_DIR"
 HOOK_PATH="$HOOKS_DIR/pre-commit"
