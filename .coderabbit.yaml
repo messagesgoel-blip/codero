@@ -1,0 +1,27 @@
+version: "2"
+language: "en-US"
+
+reviews:
+  profile: "chill"
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+  path_instructions:
+    - path: "internal/**"
+      instructions: >
+        This is Go code. Flag: missing error wrapping with %w,
+        naked returns, unexported types in public interfaces,
+        missing context propagation, goroutine leaks.
+    - path: "tests/**"
+      instructions: >
+        Flag: tests with no assertions, table tests missing name field,
+        tests that sleep instead of using channels or mocks.
+    - path: "docs/**"
+      instructions: >
+        Flag: ADRs missing status field, module intake entries
+        with pending contract doc but marked as integrated.
+
+chat:
+  auto_reply: true

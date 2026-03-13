@@ -70,10 +70,12 @@ Scope:
 
 - Daemon lifecycle (start/stop/status, graceful shutdown, crash recovery).
 - Canonical branch lifecycle state machine.
+- State machine specification is carried forward unchanged from v4 Canonical State Machine table (10 states, 20 transitions).
 - Durable storage schema + migrations.
 - Queue, lease, and heartbeat coordination.
 - CLI submit/heartbeat/poll/why (minimum viable contract).
 - Structured logging + health + metrics.
+- MI-001 (lease semantics) contract + parity-test preparation is completed in Phase 1 (Sprint 3 tail), before Phase 2 integration.
 
 Out of scope:
 
@@ -92,6 +94,8 @@ Exit gate:
 
 Goal: achieve true multi-repo orchestration while reusing proven parts of ghwatcher deliberately.
 
+Sequencing note: MI-001 lease semantics contract/parity artifacts are produced in Phase 1 and consumed at Phase 2 start.
+
 ### 2.1 Module Intake Workflow (for every module)
 
 1. Define target contract in codero (input/output/errors).
@@ -100,6 +104,8 @@ Goal: achieve true multi-repo orchestration while reusing proven parts of ghwatc
 4. Integrate as adapter or direct port (smallest change first).
 5. Validate parity + load behavior + failure behavior.
 6. Record decision in ADR and registry.
+
+Guardrail: no bulk copy from ghwatcher. Intake is module-by-module only.
 
 No module is "adopted" without all 6 steps complete.
 
@@ -155,6 +161,7 @@ Exit gate:
 - On-call style drills completed for top 5 failure modes.
 - SLO dashboard live with alert thresholds.
 - Restore/recovery runbooks tested from backup snapshots.
+- Carry-forward SLO targets from v4 are met: zero missed deliveries, zero silent queue stalls, zero undetected stale branches.
 
 ---
 
@@ -215,6 +222,8 @@ Code:
 
 - lint + unit tests mandatory
 - mutation or property tests on state transitions and lease logic
+- Tooling alignment: for the current Go codebase, v4 Stage 1.5 ESLint/Prettier is superseded by Go-native gates (`gofmt`, `go vet`, `go test`) in CI.
+- JS/TS linting is introduced only when a JS/TS surface (for example, dashboard frontend) is added.
 
 Contracts:
 
@@ -252,11 +261,13 @@ Sprint 3 (Phase 1):
 - queue/lease/heartbeat
 - CLI submit/poll/why
 - crash and outage tests
+- define MI-001 lease semantics contract (state transition + Redis lease-key behavior)
+- build MI-001 parity-test harness before module integration
 
 Sprint 4 (Phase 2 start):
 
-- ingest first Priority A module (lease semantics)
-- parity tests and rollout checklist
+- integrate MI-001 lease semantics using the prepared Phase 1 contract + parity harness
+- execute parity tests and rollout checklist
 
 ---
 

@@ -2,6 +2,10 @@
 bin/
 dist/
 *.out
+/codero
+
+# Review logs and runtime dirs
+.codero/
 
 # Go
 coverage.out

@@ -15,6 +15,10 @@
 
 Recommended format:
 
-- `feat/<short-description>`
+- `feat/COD-{issue-id}-{short-description}`
 - `fix/<short-description>`
 - `chore/<short-description>`
+
+Worktree rule:
+
+- each active agent must use a separate git worktree path.
