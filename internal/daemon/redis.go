@@ -17,6 +17,7 @@ var degraded atomic.Int32
 // Retries with exponential backoff (1s, 2s, 4s, 8s, cap 30s).
 // On reconnect: logs "redis restored", clears the degraded flag.
 // Runs as a goroutine — call go WatchRedis(ctx, client).
+// Note: Does not treat caller context cancellation as Redis outage.
 func WatchRedis(ctx context.Context, client *redis.Client) {
 	backoff := time.Second
 	const maxBackoff = 30 * time.Second
@@ -30,6 +31,10 @@ func WatchRedis(ctx context.Context, client *redis.Client) {
 
 		err := client.Ping(ctx)
 		if err != nil {
+			// Don't treat caller cancellation as Redis outage.
+			if ctx.Err() != nil {
+				return
+			}
 			if degraded.CompareAndSwap(0, 1) {
 				log.Println("redis lost, halting dispatch")
 			}

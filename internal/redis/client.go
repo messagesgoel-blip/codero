@@ -43,7 +43,10 @@ func (c *Client) Ping(ctx context.Context) error {
 
 // Close releases the underlying connection pool.
 func (c *Client) Close() error {
-	return c.rc.Close()
+	if err := c.rc.Close(); err != nil {
+		return fmt.Errorf("redis close: %w", err)
+	}
+	return nil
 }
 
 // Unwrap returns the underlying *goredis.Client.
