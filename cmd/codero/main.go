@@ -11,6 +11,7 @@ import (
 	"github.com/codero/codero/internal/config"
 	"github.com/codero/codero/internal/daemon"
 	redislib "github.com/codero/codero/internal/redis"
+	"github.com/redis/go-redis/v9"
 	"github.com/spf13/cobra"
 )
 
@@ -36,23 +37,30 @@ func daemonCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "daemon",
 		Short: "Start the codero daemon",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Run: func(cmd *cobra.Command, args []string) {
 			cfg := config.Load()
 
+			ctx := context.Background()
+			redisOpts := &redis.Options{
+				Addr:     cfg.RedisAddr,
+				Password: cfg.RedisPass,
+			}
+
 			// Redis must be reachable before doing anything else.
-			if err := daemon.CheckRedis(cfg.RedisAddr); err != nil {
+			if err := daemon.CheckRedis(ctx, redisOpts); err != nil {
 				fmt.Fprintf(os.Stderr, "codero: redis unavailable at %s: %v\n", cfg.RedisAddr, err)
 				os.Exit(1)
 			}
 
 			if err := daemon.WritePID(cfg.PIDFile); err != nil {
-				return fmt.Errorf("codero: %w", err)
+				fmt.Fprintf(os.Stderr, "codero: %v\n", err)
+				os.Exit(1)
 			}
 			defer daemon.RemovePID(cfg.PIDFile)
 
 			log.Printf("codero: daemon started (pid %d)", os.Getpid())
 
-			ctx, cancel := context.WithCancel(context.Background())
+			appCtx, cancel := context.WithCancel(context.Background())
 			var wg sync.WaitGroup
 
 			// Monitor Redis connectivity after startup.
@@ -61,14 +69,13 @@ func daemonCmd() *cobra.Command {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				daemon.WatchRedis(ctx, client.Unwrap())
+				daemon.WatchRedis(appCtx, client.Unwrap())
 			}()
 
-			// HandleSignals blocks until SIGTERM/SIGINT, then cancels ctx,
-			// waits for wg, and calls os.Exit. The defer above won't run on
-			// os.Exit, so we register PID removal before blocking.
-			daemon.HandleSignals(cancel, &wg)
-			return nil
+			// HandleSignals blocks until SIGTERM/SIGINT, cancels ctx,
+			// waits for wg, and returns an exit code.
+			exitCode := daemon.HandleSignals(cancel, &wg)
+			os.Exit(exitCode)
 		},
 	}
 }
@@ -91,15 +98,18 @@ func statusCmd() *cobra.Command {
 			}
 
 			if !daemon.ProcessRunning(pid) {
-				fmt.Printf("codero: stale PID file (pid %d)\n", pid)
-				os.Exit(1)
+				return fmt.Errorf("codero: stale PID file (pid %d)", pid)
 			}
 
 			fmt.Printf("codero: running (pid %d)\n", pid)
 
 			// Check Redis connectivity.
 			redisState := "ok"
-			if err := daemon.CheckRedis(cfg.RedisAddr); err != nil {
+			redisOpts := &redis.Options{
+				Addr:     cfg.RedisAddr,
+				Password: cfg.RedisPass,
+			}
+			if err := daemon.CheckRedis(context.Background(), redisOpts); err != nil {
 				redisState = "unavailable"
 			}
 			fmt.Printf("redis: %s\n", redisState)

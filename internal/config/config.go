@@ -13,7 +13,8 @@ type Config struct {
 
 // Load reads config from environment variables only.
 // CODERO_REDIS_ADDR, CODERO_REDIS_PASS, CODERO_PID_FILE, CODERO_LOG_LEVEL.
-// Returns defaults for any unset variable.
+// Returns defaults for any unset variable. Uses os.LookupEnv to distinguish
+// between unset and explicitly empty values.
 func Load() *Config {
 	c := &Config{
 		RedisAddr: "localhost:6379",
@@ -21,16 +22,16 @@ func Load() *Config {
 		PIDFile:   "/var/run/codero/codero.pid",
 		LogLevel:  "info",
 	}
-	if v := os.Getenv("CODERO_REDIS_ADDR"); v != "" {
+	if v, ok := os.LookupEnv("CODERO_REDIS_ADDR"); ok {
 		c.RedisAddr = v
 	}
-	if v := os.Getenv("CODERO_REDIS_PASS"); v != "" {
+	if v, ok := os.LookupEnv("CODERO_REDIS_PASS"); ok {
 		c.RedisPass = v
 	}
-	if v := os.Getenv("CODERO_PID_FILE"); v != "" {
+	if v, ok := os.LookupEnv("CODERO_PID_FILE"); ok {
 		c.PIDFile = v
 	}
-	if v := os.Getenv("CODERO_LOG_LEVEL"); v != "" {
+	if v, ok := os.LookupEnv("CODERO_LOG_LEVEL"); ok {
 		c.LogLevel = v
 	}
 	return c

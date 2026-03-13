@@ -16,20 +16,25 @@ var ErrRedisUnavailable = errors.New("redis unavailable")
 // degraded is set to 1 when Redis connectivity is lost after startup.
 var degraded atomic.Int32
 
-// CheckRedis attempts to PING the configured Redis address.
+// CheckRedis attempts to PING the Redis server with the given options.
 // Returns nil on success. Retries 3 times with 1-second backoff.
 // Returns ErrRedisUnavailable if all attempts fail.
-func CheckRedis(addr string) error {
-	client := redis.NewClient(&redis.Options{Addr: addr})
+// The caller-provided context can be used to cancel the check.
+func CheckRedis(ctx context.Context, opts *redis.Options) error {
+	client := redis.NewClient(opts)
 	defer client.Close()
 
 	var lastErr error
 	for i := 0; i < 3; i++ {
 		if i > 0 {
-			time.Sleep(time.Second)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Second):
+			}
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		_, lastErr = client.Ping(ctx).Result()
+		pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		_, lastErr = client.Ping(pingCtx).Result()
 		cancel()
 		if lastErr == nil {
 			return nil
