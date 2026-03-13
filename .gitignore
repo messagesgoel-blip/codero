@@ -4,11 +4,11 @@ dist/
 *.out
 /codero
 
-# Review logs and runtime dirs
-.codero/
-
 # Go
 coverage.out
+
+# Review logs and runtime state
+.codero/
 
 # IDE / OS
 .DS_Store

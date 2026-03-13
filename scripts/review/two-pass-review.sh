@@ -24,7 +24,13 @@ set -e
 
 if [ "$coderabbit_status" -ne 0 ]; then
   echo "CodeRabbit second pass failed (exit $coderabbit_status). Trying PR-Agent fallback..." | tee -a "$SECOND_LOG"
+  set +e
   CODERO_REPO_PATH="$REPO_PATH" "$SCRIPT_DIR/pr-agent-second-pass.sh" "$@" | tee -a "$SECOND_LOG"
+  pragent_status=$?
+  set -e
+  if [ "$pragent_status" -ne 0 ]; then
+    echo "PR-Agent fallback also failed (exit $pragent_status). Review skipped — check logs." | tee -a "$SECOND_LOG"
+  fi
 fi
 
 echo "Two-pass review completed."

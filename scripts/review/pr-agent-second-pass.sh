@@ -89,9 +89,17 @@ main() {
     exit 1
   fi
 
-  local litellm_key pr_url fallback_json litellm_base
+  local litellm_key github_token pr_url fallback_json litellm_base
   if ! litellm_key="$(load_litellm_key)"; then
     echo "Error: LiteLLM key not found. Set LITELLM_MASTER_KEY or add it in $REPO_PATH/.env" >&2
+    exit 1
+  fi
+
+  # Resolve GitHub token for PR-Agent git provider access.
+  # Precedence: CODERO_GITHUB_TOKEN > GH_TOKEN > GITHUB_TOKEN
+  github_token="${CODERO_GITHUB_TOKEN:-${GH_TOKEN:-${GITHUB_TOKEN:-}}}"
+  if [ -z "$github_token" ]; then
+    echo "Error: GitHub token not found. Set CODERO_GITHUB_TOKEN, GH_TOKEN, or GITHUB_TOKEN." >&2
     exit 1
   fi
 
@@ -116,6 +124,7 @@ main() {
     OPENAI__KEY="$litellm_key" \
     CONFIG__MODEL="$PRIMARY_MODEL" \
     CONFIG__FALLBACK_MODELS="$fallback_json" \
+    GITHUB__USER_TOKEN="$github_token" \
     "$PR_AGENT_BIN" --pr_url "$pr_url" review "$@" 2>&1
   )
 

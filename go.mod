@@ -15,4 +15,5 @@ require (
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
