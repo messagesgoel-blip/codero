@@ -3,12 +3,11 @@ package daemon
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"sync/atomic"
 	"time"
 
-	"github.com/redis/go-redis/v9"
+	"github.com/codero/codero/internal/redis"
 )
 
 // ErrRedisUnavailable is returned by CheckRedis when all retry attempts fail.
@@ -17,13 +16,11 @@ var ErrRedisUnavailable = errors.New("redis unavailable")
 // degraded is set to 1 when Redis connectivity is lost after startup.
 var degraded atomic.Int32
 
-// CheckRedis attempts to PING Redis using the provided options and context.
+// CheckRedis attempts to PING the configured Redis address.
 // Returns nil on success. Retries 3 times with 1-second backoff.
-// Returns ErrRedisUnavailable (joined with the last error) if all attempts fail.
-// Pass the caller's context so the check can be cancelled; each attempt gets
-// a 3-second per-ping timeout derived from ctx.
-func CheckRedis(ctx context.Context, opts *redis.Options) error {
-	client := redis.NewClient(opts)
+// Returns ErrRedisUnavailable if all attempts fail.
+func CheckRedis(ctx context.Context, addr, password string) error {
+	client := redis.New(addr, password)
 	defer client.Close()
 
 	var lastErr error
@@ -31,16 +28,15 @@ func CheckRedis(ctx context.Context, opts *redis.Options) error {
 		if i > 0 {
 			select {
 			case <-ctx.Done():
-				return fmt.Errorf("redis check cancelled: %w", ctx.Err())
+				return ctx.Err()
 			case <-time.After(time.Second):
 			}
 		}
-		pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		_, lastErr = client.Ping(pingCtx).Result()
-		cancel()
-		if lastErr == nil {
-			return nil
+		if err := client.Ping(ctx); err != nil {
+			lastErr = err
+			continue
 		}
+		return nil
 	}
 	return errors.Join(ErrRedisUnavailable, lastErr)
 }
@@ -61,11 +57,7 @@ func WatchRedis(ctx context.Context, client *redis.Client) {
 		case <-time.After(5 * time.Second):
 		}
 
-		pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		_, err := client.Ping(pingCtx).Result()
-		cancel()
-
-		if err != nil {
+		if err := client.Ping(ctx); err != nil {
 			if degraded.CompareAndSwap(0, 1) {
 				log.Println("redis lost, halting dispatch")
 			}
@@ -81,10 +73,7 @@ func WatchRedis(ctx context.Context, client *redis.Client) {
 					backoff = maxBackoff
 				}
 
-				retryCtx, retryCancel := context.WithTimeout(ctx, 3*time.Second)
-				_, retryErr := client.Ping(retryCtx).Result()
-				retryCancel()
-				if retryErr == nil {
+				if err := client.Ping(ctx); err == nil {
 					degraded.Store(0)
 					backoff = time.Second
 					log.Println("redis restored")
