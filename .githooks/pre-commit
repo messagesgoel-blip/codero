@@ -11,8 +11,8 @@ fi
 
 for file in "${staged[@]}"; do
   [ -f "$file" ] || continue
-  if grep -nE '^(<<<<<<<|=======|>>>>>>>)' "$file" >/dev/null 2>&1; then
-    echo "pre-commit blocked: merge conflict markers in $file" >&2
+  if grep -nE '^(<<<<<<<|=======|>>>>>>>|.*\b(secret|password|token|key|credential)\b.*=.*|.*\b(secret|password|token|key|credential)\b.*:.*)' "$file" >/dev/null 2>&1; then
+    echo "pre-commit blocked: potential sensitive data or merge conflict markers in $file" >&2
     exit 1
   fi
 done
