@@ -138,7 +138,7 @@ docker logs codero --tail 50
 
 # Check Redis queue depth directly.
 # Use REDISCLI_AUTH to avoid exposing the password in process listings.
-export REDISCLI_AUTH="$REDIS_PASSWORD"
+[ -n "$REDIS_PASSWORD" ] && export REDISCLI_AUTH="$REDIS_PASSWORD"
 redis-cli ZCARD "owner/repo:queue:pending"
 
 # Check if any lease exists.
@@ -169,7 +169,7 @@ curl -s http://localhost:9210/metrics | grep "codero_queue_wait_seconds.*owner/r
 
 # Check if a single branch has been waiting the longest.
 # Use REDISCLI_AUTH to avoid exposing the password in process listings.
-export REDISCLI_AUTH="$REDIS_PASSWORD"
+[ -n "$REDIS_PASSWORD" ] && export REDISCLI_AUTH="$REDIS_PASSWORD"
 redis-cli ZRANGEBYSCORE "owner/repo:queue:pending" -inf +inf WITHSCORES
 ```
 

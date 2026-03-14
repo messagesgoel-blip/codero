@@ -355,7 +355,8 @@ class Collector:
                 cycle_succeeded = True
             except Exception as exc:
                 log.error("collector: redis poll error: %s", exc)
-                m.poll_failures_total.labels(source="redis").inc()
+                # poll_redis already incremented the counter before re-raising;
+                # do not increment again here.
 
         # --- HTTP /queue source (merges/overrides Redis data) ---
         http_depths = poll_http_queue(self._tracker)
@@ -377,9 +378,6 @@ class Collector:
             m.queue_depth.labels(repo=repo).set(depth)
             stalled = 1 if self._tracker.is_stalled(repo, depth) else 0
             m.queue_stalled.labels(repo=repo).set(stalled)
-            if depth == 0:
-                # Clear stall flag when queue drains.
-                m.queue_stalled.labels(repo=repo).set(0)
 
         self._known_repos = current_repos
 
