@@ -1,0 +1,34 @@
+name: SonarCloud
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  sonarcloud:
+    name: sonarcloud
+    runs-on: ubuntu-latest
+    if: ${{ vars.SONAR_ORG != '' && vars.SONAR_PROJECT_KEY != '' && secrets.SONAR_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Generate coverage for SonarCloud
+        run: go test ./cmd/... ./internal/... -coverprofile=coverage.out -covermode=atomic
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@v6
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.organization=${{ vars.SONAR_ORG }}
+            -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
+            -Dsonar.sources=.
+            -Dsonar.go.coverage.reportPaths=coverage.out
