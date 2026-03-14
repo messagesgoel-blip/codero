@@ -84,6 +84,7 @@ func (lm *LeaseManager) Acquire(ctx context.Context, repo, branch, holderID stri
 
 // AcquireWithTTL is like Acquire but with a custom TTL.
 // Uses an atomic Lua script to avoid TOCTOU races between check and extend.
+// When extending an existing lease held by the same holder, AcquiredAt is preserved.
 func (lm *LeaseManager) AcquireWithTTL(ctx context.Context, repo, branch, holderID string, ttl time.Duration) (*Lease, error) {
 	key, err := redis.BuildKey(repo, "lease", branch)
 	if err != nil {
@@ -95,39 +96,56 @@ func (lm *LeaseManager) AcquireWithTTL(ctx context.Context, repo, branch, holder
 
 	// Use atomic Lua script for check-and-acquire-or-extend.
 	// This avoids TOCTOU race between SetNX failure and subsequent GET+SET.
+	// Returns: {1, acquired_at_ms} for new lease, {1, 0} for extended existing lease, {0} for conflict
 	rc := lm.client.Unwrap()
 	script := `
 		local current = redis.call('GET', KEYS[1])
 		if current == false then
-			-- No lease exists: acquire it
-			redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
-			return {1}
-		elseif current == ARGV[1] then
-			-- We already hold it: extend TTL
+			-- No lease exists: acquire it, store acquisition time
+			local acquired_at = ARGV[3]
+			redis.call('SET', KEYS[1], ARGV[1] .. '|' .. acquired_at, 'PX', ARGV[2])
+			return {1, tonumber(acquired_at)}
+		elseif current == ARGV[1] or string.match(current, '^' .. ARGV[1] .. '|') then
+			-- We already hold it: extend TTL, return stored acquisition time
+			local acquired_at = string.match(current, '^[^|]+|(%d+)$') or '0'
 			redis.call('PEXPIRE', KEYS[1], ARGV[2])
-			return {1}
+			return {1, tonumber(acquired_at)}
 		else
 			-- Held by another: conflict
-			return {0}
+			return {0, 0}
 		end
 	`
-	result, err := rc.Eval(ctx, script, []string{key}, holderID, ttl.Milliseconds()).Result()
+	result, err := rc.Eval(ctx, script, []string{key}, holderID, ttl.Milliseconds(), now.UnixMilli()).Result()
 	if err != nil {
 		return nil, fmt.Errorf("acquire lease: redis error: %w", err)
 	}
 
 	// Parse result array
 	arr, ok := result.([]interface{})
-	if !ok || len(arr) < 1 {
+	if !ok || len(arr) < 2 {
 		return nil, fmt.Errorf("acquire lease: unexpected script result type")
 	}
 	status, ok := arr[0].(int64)
 	if !ok {
 		return nil, fmt.Errorf("acquire lease: unexpected status type")
 	}
+	acquiredAtMs, ok := arr[1].(int64)
+	if !ok {
+		acquiredAtMs = now.UnixMilli()
+	}
 
 	if status == 0 {
 		return nil, ErrLeaseConflict
+	}
+
+	// Parse acquired time: if 0 or stored value, use now for new lease, stored value for extension
+	var acquiredAt time.Time
+	if acquiredAtMs > 0 && acquiredAtMs < now.UnixMilli()-1000 {
+		// Stored acquisition time from an earlier acquire (more than 1s ago)
+		acquiredAt = time.UnixMilli(acquiredAtMs)
+	} else {
+		// New lease or couldn't parse stored time
+		acquiredAt = now
 	}
 
 	return &Lease{
@@ -135,7 +153,7 @@ func (lm *LeaseManager) AcquireWithTTL(ctx context.Context, repo, branch, holder
 		Branch:     branch,
 		HolderID:   holderID,
 		ExpiresAt:  expiry,
-		AcquiredAt: now,
+		AcquiredAt: acquiredAt,
 	}, nil
 }
 
@@ -149,14 +167,15 @@ func (lm *LeaseManager) Release(ctx context.Context, repo, branch, holderID stri
 	}
 
 	// Use Lua script for atomic check-and-delete.
+	// Handles both old format (just holderID) and new format (holderID|acquiredAt).
 	rc := lm.client.Unwrap()
 	script := `
 		local current = redis.call('GET', KEYS[1])
-		if current == ARGV[1] then
+		if current == false then
+			return 0
+		elseif current == ARGV[1] or string.match(current, '^' .. ARGV[1] .. '|') then
 			redis.call('DEL', KEYS[1])
 			return 1
-		elseif current == false then
-			return 0
 		else
 			return -1
 		end
@@ -179,8 +198,8 @@ func (lm *LeaseManager) Release(ctx context.Context, repo, branch, holderID stri
 }
 
 // Extend renews a lease with a new TTL. The lease must be held by holderID.
-// Returns ErrLeaseNotFound if the lease doesn't exist or is held by another.
-// Returns ErrLeaseExpired if the lease has already expired.
+// Returns ErrLeaseNotFound if the lease doesn't exist.
+// Returns ErrLeaseConflict if the lease is held by another holder.
 func (lm *LeaseManager) Extend(ctx context.Context, repo, branch, holderID string, ttl time.Duration) (*Lease, error) {
 	key, err := redis.BuildKey(repo, "lease", branch)
 	if err != nil {
@@ -188,38 +207,61 @@ func (lm *LeaseManager) Extend(ctx context.Context, repo, branch, holderID strin
 	}
 
 	// Use Lua script for atomic check-and-extend.
+	// Returns: {1, acquired_at_ms} on success, {0} if missing, {-1} if held by another
 	rc := lm.client.Unwrap()
 	script := `
 		local current = redis.call('GET', KEYS[1])
-		if current == ARGV[1] then
+		if current == false then
+			-- Lease does not exist
+			return {0, 0}
+		elseif current == ARGV[1] or string.match(current, '^' .. ARGV[1] .. '|') then
+			-- We hold it: extend TTL, return stored acquisition time
+			local acquired_at = string.match(current, '^[^|]+|(%d+)$') or '0'
 			redis.call('PEXPIRE', KEYS[1], ARGV[2])
-			return 1
-		elseif current == false then
-			return 0
+			return {1, tonumber(acquired_at)}
 		else
-			return -1
+			-- Held by another
+			return {-1, 0}
 		end
 	`
-	result, err := rc.Eval(ctx, script, []string{key}, holderID, ttl.Milliseconds()).Int()
+	result, err := rc.Eval(ctx, script, []string{key}, holderID, ttl.Milliseconds()).Result()
 	if err != nil {
 		return nil, fmt.Errorf("extend lease: redis error: %w", err)
 	}
 
-	switch result {
+	// Parse result array
+	arr, ok := result.([]interface{})
+	if !ok || len(arr) < 2 {
+		return nil, fmt.Errorf("extend lease: unexpected script result type")
+	}
+	status, ok := arr[0].(int64)
+	if !ok {
+		return nil, fmt.Errorf("extend lease: unexpected status type")
+	}
+	acquiredAtMs, _ := arr[1].(int64)
+
+	switch status {
 	case 1:
+		// Success - preserve original AcquiredAt
+		var acquiredAt time.Time
+		if acquiredAtMs > 0 {
+			acquiredAt = time.UnixMilli(acquiredAtMs)
+		} else {
+			acquiredAt = time.Now() // fallback for leases without stored time
+		}
 		return &Lease{
 			Repo:       repo,
 			Branch:     branch,
 			HolderID:   holderID,
 			ExpiresAt:  time.Now().Add(ttl),
-			AcquiredAt: time.Now(), // approximate; original acquire time not preserved
+			AcquiredAt: acquiredAt,
 		}, nil
 	case 0:
-		return nil, ErrLeaseExpired
-	case -1:
 		return nil, ErrLeaseNotFound
+	case -1:
+		return nil, ErrLeaseConflict
 	default:
-		return nil, fmt.Errorf("extend lease: unexpected script result %d", result)
+		return nil, fmt.Errorf("extend lease: unexpected script result %d", status)
 	}
 }
 
@@ -232,7 +274,7 @@ func (lm *LeaseManager) Get(ctx context.Context, repo, branch string) (*Lease, e
 	}
 
 	rc := lm.client.Unwrap()
-	holderID, err := rc.Get(ctx, key).Result()
+	value, err := rc.Get(ctx, key).Result()
 	if err != nil {
 		if errors.Is(err, goredis.Nil) {
 			return nil, nil // no lease
@@ -245,10 +287,42 @@ func (lm *LeaseManager) Get(ctx context.Context, repo, branch string) (*Lease, e
 		return nil, fmt.Errorf("get lease: get TTL: %w", err)
 	}
 
+	// Parse value: either "holderID" (old format) or "holderID|acquiredAt" (new format)
+	var holderID string
+	var acquiredAt time.Time
+	if idx := len(value) - 1; idx > 0 {
+		for i := 0; i < len(value); i++ {
+			if value[i] == '|' {
+				holderID = value[:i]
+				// Try to parse acquisition time
+				if acquiredAtMs, parseErr := parseInt64(value[i+1:]); parseErr == nil && acquiredAtMs > 0 {
+					acquiredAt = time.UnixMilli(acquiredAtMs)
+				}
+				break
+			}
+		}
+	}
+	if holderID == "" {
+		holderID = value // old format, no pipe character
+	}
+
 	return &Lease{
-		Repo:      repo,
-		Branch:    branch,
-		HolderID:  holderID,
-		ExpiresAt: time.Now().Add(ttl),
+		Repo:       repo,
+		Branch:     branch,
+		HolderID:   holderID,
+		ExpiresAt:  time.Now().Add(ttl),
+		AcquiredAt: acquiredAt,
 	}, nil
+}
+
+// parseInt64 parses a string to int64. Returns 0 and error on failure.
+func parseInt64(s string) (int64, error) {
+	var n int64
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0, fmt.Errorf("invalid digit")
+		}
+		n = n*10 + int64(c-'0')
+	}
+	return n, nil
 }

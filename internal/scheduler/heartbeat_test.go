@@ -44,7 +44,10 @@ func TestHeartbeatStartStop(t *testing.T) {
 		LeaseTTL:  200 * time.Millisecond,
 		MaxMisses: 3,
 	}
-	hb := lm.StartHeartbeat(ctx, lease, cfg)
+	hb, err := lm.StartHeartbeat(ctx, lease, cfg)
+	if err != nil {
+		t.Fatalf("StartHeartbeat failed: %v", err)
+	}
 
 	// Give heartbeat time to run
 	time.Sleep(100 * time.Millisecond)
@@ -91,7 +94,10 @@ func TestHeartbeatContextCancellation(t *testing.T) {
 		LeaseTTL:  200 * time.Millisecond,
 		MaxMisses: 3,
 	}
-	hb := lm.StartHeartbeat(ctx, lease, cfg)
+	hb, err := lm.StartHeartbeat(ctx, lease, cfg)
+	if err != nil {
+		t.Fatalf("StartHeartbeat failed: %v", err)
+	}
 
 	// Give heartbeat time to run
 	time.Sleep(100 * time.Millisecond)
@@ -131,7 +137,10 @@ func TestHeartbeatStatus(t *testing.T) {
 		LeaseTTL:  200 * time.Millisecond,
 		MaxMisses: 3,
 	}
-	hb := lm.StartHeartbeat(ctx, lease, cfg)
+	hb, err := lm.StartHeartbeat(ctx, lease, cfg)
+	if err != nil {
+		t.Fatalf("StartHeartbeat failed: %v", err)
+	}
 	defer hb.Stop()
 
 	// Wait for first heartbeat
@@ -178,7 +187,10 @@ func TestHeartbeatMaxMisses(t *testing.T) {
 	}
 
 	// Start heartbeat
-	hb := lm.StartHeartbeat(ctx, lease, cfg)
+	hb, err := lm.StartHeartbeat(ctx, lease, cfg)
+	if err != nil {
+		t.Fatalf("StartHeartbeat failed: %v", err)
+	}
 
 	// Steal the lease to cause heartbeat failures
 	time.Sleep(30 * time.Millisecond)
@@ -214,10 +226,14 @@ func TestHeartbeatLeaseMethod(t *testing.T) {
 	}
 
 	cfg := HeartbeatConfig{
-		Interval: 50 * time.Millisecond,
-		LeaseTTL: 200 * time.Millisecond,
+		Interval:  50 * time.Millisecond,
+		LeaseTTL:  200 * time.Millisecond,
+		MaxMisses: 3,
 	}
-	hb := lm.StartHeartbeat(ctx, lease, cfg)
+	hb, err := lm.StartHeartbeat(ctx, lease, cfg)
+	if err != nil {
+		t.Fatalf("StartHeartbeat failed: %v", err)
+	}
 
 	// Should return lease while running
 	currentLease := hb.Lease()
@@ -376,10 +392,14 @@ func TestHeartbeatMultipleStops(t *testing.T) {
 	}
 
 	cfg := HeartbeatConfig{
-		Interval: 50 * time.Millisecond,
-		LeaseTTL: 200 * time.Millisecond,
+		Interval:  50 * time.Millisecond,
+		LeaseTTL:  200 * time.Millisecond,
+		MaxMisses: 3,
 	}
-	hb := lm.StartHeartbeat(ctx, lease, cfg)
+	hb, err := lm.StartHeartbeat(ctx, lease, cfg)
+	if err != nil {
+		t.Fatalf("StartHeartbeat failed: %v", err)
+	}
 
 	// Multiple stops should be safe
 	hb.Stop()

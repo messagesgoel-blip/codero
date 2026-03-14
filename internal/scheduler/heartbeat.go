@@ -43,10 +43,25 @@ type Heartbeat struct {
 // ErrHeartbeatStopped is returned when operations are attempted on a stopped heartbeat.
 var ErrHeartbeatStopped = errors.New("heartbeat stopped")
 
+// ErrInvalidConfig is returned when HeartbeatConfig has invalid values.
+var ErrInvalidConfig = errors.New("heartbeat config invalid: Interval and MaxMisses must be positive")
+
+// ErrNilLease is returned when a nil lease is passed to StartHeartbeat.
+var ErrNilLease = errors.New("lease cannot be nil")
+
 // StartHeartbeat begins periodic lease renewal.
 // The heartbeat continues until Stop is called or the context is cancelled.
 // On context cancellation, the lease is automatically released.
-func (lm *LeaseManager) StartHeartbeat(ctx context.Context, lease *Lease, cfg HeartbeatConfig) *Heartbeat {
+// Returns an error if cfg is invalid or lease is nil.
+func (lm *LeaseManager) StartHeartbeat(ctx context.Context, lease *Lease, cfg HeartbeatConfig) (*Heartbeat, error) {
+	// Validate inputs
+	if lease == nil {
+		return nil, ErrNilLease
+	}
+	if cfg.Interval <= 0 || cfg.MaxMisses <= 0 {
+		return nil, ErrInvalidConfig
+	}
+
 	hb := &Heartbeat{
 		lm:     lm,
 		lease:  lease,
@@ -57,7 +72,7 @@ func (lm *LeaseManager) StartHeartbeat(ctx context.Context, lease *Lease, cfg He
 
 	go hb.run(ctx)
 
-	return hb
+	return hb, nil
 }
 
 func (hb *Heartbeat) run(ctx context.Context) {
@@ -70,11 +85,12 @@ func (hb *Heartbeat) run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			// Context cancelled - release lease and exit.
-			hb.releaseAndStop()
+			// Use a fresh context for release since caller context is cancelled.
+			hb.releaseAndStop(context.Background())
 			return
 		case <-hb.stopCh:
 			// Stop requested - release lease and exit.
-			hb.releaseAndStop()
+			hb.releaseAndStop(ctx)
 			return
 		case <-ticker.C:
 			// Time to extend the lease.
@@ -86,7 +102,7 @@ func (hb *Heartbeat) run(ctx context.Context) {
 				if hb.misses >= hb.config.MaxMisses {
 					hb.mu.Unlock()
 					// Too many missed heartbeats - release lease and mark stopped.
-					hb.releaseAndStop()
+					hb.releaseAndStop(ctx)
 					return
 				}
 				hb.mu.Unlock()
@@ -103,9 +119,13 @@ func (hb *Heartbeat) run(ctx context.Context) {
 
 // releaseAndStop releases the lease and marks the heartbeat as stopped.
 // Must be called from the run goroutine when exiting.
-func (hb *Heartbeat) releaseAndStop() {
+func (hb *Heartbeat) releaseAndStop(ctx context.Context) {
+	// Use a bounded timeout context for best-effort release.
+	releaseCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+
 	// Release the lease (best effort, ignore errors).
-	_ = hb.lm.Release(context.Background(), hb.lease.Repo, hb.lease.Branch, hb.lease.HolderID)
+	_ = hb.lm.Release(releaseCtx, hb.lease.Repo, hb.lease.Branch, hb.lease.HolderID)
 
 	// Mark stopped and clear lease under lock to prevent stale Lease() output.
 	hb.mu.Lock()
@@ -134,16 +154,27 @@ func (hb *Heartbeat) Stop() {
 func (hb *Heartbeat) Lease() *Lease {
 	hb.mu.Lock()
 	defer hb.mu.Unlock()
-	if hb.stopped {
+	if hb.stopped || hb.lease == nil {
 		return nil
 	}
 	return hb.lease
 }
 
 // Status returns the current heartbeat status.
+// Returns a safe status with empty/zero lease fields if the heartbeat has stopped.
 func (hb *Heartbeat) Status() HeartbeatStatus {
 	hb.mu.Lock()
 	defer hb.mu.Unlock()
+
+	// Return safe status if stopped or lease is nil
+	if hb.stopped || hb.lease == nil {
+		return HeartbeatStatus{
+			Misses:    hb.misses,
+			LastErr:   hb.lastErr,
+			ExpiresAt: time.Time{}, // zero value
+		}
+	}
+
 	return HeartbeatStatus{
 		Repo:      hb.lease.Repo,
 		Branch:    hb.lease.Branch,

@@ -181,10 +181,10 @@ func TestLeaseExtendWrongHolder(t *testing.T) {
 		t.Fatalf("Acquire failed: %v", err)
 	}
 
-	// Extend by wrong holder fails
+	// Extend by wrong holder fails with ErrLeaseConflict (held by another)
 	_, err = lm.Extend(ctx, "test", "branch1", "holder2", 5*time.Second)
-	if !errors.Is(err, ErrLeaseNotFound) {
-		t.Errorf("expected ErrLeaseNotFound, got %v", err)
+	if !errors.Is(err, ErrLeaseConflict) {
+		t.Errorf("expected ErrLeaseConflict, got %v", err)
 	}
 }
 
@@ -202,10 +202,10 @@ func TestLeaseExpiry(t *testing.T) {
 	// Use miniredis FastForward to simulate TTL expiry
 	mr.FastForward(600 * time.Millisecond)
 
-	// Extend should fail for expired lease
+	// Extend should fail with ErrLeaseNotFound (lease no longer exists)
 	_, err = lm.Extend(ctx, "test", "branch1", "holder1", 5*time.Second)
-	if !errors.Is(err, ErrLeaseExpired) {
-		t.Errorf("expected ErrLeaseExpired, got %v", err)
+	if !errors.Is(err, ErrLeaseNotFound) {
+		t.Errorf("expected ErrLeaseNotFound, got %v", err)
 	}
 
 	// Another holder can now acquire
