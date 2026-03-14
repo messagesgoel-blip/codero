@@ -1,141 +1,157 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Mandatory-two review gate:
-# 1) Aider first pass (always)
-# 2) Gemini second pass (always)
-# Two successful checks are required to pass.
-# Fallback chain only applies when a primary check is rate-limited:
-# 3) PR-Agent third pass
-# 4) CodeRabbit fourth pass (only if PR-Agent fails)
+# 5-Pass Pre-Commit Review Gate Orchestrator for Mathkit-V2
+# Implements codero standard with fallback chain:
+# 1. copilot-third-pass.sh (Primary Gate 1 - gpt-5-mini/gpt-4o-mini)
+# 2. aider-first-pass.sh (Primary Gate 2 - MiniMax/OpenRouter)
+# 3. gemini-second-pass.sh (Primary Gate 3 - Gemini OAuth)
+# 4. pr-agent-second-pass.sh (Fallback 1)
+# 5. coderabbit-second-pass.sh (Fallback 2)
+#
+# Rules:
+# - Stop if 2+ checks succeed
+# - Fail if any review finds issues (not just availability failures)
+# - Rate-limited/timeout counts as "available but failed" - fallback to next
+# - Only allow commit if 2+ checks pass
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_PATH="${CODERO_REPO_PATH:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 LOG_DIR="${CODERO_REVIEW_LOG_DIR:-$REPO_PATH/.codero/review-logs}"
 TS="$(date +%Y%m%d-%H%M%S)"
+MODEL_ALIAS="${CODERO_MODEL_ALIAS:-cacheflow_agent}"
+MODE="${CODERO_MODE:-fast}"
+
 mkdir -p "$LOG_DIR"
 
-FIRST_LOG="$LOG_DIR/first-pass-$TS.log"
-SECOND_LOG="$LOG_DIR/second-pass-$TS.log"
-THIRD_LOG="$LOG_DIR/third-pass-$TS.log"
-FOURTH_LOG="$LOG_DIR/fourth-pass-$TS.log"
-PASS_TIMEOUT_SEC="${CODERO_REVIEW_PASS_TIMEOUT_SEC:-300}"
-REQUIRED_PASSES=2
+declare -a PASSED=()
+declare -a FAILED=()
 
-echo "Running mandatory-two review gate for repo: $REPO_PATH"
-
-run_pass() {
-  local name="$1"
-  local log="$2"
-  shift 2
-  set +e
-  timeout "$PASS_TIMEOUT_SEC" env CODERO_REPO_PATH="$REPO_PATH" "$@" | tee "$log"
-  local status="${PIPESTATUS[0]}"
-  set -e
-  if [ "$status" -eq 124 ]; then
-    echo "FAIL: $name (timeout ${PASS_TIMEOUT_SEC}s)"
-    return 124
-  fi
-  if [ "$status" -eq 0 ]; then
-    echo "PASS: $name"
-  else
-    echo "FAIL: $name (exit $status)"
-  fi
-  return "$status"
+log_status() {
+  local pass_fail="$1"
+  local gate="$2"
+  local gate_num="$3"
+  echo "[$TS] GATE $gate_num ($gate): $pass_fail" >> "$LOG_DIR/orchestrator-$TS.log"
 }
 
-is_rate_limited_log() {
-  local log="$1"
-  # Rate-limit and provider throttling signals across aider/gemini/pr-agent/coderabbit
-  if rg -qi 'RateLimit|rate limit|429|RESOURCE_EXHAUSTED|Too Many Requests|quota exceeded|insufficient_quota' "$log"; then
-    return 0
+run_gate() {
+  local gate_name="$1"
+  local gate_num="$2"
+  local script="$SCRIPT_DIR/${gate_name}.sh"
+  local log_file="$LOG_DIR/${gate_name}-${TS}.log"
+
+  echo "=== GATE $gate_num: $gate_name ===" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+
+  if [ ! -x "$script" ]; then
+    echo "Warning: Script not found or not executable: $script" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+    log_status "skip" "$gate_name" "$gate_num"
+    return 1
   fi
-  return 1
+
+  local output exit_code
+  output="$(timeout "${CODERO_GATE_TIMEOUT:-180}" bash "$script" 2>&1)"
+  exit_code=$?
+
+  if [ $exit_code -eq 124 ]; then
+    echo "GATE $gate_num FAILED: Timeout after ${CODERO_GATE_TIMEOUT:-180}s" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+    echo "$output" | tee "$log_file"
+    log_status "failed_timeout" "$gate_name" "$gate_num"
+    return 1
+  fi
+
+  if [ $exit_code -ne 0 ]; then
+    echo "GATE $gate_num FAILED: Exit code $exit_code" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+    echo "$output" | tee "$log_file"
+    log_status "failed" "$gate_name" "$gate_num"
+    return 1
+  fi
+
+  if echo "$output" | grep -qiE "(error|warning|fix|issue|problem|sgx|vulnerable|secret|credential)"; then
+    echo "GATE $gate_num PASSED but found issues:" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+    echo "$output" | tee "$log_file"
+    log_status "passed_with_issues" "$gate_name" "$gate_num"
+    return 1
+  fi
+
+  echo "GATE $gate_num PASSED: No issues found" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+  echo "$output" | tee "$log_file"
+  log_status "passed" "$gate_name" "$gate_num"
+  return 0
 }
 
-passes=0
-failures=0
-aider_status=1
-gemini_status=1
-aider_rl=0
-gemini_rl=0
+main() {
+  echo "========================================"
+  echo "5-PASS PRE-COMMIT REVIEW GATE"
+  echo "Model Alias: $MODEL_ALIAS"
+  echo "Mode: $MODE"
+  echo "Repo: $REPO_PATH"
+  echo "Log Dir: $LOG_DIR"
+  echo "========================================"
 
-if run_pass "Aider first pass" "$FIRST_LOG" "$SCRIPT_DIR/aider-first-pass.sh"; then
-  passes=$((passes + 1))
-  aider_status=0
-else
-  aider_status=$?
-  failures=$((failures + 1))
-  if is_rate_limited_log "$FIRST_LOG"; then
-    aider_rl=1
+  if [ ! -d "$REPO_PATH" ]; then
+    echo "Error: Repo path does not exist: $REPO_PATH" >&2
+    exit 1
   fi
-fi
 
-if run_pass "Gemini second pass" "$SECOND_LOG" "$SCRIPT_DIR/gemini-second-pass.sh"; then
-  passes=$((passes + 1))
-  gemini_status=0
-else
-  gemini_status=$?
-  failures=$((failures + 1))
-  if is_rate_limited_log "$SECOND_LOG"; then
-    gemini_rl=1
-  fi
-fi
+  local passed_count=0
+  local total_attempts=0
 
-if [ "$passes" -ge "$REQUIRED_PASSES" ]; then
-  echo "Review gate passed in primary stage."
-  echo "Summary: passes=$passes failures=$failures"
-  echo "Logs:"
-  echo "  $FIRST_LOG"
-  echo "  $SECOND_LOG"
-  exit 0
-fi
+  echo "Starting gate chain..." | tee -a "$LOG_DIR/orchestrator-$TS.log"
 
-need_fallback=0
-if [ "$aider_rl" -eq 1 ] || [ "$gemini_rl" -eq 1 ] || [ "$aider_status" -eq 124 ] || [ "$gemini_status" -eq 124 ]; then
-  need_fallback=1
-fi
+  for gate in copilot-third-pass aider-first-pass gemini-second-pass pr-agent-second-pass coderabbit-second-pass; do
+    if [ $passed_count -ge 2 ]; then
+      echo "2+ gates passed, stopping gate chain." | tee -a "$LOG_DIR/orchestrator-$TS.log"
+      break
+    fi
 
-if [ "$need_fallback" -eq 0 ]; then
-  echo "Review gate failed: fewer than $REQUIRED_PASSES checks passed and no primary rate-limit condition to trigger fallback."
-  echo "Summary: passes=$passes failures=$failures aider_status=$aider_status gemini_status=$gemini_status"
-  echo "Logs:"
-  echo "  $FIRST_LOG"
-  echo "  $SECOND_LOG"
-  exit 1
-fi
+    total_attempts=$((total_attempts + 1))
+    echo "Attempting gate $total_attempts: $gate" | tee -a "$LOG_DIR/orchestrator-$TS.log"
 
-echo "Primary stage had rate limiting; running fallback chain (PR-Agent -> CodeRabbit)..."
+    if run_gate "$gate" "$total_attempts"; then
+      passed_count=$((passed_count + 1))
+      PASSED+=("$gate")
+    else
+      FAILED+=("$gate")
+    fi
+  done
 
-if run_pass "PR-Agent third pass" "$THIRD_LOG" "$SCRIPT_DIR/pr-agent-second-pass.sh" "$@"; then
-  passes=$((passes + 1))
-else
-  failures=$((failures + 1))
-fi
+  echo "" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+  echo "========================================" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+  echo "REVIEW SUMMARY" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+  echo "========================================" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+  echo "Gates attempted: $total_attempts" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+  echo "Gates passed: $passed_count" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+  echo "Passed gates: ${PASSED[*]}" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+  echo "Failed gates: ${FAILED[*]}" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+  echo "Model: $MODEL_ALIAS" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+  echo "Mode: $MODE" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+  echo "Timestamp: $TS" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+  echo "========================================" | tee -a "$LOG_DIR/orchestrator-$TS.log"
 
-if [ "$passes" -lt "$REQUIRED_PASSES" ]; then
-  if run_pass "CodeRabbit fourth pass" "$FOURTH_LOG" "$SCRIPT_DIR/coderabbit-second-pass.sh" "$@"; then
-    passes=$((passes + 1))
+  if [ $passed_count -ge 2 ]; then
+    local parallel_script="$SCRIPT_DIR/parallel-agent-pass.sh"
+    if [ -x "$parallel_script" ]; then
+      echo "Running parallel-agent pass..."
+      timeout "${CODERO_GATE_TIMEOUT:-180}" env CODERO_REPO_PATH="$REPO_PATH" "$parallel_script"
+    fi
+
+    echo ""
+    echo "✓ SUCCESS: 2+ gates passed ($passed_count/$total_attempts)"
+    echo "Logs:"
+    for log in "$LOG_DIR"/*.log; do
+      echo "  $log"
+    done
+    exit 0
   else
-    failures=$((failures + 1))
+    echo ""
+    echo "✗ FAIL: Less than 2 gates passed ($passed_count/$total_attempts)"
+    echo "At least 2 reviews must pass for commit." | tee -a "$LOG_DIR/orchestrator-$TS.log"
+    echo "Logs:"
+    for log in "$LOG_DIR"/*.log; do
+      echo "  $log"
+    done
+    exit 1
   fi
-fi
+}
 
-echo "Review gate summary: passes=$passes failures=$failures required=$REQUIRED_PASSES aider_rl=$aider_rl gemini_rl=$gemini_rl"
-
-if [ "$passes" -lt "$REQUIRED_PASSES" ]; then
-  echo "Review gate failed: mandatory two checks not satisfied."
-  echo "Logs:"
-  echo "  $FIRST_LOG"
-  echo "  $SECOND_LOG"
-  if [ -f "$THIRD_LOG" ]; then echo "  $THIRD_LOG"; fi
-  if [ -f "$FOURTH_LOG" ]; then echo "  $FOURTH_LOG"; fi
-  exit 1
-fi
-
-echo "Review gate passed."
-echo "Logs:"
-echo "  $FIRST_LOG"
-echo "  $SECOND_LOG"
-if [ -f "$THIRD_LOG" ]; then echo "  $THIRD_LOG"; fi
-if [ -f "$FOURTH_LOG" ]; then echo "  $FOURTH_LOG"; fi
+main "$@"

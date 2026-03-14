@@ -1,133 +1,195 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# First-pass local review using aider.
+# Aider First-Pass Review (Primary Gate 1)
+# Local review using aider AI for pre-commit quality gate.
+# Supports multiple free/paid model backends:
+# 1. MiniMax (free tier) - set MINIMAX_API_KEY
+# 2. OpenRouter (free tier models) - set OPENROUTER_API_KEY
+# 3. Gemini (free tier) - set GEMINI_API_KEY
+# 4. LiteLLM (local proxy) - set LITELLM_MASTER_KEY
+#
+# Default: Uses MiniMax M2.5 (fast, good for code review)
 
 REPO_PATH="${CODERO_REPO_PATH:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-AIDER_TIMEOUT_SEC="${CODERO_AIDER_TIMEOUT_SEC:-180}"
-AIDER_MODEL="${CODERO_AIDER_MODEL:-cacheflow_agent}"
-AIDER_BIN="${CODERO_AIDER_BIN:-}"
-LITELLM_URL_RAW="${CODERO_LITELLM_URL:-${LITELLM_PROXY_URL:-http://localhost:4000/v1/chat/completions}}"
-HARDCODED_LITELLM_MASTER_KEY="sk-ae0aac762d1dc7c34f060230432e67780cdb7951363d2fec"
+TIMEOUT_SEC="${CODERO_FIRST_PASS_TIMEOUT_SEC:-90}"
+# Default to MiniMax (fast and reliable)
+AIDER_MODEL="${CODERO_AIDER_MODEL:-minimax/MiniMax-M2.5}"
 
-if [ "$AIDER_MODEL" = "cacheflow_agent" ]; then
-  AIDER_MODEL="cacheflow-agent"
-fi
-
-# aider expects provider-qualified names for LiteLLM/OpenAI-compatible endpoints.
-if [ "$AIDER_MODEL" = "cacheflow-agent" ]; then
-  AIDER_MODEL="openai/cacheflow-agent"
-fi
-
-resolve_aider_bin() {
-  if [ -n "$AIDER_BIN" ] && [ -x "$AIDER_BIN" ]; then
-    echo "$AIDER_BIN"
-    return 0
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    return 1
   fi
-
-  if command -v aider >/dev/null 2>&1; then
-    command -v aider
-    return 0
-  fi
-
-  for candidate in /home/codex-c/.local/bin/aider /home/sanjay/.local/bin/aider; do
-    if [ -x "$candidate" ]; then
-      echo "$candidate"
-      return 0
-    fi
-  done
-
-  return 1
+  return 0
 }
 
-build_prompt() {
-  cat <<'EOF'
-Review current uncommitted repo changes for a pre-commit quality gate.
-Focus on:
-1. Logic bugs and edge cases
-2. Security issues and secret leaks
-3. Regressions and missing tests
-4. Actionable fixes before commit
-
-Return concise, prioritized findings.
-EOF
-}
-
-load_litellm_key() {
-  if [ -n "$HARDCODED_LITELLM_MASTER_KEY" ]; then
-    echo "$HARDCODED_LITELLM_MASTER_KEY"
-    return 0
-  fi
-
-  if [ -n "${CODERO_LITELLM_MASTER_KEY:-}" ]; then
-    echo "$CODERO_LITELLM_MASTER_KEY"
-    return 0
-  fi
-  if [ -n "${LITELLM_MASTER_KEY:-}" ]; then
-    echo "$LITELLM_MASTER_KEY"
-    return 0
-  fi
+load_api_config() {
+  # Priority 1: MiniMax (fast, good for code)
   if [ -f "$REPO_PATH/.env" ]; then
-    local raw
-    raw="$(grep -E '^(LITELLM_MASTER_KEY|LITELLM_API_KEY|OPENAI_API_KEY)=' "$REPO_PATH/.env" | head -n 1 | cut -d'=' -f2- || true)"
-    raw="${raw%\"}"
-    raw="${raw#\"}"
-    raw="${raw%\'}"
-    raw="${raw#\'}"
-    if [ -n "$raw" ]; then
-      echo "$raw"
+    local minimax_key
+    minimax_key="$(grep -E '^MINIMAX_API_KEY=' "$REPO_PATH/.env" 2>/dev/null | head -n 1 | cut -d'=' -f2- || true)"
+    minimax_key="${minimax_key%\"}"
+    minimax_key="${minimax_key#\"}"
+    if [ -n "$minimax_key" ]; then
+      echo "minimax|https://api.minimax.chat/v1|$minimax_key"
       return 0
     fi
   fi
-  if [ -n "${OPENAI_API_KEY:-}" ]; then
-    echo "$OPENAI_API_KEY"
+  
+  if [ -n "${MINIMAX_API_KEY:-}" ]; then
+    echo "minimax|https://api.minimax.chat/v1|${MINIMAX_API_KEY}"
     return 0
   fi
+  
+  # Priority 2: OpenRouter (free models)
+  if [ -n "${OPENROUTER_API_KEY:-}" ]; then
+    echo "openrouter|https://openrouter.ai/api/v1|${OPENROUTER_API_KEY}"
+    return 0
+  fi
+  
+  if [ -f "$REPO_PATH/.env" ]; then
+    local or_key
+    or_key="$(grep -E '^OPENROUTER_API_KEY=' "$REPO_PATH/.env" 2>/dev/null | head -n 1 | cut -d'=' -f2- || true)"
+    or_key="${or_key%\"}"
+    or_key="${or_key#\"}"
+    if [ -n "$or_key" ]; then
+      echo "openrouter|https://openrouter.ai/api/v1|$or_key"
+      return 0
+    fi
+  fi
+  
+  # Priority 3: Gemini API (free tier)
+  if [ -f "$REPO_PATH/.env" ]; then
+    local gemini_key
+    gemini_key="$(grep -E '^GEMINI_API_KEY=' "$REPO_PATH/.env" 2>/dev/null | head -n 1 | cut -d'=' -f2- || true)"
+    gemini_key="${gemini_key%\"}"
+    gemini_key="${gemini_key#\"}"
+    if [ -n "$gemini_key" ]; then
+      echo "gemini||${gemini_key}"
+      return 0
+    fi
+  fi
+  
+  if [ -n "${GEMINI_API_KEY:-}" ]; then
+    echo "gemini||${GEMINI_API_KEY}"
+    return 0
+  fi
+  
+  # Priority 4: LiteLLM proxy
+  if [ -f "$REPO_PATH/.env" ]; then
+    local litellm_key base_url
+    base_url="${LITELLM_URL:-http://localhost:4000/v1}"
+    litellm_key="$(grep -E '^LITELLM_MASTER_KEY=' "$REPO_PATH/.env" 2>/dev/null | head -n 1 | cut -d'=' -f2- || true)"
+    litellm_key="${litellm_key%\"}"
+    litellm_key="${litellm_key#\"}"
+    if [ -n "$litellm_key" ]; then
+      echo "litellm|${base_url}|${litellm_key}"
+      return 0
+    fi
+  fi
+  
   return 1
+}
+
+build_diff() {
+  local tracked untracked file file_diff
+  tracked="$(git -C "$REPO_PATH" diff HEAD 2>/dev/null || true)"
+  untracked=""
+
+  while IFS= read -r -d '' file; do
+    if [ -f "$file" ]; then
+      file_diff="$(git -C "$REPO_PATH" diff --no-index -- /dev/null "$file" 2>/dev/null || [ $? -eq 1 ])"
+      untracked="${untracked}${file_diff}"
+    fi
+  done < <(git -C "$REPO_PATH" ls-files --others --exclude-standard -z 2>/dev/null)
+
+  printf '%s%s' "$tracked" "$untracked"
 }
 
 main() {
+  if ! require_cmd aider; then
+    echo "Error: required command not found: aider" >&2
+    echo "Install with: pip install aider-chat" >&2
+    exit 1
+  fi
+
   if [ ! -d "$REPO_PATH" ]; then
     echo "Error: repo path does not exist: $REPO_PATH" >&2
     exit 1
   fi
 
-  local bin output status prompt litellm_key litellm_base
-  if ! bin="$(resolve_aider_bin)"; then
-    echo "Error: aider binary not found. Set CODERO_AIDER_BIN or install aider." >&2
+  local diff
+  diff="$(build_diff)"
+  if [ -z "$diff" ]; then
+    echo "No uncommitted changes to review."
+    exit 0
+  fi
+
+  echo "--- CODERO FIRST PASS (Aider) ---"
+
+  local api_config
+  if ! api_config="$(load_api_config)"; then
+    echo "Error: No API configuration found." >&2
+    echo "Set one of: MINIMAX_API_KEY, OPENROUTER_API_KEY, GEMINI_API_KEY, or LITELLM_MASTER_KEY" >&2
     exit 1
   fi
-  if ! litellm_key="$(load_litellm_key)"; then
-    echo "Error: LiteLLM key not found for aider first pass." >&2
-    exit 1
-  fi
 
-  prompt="$(build_prompt)"
-  litellm_base="${LITELLM_URL_RAW%/chat/completions}"
+  local provider base_url api_key
+  provider="$(echo "$api_config" | cut -d'|' -f1)"
+  base_url="$(echo "$api_config" | cut -d'|' -f2)"
+  api_key="$(echo "$api_config" | cut -d'|' -f3)"
+  
+  echo "Provider: $provider"
+  echo "Model: $AIDER_MODEL"
+  echo "Timeout: ${TIMEOUT_SEC}s"
 
-  echo "--- CODERO FIRST PASS (Aider: $AIDER_MODEL) ---"
-  set +e
-  output="$(
-    cd "$REPO_PATH"
-    OPENAI_API_KEY="$litellm_key" \
-    OPENAI_API_BASE="$litellm_base" \
-    timeout "$AIDER_TIMEOUT_SEC" "$bin" --yes --model "$AIDER_MODEL" --message "$prompt" 2>&1
-  )"
-  status=$?
-  set -e
+  local message
+  message="Review the staged code changes for bugs, security issues, and code quality. List findings with file locations. If no issues, say 'No issues found.'"
 
-  printf '%s\n' "$output"
-
-  if [ "$status" -eq 124 ]; then
-    echo "Aider first pass timed out (${AIDER_TIMEOUT_SEC}s)." >&2
-    exit 124
-  fi
-  if [ "$status" -ne 0 ]; then
-    echo "Aider first pass failed (exit $status)." >&2
-    exit "$status"
-  fi
-  if printf '%s\n' "$output" | grep -qiE '(RateLimitError|Authentication|invalid api key|Traceback|^Error:|litellm\..*Error|Provider NOT provided)'; then
-    echo "Aider first pass failed due to provider/runtime errors." >&2
+  cd "$REPO_PATH"
+  
+  local aider_args=(
+    --model "$AIDER_MODEL"
+    --no-auto-commits
+    --no-gitignore
+    --no-show-model-warnings
+    --yes
+    --message "$message"
+  )
+  
+  case "$provider" in
+    minimax)
+      aider_args+=(
+        --openai-api-base "$base_url"
+        --openai-api-key "$api_key"
+      )
+      ;;
+    openrouter)
+      aider_args+=(
+        --openai-api-base "$base_url"
+        --openai-api-key "$api_key"
+      )
+      export OPENROUTER_API_KEY="$api_key"
+      ;;
+    litellm)
+      aider_args+=(
+        --openai-api-base "$base_url"
+        --openai-api-key "$api_key"
+      )
+      ;;
+    gemini)
+      export GEMINI_API_KEY="$api_key"
+      AIDER_MODEL="gemini-2.5-flash-lite"
+      aider_args=(--model "$AIDER_MODEL" --no-auto-commits --no-gitignore --no-show-model-warnings --yes --message "$message")
+      ;;
+  esac
+  
+  if ! timeout "$TIMEOUT_SEC" aider "${aider_args[@]}" 2>&1; then
+    exit_code=$?
+    if [ $exit_code -eq 124 ]; then
+      echo "Error: Aider review timed out after ${TIMEOUT_SEC}s"
+      exit 1
+    fi
     exit 1
   fi
 
