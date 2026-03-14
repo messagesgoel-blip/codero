@@ -10,9 +10,13 @@ import (
 
 	"github.com/codero/codero/internal/config"
 	"github.com/codero/codero/internal/daemon"
+	"github.com/codero/codero/internal/delivery"
 	loglib "github.com/codero/codero/internal/log"
 	redislib "github.com/codero/codero/internal/redis"
+	"github.com/codero/codero/internal/runner"
+	"github.com/codero/codero/internal/scheduler"
 	"github.com/codero/codero/internal/state"
+	"github.com/codero/codero/internal/webhook"
 	"github.com/spf13/cobra"
 )
 
@@ -155,10 +159,82 @@ func daemonCmd(configPath *string) *cobra.Command {
 				daemon.WatchRedis(ctx, client)
 			}()
 
+			// Sprint 5: initialize delivery stream, runner, expiry worker,
+			// reconciler, and (optionally) webhook receiver.
+			stream := delivery.NewStream(db, client)
+			queue := scheduler.NewQueue(client)
+			leaseMgr := scheduler.NewLeaseManager(client)
+
+			// Review runner: consumes queued_cli branches and dispatches reviews.
+			reviewRunner := runner.New(db, queue, leaseMgr, stream,
+				runner.NewStubProvider(0),
+				runner.Config{Repos: cfg.Repos},
+			)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				reviewRunner.Run(ctx)
+			}()
+
+			// Expiry worker: session heartbeat TTL and lease audit.
+			expiryWorker := scheduler.NewExpiryWorker(db, queue, stream)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				expiryWorker.Run(ctx)
+			}()
+
+			// Reconciler: polls GitHub for drift repair.
+			// webhookEnabled=false → polling-only mode (60s interval).
+			reconciler := webhook.NewReconciler(db,
+				&webhook.StubGitHubClient{},
+				cfg.Repos,
+				cfg.Webhook.Enabled,
+			)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				reconciler.Run(ctx)
+			}()
+
+			// Webhook server: started only if explicitly enabled.
+			// Polling-only mode remains fully functional without it.
+			if cfg.Webhook.Enabled {
+				dedup := webhook.NewDeduplicator(db, client)
+				proc := &webhook.NopProcessor{}
+				handler := webhook.NewHandler(cfg.Webhook.Secret, dedup, proc)
+				addr := fmt.Sprintf(":%d", cfg.Webhook.Port)
+				srv := webhook.NewServer(addr, handler)
+
+				loglib.Info("codero: webhook receiver starting",
+					loglib.FieldEventType, loglib.EventStartup,
+					loglib.FieldComponent, "webhook",
+					"addr", addr,
+				)
+
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					if err := srv.Start(ctx); err != nil {
+						loglib.Error("codero: webhook server error",
+							loglib.FieldComponent, "webhook",
+							"error", err,
+							"ctx_err", ctx.Err(),
+						)
+					}
+				}()
+			} else {
+				loglib.Info("codero: webhook receiver disabled (polling-only mode)",
+					loglib.FieldEventType, loglib.EventStartup,
+					loglib.FieldComponent, "daemon",
+				)
+			}
+
 			loglib.Info("codero: daemon started",
 				loglib.FieldEventType, loglib.EventStartup,
 				loglib.FieldComponent, "daemon",
 				"pid", os.Getpid(),
+				"webhook_enabled", cfg.Webhook.Enabled,
 			)
 
 			if exitCode := daemon.HandleSignals(cancel, &wg); exitCode != 0 {
