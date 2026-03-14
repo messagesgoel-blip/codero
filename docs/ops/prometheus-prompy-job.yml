@@ -1,0 +1,40 @@
+---
+# Prometheus scrape config snippet for the prompy sidecar.
+#
+# Add this job to your prometheus.yml scrape_configs section.
+# The target address uses the Docker service name (prompy:9210) so that
+# Prometheus can reach it within the shared Docker network (codero-net).
+# Do NOT use localhost:9210 from inside a container — use the service name.
+#
+# Example minimal prometheus.yml:
+#
+#   global:
+#     scrape_interval: 15s
+#
+#   scrape_configs:
+#     - <<: *prompy_job          # merge this file's content
+#
+# Or inline it directly:
+
+scrape_configs:
+  - job_name: "codero-prompy"
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    static_configs:
+      - targets:
+          # Use the Docker Compose service name, not localhost.
+          # In a docker network, prompy is reachable at prompy:9210.
+          - "prompy:9210"
+        labels:
+          env: "production"
+          service: "codero"
+          component: "prompy"
+    metrics_path: /metrics
+    scheme: http
+
+    # Optional: relabeling to normalize repo label format.
+    # metric_relabel_configs:
+    #   - source_labels: [repo]
+    #     target_label: repo
+    #     regex: (.+)
+    #     replacement: '$1'

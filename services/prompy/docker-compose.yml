@@ -1,0 +1,53 @@
+version: "3.9"
+
+# prompy — codero SLO observability sidecar
+# Run alongside your existing codero + Redis stack.
+#
+# Usage:
+#   cp .env.example .env        # fill in values
+#   docker compose up -d
+
+services:
+  prompy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: codero/prompy:latest
+    container_name: prompy
+    restart: unless-stopped
+    ports:
+      - "9210:9210"
+    env_file:
+      - .env
+    environment:
+      # Override individual vars here if not using .env.
+      PROMPY_PORT: "9210"
+      PROMPY_ADDR: "0.0.0.0"
+    networks:
+      - codero-net
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    # Only expose on localhost — never bind 0.0.0.0 in production.
+    ports:
+      - "127.0.0.1:6379:6379"
+    networks:
+      - codero-net
+    command: >
+      redis-server
+      --save ""
+      --requirepass ${REDIS_PASSWORD:-}
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+networks:
+  codero-net:
+    external: true
+    name: ${DOCKER_NETWORK:-codero-net}

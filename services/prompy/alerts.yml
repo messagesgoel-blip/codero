@@ -1,0 +1,73 @@
+---
+# Prometheus alert rules for codero SLO observability (prompy)
+# Load this file by referencing it in your Prometheus rule_files config.
+#
+# Example prometheus.yml snippet:
+#   rule_files:
+#     - /etc/prometheus/rules/prompy-alerts.yml
+
+groups:
+  - name: codero.slo
+    interval: 60s
+    rules:
+
+      # -----------------------------------------------------------------------
+      # Alert: queue_stalled_for_10m
+      # Fires when a repo's queue has been stalled for >= 10 minutes.
+      # -----------------------------------------------------------------------
+      - alert: CoderoQueueStalledFor10m
+        expr: codero_queue_stalled == 1
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Codero queue stalled for {{ $labels.repo }}"
+          description: >
+            The dispatch queue for repo {{ $labels.repo }} has been non-empty
+            with no lease activity for at least 10 minutes.
+            Check for a stuck agent, expired lease, or Redis connectivity issue.
+          runbook_url: "https://github.com/codero/codero/blob/main/docs/runbooks/prompy-observability.md#queue-stalled"
+
+      # -----------------------------------------------------------------------
+      # Alert: high_queue_wait_p95
+      # Fires when 95th-percentile queue wait time exceeds 30 minutes.
+      # -----------------------------------------------------------------------
+      - alert: CoderoHighQueueWaitP95
+        expr: >
+          histogram_quantile(
+            0.95,
+            sum by (repo, le) (rate(codero_queue_wait_seconds_bucket[30m]))
+          ) > 1800
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "High p95 queue wait for {{ $labels.repo }}"
+          description: >
+            The 95th-percentile queue wait time for repo {{ $labels.repo }}
+            exceeds 30 minutes. Branches are spending too long waiting for
+            a dispatch slot.
+          runbook_url: "https://github.com/codero/codero/blob/main/docs/runbooks/prompy-observability.md#high-queue-wait"
+
+      # -----------------------------------------------------------------------
+      # Alert: missing_prompy_data
+      # Fires when prompy has not recorded a successful collection cycle
+      # in the past 5 minutes (sidecar itself is down or broken).
+      # -----------------------------------------------------------------------
+      - alert: CoderoMissingPrompyData
+        expr: >
+          (time() - codero_last_success_timestamp_seconds) > 300
+          or absent(codero_last_success_timestamp_seconds)
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "prompy sidecar not reporting data"
+          description: >
+            The prompy observability sidecar has not produced a successful
+            collection cycle in the last 5 minutes, or the metric is absent.
+            Codero SLO visibility is degraded.
+          runbook_url: "https://github.com/codero/codero/blob/main/docs/runbooks/prompy-observability.md#missing-data"

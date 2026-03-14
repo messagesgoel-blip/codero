@@ -1,0 +1,1 @@
+# prompy — codero observability sidecar
