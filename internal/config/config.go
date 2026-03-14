@@ -44,15 +44,26 @@ type RedisConfig struct {
 	Password string `yaml:"password"`
 }
 
+// WebhookConfig holds webhook receiver settings.
+// Webhooks are optional; polling-only mode is the default and fully functional
+// even when webhook is disabled (WebhookEnabled = false).
+type WebhookConfig struct {
+	Enabled bool   `yaml:"enabled"` // default: false (polling-only)
+	Port    int    `yaml:"port"`    // default: 9090
+	Secret  string `yaml:"secret"`  // HMAC-SHA256 secret for signature verification
+	Path    string `yaml:"path"`    // default: /webhook/github
+}
+
 // Config holds runtime configuration for the codero daemon.
 type Config struct {
-	GitHubToken string      `yaml:"github_token"`
-	Repos       []string    `yaml:"repos"`
-	Redis       RedisConfig `yaml:"redis"`
-	PIDFile     string      `yaml:"pid_file"`
-	LogLevel    string      `yaml:"log_level"`
-	LogPath     string      `yaml:"log_path"`
-	DBPath      string      `yaml:"db_path"`
+	GitHubToken string        `yaml:"github_token"`
+	Repos       []string      `yaml:"repos"`
+	Redis       RedisConfig   `yaml:"redis"`
+	PIDFile     string        `yaml:"pid_file"`
+	LogLevel    string        `yaml:"log_level"`
+	LogPath     string        `yaml:"log_path"`
+	DBPath      string        `yaml:"db_path"`
+	Webhook     WebhookConfig `yaml:"webhook"`
 }
 
 // Load reads config from a YAML file at path and applies env overrides.
@@ -120,6 +131,11 @@ func defaults() *Config {
 		LogLevel: "info",
 		LogPath:  "",
 		DBPath:   "/var/lib/codero/codero.db",
+		Webhook: WebhookConfig{
+			Enabled: false, // polling-only mode by default
+			Port:    9090,
+			Path:    "/webhook/github",
+		},
 	}
 }
 
@@ -142,6 +158,14 @@ func applyEnvOverrides(c *Config) {
 	}
 	if v := os.Getenv("CODERO_DB_PATH"); v != "" {
 		c.DBPath = v
+	}
+	// Webhook env overrides.
+	// CODERO_WEBHOOK_ENABLED=true enables the webhook receiver.
+	if v := os.Getenv("CODERO_WEBHOOK_ENABLED"); v == "true" || v == "1" {
+		c.Webhook.Enabled = true
+	}
+	if v := os.Getenv("CODERO_WEBHOOK_SECRET"); v != "" {
+		c.Webhook.Secret = v
 	}
 }
 
