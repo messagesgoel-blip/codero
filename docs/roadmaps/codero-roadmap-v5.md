@@ -64,6 +64,28 @@ That last change is deliberate. Repo-qualified identity, fairness, and delivery 
 - No phase is complete without tests, observability, runbooks, and recovery drills.
 - The roadmap does not own agent lifecycle. codero manages review orchestration, not agent scheduling.
 
+### 2.1 Product thesis and anti-goals
+
+Product thesis by phase:
+
+- Phase 1 primary user: a single operator running multiple active repos daily.
+- Phase 2 primary user: small teams needing predictable review orchestration and auditability across repos.
+- Phase 3+ primary user: platform and security-conscious teams requiring policy, controls, and trust boundaries.
+
+codero must outperform "GitHub + scripts + good prompts" on:
+
+- deterministic lifecycle semantics and replayable state
+- policy-driven merge readiness and auditable overrides
+- resilient degraded operation and reconciliation after failures
+- measurable operator time reduction across repeated review loops
+
+Anti-goals:
+
+- not a general-purpose agent scheduler
+- not a CI replacement
+- not a code-hosting abstraction layer
+- not a workflow engine unless clear complexity evidence requires it
+
 ---
 
 ## 3) System boundaries and responsibility model
@@ -117,6 +139,29 @@ operator or external orchestration starts agent -> agent works in isolated workt
 - Every invalid state transition is rejected and logged.
 - Durable store rebuild after Redis loss is a supported path, not an edge case.
 - Every manual operator intervention must leave an auditable trace.
+
+### 3.6 Canonical domain model
+
+Core entities and relationships:
+
+- **tenant**: top-level ownership and policy scope (single operator in Phase 1, multi-tenant in Phase 2+).
+- **repo**: code host repository under a tenant; owns repo-level policy and onboarding state.
+- **branch instance**: repo-qualified branch identity plus HEAD and lifecycle state.
+- **PR**: external code host review artifact linked to branch instance.
+- **review run**: one execution attempt against a branch instance or PR, with backend, timing, and outcome.
+- **lease**: exclusive dispatch claim for a branch instance with TTL and heartbeat semantics.
+- **feedback bundle**: normalized review findings and system events delivered to agents/operators with seq ordering.
+- **agent session**: external actor context linked to one active task branch at a time.
+- **operator action**: explicit human control action with actor, reason, and audit trace.
+- **policy set**: hierarchical configuration for queue, review, gating, and merge semantics.
+- **suppression/waiver**: time-scoped acceptance of noisy or intentionally accepted findings, with owner and expiry.
+
+Model constraints:
+
+- branch instance is the unit of queueing, leasing, review, and merge readiness
+- review runs and feedback bundles are append-only records
+- policy sets are resolved deterministically by hierarchy at decision time
+- suppressions never delete findings; they alter gating/visibility outcomes with audit trace
 
 ---
 
@@ -424,7 +469,92 @@ At minimum each intake entry records:
 
 ---
 
-## 8) First six execution sprints
+## 8) Product and operating doctrine
+
+### 8.1 Policy hierarchy and configuration model
+
+Policy precedence (highest to lowest):
+
+1. Temporary operator override (time-scoped, auditable)
+2. PR or branch exception
+3. Repo policy
+4. Tenant policy
+5. Global defaults
+
+Policy domains:
+
+- severity thresholds and merge blockers
+- WFQ coefficients and queue aging behavior
+- pre-commit slot caps and daily cost caps
+- allowed review backends and fallback order
+- auto-merge eligibility rules
+- polling versus webhook operating mode
+- review scope rules (changed files, full scan, retry behavior)
+- suppression eligibility and approval requirements
+
+### 8.2 Suppression and waiver model
+
+Suppressions/waivers are explicit policy objects with:
+
+- scope: line, file, rule, repo, or backend
+- reason and expected risk
+- owner (human) and optional proposing agent
+- expiry timestamp (required unless explicitly permanent and approved)
+- audit trail: created, modified, approved, expired, revoked
+
+Behavior:
+
+- suppressions can hide repeated noise in operator views
+- gating impact is policy-controlled (visibility-only vs merge-impacting)
+- agents may propose suppressions; only approved human/operator roles may activate merge-affecting waivers
+- expired suppressions automatically revert to normal finding behavior
+
+### 8.3 Repo onboarding and lifecycle model
+
+Repo lifecycle states:
+
+- proposed -> onboarded -> validating -> active -> paused -> archived
+
+Onboarding checks:
+
+- required token scopes verified
+- branch protection compatibility verified
+- webhook configured or polling fallback confirmed
+- repo policy loaded and resolved
+- reconciliation drill executed successfully
+
+### 8.4 Degraded operating modes
+
+Named operating modes:
+
+- healthy
+- degraded: Redis unavailable
+- degraded: GitHub unavailable
+- degraded: CodeRabbit unavailable
+- degraded: LiteLLM unavailable
+- degraded: webhook unavailable (polling fallback)
+- read-only/drain
+- recovery/rebuild
+
+Each mode must define:
+
+- allowed operations
+- blocked operations
+- operator-visible status and guidance
+- safe fallback workflow
+
+### 8.5 Project kill and revisit criteria
+
+Program-level criteria (reviewed at phase gates):
+
+- if operator intervention rate does not materially improve over baseline
+- if false-positive burden remains above agreed threshold after stabilization window
+- if codero does not outperform a simpler script-based workflow in day-to-day use
+- if support/ops burden outweighs demonstrated product value
+
+---
+
+## 9) First six execution sprints
 
 ### Sprint 1
 
@@ -792,7 +922,80 @@ Phase 1 sign-off requires explicit drills for all of the above, not only unit te
 
 ---
 
-## 9) Definition of done for the roadmap itself
+## Appendix I — Security and trust boundaries (binding)
+
+Trust-boundary rules apply in every phase:
+
+- raw source content may flow only to explicitly allowed review backends and configured model endpoints
+- raw source content must not be durably persisted outside approved durable stores
+- secrets, tokens, credentials, and provider auth artifacts must never be emitted in findings, logs, or metrics
+- operational logs and metrics contain metadata and counters, not full code payloads
+- all external backend usage must be policy-gated and auditable by backend and model
+
+Storage and handling requirements:
+
+- durable stores persist normalized findings, transition records, and policy decisions
+- ephemeral coordination layers may cache operational metadata but not become sole source of truth
+- key material is stored in designated secret stores or environment injection paths with rotation support
+- "stateless processing" means request/response review content is not retained by codero durable stores unless explicitly required for replay contracts
+
+Phase implications:
+
+- Phase 1: local-only defaults and explicit backend allowlist
+- Phase 2+: tenant isolation and policy-enforced backend allowlists are mandatory
+- Phase 3+: immutable audit and enterprise retention controls are mandatory
+
+---
+
+## Appendix J — Semantic change policy (binding)
+
+Changes to binding semantics require elevated change control.
+
+High-impact semantic surfaces:
+
+- canonical state machine transitions
+- merge-ready computation rules
+- operator action semantics
+- delivery/seq semantics
+- Redis recovery and rebuild rules
+- pre-commit loop ordering and gating semantics
+
+Required artifacts for semantic changes:
+
+- ADR documenting rationale and alternatives
+- migration note describing data and behavior impact
+- compatibility impact note (forward/backward)
+- regression tests covering old and new behavior
+- rollback path with operator-safe fallback
+
+No semantic change is "minor docs-only" if it affects runtime decisions.
+
+---
+
+## Appendix K — Product and economic scorecard (mandatory)
+
+Operational correctness is necessary but insufficient. codero must also demonstrate product value.
+
+Track at minimum:
+
+- operator minutes saved per reviewed branch
+- first-pass clean rate trend
+- PR review turnaround improvement
+- false-positive rate by backend
+- manual interventions per 100 branches
+- stale-branch catch rate
+- percent of branches reaching `merge_ready` without human rescue
+- cost per successful reviewed branch
+
+Use scorecard trends at phase gates:
+
+- promote when value and reliability both improve
+- hold when reliability improves but value does not
+- reconsider scope when value and reliability both stall
+
+---
+
+## 10) Definition of done for the roadmap itself
 
 This roadmap is acceptable only if:
 
