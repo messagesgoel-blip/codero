@@ -28,12 +28,14 @@ In this repo, `scripts/review/two-pass-review.sh` is authoritative.
 Current mandatory gate policy:
 
 1. Run `aider` first pass.
-2. Run `gemini` second pass.
+2. Run `gemini` (LiteLLM) second pass.
 3. Two successful checks are mandatory before commit.
-4. If a primary check is rate-limited or times out, run fallback chain:
-   - `pr-agent` third
-   - `coderabbit` fourth (only if still below two successful checks)
-5. Fix findings before commit.
+4. Run `coderabbit` (CodeRabbit) third as the canonical second review loop after LiteLLM.
+5. If either `gemini` or `coderabbit` is rate-limited or times out, run fallback chain:
+   - `pr-agent` next
+   - additional fallback tooling only if still below two successful checks
+6. `coderabbit` is never a fallback when the canonical sequence is available.
+7. Fix findings before commit.
 
 Operational rule:
 

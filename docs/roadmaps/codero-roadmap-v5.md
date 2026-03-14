@@ -524,7 +524,7 @@ Redis is the ephemeral coordination layer in every phase. It never replaces the 
 | Concern | Redis primitive | Durable source or recovery rule | Notes |
 |---|---|---|---|
 | Lease acquire/release | `SET NX + TTL` | Rebuild lease truth from durable state plus lease audit | No double-lease on NX failure |
-| WFQ dispatch queue | Sorted set (`ZADD`, `ZPOPMAX`) | Recompute all scores from durable state and repopulate | Queue order must be reproducible |
+| WFQ dispatch queue | Sorted set (`ZADD`, `ZPOPMIN`) | Recompute all scores from durable state and repopulate | Queue order must be reproducible |
 | Concurrent slot counter | `INCR` / `DECR` via Lua | Rebuild from active durable review state on restart | Never rely on in-process mutex only |
 | Heartbeat TTL | `SET EX 1800` + keyspace notification | Durable state remains authoritative; expiry drives transition and system bundle | Keyspace notifications are fast path, not correctness path |
 | Delivery seq number | `INCR seq:*` | Read durable seq floor on startup and continue upward | Seq is monotonic, not necessarily contiguous |
@@ -551,14 +551,14 @@ Implementation constraints:
 
 WFQ score is computed at dispatch time as:
 
-`queue_priority + (minutes_waiting * wait_factor) - (retry_count * retry_penalty) - (active_jobs * concurrency_penalty)`
+`queue_priority - (minutes_waiting * wait_factor) + (retry_count * retry_penalty) + (active_jobs * concurrency_penalty)`
 
 Rules:
 
 - `queue_priority` is capped at 20
 - scores are recomputed on dispatch ticks
 - Phase 1 uses a single-goroutine dispatcher
-- if Phase 2 introduces parallel dispatch, `ZPOPMAX` usage must be replaced or wrapped with a Lua pop-verify-lease sequence
+- if Phase 2 introduces parallel dispatch, `ZPOPMIN` usage must be replaced or wrapped with a Lua pop-verify-lease sequence
 
 ### C.2 Lease semantics
 
