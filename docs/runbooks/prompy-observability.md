@@ -137,10 +137,12 @@ All tests should pass.
 docker logs codero --tail 50
 
 # Check Redis queue depth directly.
-redis-cli -a "$REDIS_PASSWORD" ZCARD "owner/repo:queue:pending"
+# Use REDISCLI_AUTH to avoid exposing the password in process listings.
+export REDISCLI_AUTH="$REDIS_PASSWORD"
+redis-cli ZCARD "owner/repo:queue:pending"
 
 # Check if any lease exists.
-redis-cli -a "$REDIS_PASSWORD" KEYS "owner/repo:lease:*"
+redis-cli KEYS "owner/repo:lease:*"
 
 # Restart daemon if needed.
 docker restart codero
@@ -166,7 +168,9 @@ curl -s http://localhost:9210/metrics | grep codero_queue_depth
 curl -s http://localhost:9210/metrics | grep "codero_queue_wait_seconds.*owner/repo"
 
 # Check if a single branch has been waiting the longest.
-redis-cli -a "$REDIS_PASSWORD" ZRANGEBYSCORE "owner/repo:queue:pending" -inf +inf WITHSCORES
+# Use REDISCLI_AUTH to avoid exposing the password in process listings.
+export REDISCLI_AUTH="$REDIS_PASSWORD"
+redis-cli ZRANGEBYSCORE "owner/repo:queue:pending" -inf +inf WITHSCORES
 ```
 
 **Mitigation:**
@@ -203,7 +207,7 @@ sleep 10 && curl -s http://localhost:9210/metrics | grep codero_last_success
 If Redis is unreachable:
 ```bash
 # From inside the prompy container.
-docker exec prompy python3 -c "import redis; redis.Redis(host='redis', port=6379).ping(); print('ok')"
+docker exec prompy python3 -c "import os, redis; redis.Redis(host='redis', port=6379, password=os.environ.get('REDIS_PASSWORD')).ping(); print('ok')"
 ```
 
 ---

@@ -95,6 +95,11 @@ class Tracker:
     def record_lease_seen(self, repo: str) -> None:
         self._last_lease_seen[repo] = time.time()
 
+    def clear_repo(self, repo: str) -> None:
+        """Remove all tracking state for a repo that has disappeared from the queue."""
+        self._items.pop(repo, None)
+        self._last_lease_seen.pop(repo, None)
+
     def is_stalled(self, repo: str, queue_depth: int) -> bool:
         """
         A queue is stalled if depth > 0 and no lease was seen within
@@ -193,6 +198,9 @@ def poll_redis(
     except redis_lib.RedisError as exc:
         log.error("redis: scan failed: %s", exc)
         m.poll_failures_total.labels(source="redis").inc()
+        # Re-raise so the caller does not treat a total scan failure as a
+        # successful cycle (which would suppress CoderoMissingPrompyData).
+        raise
 
     return queue_depths
 
@@ -360,6 +368,9 @@ class Collector:
         for repo in self._known_repos - current_repos:
             m.queue_depth.labels(repo=repo).set(0)
             m.queue_stalled.labels(repo=repo).set(0)
+            # Also clear tracker state so stale timestamps don't affect
+            # stall detection or wait-time observations if the repo reappears.
+            self._tracker.clear_repo(repo)
 
         # --- Update queue_depth and queue_stalled gauges ---
         for repo, depth in queue_depths.items():
@@ -400,7 +411,8 @@ class Collector:
                 self._run_cycle()
             except Exception as exc:
                 log.error("collector: unhandled error in cycle: %s", exc, exc_info=True)
-                m.poll_failures_total.labels(source="redis").inc()
+                # No single source is identifiable at this outer level; use "unknown".
+                m.poll_failures_total.labels(source="unknown").inc()
 
             elapsed = time.monotonic() - start
             sleep_for = max(0.0, POLL_INTERVAL_SECONDS - elapsed)
