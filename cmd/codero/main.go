@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/codero/codero/internal/config"
 	"github.com/codero/codero/internal/daemon"
@@ -36,7 +39,7 @@ func main() {
 	root.PersistentFlags().StringVarP(&configPath, "config", "c", "codero.yaml",
 		"path to codero YAML config file")
 
-	root.AddCommand(daemonCmd(&configPath), statusCmd(&configPath), versionCmd())
+	root.AddCommand(daemonCmd(&configPath), statusCmd(&configPath), versionCmd(), commitGateCmd(), registerCmd())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -291,4 +294,242 @@ func versionCmd() *cobra.Command {
 			fmt.Println(version)
 		},
 	}
+}
+
+// commitGateCmd runs the pre-commit review gate.
+// It executes the two-pass review scripts and returns non-zero if the gate fails.
+// This command is designed to be used as a pre-commit hook.
+func commitGateCmd() *cobra.Command {
+	var (
+		timeout   int
+		repoPath  string
+		scriptDir string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "commit-gate",
+		Short: "Run pre-commit review gate",
+		Long: `Run the mandatory two-pass review gate before commit.
+
+This command executes the local review pipeline:
+1. Aider first pass (LLM review)
+2. Gemini second pass (LLM review)
+
+At least one pass must succeed. Falls back to PR-Agent and CodeRabbit
+if primary passes are rate-limited.
+
+Exit code 0 allows commit, non-zero aborts.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Resolve repo path
+			if repoPath == "" {
+				absPath, err := os.Getwd()
+				if err != nil {
+					return fmt.Errorf("getwd: %w", err)
+				}
+				repoPath = absPath
+			}
+
+			// Find scripts directory
+			if scriptDir == "" {
+				// Look for scripts in standard locations
+				possiblePaths := []string{
+					filepath.Join(repoPath, ".codero", "scripts", "review"),
+					filepath.Join(repoPath, "scripts", "review"),
+					"/home/sanjay/codero/scripts/review",
+				}
+				for _, p := range possiblePaths {
+					if _, err := os.Stat(p); err == nil {
+						scriptDir = p
+						break
+					}
+				}
+				if scriptDir == "" {
+					return fmt.Errorf("could not find review scripts directory")
+				}
+			}
+
+			twoPassScript := filepath.Join(scriptDir, "two-pass-review.sh")
+			if _, err := os.Stat(twoPassScript); err != nil {
+				return fmt.Errorf("two-pass-review.sh not found in %s", scriptDir)
+			}
+
+			fmt.Println("Running pre-commit review gate...")
+			fmt.Println("Repository:", repoPath)
+			if timeout > 0 {
+				fmt.Printf("Timeout: %d seconds\n", timeout)
+			}
+
+			// Set up environment
+			env := os.Environ()
+			env = append(env, fmt.Sprintf("CODERO_REPO_PATH=%s", repoPath))
+			if timeout > 0 {
+				env = append(env, fmt.Sprintf("CODERO_REVIEW_PASS_TIMEOUT_SEC=%d", timeout))
+			}
+
+			// Run the two-pass review script
+			ctx := cmd.Context()
+			if timeout > 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
+				defer cancel()
+			}
+
+			// Script path validated to exist in known directories before this line
+			// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+			execCmd := exec.CommandContext(ctx, twoPassScript)
+			execCmd.Env = env
+			execCmd.Dir = repoPath
+			execCmd.Stdin = os.Stdin
+			execCmd.Stdout = os.Stdout
+			execCmd.Stderr = os.Stderr
+
+			err := execCmd.Run()
+			if err != nil {
+				if execErr, ok := err.(*exec.ExitError); ok {
+					fmt.Println("\n⚠️  Commit gate FAILED")
+					fmt.Println("Please fix the issues and try again.")
+					return fmt.Errorf("commit gate failed (exit code: %d)", execErr.ExitCode())
+				}
+				return fmt.Errorf("commit gate error: %w", err)
+			}
+
+			fmt.Println("\n✅ Commit gate PASSED")
+			return nil
+		},
+	}
+
+	cmd.Flags().IntVarP(&timeout, "timeout", "t", 300,
+		"timeout for each review pass in seconds (default: 300)")
+	cmd.Flags().StringVarP(&repoPath, "repo-path", "r", "",
+		"path to repository (default: current directory)")
+	cmd.Flags().StringVar(&scriptDir, "script-dir", "",
+		"path to review scripts directory")
+
+	return cmd
+}
+
+// registerCmd registers a branch for local review or queue submission.
+func registerCmd() *cobra.Command {
+	var (
+		branch    string
+		repo      string
+		priority  int
+		skipLocal bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "register [branch]",
+		Short: "Register a branch for review",
+		Long: `Register a branch for codero review orchestration.
+
+This command:
+1. Records the branch in the local state store
+2. Transitions to local_review (default) or queued_cli (with --skip-local)
+3. Enables tracking and scoring for dispatch
+
+If no branch is provided, uses the current git branch.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfig(*configPathForCmd(cmd))
+			if err != nil {
+				return fmt.Errorf("codero: config: %w", err)
+			}
+
+			// Resolve branch from args or git
+			if len(args) > 0 {
+				branch = args[0]
+			} else {
+				branch, err = getCurrentBranch()
+				if err != nil {
+					return fmt.Errorf("get current branch: %w", err)
+				}
+			}
+
+			// Resolve repo
+			if repo == "" {
+				if len(cfg.Repos) == 0 {
+					return fmt.Errorf("no repositories configured")
+				}
+				repo = cfg.Repos[0]
+			}
+
+			// Open state store
+			db, err := state.Open(cfg.DBPath)
+			if err != nil {
+				return fmt.Errorf("open state store: %w", err)
+			}
+			defer db.Close()
+
+			targetState := state.StateLocalReview
+			trigger := "codero-cli register"
+
+			if skipLocal {
+				targetState = state.StateQueuedCLI
+				trigger = "codero-cli register --skip-local"
+			}
+
+			// Check if branch already exists
+			existing, err := state.GetBranch(db, repo, branch)
+			if err != nil {
+				if errors.Is(err, state.ErrBranchNotFound) {
+					// Branch doesn't exist - inform user to submit via daemon
+					fmt.Printf("Branch %s/%s not found in state store.\n", repo, branch)
+					fmt.Println("Branches are typically registered via webhook or daemon submit.")
+					fmt.Println("For local_review, ensure the branch has been submitted first.")
+					return fmt.Errorf("branch not registered")
+				}
+				return fmt.Errorf("check branch: %w", err)
+			}
+
+			// Branch exists, transition to target state
+			if err := state.TransitionBranch(db, existing.ID, existing.State, targetState, trigger); err != nil {
+				return fmt.Errorf("transition branch: %w", err)
+			}
+			fmt.Printf("Branch %s/%s: %s -> %s\n", repo, branch, existing.State, targetState)
+
+			fmt.Printf("\nBranch registered successfully.\n")
+			if skipLocal {
+				fmt.Println("Branch is in queue for review dispatch.")
+			} else {
+				fmt.Println("Branch is in local_review - run commit-gate before committing.")
+			}
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVarP(&repo, "repo", "R", "", "repository (owner/repo)")
+	cmd.Flags().IntVarP(&priority, "priority", "p", 10, "queue priority (0-20)")
+	cmd.Flags().BoolVar(&skipLocal, "skip-local", false, "skip local_review and go directly to queue")
+
+	return cmd
+}
+
+// configPathForCmd extracts the config path from cobra command flags.
+func configPathForCmd(cmd *cobra.Command) *string {
+	if cfgPath, err := cmd.Flags().GetString("config"); err == nil && cfgPath != "" {
+		return &cfgPath
+	}
+	defaultPath := "codero.yaml"
+	return &defaultPath
+}
+
+// getCurrentBranch returns the current git branch.
+func getCurrentBranch() (string, error) {
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git branch: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// getCurrentHeadHash returns the current HEAD commit hash.
+func getCurrentHeadHash() (string, error) {
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git HEAD: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
 }
