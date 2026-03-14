@@ -141,8 +141,8 @@ docker logs codero --tail 50
 [ -n "$REDIS_PASSWORD" ] && export REDISCLI_AUTH="$REDIS_PASSWORD"
 redis-cli ZCARD "owner/repo:queue:pending"
 
-# Check if any lease exists.
-redis-cli KEYS "owner/repo:lease:*"
+# Check if any lease exists (use --scan to avoid blocking the server).
+redis-cli --scan --pattern "owner/repo:lease:*"
 
 # Restart daemon if needed.
 docker restart codero

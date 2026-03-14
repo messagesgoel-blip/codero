@@ -3,7 +3,7 @@ Collector: polls codero runtime signals and updates Prometheus metrics.
 
 Data sources (in priority order):
 1. Redis direct connection — always used for queue depth and stall detection.
-2. Codero HTTP endpoints (/health, /queue, /metrics) — optional; used when
+2. Codero HTTP endpoints (/queue, /metrics) — optional; used when
    CODERO_BASE_URL is configured and the daemon is reachable.
 
 Resilience:
@@ -146,16 +146,23 @@ def _redis_client() -> Optional[redis_lib.Redis]:
 def poll_redis(
     rc: redis_lib.Redis,
     tracker: Tracker,
-) -> dict[str, int]:
+) -> tuple[dict[str, int], bool]:
     """
     Scan Redis for all repos with active queue keys.
-    Returns {repo: queue_depth}.
-    Updates the tracker with current queue membership.
 
-    Queue keys follow codero's pattern: `{repo}:queue:pending`
-    Lease keys follow: `{repo}:lease:{branch}`
+    Returns ``(queue_depths, is_complete)`` where:
+    - ``queue_depths`` maps repo → queue depth for every repo successfully read.
+    - ``is_complete`` is True when every per-repo read succeeded; False when at
+      least one per-repo RedisError was encountered (partial snapshot).
+
+    A scan-level RedisError re-raises instead of returning so the caller can
+    distinguish a total failure from a partial one.
+
+    Queue keys follow codero's pattern: ``{repo}:queue:pending``
+    Lease keys follow: ``{repo}:lease:{branch}``
     """
     queue_depths: dict[str, int] = {}
+    is_complete = True
 
     # Scan for queue keys. Pattern: *:queue:pending
     try:
@@ -192,6 +199,7 @@ def poll_redis(
                 except redis_lib.RedisError as exc:
                     log.warning("redis: error reading queue for %s: %s", repo, exc)
                     m.poll_failures_total.labels(source="redis").inc()
+                    is_complete = False  # partial snapshot — some repos unreadable
 
             if cursor == 0:
                 break
@@ -202,7 +210,7 @@ def poll_redis(
         # successful cycle (which would suppress CoderoMissingPrompyData).
         raise
 
-    return queue_depths
+    return queue_depths, is_complete
 
 
 # ---------------------------------------------------------------------------
@@ -299,16 +307,6 @@ def poll_http_metrics(repo: str) -> bool:
     return True
 
 
-def poll_http_health() -> bool:
-    """
-    Poll codero /health endpoint.
-    Returns True if codero daemon is healthy, False otherwise.
-    """
-    data = _get_json("/health", "http_health")
-    if data is None:
-        return False
-    return data.get("status") == "ok"
-
 
 # ---------------------------------------------------------------------------
 # Main collection cycle
@@ -348,9 +346,10 @@ class Collector:
 
         # --- Redis source ---
         rc = self._ensure_redis()
+        redis_complete = False
         if rc is not None:
             try:
-                redis_depths = poll_redis(rc, self._tracker)
+                redis_depths, redis_complete = poll_redis(rc, self._tracker)
                 queue_depths.update(redis_depths)
                 cycle_succeeded = True
             except Exception as exc:
@@ -365,21 +364,24 @@ class Collector:
             cycle_succeeded = True
 
         # --- Stale-label cleanup: zero out repos that disappeared this cycle ---
+        # Only safe when Redis returned a complete snapshot; a partial result does
+        # not reliably indicate that missing repos have vanished — they may have
+        # just had a transient per-repo read error.
         current_repos = set(queue_depths.keys())
-        for repo in self._known_repos - current_repos:
-            m.queue_depth.labels(repo=repo).set(0)
-            m.queue_stalled.labels(repo=repo).set(0)
-            # Also clear tracker state so stale timestamps don't affect
-            # stall detection or wait-time observations if the repo reappears.
-            self._tracker.clear_repo(repo)
+        if redis_complete:
+            for repo in self._known_repos - current_repos:
+                m.queue_depth.labels(repo=repo).set(0)
+                m.queue_stalled.labels(repo=repo).set(0)
+                # Clear tracker state so stale timestamps don't affect stall
+                # detection or wait-time observations if the repo reappears.
+                self._tracker.clear_repo(repo)
+            self._known_repos = current_repos
 
         # --- Update queue_depth and queue_stalled gauges ---
         for repo, depth in queue_depths.items():
             m.queue_depth.labels(repo=repo).set(depth)
             stalled = 1 if self._tracker.is_stalled(repo, depth) else 0
             m.queue_stalled.labels(repo=repo).set(stalled)
-
-        self._known_repos = current_repos
 
         # --- HTTP /metrics source for timing histograms ---
         for repo in queue_depths:

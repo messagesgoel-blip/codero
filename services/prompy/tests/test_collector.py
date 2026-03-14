@@ -98,8 +98,9 @@ class TestPollRedis(unittest.TestCase):
             queue_keys=["owner/repo:queue:pending"],
             queue_members={"owner/repo:queue:pending": ["feat/a", "feat/b"]},
         )
-        depths = poll_redis(rc, tracker)
+        depths, complete = poll_redis(rc, tracker)
         self.assertEqual(depths["owner/repo"], 2)
+        self.assertTrue(complete)
 
     def test_empty_queue_returns_zero_depth(self):
         tracker = Tracker()
@@ -107,11 +108,12 @@ class TestPollRedis(unittest.TestCase):
             queue_keys=["owner/repo:queue:pending"],
             queue_members={"owner/repo:queue:pending": []},
         )
-        depths = poll_redis(rc, tracker)
+        depths, complete = poll_redis(rc, tracker)
         # Contract: a visible (scanned) queue key with no members must appear
         # in the result dict with depth 0, not be absent entirely.
         self.assertIn("owner/repo", depths)
         self.assertEqual(depths["owner/repo"], 0)
+        self.assertTrue(complete)
 
     def test_lease_seen_recorded_when_ttl_positive(self):
         tracker = Tracker()
@@ -145,7 +147,7 @@ class TestPollRedis(unittest.TestCase):
             "repo/b:queue:pending": ["feat/y", "feat/z"],
         }.get(key, [])
         rc.ttl.return_value = -2
-        depths = poll_redis(rc, tracker)
+        depths, complete = poll_redis(rc, tracker)
         self.assertEqual(depths["repo/a"], 1)
         self.assertEqual(depths["repo/b"], 2)
 
@@ -159,9 +161,10 @@ class TestPollRedis(unittest.TestCase):
         rc.zrange.side_effect = redis_lib.RedisError("connection lost")
 
         before = m.poll_failures_total.labels(source="redis")._value.get()
-        poll_redis(rc, tracker)
+        depths, complete = poll_redis(rc, tracker)
         after = m.poll_failures_total.labels(source="redis")._value.get()
         self.assertGreater(after, before)
+        self.assertFalse(complete)  # per-repo error → partial snapshot
 
 
 class TestPollHttpQueue(unittest.TestCase):
