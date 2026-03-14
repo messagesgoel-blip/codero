@@ -65,6 +65,13 @@ review_with_copilot() {
 
   echo "--- CODERO COPILOT PASS (Model: $COPILOT_MODEL) ---"
 
+  # Copilot CLI rejects classic PAT in GH_TOKEN; prefer interactive OAuth/session.
+  local _saved_gh_token=""
+  if [ -n "${GH_TOKEN:-}" ] && [[ "${GH_TOKEN}" == ghp_* ]]; then
+    _saved_gh_token="${GH_TOKEN}"
+    unset GH_TOKEN
+  fi
+
   local prompt
   prompt="You are performing a strict pre-commit quality gate review. Focus on:
 1. Logic bugs and edge cases
@@ -80,6 +87,9 @@ $diff"
   local result
   if ! result="$(timeout "$TIMEOUT_SEC" copilot --model "$COPILOT_MODEL" -p "$prompt" 2>&1)"; then
     exit_code=$?
+    if [ -n "$_saved_gh_token" ]; then
+      export GH_TOKEN="$_saved_gh_token"
+    fi
     if [ $exit_code -eq 124 ]; then
       echo "Error: Copilot review timed out after ${TIMEOUT_SEC}s"
       return 1
@@ -88,6 +98,9 @@ $diff"
     return 1
   fi
 
+  if [ -n "$_saved_gh_token" ]; then
+    export GH_TOKEN="$_saved_gh_token"
+  fi
   echo "$result"
   echo "--- CODERO COPILOT PASS END ---"
 }

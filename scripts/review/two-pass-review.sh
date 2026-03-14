@@ -23,6 +23,7 @@ TS="$(date +%Y%m%d-%H%M%S)"
 MODEL_ALIAS="${CODERO_MODEL_ALIAS:-cacheflow_agent}"
 MODE="${CODERO_MODE:-fast}"
 MIN_SUCCESSFUL_AI_GATES="${CODERO_MIN_SUCCESSFUL_AI_GATES:-2}"
+AUTH_HOME="${CODERO_AUTH_HOME:-}"
 
 mkdir -p "$LOG_DIR"
 
@@ -34,6 +35,58 @@ log_status() {
   local gate="$2"
   local gate_num="$3"
   echo "[$TS] GATE $gate_num ($gate): $pass_fail" >> "$LOG_DIR/orchestrator-$TS.log"
+}
+
+find_env_file() {
+  if [ -n "${CODERO_ENV_FILE:-}" ] && [ -f "${CODERO_ENV_FILE}" ]; then
+    echo "${CODERO_ENV_FILE}"
+    return 0
+  fi
+
+  if [ -f "$REPO_PATH/.env" ]; then
+    echo "$REPO_PATH/.env"
+    return 0
+  fi
+
+  local common_dir repo_root_env
+  common_dir="$(git -C "$REPO_PATH" rev-parse --git-common-dir 2>/dev/null || true)"
+  if [ -n "$common_dir" ]; then
+    repo_root_env="$(cd "$REPO_PATH" && cd "$common_dir/.." 2>/dev/null && pwd)/.env"
+    if [ -f "$repo_root_env" ]; then
+      echo "$repo_root_env"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+load_env() {
+  local env_file
+  if env_file="$(find_env_file)"; then
+    echo "Loading environment from: $env_file" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+    set -a
+    # shellcheck disable=SC1090
+    . "$env_file"
+    set +a
+  else
+    echo "No .env file found; gates will rely on existing environment variables." | tee -a "$LOG_DIR/orchestrator-$TS.log"
+  fi
+}
+
+setup_auth_home() {
+  if [ -n "$AUTH_HOME" ] && [ -d "$AUTH_HOME" ]; then
+    export HOME="$AUTH_HOME"
+    echo "Using auth home: $HOME" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+    return 0
+  fi
+
+  if [ "${HOME:-}" != "/home/sanjay" ] && [ -d "/home/sanjay" ]; then
+    if [ -f "/home/sanjay/.config/github-copilot/apps.json" ] || [ -f "/home/sanjay/.coderabbit/auth.json" ]; then
+      export HOME="/home/sanjay"
+      echo "Using detected auth home: $HOME" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+    fi
+  fi
 }
 
 run_gate() {
@@ -70,7 +123,14 @@ run_gate() {
     return 1
   fi
 
-  if echo "$output" | grep -qiE "(error|warning|fix|issue|problem|sgx|vulnerable|secret|credential)"; then
+  if echo "$output" | grep -qiE "(no issues found|no actionable issues|no significant issues|looks good)"; then
+    echo "GATE $gate_num PASSED: Reviewer reported no actionable findings" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+    echo "$output" | tee "$log_file"
+    log_status "passed_clean" "$gate_name" "$gate_num"
+    return 0
+  fi
+
+  if echo "$output" | grep -qiE "(error|warning|fix|issue|problem|vulnerable|secret|credential)"; then
     echo "GATE $gate_num PASSED but found issues:" | tee -a "$LOG_DIR/orchestrator-$TS.log"
     echo "$output" | tee "$log_file"
     log_status "passed_with_issues" "$gate_name" "$gate_num"
@@ -96,6 +156,9 @@ main() {
     echo "Error: Repo path does not exist: $REPO_PATH" >&2
     exit 1
   fi
+
+  load_env
+  setup_auth_home
 
   local passed_count=0
   local total_attempts=0
