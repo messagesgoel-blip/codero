@@ -48,3 +48,9 @@ Install pre-commit hook for a repo:
 - `docs/agent-preflight.md`
 - `docs/adr/`
 - `CONTRIBUTING.md`
+
+## Canonical roadmap source
+
+The canonical roadmap for Codero is `docs/roadmap.md`.
+The detailed v5 execution roadmap is `docs/roadmaps/codero-roadmap-v5.md`.
+If these files ever differ, treat `docs/roadmap.md` as the source of truth unless a PR explicitly states that another file supersedes it.
