@@ -229,7 +229,6 @@ func daemonCmd(configPath *string) *cobra.Command {
 					loglib.FieldComponent, "daemon",
 				)
 			}
-
 			loglib.Info("codero: daemon started",
 				loglib.FieldEventType, loglib.EventStartup,
 				loglib.FieldComponent, "daemon",
