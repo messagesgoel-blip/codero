@@ -29,13 +29,13 @@ make ci
 Run manually in any target repo:
 
 ```bash
-CODERO_REPO_PATH=/path/to/repo /srv/storage/local/codero/scripts/review/two-pass-review.sh
+CODERO_REPO_PATH=/path/to/repo /home/sanjay/codero/scripts/review/two-pass-review.sh
 ```
 
 Install pre-commit hook for a repo:
 
 ```bash
-/srv/storage/local/codero/scripts/review/install-pre-commit.sh /path/to/repo
+/home/sanjay/codero/scripts/review/install-pre-commit.sh /path/to/repo
 ```
 
 ## Core Docs
