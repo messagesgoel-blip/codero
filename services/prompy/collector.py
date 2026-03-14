@@ -350,8 +350,9 @@ class Collector:
         if rc is not None:
             try:
                 redis_depths, redis_complete = poll_redis(rc, self._tracker)
-                queue_depths.update(redis_depths)
-                cycle_succeeded = True
+                if redis_complete and redis_depths:
+                    queue_depths.update(redis_depths)
+                    cycle_succeeded = True
             except Exception as exc:
                 log.error("collector: redis poll error: %s", exc)
                 # poll_redis already incremented the counter before re-raising;

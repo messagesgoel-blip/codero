@@ -147,7 +147,7 @@ class TestPollRedis(unittest.TestCase):
             "repo/b:queue:pending": ["feat/y", "feat/z"],
         }.get(key, [])
         rc.ttl.return_value = -2
-        depths, complete = poll_redis(rc, tracker)
+        depths, _complete = poll_redis(rc, tracker)
         self.assertEqual(depths["repo/a"], 1)
         self.assertEqual(depths["repo/b"], 2)
 
@@ -161,7 +161,7 @@ class TestPollRedis(unittest.TestCase):
         rc.zrange.side_effect = redis_lib.RedisError("connection lost")
 
         before = m.poll_failures_total.labels(source="redis")._value.get()
-        depths, complete = poll_redis(rc, tracker)
+        _depths, complete = poll_redis(rc, tracker)
         after = m.poll_failures_total.labels(source="redis")._value.get()
         self.assertGreater(after, before)
         self.assertFalse(complete)  # per-repo error → partial snapshot
