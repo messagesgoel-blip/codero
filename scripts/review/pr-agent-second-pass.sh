@@ -49,7 +49,7 @@ model_list_to_json() {
     item="$(echo "$item" | xargs)"
     [ -z "$item" ] && continue
     if [ "$first" -eq 0 ]; then
-      out+=" ,"
+      out+=","
     fi
     out+="\"$item\""
     first=0
