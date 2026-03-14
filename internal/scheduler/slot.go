@@ -9,9 +9,11 @@ import (
 )
 
 // SlotCounter manages atomic slot allocation for concurrent dispatch.
-// Uses Redis INCR/DECR for atomic count operations.
+// It ensures that the number of concurrent dispatch operations does not exceed
+// a configurable limit per repository. Uses Redis INCR/DECR via Lua scripts
+// for atomic count operations to prevent race conditions.
 type SlotCounter struct {
-	client *redis.Client
+	client *redis.Client // Redis client for atomic operations
 }
 
 // NewSlotCounter creates a slot counter manager.

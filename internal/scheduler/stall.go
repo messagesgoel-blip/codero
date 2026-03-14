@@ -10,10 +10,14 @@ import (
 // A queue is stalled when all eligible queued items are either:
 // 1. Exhausted (queue empty)
 // 2. Blocked by retry limits (retry_count >= max_retries)
+//
+// This implements the queue_stalled contract from codero-roadmap-v5.md:
+// queue_stalled fires when all eligible queued items are exhausted or blocked by retry limits.
+// When queue_stalled fires, dispatch halts and an event is emitted for operator intervention.
 type StallDetector struct {
-	queue    *Queue
-	db       *sql.DB
-	maxRatio float64 // maximum ratio of blocked items to tolerate before declaring stalled
+	queue    *Queue   // The WFQ queue to monitor
+	db       *sql.DB  // SQLite state store for retry count queries
+	maxRatio float64  // Maximum ratio of blocked items to tolerate before declaring stalled (default 1.0 = 100%)
 }
 
 // NewStallDetector creates a stall detector for a repo.

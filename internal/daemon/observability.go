@@ -14,13 +14,18 @@ import (
 )
 
 // ObservabilityServer provides HTTP endpoints for health, queue status, and metrics.
+// It implements the observability skeleton contract from codero-roadmap-v5.md:
+// - /health: Returns uptime, Redis status, and slot counter status
+// - /queue: Returns queue snapshot with branch ordering/scores for a given repo
+// - /metrics: Returns Prometheus-compatible text format metrics
+// - /ready: Returns readiness status for Kubernetes probes
 type ObservabilityServer struct {
-	server      *http.Server
-	redisClient *redis.Client
-	queue       *scheduler.Queue
-	slotCounter *scheduler.SlotCounter
-	startTime   time.Time
-	mu          sync.RWMutex
+	server      *http.Server               // HTTP server for serving endpoints
+	redisClient *redis.Client              // Redis client for health checks
+	queue       *scheduler.Queue          // WFQ queue for queue introspection
+	slotCounter *scheduler.SlotCounter    // Slot counter for dispatch slot status
+	startTime   time.Time                  // Process start time for uptime calculation
+	mu          sync.RWMutex               // Mutex for thread-safe state access
 }
 
 // NewObservabilityServer creates a new observability server.
