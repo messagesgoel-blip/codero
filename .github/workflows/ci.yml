@@ -28,7 +28,15 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
-      - run: make unit
+      - name: Run unit tests with coverage
+        run: go test ./cmd/... ./internal/... -coverprofile=coverage.out -covermode=atomic
+      - name: Show coverage summary
+        run: go tool cover -func=coverage.out
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: coverage-report
+          path: coverage.out
 
   contract:
     runs-on: ubuntu-latest
