@@ -77,12 +77,13 @@ func NewLeaseManager(client *redis.Client, opts ...LeaseOption) *LeaseManager {
 
 // Acquire attempts to obtain a lease on a branch.
 // Returns ErrLeaseConflict if the lease is held by another holder.
-// If extendIfHeld is true and the caller already holds the lease, it will be extended.
+// If the caller already holds the lease, it is extended.
 func (lm *LeaseManager) Acquire(ctx context.Context, repo, branch, holderID string) (*Lease, error) {
 	return lm.AcquireWithTTL(ctx, repo, branch, holderID, lm.defaultTTL)
 }
 
 // AcquireWithTTL is like Acquire but with a custom TTL.
+// Uses an atomic Lua script to avoid TOCTOU races between check and extend.
 func (lm *LeaseManager) AcquireWithTTL(ctx context.Context, repo, branch, holderID string, ttl time.Duration) (*Lease, error) {
 	key, err := redis.BuildKey(repo, "lease", branch)
 	if err != nil {
@@ -92,32 +93,40 @@ func (lm *LeaseManager) AcquireWithTTL(ctx context.Context, repo, branch, holder
 	now := time.Now()
 	expiry := now.Add(ttl)
 
-	// Use SET NX (only set if not exists) for atomic acquisition.
+	// Use atomic Lua script for check-and-acquire-or-extend.
+	// This avoids TOCTOU race between SetNX failure and subsequent GET+SET.
 	rc := lm.client.Unwrap()
-	acquired, err := rc.SetNX(ctx, key, holderID, ttl).Result()
+	script := `
+		local current = redis.call('GET', KEYS[1])
+		if current == false then
+			-- No lease exists: acquire it
+			redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
+			return {1}
+		elseif current == ARGV[1] then
+			-- We already hold it: extend TTL
+			redis.call('PEXPIRE', KEYS[1], ARGV[2])
+			return {1}
+		else
+			-- Held by another: conflict
+			return {0}
+		end
+	`
+	result, err := rc.Eval(ctx, script, []string{key}, holderID, ttl.Milliseconds()).Result()
 	if err != nil {
 		return nil, fmt.Errorf("acquire lease: redis error: %w", err)
 	}
 
-	if !acquired {
-		// Check if we already hold the lease.
-		currentHolder, err := rc.Get(ctx, key).Result()
-		if err != nil {
-			return nil, fmt.Errorf("acquire lease: check current holder: %w", err)
-		}
-		if currentHolder == holderID {
-			// We already hold it; extend the lease.
-			if err := rc.Set(ctx, key, holderID, ttl).Err(); err != nil {
-				return nil, fmt.Errorf("acquire lease: extend own lease: %w", err)
-			}
-			return &Lease{
-				Repo:       repo,
-				Branch:     branch,
-				HolderID:   holderID,
-				ExpiresAt:  expiry,
-				AcquiredAt: now,
-			}, nil
-		}
+	// Parse result array
+	arr, ok := result.([]interface{})
+	if !ok || len(arr) < 1 {
+		return nil, fmt.Errorf("acquire lease: unexpected script result type")
+	}
+	status, ok := arr[0].(int64)
+	if !ok {
+		return nil, fmt.Errorf("acquire lease: unexpected status type")
+	}
+
+	if status == 0 {
 		return nil, ErrLeaseConflict
 	}
 

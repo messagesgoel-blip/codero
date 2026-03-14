@@ -35,7 +35,9 @@ var placeholderScripts = map[string]string{
 -- ARGV[1] = holder ID
 -- ARGV[2] = TTL in milliseconds
 -- ARGV[3] = branch name
--- Returns: {1, expiry_ms} on success, {0} if conflict, {-1} on error
+-- Returns: {1, expiry_ms} on success (acquired or extended own lease)
+--          {0} if lease held by another holder
+-- Note: redis.call aborts on Redis errors; script does not return {-1}
 
 local lease_key = KEYS[1]
 local queue_key = KEYS[2]

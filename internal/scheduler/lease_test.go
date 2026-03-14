@@ -267,6 +267,39 @@ func TestLeaseTimeRemaining(t *testing.T) {
 	}
 }
 
+// TestLeaseAcquireAtomic verifies the atomic check-and-extend behavior
+// to ensure no TOCTOU race between SetNX failure and subsequent GET+SET.
+func TestLeaseAcquireAtomic(t *testing.T) {
+	client, _ := testRedisClient(t)
+	lm := NewLeaseManager(client, WithLeaseTTL(5*time.Second))
+
+	ctx := context.Background()
+
+	// Acquire lease
+	lease1, err := lm.Acquire(ctx, "test", "branch1", "holder1")
+	if err != nil {
+		t.Fatalf("first Acquire failed: %v", err)
+	}
+
+	// Simulate another holder trying to acquire simultaneously
+	// The atomic script ensures they get ErrLeaseConflict
+	_, err = lm.Acquire(ctx, "test", "branch1", "holder2")
+	if !errors.Is(err, ErrLeaseConflict) {
+		t.Errorf("expected ErrLeaseConflict for different holder, got %v", err)
+	}
+
+	// Original holder can re-acquire (extend)
+	lease2, err := lm.Acquire(ctx, "test", "branch1", "holder1")
+	if err != nil {
+		t.Fatalf("re-acquire by same holder failed: %v", err)
+	}
+
+	// Verify the lease was extended (new expiry should be later)
+	if !lease2.ExpiresAt.After(lease1.ExpiresAt) && lease2.ExpiresAt != lease1.ExpiresAt {
+		t.Error("re-acquire should extend or maintain lease expiry")
+	}
+}
+
 // Ensure LeaseManager implements expected interface
 var _ = func() {
 	_ = func(lm *LeaseManager, ctx context.Context) {

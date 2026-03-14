@@ -70,11 +70,11 @@ func (hb *Heartbeat) run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			// Context cancelled - release lease and exit.
-			_ = hb.lm.Release(context.Background(), hb.lease.Repo, hb.lease.Branch, hb.lease.HolderID)
+			hb.releaseAndStop()
 			return
 		case <-hb.stopCh:
 			// Stop requested - release lease and exit.
-			_ = hb.lm.Release(context.Background(), hb.lease.Repo, hb.lease.Branch, hb.lease.HolderID)
+			hb.releaseAndStop()
 			return
 		case <-ticker.C:
 			// Time to extend the lease.
@@ -85,7 +85,8 @@ func (hb *Heartbeat) run(ctx context.Context) {
 				hb.lastErr = err
 				if hb.misses >= hb.config.MaxMisses {
 					hb.mu.Unlock()
-					// Too many missed heartbeats - stop trying.
+					// Too many missed heartbeats - release lease and mark stopped.
+					hb.releaseAndStop()
 					return
 				}
 				hb.mu.Unlock()
@@ -98,6 +99,19 @@ func (hb *Heartbeat) run(ctx context.Context) {
 			hb.mu.Unlock()
 		}
 	}
+}
+
+// releaseAndStop releases the lease and marks the heartbeat as stopped.
+// Must be called from the run goroutine when exiting.
+func (hb *Heartbeat) releaseAndStop() {
+	// Release the lease (best effort, ignore errors).
+	_ = hb.lm.Release(context.Background(), hb.lease.Repo, hb.lease.Branch, hb.lease.HolderID)
+
+	// Mark stopped and clear lease under lock to prevent stale Lease() output.
+	hb.mu.Lock()
+	hb.stopped = true
+	hb.lease = nil
+	hb.mu.Unlock()
 }
 
 // Stop stops the heartbeat and releases the lease.

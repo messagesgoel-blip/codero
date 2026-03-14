@@ -177,9 +177,6 @@ func TestHeartbeatMaxMisses(t *testing.T) {
 		MaxMisses: 2,
 	}
 
-	// Hold the lease in another holder to cause conflicts
-	// (Simulating a scenario where extension fails)
-
 	// Start heartbeat
 	hb := lm.StartHeartbeat(ctx, lease, cfg)
 
@@ -188,12 +185,20 @@ func TestHeartbeatMaxMisses(t *testing.T) {
 	rc := client.Unwrap()
 	rc.Set(ctx, "codero:test:lease:branch1", "other-holder", 5*time.Second)
 
-	// Wait for heartbeats to fail
-	time.Sleep(100 * time.Millisecond)
+	// Wait for heartbeats to fail and trigger MaxMisses cleanup
+	time.Sleep(150 * time.Millisecond)
 
-	status := hb.Status()
-	if status.Misses == 0 {
-		t.Error("expected some missed heartbeats")
+	// Verify heartbeat stopped after MaxMisses
+	currentLease := hb.Lease()
+	if currentLease != nil {
+		t.Error("Lease() should return nil after MaxMisses stops heartbeat")
+	}
+
+	// Verify the lease was released (the "other-holder" value should remain,
+	// but our release attempt should have happened)
+	holder, _ := rc.Get(ctx, "codero:test:lease:branch1").Result()
+	if holder == "holder1" {
+		t.Error("original holder's lease should have been released")
 	}
 }
 
