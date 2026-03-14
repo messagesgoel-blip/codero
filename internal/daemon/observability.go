@@ -20,12 +20,12 @@ import (
 // - /metrics: Returns Prometheus-compatible text format metrics
 // - /ready: Returns readiness status for Kubernetes probes
 type ObservabilityServer struct {
-	server      *http.Server               // HTTP server for serving endpoints
-	redisClient *redis.Client              // Redis client for health checks
-	queue       *scheduler.Queue          // WFQ queue for queue introspection
-	slotCounter *scheduler.SlotCounter    // Slot counter for dispatch slot status
-	startTime   time.Time                  // Process start time for uptime calculation
-	mu          sync.RWMutex               // Mutex for thread-safe state access
+	server      *http.Server           // HTTP server for serving endpoints
+	redisClient *redis.Client          // Redis client for health checks
+	queue       *scheduler.Queue       // WFQ queue for queue introspection
+	slotCounter *scheduler.SlotCounter // Slot counter for dispatch slot status
+	startTime   time.Time              // Process start time for uptime calculation
+	mu          sync.RWMutex           // Mutex for thread-safe state access
 }
 
 // NewObservabilityServer creates a new observability server.

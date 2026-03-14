@@ -15,9 +15,9 @@ import (
 // queue_stalled fires when all eligible queued items are exhausted or blocked by retry limits.
 // When queue_stalled fires, dispatch halts and an event is emitted for operator intervention.
 type StallDetector struct {
-	queue    *Queue   // The WFQ queue to monitor
-	db       *sql.DB  // SQLite state store for retry count queries
-	maxRatio float64  // Maximum ratio of blocked items to tolerate before declaring stalled (default 1.0 = 100%)
+	queue    *Queue  // The WFQ queue to monitor
+	db       *sql.DB // SQLite state store for retry count queries
+	maxRatio float64 // Maximum ratio of blocked items to tolerate before declaring stalled (default 1.0 = 100%)
 }
 
 // NewStallDetector creates a stall detector for monitoring a repository's dispatch queue.
