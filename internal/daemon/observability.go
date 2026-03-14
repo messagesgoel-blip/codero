@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -19,17 +20,19 @@ import (
 // - /queue: Returns queue snapshot with branch ordering/scores for a given repo
 // - /metrics: Returns Prometheus-compatible text format metrics
 // - /ready: Returns readiness status for Kubernetes probes
+// - /api/v1/agent-metrics: Returns effectiveness metrics per agent and project
 type ObservabilityServer struct {
 	server      *http.Server           // HTTP server for serving endpoints
 	redisClient *redis.Client          // Redis client for health checks
 	queue       *scheduler.Queue       // WFQ queue for queue introspection
 	slotCounter *scheduler.SlotCounter // Slot counter for dispatch slot status
+	db          *sql.DB                // SQLite state store for metrics queries
 	startTime   time.Time              // Process start time for uptime calculation
 	mu          sync.RWMutex           // Mutex for thread-safe state access
 }
 
 // NewObservabilityServer creates a new observability server.
-func NewObservabilityServer(redisClient *redis.Client, queue *scheduler.Queue, slotCounter *scheduler.SlotCounter, port string) *ObservabilityServer {
+func NewObservabilityServer(redisClient *redis.Client, queue *scheduler.Queue, slotCounter *scheduler.SlotCounter, db *sql.DB, port string) *ObservabilityServer {
 	mux := http.NewServeMux()
 	server := &http.Server{
 		Addr:    ":" + port,
@@ -41,6 +44,7 @@ func NewObservabilityServer(redisClient *redis.Client, queue *scheduler.Queue, s
 		redisClient: redisClient,
 		queue:       queue,
 		slotCounter: slotCounter,
+		db:          db,
 		startTime:   time.Now(),
 	}
 
@@ -49,6 +53,7 @@ func NewObservabilityServer(redisClient *redis.Client, queue *scheduler.Queue, s
 	mux.HandleFunc("/queue", obs.handleQueue)
 	mux.HandleFunc("/metrics", obs.handleMetrics)
 	mux.HandleFunc("/ready", obs.handleReady)
+	mux.HandleFunc("/api/v1/agent-metrics", obs.handleAgentMetrics)
 
 	return obs
 }
@@ -191,6 +196,78 @@ func (o *ObservabilityServer) handleMetrics(w http.ResponseWriter, r *http.Reque
 	} else {
 		fmt.Fprintf(w, "codero_redis_connected 0\n")
 	}
+}
+
+// handleAgentMetrics returns effectiveness metrics per agent and project.
+// This implements the /api/v1/agent-metrics endpoint from the observability contract.
+func (o *ObservabilityServer) handleAgentMetrics(w http.ResponseWriter, r *http.Request) {
+	if o.db == nil {
+		http.Error(w, "database not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	repo := r.URL.Query().Get("repo")
+
+	// Query branches for metrics
+	var rows *sql.Rows
+	var err error
+
+	if repo != "" {
+		rows, err = o.db.QueryContext(r.Context(), `
+			SELECT repo, state, COUNT(*) as count,
+			       SUM(CASE WHEN approved = 1 THEN 1 ELSE 0 END) as approved,
+			       SUM(CASE WHEN ci_green = 1 THEN 1 ELSE 0 END) as ci_green,
+			       SUM(retry_count) as total_retries
+			FROM branch_states
+			WHERE repo = ?
+			GROUP BY repo, state`, repo)
+	} else {
+		rows, err = o.db.QueryContext(r.Context(), `
+			SELECT repo, state, COUNT(*) as count,
+			       SUM(CASE WHEN approved = 1 THEN 1 ELSE 0 END) as approved,
+			       SUM(CASE WHEN ci_green = 1 THEN 1 ELSE 0 END) as ci_green,
+			       SUM(retry_count) as total_retries
+			FROM branch_states
+			GROUP BY repo, state`)
+	}
+
+	if err != nil {
+		http.Error(w, fmt.Sprintf("query failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	// Aggregate metrics by repo
+	metrics := make(map[string]map[string]int)
+	for rows.Next() {
+		var r string
+		var st string
+		var count, approved, ciGreen, totalRetries int
+		if err := rows.Scan(&r, &st, &count, &approved, &ciGreen, &totalRetries); err != nil {
+			http.Error(w, fmt.Sprintf("scan failed: %v", err), http.StatusInternalServerError)
+			return
+		}
+		if metrics[r] == nil {
+			metrics[r] = make(map[string]int)
+		}
+		metrics[r][st] = count
+		metrics[r]["total_approved"] += approved
+		metrics[r]["total_ci_green"] += ciGreen
+		metrics[r]["total_retries"] += totalRetries
+	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, fmt.Sprintf("row iteration failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Build response
+	response := map[string]interface{}{
+		"repos":        metrics,
+		"generated_at": time.Now().Format(time.RFC3339),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }
 
 // handleReady returns readiness status (for Kubernetes readiness probe).
