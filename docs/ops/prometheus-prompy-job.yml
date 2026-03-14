@@ -26,7 +26,10 @@ scrape_configs:
           # In a docker network, prompy is reachable at prompy:9210.
           - "prompy:9210"
         labels:
-          env: "production"
+          # Override 'env' at deploy time via metric_relabel_configs or by
+          # replacing this placeholder with your actual environment name
+          # (e.g. "staging", "production"). Do not hardcode here.
+          env: "<your-env>"
           service: "codero"
           component: "prompy"
     metrics_path: /metrics

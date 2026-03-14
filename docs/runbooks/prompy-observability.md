@@ -13,8 +13,8 @@
 1. [Start](#start)
 2. [Validate](#validate)
 3. [Troubleshoot](#troubleshoot)
-   - [queue_stalled_for_10m](#alert-coderoqueuestablledfor10m)
-   - [high_queue_wait_p95](#alert-coderoqueuehighqueuewaitp95)
+   - [queue_stalled_for_10m](#alert-coderoqueuestalledfor10m)
+   - [high_queue_wait_p95](#alert-coderohighqueuewaitp95)
    - [missing_prompy_data](#alert-coderomissingprompydata)
 4. [Rollback](#rollback)
 
@@ -53,7 +53,7 @@ docker compose logs -f prompy
 ```
 
 Expected log output:
-```
+```text
 2026-03-14T10:00:00 INFO prompy.server: metrics: listening on 0.0.0.0:9210/metrics
 2026-03-14T10:00:00 INFO prompy.collector: starting; interval=15s stall_threshold=600s ...
 ```
@@ -76,7 +76,7 @@ curl -s http://localhost:9210/metrics | grep -E \
 ```
 
 Expected (example):
-```
+```text
 codero_last_success_timestamp_seconds 1.741952400e+09
 codero_poll_failures_total{source="redis"} 0
 codero_queue_depth{repo="owner/repo"} 2

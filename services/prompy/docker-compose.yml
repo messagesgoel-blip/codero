@@ -42,7 +42,8 @@ services:
       --save ""
       --requirepass ${REDIS_PASSWORD:-}
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      # Authenticate when REDIS_PASSWORD is set; fall back to no-auth for dev.
+      test: ["CMD-SHELL", "redis-cli -a \"${REDIS_PASSWORD:-}\" ping 2>/dev/null || redis-cli ping"]
       interval: 10s
       timeout: 3s
       retries: 5

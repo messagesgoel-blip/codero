@@ -108,7 +108,10 @@ class TestPollRedis(unittest.TestCase):
             queue_members={"owner/repo:queue:pending": []},
         )
         depths = poll_redis(rc, tracker)
-        self.assertEqual(depths.get("owner/repo", 0), 0)
+        # Contract: a visible (scanned) queue key with no members must appear
+        # in the result dict with depth 0, not be absent entirely.
+        self.assertIn("owner/repo", depths)
+        self.assertEqual(depths["owner/repo"], 0)
 
     def test_lease_seen_recorded_when_ttl_positive(self):
         tracker = Tracker()
@@ -166,10 +169,7 @@ class TestPollHttpQueue(unittest.TestCase):
         with patch("prompy.collector.CODERO_BASE_URL", ""):
             tracker = Tracker()
             result = poll_http_queue(tracker)
-            self.assertNone(result)
-
-    def assertNone(self, x):
-        self.assertIsNone(x)
+            self.assertIsNone(result)
 
     @patch("prompy.collector.requests.get")
     def test_parses_depth_from_response(self, mock_get):

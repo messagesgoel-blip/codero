@@ -213,7 +213,13 @@ def _get_json(path: str, source_label: str) -> Optional[dict]:
             return resp.json()
         except requests.exceptions.RequestException as exc:
             if attempt == MAX_RETRIES:
-                log.warning("http: %s unreachable after %d attempts: %s", url, MAX_RETRIES, exc)
+                # Log only the path, never the full URL — it may contain credentials.
+                log.warning(
+                    "http: endpoint unreachable after %d attempts (path=%s): %s",
+                    MAX_RETRIES,
+                    path,
+                    exc,
+                )
                 m.poll_failures_total.labels(source=source_label).inc()
             else:
                 backoff = 0.5 * (2 ** (attempt - 1))
@@ -257,7 +263,7 @@ def poll_http_queue(tracker: Tracker) -> Optional[dict[str, int]]:
     return result
 
 
-def poll_http_metrics(repo: str) -> None:
+def poll_http_metrics(repo: str) -> bool:
     """
     Poll codero /metrics endpoint for timing observations.
 
@@ -266,10 +272,12 @@ def poll_http_metrics(repo: str) -> None:
       "review_cycle_seconds_observations": [120.5, 300.0],
       "merge_ready_lead_seconds_observations": [3600.0]
     }
+
+    Returns True if the endpoint responded with data, False otherwise.
     """
     data = _get_json(f"/metrics?repo={repo}", "http_metrics")
     if data is None:
-        return
+        return False
     for obs in data.get("review_cycle_seconds_observations", []):
         try:
             m.review_cycle_seconds.labels(repo=repo).observe(float(obs))
@@ -280,6 +288,7 @@ def poll_http_metrics(repo: str) -> None:
             m.merge_ready_lead_seconds.labels(repo=repo).observe(float(obs))
         except (TypeError, ValueError):
             pass
+    return True
 
 
 def poll_http_health() -> bool:
@@ -306,6 +315,8 @@ class Collector:
     def __init__(self) -> None:
         self._tracker = Tracker()
         self._rc: Optional[redis_lib.Redis] = None
+        # Track repos seen in the previous cycle to zero out stale gauge labels.
+        self._known_repos: set[str] = set()
 
     def _ensure_redis(self) -> Optional[redis_lib.Redis]:
         """Lazy-connect/reconnect to Redis."""
@@ -324,6 +335,8 @@ class Collector:
     def _run_cycle(self) -> None:
         """Execute one full collection cycle."""
         queue_depths: dict[str, int] = {}
+        # Only mark the cycle as successful when at least one source returns data.
+        cycle_succeeded = False
 
         # --- Redis source ---
         rc = self._ensure_redis()
@@ -331,6 +344,7 @@ class Collector:
             try:
                 redis_depths = poll_redis(rc, self._tracker)
                 queue_depths.update(redis_depths)
+                cycle_succeeded = True
             except Exception as exc:
                 log.error("collector: redis poll error: %s", exc)
                 m.poll_failures_total.labels(source="redis").inc()
@@ -339,6 +353,13 @@ class Collector:
         http_depths = poll_http_queue(self._tracker)
         if http_depths is not None:
             queue_depths.update(http_depths)
+            cycle_succeeded = True
+
+        # --- Stale-label cleanup: zero out repos that disappeared this cycle ---
+        current_repos = set(queue_depths.keys())
+        for repo in self._known_repos - current_repos:
+            m.queue_depth.labels(repo=repo).set(0)
+            m.queue_stalled.labels(repo=repo).set(0)
 
         # --- Update queue_depth and queue_stalled gauges ---
         for repo, depth in queue_depths.items():
@@ -349,15 +370,19 @@ class Collector:
                 # Clear stall flag when queue drains.
                 m.queue_stalled.labels(repo=repo).set(0)
 
+        self._known_repos = current_repos
+
         # --- HTTP /metrics source for timing histograms ---
         for repo in queue_depths:
             try:
-                poll_http_metrics(repo)
+                if poll_http_metrics(repo):
+                    cycle_succeeded = True
             except Exception as exc:
                 log.warning("collector: http metrics poll error for %s: %s", repo, exc)
 
-        # --- Record successful cycle ---
-        m.last_success_timestamp_seconds.set(time.time())
+        # --- Record successful cycle only when at least one source provided data ---
+        if cycle_succeeded:
+            m.last_success_timestamp_seconds.set(time.time())
 
     def run_forever(self) -> None:
         """Block and run collection cycles indefinitely."""
@@ -366,7 +391,8 @@ class Collector:
             POLL_INTERVAL_SECONDS,
             STALL_THRESHOLD_SECONDS,
             REDIS_ADDR,
-            CODERO_BASE_URL or "(none)",
+            # Never log the raw CODERO_BASE_URL — it may contain embedded credentials.
+            "configured" if CODERO_BASE_URL else "(none)",
         )
         while True:
             start = time.monotonic()
