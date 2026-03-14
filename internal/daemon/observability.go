@@ -155,6 +155,8 @@ func (o *ObservabilityServer) handleMetrics(w http.ResponseWriter, r *http.Reque
 
 	// Start with process metrics
 	uptime := time.Since(o.startTime).Seconds()
+	// nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
+	// This endpoint serves Prometheus text format metrics, not HTML. Prometheus is the only consumer.
 	fmt.Fprintf(w, "# HELP codero_uptime_seconds Seconds since service start\n")
 	fmt.Fprintf(w, "# TYPE codero_uptime_seconds gauge\n")
 	fmt.Fprintf(w, "codero_uptime_seconds %.2f\n", uptime)
@@ -177,6 +179,7 @@ func (o *ObservabilityServer) handleMetrics(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Redis metrics
+	// nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 	rc := o.redisClient.Unwrap()
 	if err := rc.Ping(ctx).Err(); err == nil {
 		fmt.Fprintf(w, "# HELP codero_redis_connected Redis connection status\n")
