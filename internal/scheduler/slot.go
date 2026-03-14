@@ -16,20 +16,25 @@ type SlotCounter struct {
 	client *redis.Client // Redis client for atomic operations
 }
 
-// NewSlotCounter creates a slot counter manager.
+// NewSlotCounter creates a slot counter manager for managing concurrent dispatch slots.
+// The returned SlotCounter can be used to track and limit the number of concurrent
+// dispatch operations per repository using atomic Redis operations.
 func NewSlotCounter(client *redis.Client) *SlotCounter {
 	return &SlotCounter{client: client}
 }
 
-// SlotKey returns the Redis key for a repo's slot counter.
+// slotKey returns the Redis key for a repository's slot counter.
+// Uses the pattern codero:<repo>:dispatch:slots for key names.
 func slotKey(repo string) string {
 	// Uses the redis package's key building logic
 	key, _ := redis.BuildKey(repo, "dispatch", "slots")
 	return key
 }
 
-// AcquireSlot atomically increments the slot counter if under the limit.
-// Returns true if slot acquired, false if at capacity.
+// AcquireSlot attempts to acquire a dispatch slot for the given repository.
+// It uses a Lua script to atomically check if the current count is under the limit
+// and increment the counter if so. Returns true if slot was acquired, false if
+// the slot limit has been reached.
 func (sc *SlotCounter) AcquireSlot(ctx context.Context, repo string, limit int64) (bool, error) {
 	key := slotKey(repo)
 	rc := sc.client.Unwrap()
@@ -57,8 +62,9 @@ func (sc *SlotCounter) AcquireSlot(ctx context.Context, repo string, limit int64
 	return result > 0, nil
 }
 
-// ReleaseSlot atomically decrements the slot counter.
-// Safe to call even if counter is at 0.
+// ReleaseSlot releases a previously acquired dispatch slot by atomically
+// decrementing the slot counter. Uses a Lua script to ensure the counter
+// never goes below zero. Safe to call even if no slots are currently in use.
 func (sc *SlotCounter) ReleaseSlot(ctx context.Context, repo string) error {
 	key := slotKey(repo)
 	rc := sc.client.Unwrap()
@@ -84,8 +90,8 @@ func (sc *SlotCounter) ReleaseSlot(ctx context.Context, repo string) error {
 	return nil
 }
 
-// GetSlotCount returns the current slot count.
-// Returns 0 if no counter exists.
+// GetSlotCount retrieves the current number of active dispatch slots for a repository.
+// Returns 0 if no counter key exists in Redis (meaning no slots are in use).
 func (sc *SlotCounter) GetSlotCount(ctx context.Context, repo string) (int64, error) {
 	key := slotKey(repo)
 	rc := sc.client.Unwrap()
@@ -101,7 +107,9 @@ func (sc *SlotCounter) GetSlotCount(ctx context.Context, repo string) (int64, er
 	return val, nil
 }
 
-// SetSlotCount sets the slot counter to a specific value (for initialization or reset).
+// SetSlotCount sets the slot counter to a specific value for initialization or recovery.
+// If count is <= 0, the Redis key is deleted. This is useful for setting up initial slot
+// capacity or resetting the counter after a crash.
 func (sc *SlotCounter) SetSlotCount(ctx context.Context, repo string, count int64) error {
 	key := slotKey(repo)
 	rc := sc.client.Unwrap()
@@ -120,7 +128,9 @@ func (sc *SlotCounter) SetSlotCount(ctx context.Context, repo string, count int6
 	return nil
 }
 
-// ResetSlotCount deletes the slot counter (for testing or recovery).
+// ResetSlotCount removes the slot counter key from Redis, effectively resetting
+// the slot count to zero. This is useful during testing or after recovering from
+// an inconsistent state.
 func (sc *SlotCounter) ResetSlotCount(ctx context.Context, repo string) error {
 	key := slotKey(repo)
 	rc := sc.client.Unwrap()

@@ -20,7 +20,9 @@ type StallDetector struct {
 	maxRatio float64  // Maximum ratio of blocked items to tolerate before declaring stalled (default 1.0 = 100%)
 }
 
-// NewStallDetector creates a stall detector for a repo.
+// NewStallDetector creates a stall detector for monitoring a repository's dispatch queue.
+// The detector checks if all eligible queued items are blocked by retry limits,
+// which indicates a stalled queue requiring operator intervention.
 func NewStallDetector(queue *Queue, db *sql.DB) *StallDetector {
 	return &StallDetector{
 		queue:    queue,
@@ -30,12 +32,13 @@ func NewStallDetector(queue *Queue, db *sql.DB) *StallDetector {
 }
 
 // StallStatus represents the current state of the queue with respect to stalling.
+// It provides details about queue size, blocked items, and whether the queue is stalled.
 type StallStatus struct {
 	QueueEmpty   bool    // true if queue has no items
-	TotalItems   int64   // total items in queue
-	BlockedItems int64   // items blocked by retry limit
-	BlockedRatio float64 // ratio of blocked to total
-	IsStalled    bool    // true if queue is stalled
+	TotalItems   int64   // total number of items currently in the queue
+	BlockedItems int64   // number of items blocked due to exceeding retry limits
+	BlockedRatio float64 // ratio of blocked items to total items (0.0 to 1.0)
+	IsStalled    bool    // true if queue is stalled (all eligible items blocked)
 }
 
 // CheckStalled determines if the queue is stalled.
@@ -82,7 +85,8 @@ func (sd *StallDetector) CheckStalled(ctx context.Context, repo string) (*StallS
 	return status, nil
 }
 
-// isBranchBlocked checks if a branch has exceeded its retry limit.
+// isBranchBlocked queries the SQLite state store to determine if a branch has
+// exceeded its maximum retry count. Returns true if retry_count >= max_retries.
 func (sd *StallDetector) isBranchBlocked(ctx context.Context, repo, branch string) (bool, error) {
 	var retryCount, maxRetries int
 	err := sd.db.QueryRowContext(ctx,
