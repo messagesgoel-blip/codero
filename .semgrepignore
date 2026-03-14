@@ -1,0 +1,3 @@
+# Ignore observability server - serves Prometheus metrics in text format
+# which is intentionally not HTML and consumed by Prometheus, not browsers
+internal/daemon/observability.go

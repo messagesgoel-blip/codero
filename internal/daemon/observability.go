@@ -165,15 +165,18 @@ func (o *ObservabilityServer) handleMetrics(w http.ResponseWriter, r *http.Reque
 	if o.queue != nil {
 		// Get queue length for a sample repo if available
 		// In real implementation, we'd iterate over all repos
+		// nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 		fmt.Fprintf(w, "# HELP codero_queue_length Number of items in queue\n")
 		fmt.Fprintf(w, "# TYPE codero_queue_length gauge\n")
 	}
 
 	// Slot counter metrics
 	if o.slotCounter != nil {
+		// nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 		fmt.Fprintf(w, "# HELP codero_active_slots Current number of active dispatch slots\n")
 		fmt.Fprintf(w, "# TYPE codero_active_slots gauge\n")
 		// Would need to iterate repos for actual values
+		// nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 		fmt.Fprintf(w, "# HELP codero_slot_limit Maximum allowed concurrent dispatches\n")
 		fmt.Fprintf(w, "# TYPE codero_slot_limit gauge\n")
 	}
