@@ -588,14 +588,17 @@ Program-level criteria (reviewed at phase gates):
 - lease audit goroutine
 - observability skeleton: `/health`, `/queue`, `/metrics`
 
-### Sprint 5
+### Sprint 5 ✓ (feat/COD-014-sprint5-review-delivery-reconcile)
 
-- PR review runner
-- finding normalizer
-- append-only delivery and replay
-- webhook receiver, dedup, reconciliation loop
-- heartbeat expiry and abandoned-state handling
-- polling-only mode default
+- PR review runner: `internal/runner` — consumes queued_cli, acquires lease, executes provider, normalizes findings, transitions state deterministically
+- finding normalizer: `internal/normalizer` — canonical schema (severity, category, file, line, message, source, timestamp, rule_id); stable for same input
+- append-only delivery and replay: `internal/delivery` — Redis INCR seq + SQLite durable floor; replay API; InitSeqFloor on restart
+- webhook receiver, dedup, reconciliation loop: `internal/webhook` — HMAC-SHA256 sig verify; Redis NX + durable DB dedup; reconciler polls every 60s (polling-only) or 5m (webhook mode)
+- heartbeat expiry and abandoned-state handling: `internal/scheduler/expiry.go` — session TTL (1800s) → abandoned (T14); lease audit goroutine (30s) → re-queue/block (T07/T16)
+- polling-only mode default: daemon boots and operates fully with `webhook.enabled: false`; reconciler remains correctness backstop in all modes
+- new DB migration: `000002_sprint5_delivery.up.sql` — delivery_events, webhook_deliveries, review_runs, findings tables
+- new contracts: `docs/contracts/review-finding-schema.md`, `docs/contracts/delivery-replay-contract.md`
+- new runbook: `docs/runbooks/webhook-outage-polling-fallback.md`
 
 ### Sprint 6
 
