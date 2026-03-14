@@ -7,12 +7,11 @@ import (
 )
 
 // StallDetector checks whether the dispatch queue is stalled.
-// A queue is stalled when all eligible queued items are either:
-// 1. Exhausted (queue empty)
-// 2. Blocked by retry limits (retry_count >= max_retries)
+// A queue is stalled when all eligible queued items are blocked by retry limits
+// (retry_count >= max_retries). An empty queue is NOT considered stalled.
 //
 // This implements the queue_stalled contract from codero-roadmap-v5.md:
-// queue_stalled fires when all eligible queued items are exhausted or blocked by retry limits.
+// queue_stalled fires when all eligible queued items are blocked by retry limits.
 // When queue_stalled fires, dispatch halts and an event is emitted for operator intervention.
 type StallDetector struct {
 	queue    *Queue  // The WFQ queue to monitor
@@ -44,6 +43,16 @@ type StallStatus struct {
 // CheckStalled determines if the queue is stalled.
 // Returns StallStatus with details about the queue state.
 func (sd *StallDetector) CheckStalled(ctx context.Context, repo string) (*StallStatus, error) {
+	if sd == nil {
+		return nil, fmt.Errorf("stall check: detector is nil")
+	}
+	if sd.queue == nil {
+		return nil, fmt.Errorf("stall check: detector queue not configured")
+	}
+	if sd.db == nil {
+		return nil, fmt.Errorf("stall check: detector db not configured")
+	}
+
 	// Get all items in queue
 	entries, err := sd.queue.List(ctx, repo)
 	if err != nil {

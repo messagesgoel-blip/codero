@@ -2,10 +2,12 @@ package scheduler
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/codero/codero/internal/redis"
+	"github.com/codero/codero/internal/state"
 )
 
 func testRedisClientStall(t *testing.T) *redis.Client {
@@ -27,8 +29,16 @@ func TestStallDetectorEmptyQueue(t *testing.T) {
 	client := testRedisClientStall(t)
 	q := NewQueue(client)
 
-	// Create detector with nil db (won't be called for empty queue)
-	sd := NewStallDetector(q, nil)
+	// Create a test database
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := state.Open(dbPath)
+	if err != nil {
+		t.Fatalf("state.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	// Create detector with valid db
+	sd := NewStallDetector(q, db.Unwrap())
 
 	ctx := context.Background()
 	status, err := sd.CheckStalled(ctx, "test")
