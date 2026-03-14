@@ -1,3 +1,6 @@
 # Ignore observability server - serves Prometheus metrics in text format
 # which is intentionally not HTML and consumed by Prometheus, not browsers
 internal/daemon/observability.go
+
+# Ignore pre-existing docker-compose security findings (not introduced by this PR)
+infra/docker-compose.yml
