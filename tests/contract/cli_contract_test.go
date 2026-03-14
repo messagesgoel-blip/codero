@@ -29,3 +29,42 @@ func TestHelpContract(t *testing.T) {
 		t.Fatalf("help output missing Usage section: %s", string(out))
 	}
 }
+
+func TestQueueCommandExists(t *testing.T) {
+	root := repoRoot(t)
+	cmd := exec.Command("go", "run", "./cmd/codero", "queue", "--help")
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected queue command to exist: %v\noutput: %s", err, string(out))
+	}
+	if !strings.Contains(string(out), "queue") {
+		t.Fatalf("queue help missing expected text: %s", string(out))
+	}
+}
+
+func TestBranchCommandExists(t *testing.T) {
+	root := repoRoot(t)
+	cmd := exec.Command("go", "run", "./cmd/codero", "branch", "--help")
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected branch command to exist: %v\noutput: %s", err, string(out))
+	}
+	if !strings.Contains(string(out), "Displays") {
+		t.Fatalf("branch help missing expected text: %s", string(out))
+	}
+}
+
+func TestEventsCommandExists(t *testing.T) {
+	root := repoRoot(t)
+	cmd := exec.Command("go", "run", "./cmd/codero", "events", "--help")
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected events command to exist: %v\noutput: %s", err, string(out))
+	}
+	if !strings.Contains(string(out), "events") {
+		t.Fatalf("events help missing expected text: %s", string(out))
+	}
+}
