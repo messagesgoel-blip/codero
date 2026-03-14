@@ -8,15 +8,15 @@
 
 | Gate | Tool | Model | Provider | Status |
 |------|------|-------|----------|--------|
-| 0 | Semgrep | `p/default` | Semgrep OSS engine | 🔒 Mandatory |
 | 1 | Copilot | `gpt-5-mini` | GitHub OAuth | ✅ Primary |
+| 2 | Semgrep | `p/default` | Semgrep OSS engine | 🔒 Mandatory |
 | 2 | Aider | `MiniMax-M2.5` | MiniMax API | ✅ Primary |
 | 3 | Gemini | `gemini-2.5-flash-lite` | Google OAuth | ✅ Primary |
 | 4 | PR-Agent | LiteLLM models | LiteLLM proxy | ⚡ Fallback |
 | 5 | CodeRabbit | - | CodeRabbit API | ⚡ Fallback |
 
 **Rules:**
-- Gate 0 (Semgrep) must pass
+- Semgrep gate must pass
 - Stop when 2+ AI gates pass
 - Rate-limited/timeout triggers fallback to next gate
 - All gates must be installed and configured
@@ -92,12 +92,12 @@ CODERO_AIDER_MODEL=ollama/llama3
 ```
 scripts/review/
 ├── two-pass-review.sh      # Orchestrator (runs all gates)
-├── semgrep-zero-pass.sh    # Gate 0 - deterministic Semgrep blocker
 ├── copilot-third-pass.sh   # Gate 1 - GitHub Copilot CLI
-├── aider-first-pass.sh     # Gate 2 - Aider with MiniMax/OpenRouter
-├── gemini-second-pass.sh   # Gate 3 - Gemini CLI with OAuth switching
-├── pr-agent-second-pass.sh # Gate 4 - PR-Agent via LiteLLM
-├── coderabbit-second-pass.sh # Gate 5 - CodeRabbit CLI
+├── semgrep-zero-pass.sh    # Gate 2 - deterministic Semgrep blocker
+├── aider-first-pass.sh     # Gate 3 - Aider with MiniMax/OpenRouter
+├── gemini-second-pass.sh   # Gate 4 - Gemini CLI with OAuth switching
+├── pr-agent-second-pass.sh # Gate 5 - PR-Agent via LiteLLM
+├── coderabbit-second-pass.sh # Gate 6 - CodeRabbit CLI
 └── install-pre-commit.sh   # Install git hook
 
 .git/hooks/
@@ -151,6 +151,9 @@ CODERO_GEMINI_MAX_RETRIES=3
 
 # Gate quorum
 CODERO_MIN_SUCCESSFUL_AI_GATES=2
+
+# Gate execution order
+CODERO_GATE_ORDER=copilot-first   # or semgrep-first
 ```
 
 ## Customization

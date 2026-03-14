@@ -2,13 +2,13 @@
 set -euo pipefail
 
 # 6-Pass Pre-Commit Review Gate Orchestrator
-# Implements codero standard with deterministic + AI fallback chain:
-# 0. semgrep-zero-pass.sh (Deterministic blocker)
-# 1. copilot-third-pass.sh (Primary Gate 1 - gpt-5-mini/gpt-4o-mini)
-# 2. aider-first-pass.sh (Primary Gate 2 - MiniMax/OpenRouter)
-# 3. gemini-second-pass.sh (Primary Gate 3 - Gemini OAuth)
-# 4. pr-agent-second-pass.sh (Fallback 1)
-# 5. coderabbit-second-pass.sh (Fallback 2)
+# Default order:
+# 1. copilot-third-pass.sh (Primary AI gate)
+# 2. semgrep-zero-pass.sh (Deterministic blocker; mandatory)
+# 3. aider-first-pass.sh
+# 4. gemini-second-pass.sh
+# 5. pr-agent-second-pass.sh
+# 6. coderabbit-second-pass.sh
 #
 # Rules:
 # - Stop if 2+ checks succeed
@@ -24,6 +24,7 @@ MODEL_ALIAS="${CODERO_MODEL_ALIAS:-cacheflow_agent}"
 MODE="${CODERO_MODE:-fast}"
 MIN_SUCCESSFUL_AI_GATES="${CODERO_MIN_SUCCESSFUL_AI_GATES:-2}"
 AUTH_HOME="${CODERO_AUTH_HOME:-}"
+GATE_ORDER="${CODERO_GATE_ORDER:-copilot-first}"
 
 mkdir -p "$LOG_DIR"
 
@@ -143,6 +144,90 @@ run_gate() {
   return 0
 }
 
+run_copilot_then_semgrep() {
+  PASSED_COUNT=0
+  TOTAL_ATTEMPTS=0
+  local semgrep_script="$SCRIPT_DIR/semgrep-zero-pass.sh"
+
+  # Gate 1: Copilot (AI)
+  TOTAL_ATTEMPTS=$((TOTAL_ATTEMPTS + 1))
+  echo "Attempting gate $TOTAL_ATTEMPTS: copilot-third-pass" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+  if run_gate "copilot-third-pass" "$TOTAL_ATTEMPTS"; then
+    PASSED_COUNT=$((PASSED_COUNT + 1))
+    PASSED+=("copilot-third-pass")
+  else
+    FAILED+=("copilot-third-pass")
+  fi
+
+  # Gate 2: Semgrep (mandatory deterministic blocker)
+  if [ ! -x "$semgrep_script" ]; then
+    echo "Error: mandatory Semgrep gate missing or not executable: $semgrep_script" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+    exit 1
+  fi
+  TOTAL_ATTEMPTS=$((TOTAL_ATTEMPTS + 1))
+  if ! run_gate "semgrep-zero-pass" "$TOTAL_ATTEMPTS"; then
+    echo ""
+    echo "✗ FAIL: Semgrep Gate failed. Commit blocked."
+    exit 1
+  fi
+
+  for gate in aider-first-pass gemini-second-pass pr-agent-second-pass coderabbit-second-pass; do
+    if [ "$PASSED_COUNT" -ge "$MIN_SUCCESSFUL_AI_GATES" ]; then
+      echo "AI gate quorum met, stopping gate chain." | tee -a "$LOG_DIR/orchestrator-$TS.log"
+      break
+    fi
+
+    TOTAL_ATTEMPTS=$((TOTAL_ATTEMPTS + 1))
+    echo "Attempting gate $TOTAL_ATTEMPTS: $gate" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+
+    if run_gate "$gate" "$TOTAL_ATTEMPTS"; then
+      PASSED_COUNT=$((PASSED_COUNT + 1))
+      PASSED+=("$gate")
+    else
+      FAILED+=("$gate")
+    fi
+  done
+
+  return 0
+}
+
+run_semgrep_then_ai() {
+  PASSED_COUNT=0
+  TOTAL_ATTEMPTS=0
+  local semgrep_script="$SCRIPT_DIR/semgrep-zero-pass.sh"
+
+  # Gate 1: Semgrep (mandatory deterministic blocker)
+  if [ ! -x "$semgrep_script" ]; then
+    echo "Error: mandatory Semgrep gate missing or not executable: $semgrep_script" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+    exit 1
+  fi
+  TOTAL_ATTEMPTS=$((TOTAL_ATTEMPTS + 1))
+  if ! run_gate "semgrep-zero-pass" "$TOTAL_ATTEMPTS"; then
+    echo ""
+    echo "✗ FAIL: Semgrep Gate failed. Commit blocked."
+    exit 1
+  fi
+
+  for gate in copilot-third-pass aider-first-pass gemini-second-pass pr-agent-second-pass coderabbit-second-pass; do
+    if [ "$PASSED_COUNT" -ge "$MIN_SUCCESSFUL_AI_GATES" ]; then
+      echo "AI gate quorum met, stopping gate chain." | tee -a "$LOG_DIR/orchestrator-$TS.log"
+      break
+    fi
+
+    TOTAL_ATTEMPTS=$((TOTAL_ATTEMPTS + 1))
+    echo "Attempting gate $TOTAL_ATTEMPTS: $gate" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+
+    if run_gate "$gate" "$TOTAL_ATTEMPTS"; then
+      PASSED_COUNT=$((PASSED_COUNT + 1))
+      PASSED+=("$gate")
+    else
+      FAILED+=("$gate")
+    fi
+  done
+
+  return 0
+}
+
 main() {
   echo "========================================"
   echo "5-PASS PRE-COMMIT REVIEW GATE"
@@ -162,38 +247,24 @@ main() {
 
   local passed_count=0
   local total_attempts=0
-  local semgrep_script="$SCRIPT_DIR/semgrep-zero-pass.sh"
 
   echo "Starting gate chain..." | tee -a "$LOG_DIR/orchestrator-$TS.log"
-
-  # Gate 0 is deterministic and mandatory.
-  if [ ! -x "$semgrep_script" ]; then
-    echo "Error: mandatory Gate 0 missing or not executable: $semgrep_script" | tee -a "$LOG_DIR/orchestrator-$TS.log"
-    exit 1
-  fi
-  total_attempts=$((total_attempts + 1))
-  if ! run_gate "semgrep-zero-pass" "$total_attempts"; then
-    echo ""
-    echo "✗ FAIL: Semgrep Gate 0 failed. Commit blocked."
-    exit 1
-  fi
-
-  for gate in copilot-third-pass aider-first-pass gemini-second-pass pr-agent-second-pass coderabbit-second-pass; do
-    if [ "$passed_count" -ge "$MIN_SUCCESSFUL_AI_GATES" ]; then
-      echo "2+ gates passed, stopping gate chain." | tee -a "$LOG_DIR/orchestrator-$TS.log"
-      break
-    fi
-
-    total_attempts=$((total_attempts + 1))
-    echo "Attempting gate $total_attempts: $gate" | tee -a "$LOG_DIR/orchestrator-$TS.log"
-
-    if run_gate "$gate" "$total_attempts"; then
-      passed_count=$((passed_count + 1))
-      PASSED+=("$gate")
-    else
-      FAILED+=("$gate")
-    fi
-  done
+  PASSED_COUNT=0
+  TOTAL_ATTEMPTS=0
+  case "$GATE_ORDER" in
+    copilot-first)
+      run_copilot_then_semgrep
+      ;;
+    semgrep-first)
+      run_semgrep_then_ai
+      ;;
+    *)
+      echo "Error: unsupported CODERO_GATE_ORDER='$GATE_ORDER' (use 'copilot-first' or 'semgrep-first')" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+      exit 1
+      ;;
+  esac
+  passed_count="$PASSED_COUNT"
+  total_attempts="$TOTAL_ATTEMPTS"
 
   echo "" | tee -a "$LOG_DIR/orchestrator-$TS.log"
   echo "========================================" | tee -a "$LOG_DIR/orchestrator-$TS.log"
@@ -205,6 +276,7 @@ main() {
   echo "Failed gates: ${FAILED[*]}" | tee -a "$LOG_DIR/orchestrator-$TS.log"
   echo "Model: $MODEL_ALIAS" | tee -a "$LOG_DIR/orchestrator-$TS.log"
   echo "Mode: $MODE" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+  echo "Gate order: $GATE_ORDER" | tee -a "$LOG_DIR/orchestrator-$TS.log"
   echo "Timestamp: $TS" | tee -a "$LOG_DIR/orchestrator-$TS.log"
   echo "========================================" | tee -a "$LOG_DIR/orchestrator-$TS.log"
 
