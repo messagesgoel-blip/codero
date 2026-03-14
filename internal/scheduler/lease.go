@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/codero/codero/internal/redis"
@@ -105,11 +106,19 @@ func (lm *LeaseManager) AcquireWithTTL(ctx context.Context, repo, branch, holder
 			local acquired_at = ARGV[3]
 			redis.call('SET', KEYS[1], ARGV[1] .. '|' .. acquired_at, 'PX', ARGV[2])
 			return {1, tonumber(acquired_at)}
-		elseif current == ARGV[1] or string.match(current, '^' .. ARGV[1] .. '|') then
+		end
+		-- Extract holderID from value using literal comparison (avoid pattern metacharacters)
+		local pipe_pos = string.find(current, '|', 1, true)
+		local stored_holder = current
+		local acquired_at = '0'
+		if pipe_pos then
+			stored_holder = string.sub(current, 1, pipe_pos - 1)
+			acquired_at = string.sub(current, pipe_pos + 1)
+		end
+		if stored_holder == ARGV[1] then
 			-- We already hold it: extend TTL, return stored acquisition time
-			local acquired_at = string.match(current, '^[^|]+|(%d+)$') or '0'
 			redis.call('PEXPIRE', KEYS[1], ARGV[2])
-			return {1, tonumber(acquired_at)}
+			return {1, tonumber(acquired_at) or 0}
 		else
 			-- Held by another: conflict
 			return {0, 0}
@@ -138,13 +147,11 @@ func (lm *LeaseManager) AcquireWithTTL(ctx context.Context, repo, branch, holder
 		return nil, ErrLeaseConflict
 	}
 
-	// Parse acquired time: if 0 or stored value, use now for new lease, stored value for extension
+	// Parse acquired time: preserve stored timestamp if valid, otherwise use now
 	var acquiredAt time.Time
-	if acquiredAtMs > 0 && acquiredAtMs < now.UnixMilli()-1000 {
-		// Stored acquisition time from an earlier acquire (more than 1s ago)
+	if acquiredAtMs > 0 {
 		acquiredAt = time.UnixMilli(acquiredAtMs)
 	} else {
-		// New lease or couldn't parse stored time
 		acquiredAt = now
 	}
 
@@ -168,12 +175,20 @@ func (lm *LeaseManager) Release(ctx context.Context, repo, branch, holderID stri
 
 	// Use Lua script for atomic check-and-delete.
 	// Handles both old format (just holderID) and new format (holderID|acquiredAt).
+	// Uses literal comparison to avoid pattern metacharacter issues.
 	rc := lm.client.Unwrap()
 	script := `
 		local current = redis.call('GET', KEYS[1])
 		if current == false then
 			return 0
-		elseif current == ARGV[1] or string.match(current, '^' .. ARGV[1] .. '|') then
+		end
+		-- Extract holderID from value using literal comparison
+		local pipe_pos = string.find(current, '|', 1, true)
+		local stored_holder = current
+		if pipe_pos then
+			stored_holder = string.sub(current, 1, pipe_pos - 1)
+		end
+		if stored_holder == ARGV[1] then
 			redis.call('DEL', KEYS[1])
 			return 1
 		else
@@ -208,17 +223,26 @@ func (lm *LeaseManager) Extend(ctx context.Context, repo, branch, holderID strin
 
 	// Use Lua script for atomic check-and-extend.
 	// Returns: {1, acquired_at_ms} on success, {0} if missing, {-1} if held by another
+	// Uses literal comparison to avoid pattern metacharacter issues.
 	rc := lm.client.Unwrap()
 	script := `
 		local current = redis.call('GET', KEYS[1])
 		if current == false then
 			-- Lease does not exist
 			return {0, 0}
-		elseif current == ARGV[1] or string.match(current, '^' .. ARGV[1] .. '|') then
+		end
+		-- Extract holderID from value using literal comparison
+		local pipe_pos = string.find(current, '|', 1, true)
+		local stored_holder = current
+		local acquired_at = '0'
+		if pipe_pos then
+			stored_holder = string.sub(current, 1, pipe_pos - 1)
+			acquired_at = string.sub(current, pipe_pos + 1)
+		end
+		if stored_holder == ARGV[1] then
 			-- We hold it: extend TTL, return stored acquisition time
-			local acquired_at = string.match(current, '^[^|]+|(%d+)$') or '0'
 			redis.call('PEXPIRE', KEYS[1], ARGV[2])
-			return {1, tonumber(acquired_at)}
+			return {1, tonumber(acquired_at) or 0}
 		else
 			-- Held by another
 			return {-1, 0}
@@ -290,19 +314,13 @@ func (lm *LeaseManager) Get(ctx context.Context, repo, branch string) (*Lease, e
 	// Parse value: either "holderID" (old format) or "holderID|acquiredAt" (new format)
 	var holderID string
 	var acquiredAt time.Time
-	if idx := len(value) - 1; idx > 0 {
-		for i := 0; i < len(value); i++ {
-			if value[i] == '|' {
-				holderID = value[:i]
-				// Try to parse acquisition time
-				if acquiredAtMs, parseErr := parseInt64(value[i+1:]); parseErr == nil && acquiredAtMs > 0 {
-					acquiredAt = time.UnixMilli(acquiredAtMs)
-				}
-				break
-			}
+	if pipeIdx := strings.IndexByte(value, '|'); pipeIdx >= 0 {
+		holderID = value[:pipeIdx]
+		// Try to parse acquisition time
+		if acquiredAtMs, parseErr := parseInt64(value[pipeIdx+1:]); parseErr == nil && acquiredAtMs > 0 {
+			acquiredAt = time.UnixMilli(acquiredAtMs)
 		}
-	}
-	if holderID == "" {
+	} else {
 		holderID = value // old format, no pipe character
 	}
 

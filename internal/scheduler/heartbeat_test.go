@@ -6,28 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alicebob/miniredis/v2"
 	"github.com/codero/codero/internal/redis"
 )
 
-// testRedisClientHeartbeat creates a miniredis server and returns a client connected to it.
-func testRedisClientHeartbeat(t *testing.T) *redis.Client {
-	t.Helper()
-
-	mr, err := miniredis.Run()
-	if err != nil {
-		t.Fatalf("miniredis: %v", err)
-	}
-	t.Cleanup(mr.Close)
-
-	client := redis.New(mr.Addr(), "")
-	t.Cleanup(func() { client.Close() })
-
-	return client
-}
-
 func TestHeartbeatStartStop(t *testing.T) {
-	client := testRedisClientHeartbeat(t)
+	client, _ := testRedisClient(t)
 	lm := NewLeaseManager(client, WithLeaseTTL(1*time.Second))
 
 	ctx := context.Background()
@@ -78,7 +61,7 @@ func TestHeartbeatStartStop(t *testing.T) {
 }
 
 func TestHeartbeatContextCancellation(t *testing.T) {
-	client := testRedisClientHeartbeat(t)
+	client, _ := testRedisClient(t)
 	lm := NewLeaseManager(client, WithLeaseTTL(1*time.Second))
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -122,7 +105,7 @@ func TestHeartbeatContextCancellation(t *testing.T) {
 }
 
 func TestHeartbeatStatus(t *testing.T) {
-	client := testRedisClientHeartbeat(t)
+	client, _ := testRedisClient(t)
 	lm := NewLeaseManager(client, WithLeaseTTL(1*time.Second))
 
 	ctx := context.Background()
@@ -169,7 +152,7 @@ func TestHeartbeatStatus(t *testing.T) {
 }
 
 func TestHeartbeatMaxMisses(t *testing.T) {
-	client := testRedisClientHeartbeat(t)
+	client, _ := testRedisClient(t)
 	lm := NewLeaseManager(client, WithLeaseTTL(100*time.Millisecond))
 
 	ctx := context.Background()
@@ -195,7 +178,8 @@ func TestHeartbeatMaxMisses(t *testing.T) {
 	// Steal the lease to cause heartbeat failures
 	time.Sleep(30 * time.Millisecond)
 	rc := client.Unwrap()
-	rc.Set(ctx, "codero:test:lease:branch1", "other-holder", 5*time.Second)
+	leaseKey, _ := redis.BuildKey("test", "lease", "branch1")
+	rc.Set(ctx, leaseKey, "other-holder", 5*time.Second)
 
 	// Wait for heartbeats to fail and trigger MaxMisses cleanup
 	time.Sleep(150 * time.Millisecond)
@@ -208,14 +192,14 @@ func TestHeartbeatMaxMisses(t *testing.T) {
 
 	// Verify the lease was released (the "other-holder" value should remain,
 	// but our release attempt should have happened)
-	holder, _ := rc.Get(ctx, "codero:test:lease:branch1").Result()
+	holder, _ := rc.Get(ctx, leaseKey).Result()
 	if holder == "holder1" {
 		t.Error("original holder's lease should have been released")
 	}
 }
 
 func TestHeartbeatLeaseMethod(t *testing.T) {
-	client := testRedisClientHeartbeat(t)
+	client, _ := testRedisClient(t)
 	lm := NewLeaseManager(client)
 
 	ctx := context.Background()
@@ -337,7 +321,7 @@ func TestDefaultHeartbeatConfig(t *testing.T) {
 }
 
 func TestMonitorHeartbeat(t *testing.T) {
-	client := testRedisClientHeartbeat(t)
+	client, _ := testRedisClient(t)
 	monitor := NewMonitorHeartbeat(client)
 	lm := NewLeaseManager(client)
 
@@ -381,7 +365,7 @@ func TestMonitorHeartbeat(t *testing.T) {
 }
 
 func TestHeartbeatMultipleStops(t *testing.T) {
-	client := testRedisClientHeartbeat(t)
+	client, _ := testRedisClient(t)
 	lm := NewLeaseManager(client)
 
 	ctx := context.Background()

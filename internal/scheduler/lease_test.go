@@ -294,9 +294,9 @@ func TestLeaseAcquireAtomic(t *testing.T) {
 		t.Fatalf("re-acquire by same holder failed: %v", err)
 	}
 
-	// Verify the lease was extended (new expiry should be later)
-	if !lease2.ExpiresAt.After(lease1.ExpiresAt) && lease2.ExpiresAt != lease1.ExpiresAt {
-		t.Error("re-acquire should extend or maintain lease expiry")
+	// Verify the lease was extended (new expiry should not be earlier than original)
+	if lease2.ExpiresAt.Before(lease1.ExpiresAt) {
+		t.Errorf("re-acquire should extend or maintain lease expiry: got %v, expected >= %v", lease2.ExpiresAt, lease1.ExpiresAt)
 	}
 }
 
