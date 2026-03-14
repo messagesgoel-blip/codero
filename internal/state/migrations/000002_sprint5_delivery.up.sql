@@ -14,9 +14,6 @@ CREATE TABLE IF NOT EXISTS delivery_events (
     PRIMARY KEY (repo, branch, seq)
 );
 
-CREATE INDEX IF NOT EXISTS idx_delivery_events_repo_branch_seq
-    ON delivery_events (repo, branch, seq);
-
 -- Webhook dedup: durable secondary idempotency beyond the Redis NX hot path.
 -- Loss of Redis dedup cannot cause durable corruption because this table exists.
 CREATE TABLE IF NOT EXISTS webhook_deliveries (

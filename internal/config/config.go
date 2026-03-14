@@ -36,6 +36,9 @@ var (
 
 	// ErrMissingRepos is returned when repos is absent or empty.
 	ErrMissingRepos = errors.New("repos list is required and must be non-empty")
+
+	// ErrMissingWebhookSecret is returned when webhook is enabled but no secret is set.
+	ErrMissingWebhookSecret = errors.New("webhook.secret is required when webhook.enabled is true")
 )
 
 // RedisConfig holds Redis connection settings.
@@ -181,6 +184,9 @@ func (c *Config) Validate() error {
 		if strings.TrimSpace(repo) == "" {
 			return ErrMissingRepos
 		}
+	}
+	if c.Webhook.Enabled && strings.TrimSpace(c.Webhook.Secret) == "" {
+		return ErrMissingWebhookSecret
 	}
 	return nil
 }

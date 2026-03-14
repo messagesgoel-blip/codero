@@ -219,6 +219,7 @@ func daemonCmd(configPath *string) *cobra.Command {
 						loglib.Error("codero: webhook server error",
 							loglib.FieldComponent, "webhook",
 							"error", err,
+							"ctx_err", ctx.Err(),
 						)
 					}
 				}()

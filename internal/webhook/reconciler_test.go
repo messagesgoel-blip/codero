@@ -65,10 +65,14 @@ func TestReconciler_ClosedPR(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Trigger one cycle manually.
-	go rec.Run(ctx)
+	done := make(chan struct{})
+	go func() {
+		rec.Run(ctx)
+		close(done)
+	}()
 	time.Sleep(200 * time.Millisecond)
 	cancel()
+	<-done
 
 	if got := getDBState(t, db, id); got != state.StateClosed {
 		t.Errorf("state: got %q, want %q (PR closed)", got, state.StateClosed)
@@ -97,9 +101,14 @@ func TestReconciler_StaleBranch(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	go rec.Run(ctx)
+	done := make(chan struct{})
+	go func() {
+		rec.Run(ctx)
+		close(done)
+	}()
 	time.Sleep(200 * time.Millisecond)
 	cancel()
+	<-done
 
 	if got := getDBState(t, db, id); got != state.StateStaleBranch {
 		t.Errorf("state: got %q, want %q (force-push detected)", got, state.StateStaleBranch)
@@ -136,9 +145,14 @@ func TestReconciler_MergeReadyTransition(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	go rec.Run(ctx)
+	done := make(chan struct{})
+	go func() {
+		rec.Run(ctx)
+		close(done)
+	}()
 	time.Sleep(200 * time.Millisecond)
 	cancel()
+	<-done
 
 	if got := getDBState(t, db, id); got != state.StateMergeReady {
 		t.Errorf("state: got %q, want %q", got, state.StateMergeReady)
@@ -169,9 +183,14 @@ func TestReconciler_MergeReadyRevoked(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	go rec.Run(ctx)
+	done := make(chan struct{})
+	go func() {
+		rec.Run(ctx)
+		close(done)
+	}()
 	time.Sleep(200 * time.Millisecond)
 	cancel()
+	<-done
 
 	if got := getDBState(t, db, id); got != state.StateCoding {
 		t.Errorf("state: got %q, want %q (approval revoked)", got, state.StateCoding)
@@ -209,13 +228,13 @@ func TestReconciler_PollingOnlyMode(t *testing.T) {
 	<-done // ensure Run exits cleanly
 }
 
-func TestReconciler_NoPR(t *testing.T) {
+func TestReconciler_NoPR_ReviewedStateClosed(t *testing.T) {
 	db := openTestDB(t)
 
-	repo, branch := "owner/repo", "no-pr"
-	id := insertBranch(t, db, repo, branch, state.StateCoding, "abc123")
+	repo, branch := "owner/repo", "no-pr-reviewed"
+	id := insertBranch(t, db, repo, branch, state.StateReviewed, "abc123")
 
-	// GitHub returns nil (no PR).
+	// GitHub returns nil (no PR exists).
 	ghClient := &mockGitHubClient{
 		state: map[string]*webhook.GitHubState{},
 	}
@@ -224,13 +243,48 @@ func TestReconciler_NoPR(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	go rec.Run(ctx)
+	done := make(chan struct{})
+	go func() {
+		rec.Run(ctx)
+		close(done)
+	}()
 	time.Sleep(200 * time.Millisecond)
 	cancel()
+	<-done
 
-	// coding → closed (no PR exists).
+	// reviewed + no PR → closed (PR was expected to exist).
 	if got := getDBState(t, db, id); got != state.StateClosed {
-		t.Errorf("state: got %q, want %q (no PR → close)", got, state.StateClosed)
+		t.Errorf("state: got %q, want %q (no PR → close for reviewed state)", got, state.StateClosed)
+	}
+}
+
+func TestReconciler_NoPR_CodingStateSkipped(t *testing.T) {
+	db := openTestDB(t)
+
+	repo, branch := "owner/repo", "no-pr-coding"
+	id := insertBranch(t, db, repo, branch, state.StateCoding, "abc123")
+
+	// GitHub returns nil (no PR). Normal for coding state.
+	ghClient := &mockGitHubClient{
+		state: map[string]*webhook.GitHubState{},
+	}
+
+	rec := webhook.NewReconciler(db, ghClient, []string{repo}, false)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		rec.Run(ctx)
+		close(done)
+	}()
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	<-done
+
+	// coding + no PR → stay coding (no PR is expected in pre-PR states).
+	if got := getDBState(t, db, id); got != state.StateCoding {
+		t.Errorf("state: got %q, want %q (coding with no PR should not be closed)", got, state.StateCoding)
 	}
 }
 

@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/codero/codero/internal/delivery"
@@ -110,7 +111,7 @@ func (w *ExpiryWorker) runSessionExpiry(ctx context.Context) {
 // expireSession transitions one branch to abandoned (T14) and delivers a system event.
 func (w *ExpiryWorker) expireSession(ctx context.Context, b state.BranchRecord) error {
 	if err := state.TransitionBranch(w.db, b.ID, b.State, state.StateAbandoned, "session_heartbeat_expired"); err != nil {
-		return err
+		return fmt.Errorf("expire session %s: %w", b.ID, err)
 	}
 
 	loglib.Warn("expiry: branch abandoned due to session heartbeat TTL",
@@ -122,10 +123,17 @@ func (w *ExpiryWorker) expireSession(ctx context.Context, b state.BranchRecord) 
 		loglib.FieldToState, string(state.StateAbandoned),
 	)
 
-	_, _ = w.stream.AppendSystem(ctx, b.Repo, b.Branch, b.HeadHash,
+	if _, err := w.stream.AppendSystem(ctx, b.Repo, b.Branch, b.HeadHash,
 		"session_expired",
 		"branch abandoned due to session heartbeat TTL expiry; use 'codero reactivate' to restore",
-	)
+	); err != nil {
+		loglib.Warn("expiry: append session_expired event failed",
+			loglib.FieldComponent, "expiry",
+			loglib.FieldRepo, b.Repo,
+			loglib.FieldBranch, b.Branch,
+			"error", err,
+		)
+	}
 	return nil
 }
 
@@ -157,12 +165,22 @@ func (w *ExpiryWorker) runLeaseAudit(ctx context.Context) {
 // auditExpiredLease handles a cli_reviewing branch whose lease has expired:
 //   - increments retry_count
 //   - transitions to blocked (T16) if max retries exceeded
-//   - transitions to queued_cli (T07) and re-enqueues otherwise
-//   - clears durable lease info and appends a system bundle
+//   - enqueues then clears durable lease info and transitions to queued_cli (T07)
+//
+// The enqueue step is done before ClearLeaseInfo in the re-queue path so that
+// on Redis failure the lease_expires_at remains set and the next audit cycle
+// will automatically retry without losing the branch.
 func (w *ExpiryWorker) auditExpiredLease(ctx context.Context, b state.BranchRecord) error {
-	// Clear stale lease info.
-	if err := state.ClearLeaseInfo(w.db, b.ID); err != nil {
-		loglib.Warn("expiry: clear lease info failed",
+	newCount, err := state.IncrementRetryCount(w.db, b.ID)
+	if err != nil {
+		return fmt.Errorf("audit expired lease %s: increment retry: %w", b.ID, err)
+	}
+
+	if _, err := w.stream.AppendSystem(ctx, b.Repo, b.Branch, b.HeadHash,
+		"lease_expired",
+		"review lease expired without completion; branch re-queued or blocked",
+	); err != nil {
+		loglib.Warn("expiry: append lease_expired event failed",
 			loglib.FieldComponent, "expiry",
 			loglib.FieldRepo, b.Repo,
 			loglib.FieldBranch, b.Branch,
@@ -170,20 +188,18 @@ func (w *ExpiryWorker) auditExpiredLease(ctx context.Context, b state.BranchReco
 		)
 	}
 
-	newCount, err := state.IncrementRetryCount(w.db, b.ID)
-	if err != nil {
-		return err
-	}
-
-	_, _ = w.stream.AppendSystem(ctx, b.Repo, b.Branch, b.HeadHash,
-		"lease_expired",
-		"review lease expired without completion; branch re-queued or blocked",
-	)
-
 	if newCount >= b.MaxRetries {
-		// T16: blocked.
+		// T16: blocked — clear lease then transition.
+		if err := state.ClearLeaseInfo(w.db, b.ID); err != nil {
+			loglib.Warn("expiry: clear lease info failed",
+				loglib.FieldComponent, "expiry",
+				loglib.FieldRepo, b.Repo,
+				loglib.FieldBranch, b.Branch,
+				"error", err,
+			)
+		}
 		if err := state.TransitionBranch(w.db, b.ID, state.StateCLIReviewing, state.StateBlocked, "lease_expired_max_retries"); err != nil {
-			return err
+			return fmt.Errorf("audit expired lease %s: transition to blocked: %w", b.ID, err)
 		}
 		loglib.Warn("expiry: branch blocked after lease expiry (max retries)",
 			loglib.FieldEventType, loglib.EventTransition,
@@ -195,21 +211,31 @@ func (w *ExpiryWorker) auditExpiredLease(ctx context.Context, b state.BranchReco
 			"retry_count", newCount,
 		)
 	} else {
-		// T07: queued_cli.
-		if err := state.TransitionBranch(w.db, b.ID, state.StateCLIReviewing, state.StateQueuedCLI, "lease_expired_requeue"); err != nil {
-			return err
-		}
+		// T07: queued_cli — enqueue first so that on Redis failure the branch
+		// remains in cli_reviewing with lease_expires_at intact for the next cycle.
 		if err := w.queue.Enqueue(ctx, QueueEntry{
 			Repo:     b.Repo,
 			Branch:   b.Branch,
 			Priority: QueuePriority(b.QueuePriority),
 		}); err != nil {
-			loglib.Warn("expiry: re-enqueue failed",
+			loglib.Warn("expiry: re-enqueue failed; branch stays in cli_reviewing for next audit cycle",
 				loglib.FieldComponent, "expiry",
 				loglib.FieldRepo, b.Repo,
 				loglib.FieldBranch, b.Branch,
 				"error", err,
 			)
+			return fmt.Errorf("audit expired lease %s: re-enqueue: %w", b.ID, err)
+		}
+		if err := state.ClearLeaseInfo(w.db, b.ID); err != nil {
+			loglib.Warn("expiry: clear lease info failed",
+				loglib.FieldComponent, "expiry",
+				loglib.FieldRepo, b.Repo,
+				loglib.FieldBranch, b.Branch,
+				"error", err,
+			)
+		}
+		if err := state.TransitionBranch(w.db, b.ID, state.StateCLIReviewing, state.StateQueuedCLI, "lease_expired_requeue"); err != nil {
+			return fmt.Errorf("audit expired lease %s: transition to queued_cli: %w", b.ID, err)
 		}
 		loglib.Info("expiry: branch re-queued after lease expiry",
 			loglib.FieldEventType, loglib.EventTransition,

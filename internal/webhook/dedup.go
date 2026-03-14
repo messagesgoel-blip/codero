@@ -47,11 +47,9 @@ func (d *Deduplicator) Check(ctx context.Context, deliveryID, eventType, repo st
 	}
 
 	// Step 1: Redis hot path.
-	key, err := dedupKey(repo, deliveryID)
-	if err != nil {
-		// Key build failure (invalid repo/id chars) — fall through to DB only.
-		// Log is omitted here; callers log the error.
-	} else {
+	var redisKey string
+	var redisKeySet bool
+	if key, err := dedupKey(repo, deliveryID); err == nil {
 		rc := d.client.Unwrap()
 		set, redisErr := rc.SetNX(ctx, key, "1", dedupTTL).Result()
 		if redisErr != nil && !errors.Is(redisErr, goredis.Nil) {
@@ -60,12 +58,19 @@ func (d *Deduplicator) Check(ctx context.Context, deliveryID, eventType, repo st
 		} else if !set {
 			// Key already exists in Redis → duplicate fast path.
 			return ErrDuplicate
+		} else {
+			redisKey = key
+			redisKeySet = true
 		}
 	}
 
 	// Step 2: Durable DB secondary idempotency check + insert.
 	inserted, err := state.MarkWebhookDelivery(d.db, deliveryID, eventType, repo)
 	if err != nil {
+		// Roll back the Redis key so a subsequent delivery attempt can succeed.
+		if redisKeySet {
+			_ = d.client.Unwrap().Del(ctx, redisKey).Err()
+		}
 		return fmt.Errorf("dedup: db mark: %w", err)
 	}
 	if !inserted {
@@ -78,7 +83,7 @@ func (d *Deduplicator) Check(ctx context.Context, deliveryID, eventType, repo st
 // IsKnown returns true if a delivery ID has been processed (DB check only).
 // Used for diagnostic purposes; normal dedup path uses Check.
 func (d *Deduplicator) IsKnown(ctx context.Context, deliveryID string) (bool, error) {
-	return state.IsWebhookProcessed(d.db, deliveryID)
+	return state.IsWebhookProcessed(ctx, d.db, deliveryID)
 }
 
 // dedupKey builds the Redis key for webhook dedup.

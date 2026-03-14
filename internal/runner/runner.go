@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -160,7 +161,7 @@ func (r *ReviewRunner) processEntry(ctx context.Context, repo, branch string) er
 	holderID := newHolderID()
 	lease, err := r.leaseMgr.AcquireWithTTL(ctx, repo, branch, holderID, r.cfg.LeaseTTL)
 	if err != nil {
-		if err == scheduler.ErrLeaseConflict {
+		if errors.Is(err, scheduler.ErrLeaseConflict) {
 			loglib.Info("runner: lease conflict, skipping",
 				loglib.FieldComponent, "runner",
 				loglib.FieldRepo, repo,
@@ -262,9 +263,10 @@ func (r *ReviewRunner) handleReviewSuccess(
 		)
 	}
 
-	// Persist normalized findings.
+	// Persist normalized findings in a single transaction.
+	findingRecords := make([]*state.FindingRecord, 0, len(findings))
 	for _, f := range findings {
-		fr := &state.FindingRecord{
+		findingRecords = append(findingRecords, &state.FindingRecord{
 			ID:        uuid.New().String(),
 			RunID:     runID,
 			Repo:      repo,
@@ -277,15 +279,15 @@ func (r *ReviewRunner) handleReviewSuccess(
 			Source:    f.Source,
 			RuleID:    f.RuleID,
 			Timestamp: f.Timestamp,
-		}
-		if err := state.InsertFinding(r.db, fr); err != nil {
-			loglib.Warn("runner: failed to persist finding",
-				loglib.FieldComponent, "runner",
-				loglib.FieldRepo, repo,
-				loglib.FieldBranch, branch,
-				"error", err,
-			)
-		}
+		})
+	}
+	if err := state.InsertFindings(r.db, findingRecords); err != nil {
+		loglib.Warn("runner: failed to persist findings",
+			loglib.FieldComponent, "runner",
+			loglib.FieldRepo, repo,
+			loglib.FieldBranch, branch,
+			"error", err,
+		)
 	}
 
 	// Update review run as completed.

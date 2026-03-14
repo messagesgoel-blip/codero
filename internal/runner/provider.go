@@ -60,6 +60,13 @@ func (s *StubProvider) Review(ctx context.Context, req ReviewRequest) (*ReviewRe
 		}
 	}
 
+	// Respect cancellation even when there is no delay.
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("stub review cancelled: %w", ctx.Err())
+	default:
+	}
+
 	return &ReviewResponse{
 		Findings: []normalizer.RawFinding{
 			{

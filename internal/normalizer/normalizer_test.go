@@ -98,33 +98,36 @@ func TestNormalize_EmptySeverityDefaultsToInfo(t *testing.T) {
 
 func TestNormalize_SeverityAliases(t *testing.T) {
 	tests := []struct {
+		name  string
 		input string
 		want  normalizer.Severity
 	}{
-		{"error", normalizer.SeverityError},
-		{"ERROR", normalizer.SeverityError},
-		{"err", normalizer.SeverityError},
-		{"critical", normalizer.SeverityError},
-		{"fatal", normalizer.SeverityError},
-		{"warning", normalizer.SeverityWarning},
-		{"WARN", normalizer.SeverityWarning},
-		{"medium", normalizer.SeverityWarning},
-		{"info", normalizer.SeverityInfo},
-		{"note", normalizer.SeverityInfo},
-		{"suggestion", normalizer.SeverityInfo},
-		{"low", normalizer.SeverityInfo},
-		{"hint", normalizer.SeverityInfo},
+		{"error_lower", "error", normalizer.SeverityError},
+		{"error_upper", "ERROR", normalizer.SeverityError},
+		{"err", "err", normalizer.SeverityError},
+		{"critical", "critical", normalizer.SeverityError},
+		{"fatal", "fatal", normalizer.SeverityError},
+		{"warning", "warning", normalizer.SeverityWarning},
+		{"warn_upper", "WARN", normalizer.SeverityWarning},
+		{"medium", "medium", normalizer.SeverityWarning},
+		{"info", "info", normalizer.SeverityInfo},
+		{"note", "note", normalizer.SeverityInfo},
+		{"suggestion", "suggestion", normalizer.SeverityInfo},
+		{"low", "low", normalizer.SeverityInfo},
+		{"hint", "hint", normalizer.SeverityInfo},
 	}
 	for _, tc := range tests {
-		raw := normalizer.RawFinding{Severity: tc.input, Message: "x"}
-		f, err := normalizer.Normalize(raw, "src", fixedTime)
-		if err != nil {
-			t.Errorf("severity %q: unexpected error: %v", tc.input, err)
-			continue
-		}
-		if f.Severity != tc.want {
-			t.Errorf("severity %q: got %q, want %q", tc.input, f.Severity, tc.want)
-		}
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			raw := normalizer.RawFinding{Severity: tc.input, Message: "x"}
+			f, err := normalizer.Normalize(raw, "src", fixedTime)
+			if err != nil {
+				t.Fatalf("severity %q: unexpected error: %v", tc.input, err)
+			}
+			if f.Severity != tc.want {
+				t.Errorf("severity %q: got %q, want %q", tc.input, f.Severity, tc.want)
+			}
+		})
 	}
 }
 

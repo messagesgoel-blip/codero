@@ -113,7 +113,13 @@ func TestStream_ReplayIdempotent(t *testing.T) {
 		t.Fatalf("replay 2: %v", err)
 	}
 	if len(events1) != len(events2) {
-		t.Errorf("idempotent: got %d then %d events", len(events1), len(events2))
+		t.Fatalf("idempotent: got %d then %d events", len(events1), len(events2))
+	}
+	for i := range events1 {
+		if events1[i].Seq != events2[i].Seq || events1[i].EventType != events2[i].EventType {
+			t.Errorf("event[%d] not idempotent: seq %d/%d eventType %q/%q",
+				i, events1[i].Seq, events2[i].Seq, events1[i].EventType, events2[i].EventType)
+		}
 	}
 }
 
@@ -169,8 +175,8 @@ func TestStream_AppendFindingBundle(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(events))
 	}
-	if events[0].EventType != "finding_bundle" {
-		t.Errorf("event_type: got %q, want %q", events[0].EventType, "finding_bundle")
+	if events[0].EventType != string(delivery.EventTypeFindingBundle) {
+		t.Errorf("event_type: got %q, want %q", events[0].EventType, delivery.EventTypeFindingBundle)
 	}
 }
 

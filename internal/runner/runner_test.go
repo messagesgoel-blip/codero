@@ -292,7 +292,16 @@ func TestStubProvider_Deterministic(t *testing.T) {
 		t.Fatalf("review 2: %v", err)
 	}
 	if len(resp1.Findings) != len(resp2.Findings) {
-		t.Errorf("non-deterministic finding count: %d vs %d", len(resp1.Findings), len(resp2.Findings))
+		t.Fatalf("non-deterministic finding count: %d vs %d", len(resp1.Findings), len(resp2.Findings))
+	}
+	for i := range resp1.Findings {
+		f1, f2 := resp1.Findings[i], resp2.Findings[i]
+		if f1.Severity != f2.Severity || f1.Category != f2.Category ||
+			f1.File != f2.File || f1.Line != f2.Line ||
+			f1.Message != f2.Message || f1.Source != f2.Source ||
+			f1.RuleID != f2.RuleID {
+			t.Errorf("finding[%d] non-deterministic:\n  got  %+v\n  want %+v", i, f2, f1)
+		}
 	}
 }
 

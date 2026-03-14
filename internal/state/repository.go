@@ -1,6 +1,7 @@
 package state
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -244,17 +245,14 @@ func TransitionBranch(db *DB, id string, from, to State, trigger string) error {
 }
 
 // IncrementRetryCount increments retry_count for a branch and returns the new value.
+// Uses RETURNING to read the new count atomically, avoiding an UPDATE+SELECT race.
 func IncrementRetryCount(db *DB, id string) (int, error) {
-	_, err := db.sql.Exec(
-		`UPDATE branch_states SET retry_count = retry_count + 1, updated_at = datetime('now') WHERE id = ?`,
-		id,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("increment retry count: %w", err)
-	}
 	var count int
-	if err := db.sql.QueryRow(`SELECT retry_count FROM branch_states WHERE id = ?`, id).Scan(&count); err != nil {
-		return 0, fmt.Errorf("read retry count: %w", err)
+	if err := db.sql.QueryRow(
+		`UPDATE branch_states SET retry_count = retry_count + 1, updated_at = datetime('now') WHERE id = ? RETURNING retry_count`,
+		id,
+	).Scan(&count); err != nil {
+		return 0, fmt.Errorf("increment retry count: %w", err)
 	}
 	return count, nil
 }
@@ -323,6 +321,51 @@ func UpdateMergeReadiness(db *DB, id string, approved, ciGreen bool, pendingEven
 		return fmt.Errorf("update merge readiness: %w", err)
 	}
 	return nil
+}
+
+// UpdateHeadHashAndTransition atomically updates head_hash and applies a
+// validated state transition with an audit record. Used by the reconciler for
+// stale-branch detection to avoid a non-atomic UpdateHeadHash + TransitionBranch.
+func UpdateHeadHashAndTransition(db *DB, id, newHeadHash string, from, to State, trigger string) error {
+	if err := ValidateTransition(from, to); err != nil {
+		return err
+	}
+
+	tx, err := db.sql.Begin()
+	if err != nil {
+		return fmt.Errorf("update head hash and transition: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var currentState string
+	if err := tx.QueryRow(`SELECT state FROM branch_states WHERE id = ?`, id).Scan(&currentState); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrBranchNotFound
+		}
+		return fmt.Errorf("update head hash and transition: read state: %w", err)
+	}
+	if State(currentState) != from {
+		return fmt.Errorf("%w: current state %q does not match expected from-state %q",
+			ErrInvalidTransition, currentState, from)
+	}
+
+	_, err = tx.Exec(
+		`UPDATE branch_states SET head_hash = ?, state = ?, updated_at = datetime('now') WHERE id = ?`,
+		newHeadHash, string(to), id,
+	)
+	if err != nil {
+		return fmt.Errorf("update head hash and transition: update: %w", err)
+	}
+
+	_, err = tx.Exec(
+		`INSERT INTO state_transitions (branch_state_id, from_state, to_state, trigger) VALUES (?, ?, ?, ?)`,
+		id, string(from), string(to), trigger,
+	)
+	if err != nil {
+		return fmt.Errorf("update head hash and transition: insert audit: %w", err)
+	}
+
+	return tx.Commit()
 }
 
 // UpdateHeadHash updates the head_hash field (stale detection).
@@ -396,7 +439,10 @@ func ListDeliveryEvents(db *DB, repo, branch string, sinceSeq int64) ([]Delivery
 		}
 		events = append(events, ev)
 	}
-	return events, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list delivery events: %w", err)
+	}
+	return events, nil
 }
 
 // --- Webhook dedup ---
@@ -417,9 +463,9 @@ func MarkWebhookDelivery(db *DB, deliveryID, eventType, repo string) (bool, erro
 }
 
 // IsWebhookProcessed returns true if a delivery has already been processed.
-func IsWebhookProcessed(db *DB, deliveryID string) (bool, error) {
+func IsWebhookProcessed(ctx context.Context, db *DB, deliveryID string) (bool, error) {
 	var count int
-	err := db.sql.QueryRow(
+	err := db.sql.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM webhook_deliveries WHERE delivery_id = ? AND processed = 1`,
 		deliveryID,
 	).Scan(&count)
@@ -497,7 +543,41 @@ func ListFindings(db *DB, repo, branch string) ([]FindingRecord, error) {
 		}
 		findings = append(findings, f)
 	}
-	return findings, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list findings: %w", err)
+	}
+	return findings, nil
+}
+
+// InsertFindings inserts multiple normalized finding records in a single transaction.
+func InsertFindings(db *DB, findings []*FindingRecord) error {
+	if len(findings) == 0 {
+		return nil
+	}
+	tx, err := db.sql.Begin()
+	if err != nil {
+		return fmt.Errorf("insert findings: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmt, err := tx.Prepare(
+		`INSERT INTO findings (id, run_id, repo, branch, severity, category, file, line, message, source, rule_id, ts)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	)
+	if err != nil {
+		return fmt.Errorf("insert findings: prepare: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, f := range findings {
+		if _, err := stmt.Exec(
+			f.ID, f.RunID, f.Repo, f.Branch, f.Severity, f.Category,
+			f.File, f.Line, f.Message, f.Source, f.RuleID, f.Timestamp,
+		); err != nil {
+			return fmt.Errorf("insert findings: exec: %w", err)
+		}
+	}
+	return tx.Commit()
 }
 
 // --- helpers ---
@@ -575,7 +655,10 @@ func scanBranches(rows *sql.Rows) ([]BranchRecord, error) {
 		}
 		records = append(records, b)
 	}
-	return records, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("scan branches: %w", err)
+	}
+	return records, nil
 }
 
 func boolInt(b bool) int {

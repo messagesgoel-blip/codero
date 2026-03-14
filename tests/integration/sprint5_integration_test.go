@@ -26,6 +26,12 @@ import (
 	"github.com/google/uuid"
 )
 
+func newWebhookHandler(t *testing.T, secret string, db *state.DB, client *redislib.Client) http.Handler {
+	t.Helper()
+	dedup := webhook.NewDeduplicator(db, client)
+	return webhook.NewHandler(secret, dedup, &webhook.NopProcessor{})
+}
+
 // ---- helpers ----
 
 func openDB(t *testing.T) *state.DB {
@@ -99,8 +105,8 @@ func TestIntegration_WebhookDedup(t *testing.T) {
 	client, _ := openRedis(t)
 
 	secret := "integration-secret"
+	handler := newWebhookHandler(t, secret, db, client)
 	dedup := webhook.NewDeduplicator(db, client)
-	handler := webhook.NewHandler(secret, dedup, &webhook.NopProcessor{})
 
 	body := webhookPayload(t, "owner/repo")
 	deliveryID := "int-del-001"
@@ -161,9 +167,14 @@ func TestIntegration_ReconciliationDriftRepair(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
-	go rec.Run(ctx)
+	done := make(chan struct{})
+	go func() {
+		rec.Run(ctx)
+		close(done)
+	}()
 	time.Sleep(200 * time.Millisecond)
 	cancel()
+	<-done
 
 	if got := getState(t, db, id); got != state.StateClosed {
 		t.Errorf("state: got %q, want %q (drift repair: PR closed)", got, state.StateClosed)

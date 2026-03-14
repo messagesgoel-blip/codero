@@ -143,7 +143,10 @@ func (r *Reconciler) reconcileBranch(ctx context.Context, b state.BranchRecord) 
 	}
 
 	if ghState == nil {
-		// No PR exists. If the branch is in an active state, close it.
+		// No PR exists. Skip pre-PR states where a PR is not yet expected.
+		if b.State == state.StateCoding || b.State == state.StateLocalReview {
+			return
+		}
 		r.maybeClose(b, "pr_not_found")
 		return
 	}
@@ -202,16 +205,30 @@ func (r *Reconciler) maybeClose(b state.BranchRecord, trigger string) {
 }
 
 func (r *Reconciler) maybeStaleBranch(b state.BranchRecord, newHeadHash string) {
-	// T12: any active → stale_branch.
-	if err := state.UpdateHeadHash(r.db, b.ID, newHeadHash); err != nil {
-		loglib.Error("reconciler: update head hash failed",
+	// T12: any active → stale_branch. Update head_hash and transition atomically
+	// to prevent a race where the hash update succeeds but the transition fails.
+	if err := state.UpdateHeadHashAndTransition(r.db, b.ID, newHeadHash, b.State, state.StateStaleBranch, "head_hash_mismatch"); err != nil {
+		loglib.Info("reconciler: stale branch transition skipped",
+			loglib.FieldEventType, loglib.EventRejection,
 			loglib.FieldComponent, "reconciler",
 			loglib.FieldRepo, b.Repo,
 			loglib.FieldBranch, b.Branch,
+			loglib.FieldFromState, string(b.State),
+			loglib.FieldToState, string(state.StateStaleBranch),
+			"trigger", "head_hash_mismatch",
 			"error", err,
 		)
+		return
 	}
-	r.transitionIfValid(b, state.StateStaleBranch, "head_hash_mismatch")
+	loglib.Info("reconciler: transition applied",
+		loglib.FieldEventType, loglib.EventTransition,
+		loglib.FieldComponent, "reconciler",
+		loglib.FieldRepo, b.Repo,
+		loglib.FieldBranch, b.Branch,
+		loglib.FieldFromState, string(b.State),
+		loglib.FieldToState, string(state.StateStaleBranch),
+		"trigger", "head_hash_mismatch",
+	)
 }
 
 func (r *Reconciler) transitionIfValid(b state.BranchRecord, to state.State, trigger string) {

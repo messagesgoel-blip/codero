@@ -105,6 +105,18 @@ func ValidateTransition(from, to State) error {
 	return fmt.Errorf("%w: %q -> %q", ErrInvalidTransition, from, to)
 }
 
+// ActiveStates contains all non-terminal states where a branch is actively
+// progressing through the lifecycle. The SQL IN clauses in ListActiveBranches
+// and ListExpiredSessions must be kept in sync with this list.
+var ActiveStates = []State{
+	StateCoding,
+	StateLocalReview,
+	StateQueuedCLI,
+	StateCLIReviewing,
+	StateReviewed,
+	StateMergeReady,
+}
+
 // IsTerminal reports whether the state is a terminal state (closed).
 func IsTerminal(s State) bool {
 	return s == StateClosed
