@@ -27,9 +27,41 @@ const (
 )
 
 // placeholderScripts maps each script name to its Lua source.
-// All bodies are stubs returning nil; full logic is added per-stage.
+// Full implementations are added per-stage.
 var placeholderScripts = map[string]string{
-	ScriptSlotAcquire:   `-- slot_acquire: placeholder (P1-S3)` + "\nreturn nil",
+	ScriptSlotAcquire: `-- slot_acquire: atomically acquire a dispatch slot
+-- KEYS[1] = lease key (codero:<repo>:lease:<branch>)
+-- KEYS[2] = queue key (codero:<repo>:queue:pending)
+-- ARGV[1] = holder ID
+-- ARGV[2] = TTL in milliseconds
+-- ARGV[3] = branch name
+-- Returns: {1, expiry_ms} on success (acquired or extended own lease)
+--          {0} if lease held by another holder
+-- Note: redis.call aborts on Redis errors; script does not return {-1}
+
+local lease_key = KEYS[1]
+local queue_key = KEYS[2]
+local holder_id = ARGV[1]
+local ttl_ms = tonumber(ARGV[2])
+local branch = ARGV[3]
+
+-- Check if lease exists
+local current = redis.call('GET', lease_key)
+if current and current ~= holder_id then
+    -- Lease held by another
+    return {0}
+end
+
+-- Acquire or extend lease
+redis.call('SET', lease_key, holder_id, 'PX', ttl_ms)
+
+-- Remove from queue if present
+redis.call('ZREM', queue_key, branch)
+
+-- Return success with expiry timestamp
+local expiry = redis.call('PEXPIRETIME', lease_key)
+return {1, expiry}
+`,
 	ScriptSeqIncrement:  `-- seq_increment: placeholder (P1-S4)` + "\nreturn nil",
 	ScriptPrecommitSlot: `-- precommit_slot_acquire: placeholder (P1-S5.5)` + "\nreturn nil",
 	ScriptDailyCap:      `-- daily_cap_check: placeholder (P1-S5.5)` + "\nreturn nil",

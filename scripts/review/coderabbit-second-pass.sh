@@ -18,6 +18,10 @@ fi
 echo "--- CODERO SECOND PASS (CodeRabbit) ---"
 (
   cd "$REPO_PATH"
-  coderabbit review --type uncommitted --plain --no-color "$@" 2>&1
+  if [ -n "${CODERABBIT_API_KEY:-}" ]; then
+    coderabbit review --type uncommitted --plain --no-color --api-key "$CODERABBIT_API_KEY" "$@" 2>&1
+  else
+    coderabbit review --type uncommitted --plain --no-color "$@" 2>&1
+  fi
 )
 echo "--- CODERO SECOND PASS END ---"

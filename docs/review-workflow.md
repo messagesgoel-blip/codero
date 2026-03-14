@@ -13,13 +13,13 @@ Combined gate:
 ## Install as pre-commit hook for a repo
 
 ```bash
-/srv/storage/local/codero/scripts/review/install-pre-commit.sh /path/to/repo
+/home/sanjay/codero/scripts/review/install-pre-commit.sh /path/to/repo
 ```
 
 Install for multiple repos:
 
 ```bash
-/srv/storage/local/codero/scripts/review/install-pre-commit-all.sh /srv/storage/local/codero/docs/managed-repos.txt
+/home/sanjay/codero/scripts/review/install-pre-commit-all.sh /home/sanjay/codero/docs/managed-repos.txt
 ```
 
 ## Environment

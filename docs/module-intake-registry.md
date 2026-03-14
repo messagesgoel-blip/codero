@@ -6,7 +6,7 @@ Hard guardrail: no bulk copy from ghwatcher. Only module-level intake with contr
 
 | Intake ID | Source Module | Target Domain | Status | Contract Doc | Parity Tests | Rollback Plan | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| MI-001 | lease semantics | coordination/lease | phase1-prep | docs/contracts/mi-001-lease-semantics.md | tests/contract/mi_001_lease_semantics_doc_test.go | pending | Priority A. Contract + parity prep in Sprint 3; integration starts Sprint 4. |
+| MI-001 | lease semantics | coordination/lease | implemented | docs/contracts/mi-001-lease-semantics.md | internal/scheduler/*_test.go | lease TTL expiry | Priority A. Implemented P1-S3: queue/lease/heartbeat. |
 | MI-002 | webhook dedup | ingestion/webhook | planned | pending | pending | pending | Priority A |
 | MI-003 | relay claim/ack/resolve | delivery/relay | planned | pending | pending | pending | Priority A |
 | MI-004 | session heartbeat lifecycle | session/liveness | planned | pending | pending | pending | Priority A |

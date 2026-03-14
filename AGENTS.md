@@ -21,15 +21,26 @@ It is intentionally repo-neutral and should work across projects.
 ## 3) Pre-Commit Quality Gate
 
 Before each commit, run the repository's local review gate.
-Default pattern:
 
-1. First pass local AI review (LiteLLM/Aider or equivalent).
-2. Second pass local CodeRabbit CLI review on uncommitted changes.
-3. If CodeRabbit fails, run PR-Agent (`qodo-ai/pr-agent`) as fallback second pass via LiteLLM using the same model set policy.
-4. Fix findings before commit.
+If the repo ships `scripts/review/two-pass-review.sh`, use it as the default prehook gate.
+In this repo, `scripts/review/two-pass-review.sh` is authoritative.
 
-If the repo ships `scripts/review/two-pass-review.sh`, use it as the default gate.
-In this repo, `scripts/review/two-pass-review.sh` is authoritative and includes CodeRabbit -> PR-Agent fallback behavior.
+Current mandatory gate policy:
+
+1. Run `aider` first pass.
+2. Run `gemini` (LiteLLM) second pass.
+3. Two successful checks are mandatory before commit.
+4. Run `coderabbit` (CodeRabbit) third as the canonical second review loop after LiteLLM.
+5. If either `gemini` or `coderabbit` is rate-limited or times out, run fallback chain:
+   - `pr-agent` next
+   - additional fallback tooling only if still below two successful checks
+6. `coderabbit` is never a fallback when the canonical sequence is available.
+7. Fix findings before commit.
+
+Operational rule:
+
+- All agents should use these shared review scripts.
+- Do not modify these shared scripts per-agent or per-task. Use the repository defaults as-is unless a dedicated infra/policy task explicitly changes them for everyone.
 
 ## 4) Validation Before Push
 
