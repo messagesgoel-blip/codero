@@ -1,0 +1,26 @@
+name: Semgrep
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  semgrep:
+    name: semgrep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Semgrep
+        run: python -m pip install --upgrade semgrep
+
+      - name: Run Semgrep (deterministic)
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+        run: |
+          if [ -n "${SEMGREP_APP_TOKEN:-}" ]; then
+            semgrep ci --metrics=off
+          else
+            semgrep scan --config p/default --error --metrics=off
+          fi

@@ -2,12 +2,13 @@
 
 ## Overview
 
-5-pass pre-commit review gate with automatic fallback chain. Designed for reliability with multiple AI providers.
+6-pass pre-commit review gate with deterministic + AI fallback chain.
 
 ## Gate Order
 
 | Gate | Tool | Model | Provider | Status |
 |------|------|-------|----------|--------|
+| 0 | Semgrep | `p/default` | Semgrep OSS engine | 🔒 Mandatory |
 | 1 | Copilot | `gpt-5-mini` | GitHub OAuth | ✅ Primary |
 | 2 | Aider | `MiniMax-M2.5` | MiniMax API | ✅ Primary |
 | 3 | Gemini | `gemini-2.5-flash-lite` | Google OAuth | ✅ Primary |
@@ -15,7 +16,8 @@
 | 5 | CodeRabbit | - | CodeRabbit API | ⚡ Fallback |
 
 **Rules:**
-- Stop when 2+ gates pass
+- Gate 0 (Semgrep) must pass
+- Stop when 2+ AI gates pass
 - Rate-limited/timeout triggers fallback to next gate
 - All gates must be installed and configured
 
@@ -26,12 +28,19 @@
 MINIMAX_API_KEY=sk-cp-xxx              # Gate 2 - https://www.minimaxi.com
 GEMINI_API_KEY=AIzaSyxxx               # Gate 3 (API key mode) - https://aistudio.google.com
 OPENROUTER_API_KEY=sk-or-v1-xxx        # Gate 2 fallback - https://openrouter.ai
+SEMGREP_APP_TOKEN=...                  # Optional: Semgrep App/CI cloud mode
 
 # Fallback providers
 LITELLM_MASTER_KEY=sk-xxx              # Gate 4 - Local LiteLLM proxy
 LITELLM_URL=http://localhost:4000/v1   # Gate 4
 
 # Gate 5 is authenticated via ~/.coderabbit/auth.json
+
+# Optional SonarCloud CI
+SONAR_TOKEN=...
+# GitHub repo variables:
+# SONAR_ORG
+# SONAR_PROJECT_KEY
 ```
 
 ## Gemini OAuth Account Switching
@@ -83,6 +92,7 @@ CODERO_AIDER_MODEL=ollama/llama3
 ```
 scripts/review/
 ├── two-pass-review.sh      # Orchestrator (runs all gates)
+├── semgrep-zero-pass.sh    # Gate 0 - deterministic Semgrep blocker
 ├── copilot-third-pass.sh   # Gate 1 - GitHub Copilot CLI
 ├── aider-first-pass.sh     # Gate 2 - Aider with MiniMax/OpenRouter
 ├── gemini-second-pass.sh   # Gate 3 - Gemini CLI with OAuth switching
@@ -98,7 +108,7 @@ scripts/review/
 
 ```bash
 # 1. Install dependencies
-pip install --break-system-packages aider-chat
+pip install --break-system-packages aider-chat semgrep
 npm install -g @github/copilot-cli
 
 # 2. Authenticate services
@@ -123,6 +133,7 @@ git checkout -- src/file.js
 
 ```bash
 # Timeouts
+CODERO_SEMGREP_TIMEOUT_SEC=180          # Gate 0 timeout (seconds)
 CODERO_GATE_TIMEOUT=90              # Per-gate timeout (seconds)
 CODERO_FIRST_PASS_TIMEOUT_SEC=90    # Gate 2 specific
 CODERO_SECOND_PASS_TIMEOUT_SEC=45   # Gate 3 specific
@@ -130,12 +141,16 @@ CODERO_COPILOT_TIMEOUT_SEC=60       # Gate 1 specific
 CODERO_CODERABBIT_TIMEOUT_SEC=120   # Gate 5 specific
 
 # Models
+CODERO_SEMGREP_CONFIG=p/default
 CODERO_AIDER_MODEL=minimax/MiniMax-M2.5
 CODERO_GEMINI_MODEL=gemini-2.5-flash-lite
 CODERO_COPILOT_MODEL=gpt-5-mini
 
 # Retries
 CODERO_GEMINI_MAX_RETRIES=3
+
+# Gate quorum
+CODERO_MIN_SUCCESSFUL_AI_GATES=2
 ```
 
 ## Customization
@@ -170,6 +185,15 @@ copilot auth login
 
 # Check model availability
 copilot --help | grep model
+```
+
+### Gate 0 (Semgrep) Issues
+```bash
+# Install/upgrade Semgrep
+pip install --break-system-packages -U semgrep
+
+# Test manually on staged files via gate
+bash scripts/review/semgrep-zero-pass.sh
 ```
 
 ### Gate 2 (Aider) Issues
@@ -209,6 +233,7 @@ Review logs are stored in:
 ```
 .codero/review-logs/
 ├── orchestrator-TIMESTAMP.log
+├── semgrep-zero-pass-TIMESTAMP.log
 ├── copilot-third-pass-TIMESTAMP.log
 ├── aider-first-pass-TIMESTAMP.log
 ├── gemini-second-pass-TIMESTAMP.log
@@ -224,6 +249,6 @@ git commit --no-verify -m "[EMERGENCY] message"
 
 ## Version
 
-- Infrastructure: v1.0.0
+- Infrastructure: v1.1.0
 - Last Updated: 2026-03-14
 - Tested On: mathkit-v2, cacheflow
