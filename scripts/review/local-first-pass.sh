@@ -6,8 +6,12 @@ set -euo pipefail
 
 REPO_PATH="${CODERO_REPO_PATH:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 LITELLM_URL="${CODERO_LITELLM_URL:-${LITELLM_PROXY_URL:-http://localhost:4000/v1/chat/completions}}"
-LITELLM_MODEL="${CODERO_LITELLM_MODEL:-${LITELLM_MODEL:-qwen3-coder-plus}}"
+LITELLM_MODEL="${CODERO_LITELLM_MODEL:-${LITELLM_MODEL:-cacheflow_agent}}"
 TIMEOUT_SEC="${CODERO_FIRST_PASS_TIMEOUT_SEC:-120}"
+
+if [ "$LITELLM_MODEL" = "cacheflow_agent" ]; then
+  LITELLM_MODEL="cacheflow-agent"
+fi
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -17,6 +21,11 @@ require_cmd() {
 }
 
 load_litellm_key() {
+  if [ -n "${CODERO_LITELLM_MASTER_KEY:-}" ]; then
+    echo "$CODERO_LITELLM_MASTER_KEY"
+    return 0
+  fi
+
   if [ -n "${LITELLM_MASTER_KEY:-}" ]; then
     echo "$LITELLM_MASTER_KEY"
     return 0
@@ -33,6 +42,11 @@ load_litellm_key() {
       echo "$raw"
       return 0
     fi
+  fi
+
+  if [ -n "${OPENAI_API_KEY:-}" ]; then
+    echo "$OPENAI_API_KEY"
+    return 0
   fi
 
   return 1
@@ -63,7 +77,7 @@ main() {
 
   local key diff prompt response result
   if ! key="$(load_litellm_key)"; then
-    echo "Error: LiteLLM key not found. Set LITELLM_MASTER_KEY or add it in $REPO_PATH/.env" >&2
+    echo "Error: LiteLLM key not found. Set CODERO_LITELLM_MASTER_KEY/LITELLM_MASTER_KEY (or OPENAI_API_KEY) or add one in $REPO_PATH/.env" >&2
     exit 1
   fi
 

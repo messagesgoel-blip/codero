@@ -17,3 +17,4 @@ coverage.out
 
 # Env
 .env
+.aider*

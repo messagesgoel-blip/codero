@@ -7,8 +7,20 @@ set -euo pipefail
 REPO_PATH="${CODERO_REPO_PATH:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 PR_AGENT_BIN="${CODERO_PR_AGENT_BIN:-pr-agent}"
 LITELLM_URL_RAW="${CODERO_LITELLM_URL:-${LITELLM_PROXY_URL:-http://localhost:4000/v1}}"
-PRIMARY_MODEL="${CODERO_SECOND_PASS_LITELLM_MODEL:-${CODERO_LITELLM_MODEL:-qwen3-coder-plus}}"
+PRIMARY_MODEL="${CODERO_SECOND_PASS_LITELLM_MODEL:-${CODERO_LITELLM_MODEL:-cacheflow_agent}}"
 MODEL_SET_RAW="${CODERO_SECOND_PASS_LITELLM_MODELS:-${CODERO_LITELLM_MODELS:-$PRIMARY_MODEL}}"
+CUSTOM_MODEL_MAX_TOKENS="${CODERO_SECOND_PASS_MODEL_MAX_TOKENS:-65536}"
+
+if [ "$PRIMARY_MODEL" = "cacheflow_agent" ]; then
+  PRIMARY_MODEL="cacheflow-agent"
+fi
+MODEL_SET_RAW="${MODEL_SET_RAW//cacheflow_agent/cacheflow-agent}"
+
+# pr-agent's LiteLLM integration expects provider-qualified model strings.
+if [ "$PRIMARY_MODEL" = "cacheflow-agent" ]; then
+  PRIMARY_MODEL="openai/cacheflow-agent"
+fi
+MODEL_SET_RAW="${MODEL_SET_RAW//cacheflow-agent/openai\/cacheflow-agent}"
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -18,6 +30,11 @@ require_cmd() {
 }
 
 load_litellm_key() {
+  if [ -n "${CODERO_LITELLM_MASTER_KEY:-}" ]; then
+    echo "$CODERO_LITELLM_MASTER_KEY"
+    return 0
+  fi
+
   if [ -n "${LITELLM_MASTER_KEY:-}" ]; then
     echo "$LITELLM_MASTER_KEY"
     return 0
@@ -34,6 +51,11 @@ load_litellm_key() {
       echo "$raw"
       return 0
     fi
+  fi
+
+  if [ -n "${OPENAI_API_KEY:-}" ]; then
+    echo "$OPENAI_API_KEY"
+    return 0
   fi
 
   return 1
@@ -118,15 +140,29 @@ main() {
   echo "Model: $PRIMARY_MODEL"
   echo "Fallback models: $fallback_json"
 
-  (
+  local output status
+  set +e
+  output="$(
     cd "$REPO_PATH"
     OPENAI__API_BASE="$litellm_base" \
     OPENAI__KEY="$litellm_key" \
     CONFIG__MODEL="$PRIMARY_MODEL" \
     CONFIG__FALLBACK_MODELS="$fallback_json" \
+    CONFIG__CUSTOM_MODEL_MAX_TOKENS="$CUSTOM_MODEL_MAX_TOKENS" \
     GITHUB__USER_TOKEN="$github_token" \
     "$PR_AGENT_BIN" --pr_url "$pr_url" review "$@" 2>&1
-  )
+  )"
+  status=$?
+  set -e
+
+  printf '%s\n' "$output"
+
+  # pr-agent can occasionally print hard errors while returning zero.
+  cleaned_output="$(printf '%s\n' "$output" | sed -E 's/\x1B\[[0-9;]*[A-Za-z]//g')"
+  if [ "$status" -ne 0 ] || printf '%s\n' "$cleaned_output" | grep -qiE '(Failed to process the command|Traceback|Bad credentials|Failed to get git provider|Failed to review PR|Failed to generate prediction|ERROR)'; then
+    echo "PR-Agent fallback failed." >&2
+    exit 1
+  fi
 
   echo "--- CODERO SECOND PASS END ---"
 }
