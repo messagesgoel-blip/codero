@@ -135,7 +135,7 @@
 | Daemon restart recovery | PASS ✓ | Integration tests cover |
 | SIGKILL aftermath recovery | PENDING | Not tested in this run |
 | Duplicate webhook delivery handling | PASS ✓ | TestIntegration_WebhookDedup |
-| Pre-commit loops enforced by hook | NOT IMPLEMENTED | Stub in docs |
+| Pre-commit loops enforced by hook | PENDING | Phase 1 requirement; requires hook enforcement in active repos |
 
 ---
 
