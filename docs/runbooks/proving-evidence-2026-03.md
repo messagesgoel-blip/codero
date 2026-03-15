@@ -95,7 +95,7 @@
 ### Test Coverage
 - **Status:** PASS ✓
 - **Test:** `TestSprint6_MergeReady_Guardrails/unresolved_threads`
-- **Evidence:** Merge ready guardrails include unresolved_threads check
+- **Evidence:** Merge-ready guardrails include unresolved_threads check
 
 ---
 
