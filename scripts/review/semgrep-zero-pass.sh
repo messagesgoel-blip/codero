@@ -3,10 +3,22 @@ set -euo pipefail
 
 # Semgrep deterministic pre-commit gate (Gate 0).
 # Fails commit on findings or execution errors.
+# Scans staged content (not working tree) for accuracy.
 
 REPO_PATH="${CODERO_REPO_PATH:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 TIMEOUT_SEC="${CODERO_SEMGREP_TIMEOUT_SEC:-180}"
 SEMGREP_CONFIG="${CODERO_SEMGREP_CONFIG:-p/default}"
+
+# Portable timeout command (macOS uses gtimeout)
+TIMEOUT_CMD=""
+if command -v timeout >/dev/null 2>&1; then
+  TIMEOUT_CMD="timeout"
+elif command -v gtimeout >/dev/null 2>&1; then
+  TIMEOUT_CMD="gtimeout"
+else
+  echo "Error: timeout command not found. Install coreutils (brew install coreutils on macOS)." >&2
+  exit 1
+fi
 
 if ! command -v semgrep >/dev/null 2>&1; then
   echo "Error: semgrep is not installed. Install with: pip install semgrep" >&2
@@ -26,9 +38,22 @@ if [ "${#STAGED_FILES[@]}" -eq 0 ]; then
   exit 0
 fi
 
+# Create temp directory for staged content
+TMPDIR="${TMPDIR:-/tmp}"
+SCAN_DIR="$(mktemp -d "${TMPDIR}/semgrep-staged.XXXXXX")"
+trap 'rm -rf "$SCAN_DIR"' EXIT
+
 TARGETS=()
 for f in "${STAGED_FILES[@]}"; do
-  [ -f "$f" ] && TARGETS+=("$f")
+  # Extract staged content using git show :<path>
+  STAGED_CONTENT="$(git -C "$REPO_PATH" show ":$f" 2>/dev/null || true)"
+  if [ -n "$STAGED_CONTENT" ]; then
+    # Create same directory structure in temp
+    TARGET_PATH="$SCAN_DIR/$f"
+    mkdir -p "$(dirname "$TARGET_PATH")"
+    printf '%s' "$STAGED_CONTENT" > "$TARGET_PATH"
+    TARGETS+=("$TARGET_PATH")
+  fi
 done
 
 if [ "${#TARGETS[@]}" -eq 0 ]; then
@@ -48,7 +73,7 @@ echo "Targets: ${#TARGETS[@]} staged file(s)"
 echo "Timeout: ${TIMEOUT_SEC}s"
 
 set +e
-timeout "$TIMEOUT_SEC" semgrep scan \
+"$TIMEOUT_CMD" "$TIMEOUT_SEC" semgrep scan \
   --config "$SEMGREP_CONFIG" \
   --error \
   --metrics=off \

@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+
+# Detect timeout command (support GNU coreutils on macOS)
+TIMEOUT_CMD=""
+if command -v timeout >/dev/null 2>&1; then
+  TIMEOUT_CMD="timeout"
+elif command -v gtimeout >/dev/null 2>&1; then
+  TIMEOUT_CMD="gtimeout"
+else
+  echo "Error: timeout command not found. Install coreutils." >&2
+  exit 1
+fi
 # 6-Pass Pre-Commit Review Gate Orchestrator
 # Default order:
 # 1. copilot-third-pass.sh (Primary AI gate)
@@ -76,73 +87,84 @@ load_env() {
 }
 
 setup_auth_home() {
+  # Prefer explicit CODERO_AUTH_HOME if provided and valid; otherwise fall back to existing HOME.
   if [ -n "$AUTH_HOME" ] && [ -d "$AUTH_HOME" ]; then
     export HOME="$AUTH_HOME"
     echo "Using auth home: $HOME" | tee -a "$LOG_DIR/orchestrator-$TS.log"
     return 0
   fi
 
-  if [ "${HOME:-}" != "/home/sanjay" ] && [ -d "/home/sanjay" ]; then
-    if [ -f "/home/sanjay/.config/github-copilot/apps.json" ] || [ -f "/home/sanjay/.coderabbit/auth.json" ]; then
-      export HOME="/home/sanjay"
-      echo "Using detected auth home: $HOME" | tee -a "$LOG_DIR/orchestrator-$TS.log"
-    fi
+  if [ -z "${HOME:-}" ]; then
+    HOME="$(getent passwd "$(id -u)" | cut -d: -f6 2>/dev/null || echo "$REPO_PATH")"
+    export HOME
+    echo "Using default auth home: $HOME" | tee -a "$LOG_DIR/orchestrator-$TS.log"
   fi
 }
+
+
 
 run_gate() {
   local gate_name="$1"
   local gate_num="$2"
   local script="$SCRIPT_DIR/${gate_name}.sh"
-  local log_file="$LOG_DIR/${gate_name}-${TS}.log"
-
-  echo "=== GATE $gate_num: $gate_name ===" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+  local log_file="$LOG_DIR/${gate_name}-$TS.log"
 
   if [ ! -x "$script" ]; then
-    echo "Warning: Script not found or not executable: $script" | tee -a "$LOG_DIR/orchestrator-$TS.log"
-    log_status "skip" "$gate_name" "$gate_num"
-    return 1
-  fi
-
-  local output exit_code
-  set +e
-  output="$(timeout "${CODERO_GATE_TIMEOUT:-180}" bash "$script" 2>&1)"
-  exit_code=$?
-  set -e
-
-  if [ $exit_code -eq 124 ]; then
-    echo "GATE $gate_num FAILED: Timeout after ${CODERO_GATE_TIMEOUT:-180}s" | tee -a "$LOG_DIR/orchestrator-$TS.log"
-    echo "$output" | tee "$log_file"
-    log_status "failed_timeout" "$gate_name" "$gate_num"
-    return 1
-  fi
-
-  if [ $exit_code -ne 0 ]; then
-    echo "GATE $gate_num FAILED: Exit code $exit_code" | tee -a "$LOG_DIR/orchestrator-$TS.log"
-    echo "$output" | tee "$log_file"
+    echo "✗ $gate_name script not found or not executable: $script" >&2
     log_status "failed" "$gate_name" "$gate_num"
     return 1
   fi
 
-  if echo "$output" | grep -qiE "(no issues found|no actionable issues|no significant issues|looks good)"; then
-    echo "GATE $gate_num PASSED: Reviewer reported no actionable findings" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+  exit_code=0
+  output=$("$TIMEOUT_CMD" "${CODERO_GATE_TIMEOUT:-180}" bash "$script" 2>&1) || exit_code=$?
+
+  if [ $exit_code -eq 0 ]; then
+    # Even on zero exit, check output for findings
+    if echo "$output" | grep -qE '[0-9]+ findings'; then
+      findings=$(echo "$output" | grep -oE '[0-9]+ findings' | head -1 | awk '{print $1}')
+      if [ -n "$findings" ] && [ "$findings" -gt 0 ]; then
+        echo "GATE $gate_num FAILED with issues ($findings findings): see log" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+        echo "$output" | tee "$log_file"
+        log_status "failed_with_issues" "$gate_name" "$gate_num"
+        return 1
+      fi
+    fi
+    echo "GATE $gate_num PASSED: No issues found" | tee -a "$LOG_DIR/orchestrator-$TS.log"
     echo "$output" | tee "$log_file"
     log_status "passed_clean" "$gate_name" "$gate_num"
     return 0
   fi
 
-  if echo "$output" | grep -qiE "(error|warning|fix|issue|problem|vulnerable|secret|credential)"; then
-    echo "GATE $gate_num PASSED but found issues:" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+  if [ $exit_code -eq 124 ]; then
+    echo "GATE $gate_num TIMEOUT" | tee -a "$LOG_DIR/orchestrator-$TS.log"
     echo "$output" | tee "$log_file"
-    log_status "passed_with_issues" "$gate_name" "$gate_num"
+    log_status "failed_timeout" "$gate_name" "$gate_num"
     return 1
   fi
 
-  echo "GATE $gate_num PASSED: No issues found" | tee -a "$LOG_DIR/orchestrator-$TS.log"
-  echo "$output" | tee "$log_file"
-  log_status "passed" "$gate_name" "$gate_num"
-  return 0
+  # Non-zero exit (gate reported issues). Check output for findings count.
+  if echo "$output" | grep -qE '[0-9]+ findings'; then
+    findings=$(echo "$output" | grep -oE '[0-9]+ findings' | head -1 | awk '{print $1}')
+    if [ -n "$findings" ] && [ "$findings" -gt 0 ]; then
+      echo "GATE $gate_num FAILED with issues ($findings findings): see log" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+      echo "$output" | tee "$log_file"
+      log_status "failed_with_issues" "$gate_name" "$gate_num"
+      return 1
+    else
+      echo "GATE $gate_num PASSED: No issues found" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+      echo "$output" | tee "$log_file"
+      log_status "passed_clean" "$gate_name" "$gate_num"
+      return 0
+    fi
+  else
+    echo "WARN: $gate_name output ambiguous (no findings count): $(echo "$output" | head -1)" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+    echo "$output" | tee "$log_file"
+    log_status "unknown_output" "$gate_name" "$gate_num"
+    return 1
+  fi
 }
+
+
 
 run_copilot_then_semgrep() {
   PASSED_COUNT=0
@@ -229,8 +251,18 @@ run_semgrep_then_ai() {
 }
 
 main() {
+  # Load environment first so .env values influence configuration
+  load_env
+
+  # Re-derive configuration from environment (now that .env is loaded)
+  MODEL_ALIAS="${CODERO_MODEL_ALIAS:-cacheflow_agent}"
+  MODE="${CODERO_MODE:-fast}"
+  MIN_SUCCESSFUL_AI_GATES="${CODERO_MIN_SUCCESSFUL_AI_GATES:-2}"
+  AUTH_HOME="${CODERO_AUTH_HOME:-}"
+  GATE_ORDER="${CODERO_GATE_ORDER:-copilot-first}"
+
   echo "========================================"
-  echo "5-PASS PRE-COMMIT REVIEW GATE"
+  echo "6-PASS PRE-COMMIT REVIEW GATE"
   echo "Model Alias: $MODEL_ALIAS"
   echo "Mode: $MODE"
   echo "Repo: $REPO_PATH"
@@ -242,11 +274,7 @@ main() {
     exit 1
   fi
 
-  load_env
   setup_auth_home
-
-  local passed_count=0
-  local total_attempts=0
 
   echo "Starting gate chain..." | tee -a "$LOG_DIR/orchestrator-$TS.log"
   PASSED_COUNT=0
@@ -263,8 +291,9 @@ main() {
       exit 1
       ;;
   esac
-  passed_count="$PASSED_COUNT"
-  total_attempts="$TOTAL_ATTEMPTS"
+
+  local passed_count="$PASSED_COUNT"
+  local total_attempts="$TOTAL_ATTEMPTS"
 
   echo "" | tee -a "$LOG_DIR/orchestrator-$TS.log"
   echo "========================================" | tee -a "$LOG_DIR/orchestrator-$TS.log"
@@ -284,7 +313,17 @@ main() {
     local parallel_script="$SCRIPT_DIR/parallel-agent-pass.sh"
     if [ -x "$parallel_script" ]; then
       echo "Running parallel-agent pass..."
-      timeout "${CODERO_GATE_TIMEOUT:-180}" env CODERO_REPO_PATH="$REPO_PATH" "$parallel_script"
+      "$TIMEOUT_CMD" "${CODERO_GATE_TIMEOUT:-180}" env CODERO_REPO_PATH="$REPO_PATH" "$parallel_script" &
+      local parallel_pid=$!
+      local parallel_exit=0
+      if wait "$parallel_pid"; then
+        parallel_exit=0
+      else
+        parallel_exit=$?
+      fi
+      if [ "$parallel_exit" -ne 0 ]; then
+        echo "⚠ Parallel-agent pass completed with exit code $parallel_exit" >&2 | tee -a "$LOG_DIR/orchestrator-$TS.log"
+      fi
     fi
 
     echo ""

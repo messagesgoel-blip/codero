@@ -18,6 +18,18 @@ require_cmd() {
   return 0
 }
 
+# Detect timeout command (support GNU coreutils on macOS)
+TIMEOUT_CMD=""
+if command -v timeout >/dev/null 2>&1; then
+  TIMEOUT_CMD="timeout"
+elif command -v gtimeout >/dev/null 2>&1; then
+  TIMEOUT_CMD="gtimeout"
+else
+  echo "Error: timeout command not found. Install coreutils." >&2
+  exit 1
+fi
+
+
 load_openai_key() {
   if [ -n "${OPENAI_API_KEY:-}" ]; then
     echo "$OPENAI_API_KEY"
@@ -41,23 +53,12 @@ load_openai_key() {
 }
 
 build_diff() {
-  local tracked untracked file file_diff
-  tracked="$(git -C "$REPO_PATH" diff HEAD 2>/dev/null || true)"
-  untracked=""
-
-  while IFS= read -r -d '' file; do
-    if [ -f "$file" ]; then
-      file_diff="$(git -C "$REPO_PATH" diff --no-index -- /dev/null "$file" 2>/dev/null || [ $? -eq 1 ])"
-      untracked="${untracked}${file_diff}"
-    fi
-  done < <(git -C "$REPO_PATH" ls-files --others --exclude-standard -z 2>/dev/null)
-
-  printf '%s%s' "$tracked" "$untracked"
+  git -C "$REPO_PATH" diff --cached --no-ext-diff --binary -- .
 }
 
 review_with_copilot() {
   local diff="$1"
-  
+
   if ! require_cmd copilot; then
     echo "Error: copilot CLI not found" >&2
     return 1
@@ -84,9 +85,9 @@ Return concise, prioritized findings with code locations.
 DIFF:
 $diff"
 
-  local result
-  if ! result="$(timeout "$TIMEOUT_SEC" copilot --model "$COPILOT_MODEL" -p "$prompt" 2>&1)"; then
-    exit_code=$?
+  local result exit_code=0
+  result=$("$TIMEOUT_CMD" "$TIMEOUT_SEC" copilot --model "$COPILOT_MODEL" -p "$prompt" 2>&1) || exit_code=$?
+  if [ $exit_code -ne 0 ]; then
     if [ -n "$_saved_gh_token" ]; then
       export GH_TOKEN="$_saved_gh_token"
     fi
@@ -107,7 +108,7 @@ $diff"
 
 review_with_openai() {
   local diff="$1"
-  
+
   if ! require_cmd openai; then
     echo "Error: openai CLI not found" >&2
     return 1
@@ -133,12 +134,12 @@ Return concise, prioritized findings with code locations.
 DIFF:
 $diff"
 
-  local result
-  if ! result="$(timeout "$TIMEOUT_SEC" OPENAI_API_KEY="$api_key" openai api chat.completions.create \
+  local result exit_code=0
+  result=$("$TIMEOUT_CMD" "$TIMEOUT_SEC" env OPENAI_API_KEY="$api_key" openai api chat.completions.create \
     -m "$OPENAI_MODEL" \
     -g system "You are a strict code reviewer. Focus on bugs, security, and best practices." \
-    -g user "$prompt" 2>&1)"; then
-    exit_code=$?
+    -g user "$prompt" 2>&1) || exit_code=$?
+  if [ $exit_code -ne 0 ]; then
     if [ $exit_code -eq 124 ]; then
       echo "Error: OpenAI review timed out after ${TIMEOUT_SEC}s"
       return 1

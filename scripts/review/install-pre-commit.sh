@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Install Codero review gate as pre-commit hook for a target repo.
+# Install Codero 4-pass review as pre-commit hook for a target repo.
 # Supports git worktrees via git rev-parse --git-common-dir.
 
 if [ "$#" -lt 1 ]; then
@@ -32,13 +32,21 @@ fi
 cat > "$HOOK_PATH" <<'HOOK'
 #!/usr/bin/env bash
 set -euo pipefail
-export CODERO_REPO_PATH="$(git rev-parse --show-toplevel)"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+export CODERO_REPO_PATH="$REPO_ROOT"
 export CODERO_MODEL_ALIAS="cacheflow_agent"
-exec "$CODERO_ROOT/scripts/review/two-pass-review.sh"
+export CODERO_ROOT="${CODERO_ROOT:-/srv/storage/local/codero}"
+
+# Prefer local scripts if available, fallback to global
+if [ -x "$REPO_ROOT/scripts/review/two-pass-review.sh" ]; then
+  exec "$REPO_ROOT/scripts/review/two-pass-review.sh"
+else
+  exec "$CODERO_ROOT/scripts/review/two-pass-review.sh"
+fi
 HOOK
 
 chmod +x "$HOOK_PATH"
 
-echo "Installed Codero review pre-commit hook: $HOOK_PATH"
+echo "Installed Codero 4-pass pre-commit hook: $HOOK_PATH"
 echo "  Model alias: cacheflow_agent"
 echo "  Mode: fast (default)"

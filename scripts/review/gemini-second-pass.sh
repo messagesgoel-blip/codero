@@ -1,139 +1,244 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Gemini Second-Pass Review (Primary Gate 2)
-# Local review using Gemini CLI for pre-commit quality gate.
-# Supports OAuth with automatic account switching on rate limit.
-# Uses gemini-2.5-flash-lite for faster responses.
-#
-# Account switching works by:
-# 1. Looking for oauth_creds files named: oauth_creds.<email_prefix>.json
-# 2. Swapping the active oauth_creds.json before each attempt
-#
-# To set up multiple accounts:
-# 1. Authenticate with each account interactively
-# 2. Save the oauth_creds.json as oauth_creds.<email_prefix>.json
-#    e.g., oauth_creds.msg.goel.json, oauth_creds.messages.goel.json
+# Gemini Second-Pass Review (Primary Gate 4)
+# API-key based review flow (LiteLLM or Gemini API).
+# No OAuth/Gemini CLI dependency.
 
 REPO_PATH="${CODERO_REPO_PATH:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 TIMEOUT_SEC="${CODERO_SECOND_PASS_TIMEOUT_SEC:-45}"
 GEMINI_MODEL="${CODERO_GEMINI_MODEL:-gemini-2.5-flash-lite}"
-MAX_RETRIES="${CODERO_GEMINI_MAX_RETRIES:-3}"
-GEMINI_CONFIG_DIR="${HOME}/.gemini"
 
-# Available accounts (will rotate on rate limit)
-# These should match oauth_creds.<account>.json files
-GEMINI_ACCOUNTS=("msg.goel@gmail.com" "agussalahi551@gmail.com" "messages.goel@gmail.com")
-CURRENT_ACCOUNT_IDX=0
-
-# Alternate Gemini config directories (for OAuth switching)
-GEMINI_ALT_HOMES=(
-  "$HOME/.gemini"
-  "$HOME/.gcli-b-home/.gemini"
-  "$HOME/.gcli-oci-noauth-home/.gemini"
-)
+# Portable timeout command (macOS uses gtimeout)
+TIMEOUT_CMD=""
+if command -v timeout >/dev/null 2>&1; then
+  TIMEOUT_CMD="timeout"
+elif command -v gtimeout >/dev/null 2>&1; then
+  TIMEOUT_CMD="gtimeout"
+else
+  echo "Error: timeout utility not found (install coreutils)" >&2
+  exit 1
+fi
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
-    echo "Error: required command not found: $1" >&2
-    exit 1
+    return 1
   fi
+  return 0
 }
 
-get_creds_file_for_account() {
-  local account="$1"
-  local email_prefix
-  email_prefix=$(echo "$account" | cut -d'@' -f1)
-  local creds_file="$GEMINI_CONFIG_DIR/oauth_creds.${email_prefix}.json"
-  
-  if [ -f "$creds_file" ]; then
-    echo "$creds_file"
+strip_quotes() {
+  local raw="${1:-}"
+  raw="${raw%\"}"
+  raw="${raw#\"}"
+  raw="${raw%\'}"
+  raw="${raw#\'}"
+  printf '%s' "$raw"
+}
+
+read_key_from_file() {
+  local key="$1"
+  local env_file="$2"
+  local raw
+  raw="$(grep -E "^${key}=" "$env_file" 2>/dev/null | head -n 1 | cut -d= -f2- || true)"
+  strip_quotes "$raw"
+}
+
+load_api_config() {
+  local base_url key raw litellm_env_path
+  base_url="${GEMINI_API_BASE:-https://generativelanguage.googleapis.com/v1beta}"
+  raw="$(strip_quotes "${GEMINI_API_KEY:-}")"
+  if [ -n "$raw" ]; then
+    printf 'gemini|%s|%s' "$base_url" "$raw"
     return 0
+  fi
+  if [ -f "$REPO_PATH/.env" ]; then
+    raw="$(read_key_from_file "GEMINI_API_KEY" "$REPO_PATH/.env")"
+    if [ -n "$raw" ]; then
+      printf 'gemini|%s|%s' "$base_url" "$raw"
+      return 0
+    fi
+  fi
+
+  base_url="${LITELLM_URL:-${LITELLM_BASE_URL:-${LITELLM_HOST:-http://localhost:4000}/v1}}"
+  for key in LITELLM_MASTER_KEY LITELLM_API_KEY OPENAI_API_KEY; do
+    raw="${!key-}"
+    raw="$(strip_quotes "$raw")"
+    if [ -n "$raw" ]; then
+      printf 'litellm|%s|%s' "$base_url" "$raw"
+      return 0
+    fi
+  done
+
+  if [ -f "$REPO_PATH/.env" ]; then
+    for key in LITELLM_MASTER_KEY LITELLM_API_KEY OPENAI_API_KEY; do
+      raw="$(read_key_from_file "$key" "$REPO_PATH/.env")"
+      if [ -n "$raw" ]; then
+        printf 'litellm|%s|%s' "$base_url" "$raw"
+        return 0
+      fi
+    done
+  fi
+
+  litellm_env_path="${LITELLM_ENV_PATH:-/opt/docker/apps/litellm/.env}"
+  if [ -f "$litellm_env_path" ]; then
+    for key in LITELLM_MASTER_KEY LITELLM_API_KEY OPENAI_API_KEY; do
+      raw="$(read_key_from_file "$key" "$litellm_env_path")"
+      if [ -n "$raw" ]; then
+        printf 'litellm|%s|%s' "$base_url" "$raw"
+        return 0
+      fi
+    done
+  fi
+
+  return 1
+}
+
+build_diff() {
+  git -C "$REPO_PATH" diff --cached --no-ext-diff --binary -- .
+}
+
+run_via_litellm() {
+  local base_url="$1"
+  local api_key="$2"
+  local prompt="$3"
+  local endpoint payload response exit_code content err
+
+  endpoint="$base_url"
+  if [[ "$endpoint" != */chat/completions ]]; then
+    endpoint="${endpoint%/}/chat/completions"
+  fi
+
+  payload="$(jq -n \
+    --arg model "$GEMINI_MODEL" \
+    --arg prompt "$prompt" \
+    '{
+      model: $model,
+      messages: [
+        { role: "system", content: "You are a strict code reviewer. Focus on logic bugs, regressions, security, and missing tests." },
+        { role: "user", content: $prompt }
+      ],
+      temperature: 0
+    }')"
+
+  exit_code=0
+  response=$("$TIMEOUT_CMD" "$TIMEOUT_SEC" curl -sS -X POST "$endpoint" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer ${api_key}" \
+    -d "$payload" 2>&1) || exit_code=$?
+
+  if [ $exit_code -ne 0 ]; then
+    if [ $exit_code -eq 124 ]; then
+      echo "Error: Gemini review timed out after ${TIMEOUT_SEC}s" >&2
+      return 124
+    fi
+    echo "$response" >&2
+    return 1
+  fi
+
+  content="$(printf '%s' "$response" | jq -r '.choices[0].message.content // empty' 2>/dev/null || true)"
+  if [ -n "$content" ]; then
+    printf '%s\n' "$content"
+    return 0
+  fi
+
+  err="$(printf '%s' "$response" | jq -r '.error.message // .error // empty' 2>/dev/null || true)"
+  if [ -n "$err" ]; then
+    echo "$err" >&2
+  else
+    echo "$response" >&2
   fi
   return 1
 }
 
-switch_gemini_account() {
-  local target_account="$1"
-  local accounts_file="$GEMINI_CONFIG_DIR/google_accounts.json"
-  local creds_file="$GEMINI_CONFIG_DIR/oauth_creds.json"
-  
-  # Check if we have dedicated credentials for this account
-  local dedicated_creds
-  if dedicated_creds=$(get_creds_file_for_account "$target_account"); then
-    # Backup current creds
-    [ -f "$creds_file" ] && cp "$creds_file" "${creds_file}.bak"
-    # Copy dedicated creds to active
-    cp "$dedicated_creds" "$creds_file"
-    echo "Switched OAuth credentials to: $target_account"
-  else
-    # Try alternate Gemini homes
-    for alt_home in "${GEMINI_ALT_HOMES[@]}"; do
-      if [ -d "$alt_home" ]; then
-        local alt_creds="$alt_home/oauth_creds.json"
-        local alt_accounts="$alt_home/google_accounts.json"
-        if [ -f "$alt_creds" ] && [ -f "$alt_accounts" ]; then
-          local alt_active
-          alt_active=$(jq -r '.active' "$alt_accounts" 2>/dev/null || echo "")
-          if [ "$alt_active" = "$target_account" ]; then
-            cp "$alt_creds" "$creds_file"
-            echo "Switched OAuth credentials from $alt_home to: $target_account"
-            break
-          fi
-        fi
-      fi
-    done
-  fi
-  
-  # Update google_accounts.json active field
-  if [ -f "$accounts_file" ]; then
-    if command -v jq >/dev/null 2>&1; then
-      jq --arg new "$target_account" '.active = $new' "$accounts_file" > "${accounts_file}.tmp" && mv "${accounts_file}.tmp" "$accounts_file"
-    else
-      sed -i "s/\"active\": \"[^\"]*\"/\"active\": \"$target_account\"/" "$accounts_file"
+run_via_gemini_api() {
+  local base_url="$1"
+  local api_key="$2"
+  local prompt="$3"
+  local endpoint payload response exit_code content err
+
+  endpoint="${base_url%/}/models/${GEMINI_MODEL}:generateContent?key=${api_key}"
+  payload="$(jq -n \
+    --arg prompt "$prompt" \
+    '{
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { text: $prompt }
+          ]
+        }
+      ]
+    }')"
+
+  exit_code=0
+  response=$("$TIMEOUT_CMD" "$TIMEOUT_SEC" curl -sS -X POST "$endpoint" \
+    -H "Content-Type: application/json" \
+    -d "$payload" 2>&1) || exit_code=$?
+
+  if [ $exit_code -ne 0 ]; then
+    if [ $exit_code -eq 124 ]; then
+      echo "Error: Gemini review timed out after ${TIMEOUT_SEC}s" >&2
+      return 124
     fi
-    echo "Updated active account to: $target_account"
+    echo "$response" >&2
+    return 1
   fi
-}
 
-build_diff() {
-  local tracked untracked file file_diff
-  tracked="$(git -C "$REPO_PATH" diff HEAD 2>/dev/null || true)"
-  untracked=""
-
-  while IFS= read -r -d '' file; do
-    if [ -f "$file" ]; then
-      file_diff="$(git -C "$REPO_PATH" diff --no-index -- /dev/null "$file" 2>/dev/null || [ $? -eq 1 ])"
-      untracked="${untracked}${file_diff}"
-    fi
-  done < <(git -C "$REPO_PATH" ls-files --others --exclude-standard -z 2>/dev/null)
-
-  printf '%s%s' "$tracked" "$untracked"
-}
-
-is_rate_limited() {
-  local output="$1"
-  if echo "$output" | grep -qiE "(429|rate.*limit|Resource has been exhausted|quota|RESOURCE_EXHAUSTED)"; then
+  content="$(printf '%s' "$response" | jq -r '[.candidates[]?.content.parts[]?.text] | join("\n")' 2>/dev/null || true)"
+  if [ -n "$content" ] && [ "$content" != "null" ]; then
+    printf '%s\n' "$content"
     return 0
+  fi
+
+  err="$(printf '%s' "$response" | jq -r '.error.message // .error // empty' 2>/dev/null || true)"
+  if [ -n "$err" ]; then
+    echo "$err" >&2
+  else
+    echo "$response" >&2
   fi
   return 1
 }
 
 run_gemini_review() {
-  local diff="$1"
-  
+  local provider="$1"
+  local base_url="$2"
+  local api_key="$3"
+  local diff="$4"
   local prompt
-  prompt="Review this code diff for bugs, security issues, and regressions. Be concise. List file locations. If no issues, say 'No issues found.'
+
+  prompt="Review this staged code diff for bugs, security issues, and regressions. Be concise. List file locations. If no issues, say 'No issues found.'
 
 DIFF:
 $diff"
 
-  timeout "$TIMEOUT_SEC" gemini -m "$GEMINI_MODEL" -p "$prompt" 2>&1
+  case "$provider" in
+    litellm)
+      run_via_litellm "$base_url" "$api_key" "$prompt"
+      ;;
+    gemini)
+      run_via_gemini_api "$base_url" "$api_key" "$prompt"
+      ;;
+    *)
+      echo "Unsupported provider: $provider" >&2
+      return 1
+      ;;
+  esac
 }
 
 main() {
-  require_cmd git
-  require_cmd gemini
+  if ! require_cmd git; then
+    echo "Error: required command not found: git" >&2
+    exit 1
+  fi
+  if ! require_cmd curl; then
+    echo "Error: required command not found: curl" >&2
+    exit 1
+  fi
+  if ! require_cmd jq; then
+    echo "Error: required command not found: jq" >&2
+    exit 1
+  fi
 
   if [ ! -d "$REPO_PATH" ]; then
     echo "Error: repo path does not exist: $REPO_PATH" >&2
@@ -143,69 +248,32 @@ main() {
   local diff
   diff="$(build_diff)"
   if [ -z "$diff" ]; then
-    echo "No uncommitted changes to review."
+    echo "No staged changes to review."
     exit 0
   fi
 
-  echo "--- CODERO SECOND PASS (Gemini CLI: $GEMINI_MODEL) ---"
-  echo "Model: $GEMINI_MODEL"
-  echo "Timeout: ${TIMEOUT_SEC}s per attempt"
-
-  local attempt=0
-  local result=""
-  local exit_code=0
-  local rate_limited_accounts=()
-
-  while [ $attempt -lt $MAX_RETRIES ]; do
-    attempt=$((attempt + 1))
-    local current_account="${GEMINI_ACCOUNTS[$CURRENT_ACCOUNT_IDX]}"
-    
-    # Skip accounts we've already tried that were rate limited
-    if [[ " ${rate_limited_accounts[*]} " =~ " ${current_account} " ]]; then
-      CURRENT_ACCOUNT_IDX=$(( (CURRENT_ACCOUNT_IDX + 1) % ${#GEMINI_ACCOUNTS[@]} ))
-      continue
-    fi
-    
-    echo "Attempt $attempt/$MAX_RETRIES using account: $current_account"
-    
-    # Switch to the account we want to try
-    switch_gemini_account "$current_account"
-    
-    result="$(run_gemini_review "$diff")"
-    exit_code=$?
-
-    if [ $exit_code -eq 124 ]; then
-      echo "Timeout on account $current_account, switching..."
-      rate_limited_accounts+=("$current_account")
-      CURRENT_ACCOUNT_IDX=$(( (CURRENT_ACCOUNT_IDX + 1) % ${#GEMINI_ACCOUNTS[@]} ))
-      continue
-    fi
-
-    if is_rate_limited "$result"; then
-      echo "Rate limited on account $current_account, switching..."
-      rate_limited_accounts+=("$current_account")
-      CURRENT_ACCOUNT_IDX=$(( (CURRENT_ACCOUNT_IDX + 1) % ${#GEMINI_ACCOUNTS[@]} ))
-      sleep 1
-      continue
-    fi
-
-    # Success or other error - don't retry
-    break
-  done
-
-  if [ $exit_code -ne 0 ] && [ $exit_code -ne 124 ]; then
-    # Check if result contains actual review content despite error code
-    if echo "$result" | grep -qiE "(finding|issue|bug|security|suggestion|review|no issues)"; then
-      echo "$result"
-      echo "--- CODERO SECOND PASS END ---"
-      exit 0
-    fi
-    echo "$result" >&2
+  local api_config provider base_url api_key
+  if ! api_config="$(load_api_config)"; then
+    echo "Error: no Gemini backend key found." >&2
+    echo "Set one of: LITELLM_MASTER_KEY, LITELLM_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY" >&2
     exit 1
   fi
 
-  if [ $exit_code -eq 124 ]; then
-    echo "Error: All Gemini accounts timed out after ${TIMEOUT_SEC}s each"
+  provider="$(echo "$api_config" | cut -d'|' -f1)"
+  base_url="$(echo "$api_config" | cut -d'|' -f2)"
+  api_key="$(echo "$api_config" | cut -d'|' -f3)"
+
+  echo "--- CODERO SECOND PASS (Gemini API) ---"
+  echo "Provider: $provider"
+  echo "Model: $GEMINI_MODEL"
+  echo "Timeout: ${TIMEOUT_SEC}s"
+
+  local result exit_code=0
+  result="$(run_gemini_review "$provider" "$base_url" "$api_key" "$diff")" || exit_code=$?
+  if [ $exit_code -ne 0 ]; then
+    if [ -n "$result" ]; then
+      echo "$result" >&2
+    fi
     exit 1
   fi
 
