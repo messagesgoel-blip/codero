@@ -80,6 +80,24 @@ trim_whitespace() {
   printf '%s' "$value"
 }
 
+is_denied_env_key() {
+  case "$1" in
+    PATH|HOME|BASH_ENV|SHELLOPTS|BASHOPTS|LD_PRELOAD|LD_LIBRARY_PATH|IFS|PWD|OLDPWD|SHLVL|ENV|PROMPT_COMMAND|CODERO_MIN_SUCCESSFUL_AI_GATES)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+is_readonly_key() {
+  local key="$1"
+  local decl
+  decl="$(declare -p "$key" 2>/dev/null || true)"
+  [[ "$decl" =~ ^declare\ -[A-Za-z]*r[A-Za-z]*\ ${key}= ]]
+}
+
 load_env() {
   local env_file line key value
   if env_file="$(find_env_file)"; then
@@ -91,12 +109,29 @@ load_env() {
         \#*) continue ;;
       esac
 
-      if [[ ! "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
-        echo "Skipping unsupported env line: $line" >> "$LOG_DIR/orchestrator-$TS.log"
+      if [[ "$line" != *=* ]]; then
+        echo "Skipping malformed env entry" >> "$LOG_DIR/orchestrator-$TS.log"
         continue
       fi
 
       key="${line%%=*}"
+      if [[ ! "$key" =~ ^[A-Z][A-Z0-9_]*$ ]]; then
+        echo "Skipping env key (invalid format): $key" >> "$LOG_DIR/orchestrator-$TS.log"
+        continue
+      fi
+      if is_denied_env_key "$key"; then
+        echo "Skipping env key (denylisted): $key" >> "$LOG_DIR/orchestrator-$TS.log"
+        continue
+      fi
+      if [ -n "${!key+x}" ]; then
+        echo "Skipping env key (already set): $key" >> "$LOG_DIR/orchestrator-$TS.log"
+        continue
+      fi
+      if is_readonly_key "$key"; then
+        echo "Skipping env key (readonly): $key" >> "$LOG_DIR/orchestrator-$TS.log"
+        continue
+      fi
+
       value="${line#*=}"
       value="$(trim_whitespace "$value")"
 
@@ -115,8 +150,13 @@ load_env() {
         value="${value:1:${#value}-2}"
       fi
 
+      if printf '%s' "$value" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+        echo "Skipping env key (unsafe control chars): $key" >> "$LOG_DIR/orchestrator-$TS.log"
+        continue
+      fi
+
       export "$key=$value"
-      echo "Loaded env key: $key" >> "$LOG_DIR/orchestrator-$TS.log"
+      echo "Loaded env key: $key (value masked)" >> "$LOG_DIR/orchestrator-$TS.log"
     done < "$env_file"
   else
     echo "No .env file found; gates will rely on existing environment variables." | tee -a "$LOG_DIR/orchestrator-$TS.log"
@@ -138,6 +178,36 @@ setup_auth_home() {
   fi
 }
 
+detect_findings_count() {
+  local output="$1"
+  local count
+
+  count="$(printf '%s' "$output" | grep -oE '[0-9]+ findings' | head -1 | awk '{print $1}' || true)"
+  if [ -n "$count" ]; then
+    printf '%s' "$count"
+    return 0
+  fi
+
+  if printf '%s' "$output" | grep -qiE 'No issues found|No issues'; then
+    printf '0'
+    return 0
+  fi
+
+  count="$(printf '%s\n' "$output" | grep -Eic '^[[:space:]]*[0-9]+\\.[[:space:]]+')"
+  if [ "$count" -gt 0 ]; then
+    printf '%s' "$count"
+    return 0
+  fi
+
+  count="$(printf '%s\n' "$output" | grep -Eic '(issue:|issues:|error:|errors:|vulnerability|regression|bug:|security issue)')"
+  if [ "$count" -gt 0 ]; then
+    printf '%s' "$count"
+    return 0
+  fi
+
+  printf ''
+}
+
 
 
 run_gate() {
@@ -157,15 +227,12 @@ run_gate() {
   output=$("$TIMEOUT_CMD" "${CODERO_GATE_TIMEOUT:-180}" bash "$script" 2>&1) || exit_code=$?
 
   if [ $exit_code -eq 0 ]; then
-    # Even on zero exit, check output for findings
-    if echo "$output" | grep -qE '[0-9]+ findings'; then
-      findings=$(echo "$output" | grep -oE '[0-9]+ findings' | head -1 | awk '{print $1}')
-      if [ -n "$findings" ] && [ "$findings" -gt 0 ]; then
-        echo "GATE $gate_num FAILED with issues ($findings findings): see log" | tee -a "$LOG_DIR/orchestrator-$TS.log"
-        echo "$output" | tee "$log_file"
-        log_status "failed_with_issues" "$gate_name" "$gate_num"
-        return 1
-      fi
+    findings="$(detect_findings_count "$output")"
+    if [ -n "$findings" ] && [ "$findings" -gt 0 ]; then
+      echo "GATE $gate_num FAILED with issues ($findings findings): see log" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+      echo "$output" | tee "$log_file"
+      log_status "failed_with_issues" "$gate_name" "$gate_num"
+      return 1
     fi
     echo "GATE $gate_num PASSED: No issues found" | tee -a "$LOG_DIR/orchestrator-$TS.log"
     echo "$output" | tee "$log_file"
@@ -181,13 +248,12 @@ run_gate() {
   fi
 
   # Any non-zero exit is a failure, even if findings parse to zero.
-  if echo "$output" | grep -qE '[0-9]+ findings'; then
-    findings=$(echo "$output" | grep -oE '[0-9]+ findings' | head -1 | awk '{print $1}')
-    if [ -n "$findings" ] && [ "$findings" -gt 0 ]; then
-      echo "GATE $gate_num FAILED with issues ($findings findings): see log" | tee -a "$LOG_DIR/orchestrator-$TS.log"
-      echo "$output" | tee "$log_file"
-      log_status "failed_with_issues" "$gate_name" "$gate_num"
-    fi
+  findings="$(detect_findings_count "$output")"
+  if [ -n "$findings" ] && [ "$findings" -gt 0 ]; then
+    echo "GATE $gate_num FAILED with issues ($findings findings): see log" | tee -a "$LOG_DIR/orchestrator-$TS.log"
+    echo "$output" | tee "$log_file"
+    log_status "failed_with_issues" "$gate_name" "$gate_num"
+    return 1
   fi
 
   echo "GATE $gate_num FAILED: non-zero exit code ($exit_code)" | tee -a "$LOG_DIR/orchestrator-$TS.log"
@@ -308,7 +374,7 @@ main() {
       local parallel_exit=0
       "$TIMEOUT_CMD" "${CODERO_GATE_TIMEOUT:-180}" env CODERO_REPO_PATH="$REPO_PATH" "$parallel_script" || parallel_exit=$?
       if [ "$parallel_exit" -ne 0 ]; then
-        echo "⚠ Parallel-agent pass completed with exit code $parallel_exit" >&2 | tee -a "$LOG_DIR/orchestrator-$TS.log"
+        echo "⚠ Parallel-agent pass completed with exit code $parallel_exit" | tee -a "$LOG_DIR/orchestrator-$TS.log" >&2
       fi
     fi
 

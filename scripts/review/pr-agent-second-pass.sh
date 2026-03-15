@@ -30,11 +30,54 @@ require_cmd() {
   return 0
 }
 
+strip_quotes() {
+  local raw="${1:-}"
+  raw="${raw%\"}"
+  raw="${raw#\"}"
+  raw="${raw%\'}"
+  raw="${raw#\'}"
+  printf '%s' "$raw"
+}
+
+read_key_from_file() {
+  local key="$1"
+  local env_file="$2"
+  local raw
+  raw="$(grep -E "^${key}=" "$env_file" 2>/dev/null | head -n 1 | cut -d'=' -f2- || true)"
+  strip_quotes "$raw"
+}
+
+find_env_file() {
+  if [ -n "${CODERO_ENV_FILE:-}" ] && [ -f "${CODERO_ENV_FILE}" ]; then
+    echo "${CODERO_ENV_FILE}"
+    return 0
+  fi
+
+  if [ -f "$REPO_PATH/.env" ]; then
+    echo "$REPO_PATH/.env"
+    return 0
+  fi
+
+  local common_dir repo_root_env
+  common_dir="$(git -C "$REPO_PATH" rev-parse --git-common-dir 2>/dev/null || true)"
+  if [ -n "$common_dir" ]; then
+    repo_root_env="$(cd "$REPO_PATH" && cd "$common_dir/.." 2>/dev/null && pwd)/.env"
+    if [ -f "$repo_root_env" ]; then
+      echo "$repo_root_env"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
 build_diff() {
   git -C "$REPO_PATH" diff --cached --no-ext-diff --binary -- .
 }
 
 load_litellm_key() {
+  local key raw env_file
+
   if [ -n "${LITELLM_MASTER_KEY:-}" ]; then
     echo "$LITELLM_MASTER_KEY"
     return 0
@@ -43,15 +86,15 @@ load_litellm_key() {
     echo "$LITELLM_API_KEY"
     return 0
   fi
-  local key raw
 
-  if [ -f "$REPO_PATH/.env" ]; then
+  env_file=""
+  if env_file="$(find_env_file)"; then
+    :
+  fi
+
+  if [ -n "$env_file" ] && [ -f "$env_file" ]; then
     for key in LITELLM_MASTER_KEY LITELLM_API_KEY; do
-      raw="$(grep -E "^${key}=" "$REPO_PATH/.env" | head -n 1 | cut -d'=' -f2- || true)"
-      raw="${raw%\"}"
-      raw="${raw#\"}"
-      raw="${raw%\'}"
-      raw="${raw#\'}"
+      raw="$(read_key_from_file "$key" "$env_file")"
       if [ -n "$raw" ]; then
         echo "$raw"
         return 0
@@ -78,12 +121,8 @@ load_litellm_key() {
     return 0
   fi
 
-  if [ -f "$REPO_PATH/.env" ]; then
-    raw="$(grep -E '^OPENAI_API_KEY=' "$REPO_PATH/.env" | head -n 1 | cut -d'=' -f2- || true)"
-    raw="${raw%\"}"
-    raw="${raw#\"}"
-    raw="${raw%\'}"
-    raw="${raw#\'}"
+  if [ -n "$env_file" ] && [ -f "$env_file" ]; then
+    raw="$(read_key_from_file "OPENAI_API_KEY" "$env_file")"
     if [ -n "$raw" ]; then
       echo "$raw"
       return 0

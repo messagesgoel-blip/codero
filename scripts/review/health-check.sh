@@ -14,10 +14,12 @@ echo ""
 
 passes=0
 failures=0
+usable_ai_gates=0
+MIN_AI_QUORUM="${CODERO_MIN_SUCCESSFUL_AI_GATES:-2}"
 
 # Check tool availability
 echo "=== Tool Availability ==="
-required_tools=(semgrep openai)
+required_tools=(semgrep)
 checked_tools=(semgrep openai aider copilot pr-agent coderabbit)
 
 is_required_tool() {
@@ -36,7 +38,7 @@ has_tool() {
 }
 
 for tool in "${checked_tools[@]}"; do
-  if command -v "$tool" >/dev/null 2>&1; then
+  if has_tool "$tool"; then
     echo "✓ $tool: installed"
   else
     if is_required_tool "$tool"; then
@@ -77,64 +79,79 @@ else
   fi
 fi
 
+key_is_set() {
+  local key="$1"
+  if [ -n "${!key-}" ]; then
+    return 0
+  fi
+  if [ -n "$env_file" ] && [ -f "$env_file" ]; then
+    local file_val
+    file_val="$(grep -E "^${key}=" "$env_file" 2>/dev/null | head -n 1 | cut -d= -f2- || true)"
+    [ -n "$file_val" ] && return 0
+  fi
+  return 1
+}
+
 echo "=== API Keys ==="
 # Backend/provider credentials (any one required)
 provider_keys=(CODERO_AIDER_GEMINI_API_KEY CODERO_GEMINI_SECOND_PASS_API_KEY GEMINI_API_KEY OPENROUTER_API_KEY MINIMAX_API_KEY LITELLM_MASTER_KEY LITELLM_API_KEY OPENAI_API_KEY)
 provider_found=false
 for key in "${provider_keys[@]}"; do
-  if [ -n "${!key-}" ]; then
-    echo "✓ $key: set (via environment)"
-    provider_found=true
-    continue
-  fi
-  if [ -n "$env_file" ] && [ -f "$env_file" ]; then
-    file_val="$(grep -E "^${key}=" "$env_file" 2>/dev/null | head -n 1 | cut -d= -f2- || true)"
-    if [ -n "$file_val" ]; then
+  if key_is_set "$key"; then
+    if [ -n "${!key-}" ]; then
+      echo "✓ $key: set (via environment)"
+    else
+      file_val="$(grep -E "^${key}=" "$env_file" 2>/dev/null | head -n 1 | cut -d= -f2- || true)"
       echo "✓ $key: set (${#file_val} chars)"
-      provider_found=true
-      continue
     fi
+    provider_found=true
+  else
+    echo "- $key: not set"
   fi
-  echo "- $key: not set"
 done
 
 # GitHub authentication (any token required)
 github_keys=(GH_TOKEN GITHUB_TOKEN CODERO_GITHUB_TOKEN)
 github_found=false
 for key in "${github_keys[@]}"; do
-  if [ -n "${!key-}" ]; then
-    echo "✓ $key: set (via environment)"
-    github_found=true
-    continue
-  fi
-  if [ -n "$env_file" ] && [ -f "$env_file" ]; then
-    file_val="$(grep -E "^${key}=" "$env_file" 2>/dev/null | head -n 1 | cut -d= -f2- || true)"
-    if [ -n "$file_val" ]; then
+  if key_is_set "$key"; then
+    if [ -n "${!key-}" ]; then
+      echo "✓ $key: set (via environment)"
+    else
+      file_val="$(grep -E "^${key}=" "$env_file" 2>/dev/null | head -n 1 | cut -d= -f2- || true)"
       echo "✓ $key: set (${#file_val} chars)"
-      github_found=true
-      continue
     fi
+    github_found=true
+  else
+    echo "- $key: not set"
   fi
-  echo "- $key: not set"
 done
 
 if [ "$provider_found" = false ]; then
-  echo "✗ No provider backend keys found"
-  failures=$((failures + 1))
+  echo "⚠ No provider backend keys found (some AI gates may be unavailable)"
 fi
 if [ "$github_found" = false ]; then
-  echo "✗ No GitHub auth keys found"
-  failures=$((failures + 1))
+  echo "⚠ No GitHub auth keys found (pr-agent gate may be unavailable)"
 fi
 echo ""
+
 # Check scripts
 echo "=== Scripts ==="
-for script in scripts/review/two-pass-review.sh scripts/review/semgrep-zero-pass.sh scripts/review/copilot-third-pass.sh scripts/review/aider-first-pass.sh scripts/review/gemini-second-pass.sh scripts/review/pr-agent-second-pass.sh scripts/review/coderabbit-second-pass.sh; do
+required_scripts=(scripts/review/two-pass-review.sh scripts/review/semgrep-zero-pass.sh)
+optional_ai_scripts=(scripts/review/copilot-third-pass.sh scripts/review/aider-first-pass.sh scripts/review/gemini-second-pass.sh scripts/review/pr-agent-second-pass.sh scripts/review/coderabbit-second-pass.sh)
+for script in "${required_scripts[@]}"; do
   if [ -x "$script" ]; then
     echo "✓ $script: executable"
   else
     echo "✗ $script: missing or not executable"
     failures=$((failures + 1))
+  fi
+done
+for script in "${optional_ai_scripts[@]}"; do
+  if [ -x "$script" ]; then
+    echo "✓ $script: executable"
+  else
+    echo "⚠ $script: missing or not executable (optional)"
   fi
 done
 echo ""
@@ -146,6 +163,49 @@ if [ -n "$hook_path" ] && [ -x "$hook_path" ]; then
   echo "✓ pre-commit hook: executable ($hook_path)"
 else
   echo "✗ pre-commit hook: missing or not executable"
+  failures=$((failures + 1))
+fi
+echo ""
+
+echo "=== AI Gate Readiness ==="
+if [ -x "scripts/review/copilot-third-pass.sh" ] && (has_tool copilot || (has_tool openai && key_is_set OPENAI_API_KEY)); then
+  echo "✓ Copilot gate: usable"
+  usable_ai_gates=$((usable_ai_gates + 1))
+else
+  echo "⚠ Copilot gate: unavailable (need copilot CLI, or openai CLI + OPENAI_API_KEY)"
+fi
+
+if [ -x "scripts/review/aider-first-pass.sh" ] && has_tool aider && [ "$provider_found" = true ]; then
+  echo "✓ Aider gate: usable"
+  usable_ai_gates=$((usable_ai_gates + 1))
+else
+  echo "⚠ Aider gate: unavailable (needs aider + provider key)"
+fi
+
+if [ -x "scripts/review/gemini-second-pass.sh" ] && has_tool curl && has_tool jq && [ "$provider_found" = true ]; then
+  echo "✓ Gemini gate: usable"
+  usable_ai_gates=$((usable_ai_gates + 1))
+else
+  echo "⚠ Gemini gate: unavailable (needs curl + jq + provider key)"
+fi
+
+if [ -x "scripts/review/pr-agent-second-pass.sh" ] && has_tool pr-agent && [ "$provider_found" = true ] && [ "$github_found" = true ]; then
+  echo "✓ pr-agent gate: usable"
+  usable_ai_gates=$((usable_ai_gates + 1))
+else
+  echo "⚠ pr-agent gate: unavailable (needs pr-agent + provider key + GitHub token)"
+fi
+
+if [ -x "scripts/review/coderabbit-second-pass.sh" ] && has_tool coderabbit; then
+  echo "✓ coderabbit gate: usable"
+  usable_ai_gates=$((usable_ai_gates + 1))
+else
+  echo "⚠ coderabbit gate: unavailable (needs coderabbit CLI)"
+fi
+
+echo "AI gates usable: $usable_ai_gates (minimum required: $MIN_AI_QUORUM)"
+if [ "$usable_ai_gates" -lt "$MIN_AI_QUORUM" ]; then
+  echo "✗ AI quorum not met for pre-commit gate"
   failures=$((failures + 1))
 fi
 echo ""
@@ -219,6 +279,7 @@ echo "========================================"
 echo "Tools: checked"
 echo "API Keys: checked"
 echo "Scripts: checked"
+echo "AI readiness: $usable_ai_gates/$MIN_AI_QUORUM"
 echo "Quick tests: $passes passed"
 echo ""
 

@@ -45,6 +45,18 @@ read_key_from_file() {
   strip_quotes "$raw"
 }
 
+write_secret_headers_file() {
+  local header_line="$1"
+  local header_file
+  header_file="$(mktemp "${TMPDIR:-/tmp}/codero-curl-headers.XXXXXX")"
+  chmod 600 "$header_file"
+  {
+    echo "Content-Type: application/json"
+    echo "$header_line"
+  } > "$header_file"
+  printf '%s' "$header_file"
+}
+
 find_env_file() {
   if [ -n "${CODERO_ENV_FILE:-}" ] && [ -f "${CODERO_ENV_FILE}" ]; then
     echo "${CODERO_ENV_FILE}"
@@ -142,7 +154,7 @@ run_via_litellm() {
   local base_url="$1"
   local api_key="$2"
   local prompt="$3"
-  local endpoint payload response exit_code content err
+  local endpoint payload response exit_code content err header_file
 
   endpoint="$base_url"
   if [[ "$endpoint" != */chat/completions ]]; then
@@ -161,11 +173,12 @@ run_via_litellm() {
       temperature: 0
     }')"
 
+  header_file="$(write_secret_headers_file "Authorization: Bearer ${api_key}")"
   exit_code=0
   response=$("$TIMEOUT_CMD" "$TIMEOUT_SEC" curl -sS -X POST "$endpoint" \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer ${api_key}" \
+    -H "@${header_file}" \
     -d "$payload" 2>&1) || exit_code=$?
+  rm -f "$header_file"
 
   if [ $exit_code -ne 0 ]; then
     if [ $exit_code -eq 124 ]; then
@@ -195,7 +208,7 @@ run_via_gemini_api() {
   local base_url="$1"
   local api_key="$2"
   local prompt="$3"
-  local endpoint payload response exit_code content err
+  local endpoint payload response exit_code content err header_file
 
   # Keep keys out of URL query strings to avoid leakage in process lists and URL logs.
   endpoint="${base_url%/}/models/${GEMINI_MODEL}:generateContent"
@@ -212,11 +225,12 @@ run_via_gemini_api() {
       ]
     }')"
 
+  header_file="$(write_secret_headers_file "x-goog-api-key: ${api_key}")"
   exit_code=0
   response=$("$TIMEOUT_CMD" "$TIMEOUT_SEC" curl -sS -X POST "$endpoint" \
-    -H "Content-Type: application/json" \
-    -H "x-goog-api-key: ${api_key}" \
+    -H "@${header_file}" \
     -d "$payload" 2>&1) || exit_code=$?
+  rm -f "$header_file"
 
   if [ $exit_code -ne 0 ]; then
     if [ $exit_code -eq 124 ]; then
