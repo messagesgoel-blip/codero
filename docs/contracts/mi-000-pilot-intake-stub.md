@@ -36,7 +36,7 @@
 
 ### Test Structure
 
-```
+```text
 tests/parity/mi-000-pilot/
 ├── README.md              # Test plan and coverage matrix
 ├── test_inputs.yaml       # Input fixtures

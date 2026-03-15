@@ -40,6 +40,9 @@ var (
 
 	// ErrMissingWebhookSecret is returned when webhook is enabled but no secret is set.
 	ErrMissingWebhookSecret = errors.New("webhook.secret is required when webhook.enabled is true")
+
+	// ErrInvalidObservabilityPort is returned when observability_port is outside 1..65535.
+	ErrInvalidObservabilityPort = errors.New("observability_port must be between 1 and 65535")
 )
 
 // RedisConfig holds Redis connection settings.
@@ -175,7 +178,7 @@ func applyEnvOverrides(c *Config) {
 	}
 	// CODERO_OBSERVABILITY_PORT overrides the HTTP port for the observability server.
 	if v := os.Getenv("CODERO_OBSERVABILITY_PORT"); v != "" {
-		if p, err := strconv.Atoi(v); err == nil && p > 0 {
+		if p, err := strconv.Atoi(v); err == nil {
 			c.ObservabilityPort = p
 		}
 	}
@@ -196,6 +199,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Webhook.Enabled && strings.TrimSpace(c.Webhook.Secret) == "" {
 		return ErrMissingWebhookSecret
+	}
+	if c.ObservabilityPort < 1 || c.ObservabilityPort > 65535 {
+		return ErrInvalidObservabilityPort
 	}
 	return nil
 }

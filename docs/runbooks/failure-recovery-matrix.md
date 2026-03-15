@@ -15,13 +15,13 @@
 
 | ID | Failure scenario | Impacted component | Detection signal/metric | Expected recovery behavior | Operator action | Test/simulation hook | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| FR-001 | Redis restart mid-dispatch | Queue, lease manager | `redis_reconnects` counter, queue empty signal | Rebuild queue and slot state from durable SQLite store; resume dispatch automatically | Monitor `/health` for Redis status; verify queue repopulated | `scripts/test-redis-restart.sh` | defined |
-| FR-002 | Redis unavailable at startup | Daemon | Startup exit code, `REDIS_UNAVAILABLE` error | Daemon does not start; exits with named error | Fix Redis availability; restart daemon | `scripts/test-redis-startup-failure.sh` | defined |
-| FR-003 | Daemon crash mid-review (SIGKILL) | Lease manager, branch state | Orphaned `cli_reviewing` branches, stale lease keys | On restart, audit durable `cli_reviewing` state against Redis lease keys; repair inconsistencies | None required; automatic repair | `scripts/test-sigkill-recovery.sh` | defined |
-| FR-004 | Lease expiry without heartbeat | Lease manager, runner | `lease_expiry` transitions in `state_transitions` | Terminate hung review path; increment retry count; requeue branch; append system bundle | Check `/queue` for requeued branches; verify retry count | `scripts/test-lease-expiry.sh` | defined |
-| FR-005 | Webhook outage / delivery failure | Webhook receiver, reconciler | `webhook_delivery_failures` counter, polling fallback active | Automatic fallback to polling mode (60s interval); continue operation | Monitor `/health` webhook status; check polling logs | `scripts/test-webhook-outage.sh` | defined |
-| FR-006 | Queue stall / starvation | Dispatch queue | `queue_stalled` event, all items at `max_retries` | Dispatch halts; emit `queue_stalled` event for operator intervention | Investigate blocked items; `codero record-event --type queue_stall`; manual requeue or resolution | `scripts/test-queue-stall.sh` | defined |
-| FR-007 | Duplicate webhook delivery | Webhook receiver | `webhook_duplicates_dropped` counter | Drop via Redis NX fast path; secondary durable idempotency check in `webhook_deliveries` table | None required; automatic deduplication | `scripts/test-webhook-duplicate.sh` | defined |
+| FR-001 | Redis restart mid-dispatch | Queue, lease manager | `redis_reconnects` counter, queue empty signal | Rebuild queue and slot state from durable SQLite store; resume dispatch automatically | Monitor `/health` for Redis status; verify queue repopulated | `scripts/test-redis-restart.sh` | pending |
+| FR-002 | Redis unavailable at startup | Daemon | Startup exit code, `REDIS_UNAVAILABLE` error | Daemon does not start; exits with named error | Fix Redis availability; restart daemon | `scripts/test-redis-startup-failure.sh` | pending |
+| FR-003 | Daemon crash mid-review (SIGKILL) | Lease manager, branch state | Orphaned `cli_reviewing` branches, stale lease keys | On restart, audit durable `cli_reviewing` state against Redis lease keys; repair inconsistencies | None required; automatic repair | `scripts/test-sigkill-recovery.sh` | pending |
+| FR-004 | Lease expiry without heartbeat | Lease manager, runner | `lease_expiry` transitions in `state_transitions` | Terminate hung review path; increment retry count; requeue branch; append system bundle | Check `/queue` for requeued branches; verify retry count | `scripts/test-lease-expiry.sh` | pending |
+| FR-005 | Webhook outage / delivery failure | Webhook receiver, reconciler | `webhook_delivery_failures` counter, polling fallback active | Automatic fallback to polling mode (60s interval); continue operation | Monitor `/health` webhook status; check polling logs | `scripts/test-webhook-outage.sh` | pending |
+| FR-006 | Queue stall / starvation | Dispatch queue | `queue_stalled` event, all items at `max_retries` | Dispatch halts; emit `queue_stalled` event for operator intervention | Investigate blocked items; `codero record-event --type queue_stall`; manual requeue or resolution | `scripts/test-queue-stall.sh` | pending |
+| FR-007 | Duplicate webhook delivery | Webhook receiver | `webhook_duplicates_dropped` counter | Drop via Redis NX fast path; secondary durable idempotency check in `webhook_deliveries` table | None required; automatic deduplication | `scripts/test-webhook-duplicate.sh` | pending |
 | FR-008 | SIGTERM graceful shutdown | Daemon | Graceful shutdown log, drained count | Stop accepting new submissions; drain in-flight work up to grace period; exit cleanly | None required; monitor shutdown logs | `kill -TERM $PID` | defined |
 
 ---
@@ -82,6 +82,24 @@
 2. Investigate root cause (external dependency, config)
 3. Resolve or requeue items manually
 4. Record event via `codero record-event --type queue_stall`
+
+### FR-007: Duplicate Webhook Delivery
+
+Duplicate deliveries are automatically deduplicated via Redis NX fast path and the durable `webhook_deliveries` idempotency table. No manual recovery is required.
+
+1. Monitor webhook logs for `webhook_duplicates_dropped` counter activity
+2. Verify idempotency via `webhook_deliveries` table (`processed = 1` for repeated event IDs)
+3. If duplicates appear in downstream state, inspect `state_transitions` for unexpected repeated entries
+4. Record event via `codero record-event --type webhook_duplicate` if systemic duplication is observed
+
+### FR-008: SIGTERM Graceful Shutdown
+
+Graceful shutdown is automatic; no manual recovery is required.
+
+1. Monitor shutdown logs for drain confirmation and in-flight work count
+2. Verify lease handoff/audit via `state_transitions` (no orphaned `cli_reviewing` entries post-shutdown)
+3. Inspect queue state via `codero queue` to confirm no items were silently dropped
+4. Record event via `codero record-event --type shutdown_failure` if graceful shutdown fails or times out
 
 ---
 

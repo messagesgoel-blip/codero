@@ -134,12 +134,26 @@ foo: bar
 }
 
 func TestValidate_MissingRequired(t *testing.T) {
-	c := &Config{GitHubToken: " ", Repos: []string{"org/repo"}}
+	c := &Config{GitHubToken: " ", Repos: []string{"org/repo"}, ObservabilityPort: 8080}
 	if !errors.Is(c.Validate(), ErrMissingToken) {
 		t.Fatalf("expected ErrMissingToken")
 	}
-	c = &Config{GitHubToken: "ghp", Repos: []string{"   "}}
+	c = &Config{GitHubToken: "ghp", Repos: []string{"   "}, ObservabilityPort: 8080}
 	if !errors.Is(c.Validate(), ErrMissingRepos) {
 		t.Fatalf("expected ErrMissingRepos")
+	}
+}
+
+func TestValidate_ObservabilityPort(t *testing.T) {
+	valid := &Config{GitHubToken: "ghp_test", Repos: []string{"org/repo"}, ObservabilityPort: 8080}
+	if err := valid.Validate(); err != nil {
+		t.Errorf("expected valid port to pass, got: %v", err)
+	}
+
+	for _, bad := range []int{0, -1, 65536, 99999} {
+		c := &Config{GitHubToken: "ghp_test", Repos: []string{"org/repo"}, ObservabilityPort: bad}
+		if !errors.Is(c.Validate(), ErrInvalidObservabilityPort) {
+			t.Errorf("port %d: expected ErrInvalidObservabilityPort, got: %v", bad, c.Validate())
+		}
 	}
 }
