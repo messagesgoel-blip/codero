@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Install Codero review gate as pre-commit hook for a target repo.
+# Install Codero 6-pass review as pre-commit hook for a target repo.
 # Supports git worktrees via git rev-parse --git-common-dir.
 
 if [ "$#" -lt 1 ]; then
@@ -24,21 +24,52 @@ HOOKS_DIR="$(git -C "$REPO_PATH" rev-parse --git-common-dir)/hooks"
 mkdir -p "$HOOKS_DIR"
 
 HOOK_PATH="$HOOKS_DIR/pre-commit"
+RENDER_TMP="${HOOK_PATH}.render.$$"
+FINAL_TMP="${HOOK_PATH}.tmp.$$"
 
 if [ -f "$HOOK_PATH" ]; then
   cp "$HOOK_PATH" "$HOOK_PATH.bak.$(date +%Y%m%d-%H%M%S)"
 fi
 
-cat > "$HOOK_PATH" <<'HOOK'
+cleanup_tmp() {
+  rm -f "$RENDER_TMP" "$FINAL_TMP"
+}
+trap cleanup_tmp EXIT
+
+cat > "$RENDER_TMP" <<'HOOK'
 #!/usr/bin/env bash
 set -euo pipefail
-export CODERO_REPO_PATH="$(git rev-parse --show-toplevel)"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+export CODERO_REPO_PATH="$REPO_ROOT"
 export CODERO_MODEL_ALIAS="cacheflow_agent"
-exec "$CODERO_ROOT/scripts/review/two-pass-review.sh"
+export CODERO_ROOT="ACTUAL_CODERO_ROOT"
+
+if [ -n "${CODERO_ENV_FILE:-}" ]; then
+  export CODERO_ENV_FILE
+elif [ -f "$REPO_ROOT/.env" ]; then
+  export CODERO_ENV_FILE="$REPO_ROOT/.env"
+elif [ -f "$CODERO_ROOT/.env" ]; then
+  export CODERO_ENV_FILE="$CODERO_ROOT/.env"
+fi
+
+# Prefer local scripts if available, fallback to global
+if [ -r "$REPO_ROOT/scripts/review/two-pass-review.sh" ]; then
+  exec bash "$REPO_ROOT/scripts/review/two-pass-review.sh"
+elif [ -r "$CODERO_ROOT/scripts/review/two-pass-review.sh" ]; then
+  exec bash "$CODERO_ROOT/scripts/review/two-pass-review.sh"
+else
+  echo "Error: two-pass-review.sh not found in repo or CODERO_ROOT ($CODERO_ROOT)" >&2
+  exit 1
+fi
 HOOK
 
-chmod +x "$HOOK_PATH"
+export CODERO_ROOT
+perl -0777 -pe 's/ACTUAL_CODERO_ROOT/\Q$ENV{CODERO_ROOT}\E/g' "$RENDER_TMP" > "$FINAL_TMP"
+chmod +x "$FINAL_TMP"
+mv "$FINAL_TMP" "$HOOK_PATH"
+trap - EXIT
+rm -f "$RENDER_TMP"
 
-echo "Installed Codero review pre-commit hook: $HOOK_PATH"
+echo "Installed Codero 6-pass pre-commit hook: $HOOK_PATH"
 echo "  Model alias: cacheflow_agent"
 echo "  Mode: fast (default)"

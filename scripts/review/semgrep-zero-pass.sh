@@ -3,10 +3,22 @@ set -euo pipefail
 
 # Semgrep deterministic pre-commit gate (Gate 0).
 # Fails commit on findings or execution errors.
+# Scans staged content (not working tree) for accuracy.
 
 REPO_PATH="${CODERO_REPO_PATH:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 TIMEOUT_SEC="${CODERO_SEMGREP_TIMEOUT_SEC:-180}"
 SEMGREP_CONFIG="${CODERO_SEMGREP_CONFIG:-p/default}"
+
+# Portable timeout command (macOS uses gtimeout)
+TIMEOUT_CMD=""
+if command -v timeout >/dev/null 2>&1; then
+  TIMEOUT_CMD="timeout"
+elif command -v gtimeout >/dev/null 2>&1; then
+  TIMEOUT_CMD="gtimeout"
+else
+  echo "Error: timeout command not found. Install coreutils (brew install coreutils on macOS)." >&2
+  exit 1
+fi
 
 if ! command -v semgrep >/dev/null 2>&1; then
   echo "Error: semgrep is not installed. Install with: pip install semgrep" >&2
@@ -20,15 +32,32 @@ fi
 
 cd "$REPO_PATH"
 
-mapfile -t STAGED_FILES < <(git diff --cached --name-only --diff-filter=ACMR)
+STAGED_FILES=()
+if type mapfile >/dev/null 2>&1; then
+  mapfile -t STAGED_FILES < <(git diff --cached --name-only --diff-filter=ACMR)
+else
+  while IFS= read -r staged_file; do
+    [ -n "$staged_file" ] && STAGED_FILES+=("$staged_file")
+  done < <(git diff --cached --name-only --diff-filter=ACMR)
+fi
 if [ "${#STAGED_FILES[@]}" -eq 0 ]; then
   echo "No staged files. Semgrep gate skipped."
   exit 0
 fi
 
+# Create temp directory for staged content
+TMPDIR="${TMPDIR:-/tmp}"
+SCAN_DIR="$(mktemp -d "${TMPDIR}/semgrep-staged.XXXXXX")"
+trap 'rm -rf "$SCAN_DIR"' EXIT
+
 TARGETS=()
 for f in "${STAGED_FILES[@]}"; do
-  [ -f "$f" ] && TARGETS+=("$f")
+  # Create same directory structure in temp and materialize staged bytes.
+  TARGET_PATH="$SCAN_DIR/$f"
+  mkdir -p "$(dirname "$TARGET_PATH")"
+  if git -C "$REPO_PATH" show ":$f" > "$TARGET_PATH" 2>/dev/null; then
+    TARGETS+=("$TARGET_PATH")
+  fi
 done
 
 if [ "${#TARGETS[@]}" -eq 0 ]; then
@@ -38,8 +67,8 @@ fi
 
 EXTRA_ARGS=()
 if [ -n "${CODERO_SEMGREP_EXTRA_ARGS:-}" ]; then
-  # shellcheck disable=SC2206
-  EXTRA_ARGS=( ${CODERO_SEMGREP_EXTRA_ARGS} )
+  # Space-delimited extra args; embed spaces via escaped whitespace.
+  read -r -a EXTRA_ARGS <<< "${CODERO_SEMGREP_EXTRA_ARGS}"
 fi
 
 echo "--- CODERO SEMGREP PASS (Gate 0) ---"
@@ -48,7 +77,7 @@ echo "Targets: ${#TARGETS[@]} staged file(s)"
 echo "Timeout: ${TIMEOUT_SEC}s"
 
 set +e
-timeout "$TIMEOUT_SEC" semgrep scan \
+"$TIMEOUT_CMD" "$TIMEOUT_SEC" semgrep scan \
   --config "$SEMGREP_CONFIG" \
   --error \
   --metrics=off \
