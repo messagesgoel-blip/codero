@@ -68,7 +68,7 @@ func TestSprint6_E2E_Lifecycle(t *testing.T) {
 	// Setup isolated test infrastructure
 	db := openTestDB(t)
 	client, mr := openTestRedis(t)
-	defer mr.Close()
+	_ = mr // cleanup handled by t.Cleanup in openTestRedis
 
 	stream := delivery.NewStream(db, client)
 	q := scheduler.NewQueue(client)
@@ -196,20 +196,14 @@ func TestSprint6_InvalidTransition_Rejection(t *testing.T) {
 
 	// Attempt invalid transition: coding -> merge_ready (not allowed)
 	err := state.TransitionBranch(db, branchID, state.StateCoding, state.StateMergeReady, "invalid_test")
-	if err == nil {
-		t.Error("expected ErrInvalidTransition for coding -> merge_ready, got nil")
-	}
-	if err != nil && !errors.Is(err, state.ErrInvalidTransition) {
-		t.Errorf("expected ErrInvalidTransition, got: %v", err)
+	if !errors.Is(err, state.ErrInvalidTransition) {
+		t.Errorf("expected ErrInvalidTransition for coding -> merge_ready, got: %v", err)
 	}
 
 	// Attempt invalid transition: coding -> cli_reviewing (skip queue)
 	err = state.TransitionBranch(db, branchID, state.StateCoding, state.StateCLIReviewing, "invalid_test")
-	if err == nil {
-		t.Error("expected ErrInvalidTransition for coding -> cli_reviewing, got nil")
-	}
-	if err != nil && !errors.Is(err, state.ErrInvalidTransition) {
-		t.Errorf("expected ErrInvalidTransition, got: %v", err)
+	if !errors.Is(err, state.ErrInvalidTransition) {
+		t.Errorf("expected ErrInvalidTransition for coding -> cli_reviewing, got: %v", err)
 	}
 
 	// State should remain unchanged
@@ -224,7 +218,7 @@ func TestSprint6_LeaseExpiry_RetrySemantics(t *testing.T) {
 
 	db := openTestDB(t)
 	client, mr := openTestRedis(t)
-	defer mr.Close()
+	_ = mr // cleanup handled by t.Cleanup in openTestRedis
 
 	stream := delivery.NewStream(db, client)
 	q := scheduler.NewQueue(client)
@@ -276,7 +270,7 @@ func TestSprint6_LeaseExpiry_BlockedTransition(t *testing.T) {
 
 	db := openTestDB(t)
 	client, mr := openTestRedis(t)
-	defer mr.Close()
+	_ = mr // cleanup handled by t.Cleanup in openTestRedis
 
 	stream := delivery.NewStream(db, client)
 	q := scheduler.NewQueue(client)
@@ -333,7 +327,7 @@ func TestSprint6_MergeReady_Guardrails(t *testing.T) {
 		{"multiple failures", false, false, 2, 3},
 	}
 
-	for i, tc := range tests {
+	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			testCfg := cfg
 			testCfg.Branch = cfg.Branch + "-" + tc.name
@@ -374,8 +368,6 @@ func TestSprint6_MergeReady_Guardrails(t *testing.T) {
 			if rec.State != state.StateMergeReady {
 				t.Errorf("state after transition: got %q, want %q", rec.State, state.StateMergeReady)
 			}
-
-			_ = i // silence unused variable warning if needed
 		})
 	}
 }
@@ -388,7 +380,7 @@ func TestSprint6_Abandoned_Reactivate(t *testing.T) {
 
 	db := openTestDB(t)
 	client, mr := openTestRedis(t)
-	defer mr.Close()
+	_ = mr // cleanup handled by t.Cleanup in openTestRedis
 
 	stream := delivery.NewStream(db, client)
 	q := scheduler.NewQueue(client)
@@ -451,7 +443,7 @@ func TestSprint6_Delivery_SeqNoRegression(t *testing.T) {
 
 	db := openTestDB(t)
 	client, mr := openTestRedis(t)
-	defer mr.Close()
+	_ = mr // cleanup handled by t.Cleanup in openTestRedis
 
 	stream := delivery.NewStream(db, client)
 
@@ -496,7 +488,7 @@ func TestSprint6_TUI_Contracts(t *testing.T) {
 
 	db := openTestDB(t)
 	client, mr := openTestRedis(t)
-	defer mr.Close()
+	_ = mr // cleanup handled by t.Cleanup in openTestRedis
 
 	q := scheduler.NewQueue(client)
 	stream := delivery.NewStream(db, client)
