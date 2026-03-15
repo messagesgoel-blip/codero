@@ -39,7 +39,16 @@ func main() {
 	root.PersistentFlags().StringVarP(&configPath, "config", "c", "codero.yaml",
 		"path to codero YAML config file")
 
-	root.AddCommand(daemonCmd(&configPath), statusCmd(&configPath), versionCmd(), commitGateCmd(), registerCmd())
+	root.AddCommand(
+		daemonCmd(&configPath),
+		statusCmd(&configPath),
+		versionCmd(),
+		commitGateCmd(),
+		registerCmd(),
+		queueCmd(&configPath),
+		branchCmd(&configPath),
+		eventsCmd(&configPath),
+	)
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -297,8 +306,7 @@ func versionCmd() *cobra.Command {
 }
 
 // commitGateCmd runs the pre-commit review gate.
-// It executes the two-pass review scripts and returns non-zero if the gate fails.
-// This command is designed to be used as a pre-commit hook.
+// It executes the repo's two-pass-review.sh script and returns non-zero if the gate fails.
 func commitGateCmd() *cobra.Command {
 	var (
 		timeout   int
@@ -311,16 +319,10 @@ func commitGateCmd() *cobra.Command {
 		Short: "Run pre-commit review gate",
 		Long: `Run the mandatory two-pass review gate before commit.
 
-This command executes the local review pipeline:
-1. Aider first pass (LLM review)
-2. Gemini second pass (LLM review)
-
-At least one pass must succeed. Falls back to PR-Agent and CodeRabbit
-if primary passes are rate-limited.
-
+This command delegates to two-pass-review.sh in the repo.
+The script defines stage order and blocking behavior.
 Exit code 0 allows commit, non-zero aborts.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Resolve repo path
 			if repoPath == "" {
 				absPath, err := os.Getwd()
 				if err != nil {
@@ -329,13 +331,10 @@ Exit code 0 allows commit, non-zero aborts.`,
 				repoPath = absPath
 			}
 
-			// Find scripts directory
 			if scriptDir == "" {
-				// Look for scripts in standard locations
 				possiblePaths := []string{
 					filepath.Join(repoPath, ".codero", "scripts", "review"),
 					filepath.Join(repoPath, "scripts", "review"),
-					"/home/sanjay/codero/scripts/review",
 				}
 				for _, p := range possiblePaths {
 					if _, err := os.Stat(p); err == nil {
@@ -344,7 +343,7 @@ Exit code 0 allows commit, non-zero aborts.`,
 					}
 				}
 				if scriptDir == "" {
-					return fmt.Errorf("could not find review scripts directory")
+					return fmt.Errorf("could not find review scripts directory; pass --script-dir")
 				}
 			}
 
@@ -354,19 +353,12 @@ Exit code 0 allows commit, non-zero aborts.`,
 			}
 
 			fmt.Println("Running pre-commit review gate...")
-			fmt.Println("Repository:", repoPath)
-			if timeout > 0 {
-				fmt.Printf("Timeout: %d seconds\n", timeout)
-			}
-
-			// Set up environment
 			env := os.Environ()
 			env = append(env, fmt.Sprintf("CODERO_REPO_PATH=%s", repoPath))
 			if timeout > 0 {
 				env = append(env, fmt.Sprintf("CODERO_REVIEW_PASS_TIMEOUT_SEC=%d", timeout))
 			}
 
-			// Run the two-pass review script
 			ctx := cmd.Context()
 			if timeout > 0 {
 				var cancel context.CancelFunc
@@ -374,7 +366,6 @@ Exit code 0 allows commit, non-zero aborts.`,
 				defer cancel()
 			}
 
-			// Script path validated to exist in known directories before this line
 			// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 			execCmd := exec.CommandContext(ctx, twoPassScript)
 			execCmd.Env = env
@@ -387,7 +378,6 @@ Exit code 0 allows commit, non-zero aborts.`,
 			if err != nil {
 				if execErr, ok := err.(*exec.ExitError); ok {
 					fmt.Println("\n⚠️  Commit gate FAILED")
-					fmt.Println("Please fix the issues and try again.")
 					return fmt.Errorf("commit gate failed (exit code: %d)", execErr.ExitCode())
 				}
 				return fmt.Errorf("commit gate error: %w", err)
@@ -435,7 +425,6 @@ If no branch is provided, uses the current git branch.`,
 				return fmt.Errorf("codero: config: %w", err)
 			}
 
-			// Resolve branch from args or git
 			if len(args) > 0 {
 				branch = args[0]
 			} else {
@@ -445,7 +434,6 @@ If no branch is provided, uses the current git branch.`,
 				}
 			}
 
-			// Resolve repo
 			if repo == "" {
 				if len(cfg.Repos) == 0 {
 					return fmt.Errorf("no repositories configured")
@@ -453,7 +441,6 @@ If no branch is provided, uses the current git branch.`,
 				repo = cfg.Repos[0]
 			}
 
-			// Open state store
 			db, err := state.Open(cfg.DBPath)
 			if err != nil {
 				return fmt.Errorf("open state store: %w", err)
@@ -468,11 +455,9 @@ If no branch is provided, uses the current git branch.`,
 				trigger = "codero-cli register --skip-local"
 			}
 
-			// Check if branch already exists
 			existing, err := state.GetBranch(db, repo, branch)
 			if err != nil {
 				if errors.Is(err, state.ErrBranchNotFound) {
-					// Branch doesn't exist - inform user to submit via daemon
 					fmt.Printf("Branch %s/%s not found in state store.\n", repo, branch)
 					fmt.Println("Branches are typically registered via webhook or daemon submit.")
 					fmt.Println("For local_review, ensure the branch has been submitted first.")
@@ -481,7 +466,10 @@ If no branch is provided, uses the current git branch.`,
 				return fmt.Errorf("check branch: %w", err)
 			}
 
-			// Branch exists, transition to target state
+			if err := state.UpdateQueuePriority(db, existing.ID, priority); err != nil {
+				return fmt.Errorf("update priority: %w", err)
+			}
+
 			if err := state.TransitionBranch(db, existing.ID, existing.State, targetState, trigger); err != nil {
 				return fmt.Errorf("transition branch: %w", err)
 			}
@@ -493,7 +481,6 @@ If no branch is provided, uses the current git branch.`,
 			} else {
 				fmt.Println("Branch is in local_review - run commit-gate before committing.")
 			}
-
 			return nil
 		},
 	}
@@ -520,16 +507,6 @@ func getCurrentBranch() (string, error) {
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("git branch: %w", err)
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-// getCurrentHeadHash returns the current HEAD commit hash.
-func getCurrentHeadHash() (string, error) {
-	cmd := exec.Command("git", "rev-parse", "HEAD")
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("git HEAD: %w", err)
 	}
 	return strings.TrimSpace(string(out)), nil
 }

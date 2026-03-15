@@ -269,6 +269,18 @@ func ResetRetryCount(db *DB, id string) error {
 	return nil
 }
 
+// UpdateQueuePriority updates queue_priority for a branch record.
+func UpdateQueuePriority(db *DB, id string, priority int) error {
+	_, err := db.sql.Exec(
+		`UPDATE branch_states SET queue_priority = ?, updated_at = datetime('now') WHERE id = ?`,
+		priority, id,
+	)
+	if err != nil {
+		return fmt.Errorf("update queue priority: %w", err)
+	}
+	return nil
+}
+
 // UpdateLeaseInfo sets lease_id and lease_expires_at on a branch record.
 // Called when a runner acquires a lease.
 func UpdateLeaseInfo(db *DB, id, leaseID string, expiresAt time.Time) error {
