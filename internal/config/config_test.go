@@ -23,6 +23,7 @@ func TestLoadEnv_Defaults(t *testing.T) {
 	t.Setenv("CODERO_LOG_LEVEL", "")
 	t.Setenv("CODERO_LOG_PATH", "")
 	t.Setenv("CODERO_DB_PATH", "")
+	t.Setenv("CODERO_OBSERVABILITY_PORT", "")
 
 	c := LoadEnv()
 	if c.Redis.Addr != "localhost:6379" {
@@ -40,6 +41,9 @@ func TestLoadEnv_Defaults(t *testing.T) {
 	if c.DBPath != "/var/lib/codero/codero.db" {
 		t.Errorf("DBPath: got %q", c.DBPath)
 	}
+	if c.ObservabilityPort != 8080 {
+		t.Errorf("ObservabilityPort: got %d, want 8080", c.ObservabilityPort)
+	}
 }
 
 func TestLoadEnv_Overrides(t *testing.T) {
@@ -51,6 +55,7 @@ func TestLoadEnv_Overrides(t *testing.T) {
 	t.Setenv("CODERO_DB_PATH", "/tmp/codero.db")
 	t.Setenv("GITHUB_TOKEN", "ghp_test")
 	t.Setenv("CODERO_REPOS", " org/a , org/b ")
+	t.Setenv("CODERO_OBSERVABILITY_PORT", "9091")
 
 	c := LoadEnv()
 	if c.Redis.Addr != "redis.example.com:6380" || c.Redis.Password != "secret" {
@@ -61,6 +66,9 @@ func TestLoadEnv_Overrides(t *testing.T) {
 	}
 	if len(c.Repos) != 2 || c.Repos[0] != "org/a" || c.Repos[1] != "org/b" {
 		t.Fatalf("repos parse mismatch: %v", c.Repos)
+	}
+	if c.ObservabilityPort != 9091 {
+		t.Errorf("ObservabilityPort: got %d, want 9091", c.ObservabilityPort)
 	}
 }
 
@@ -126,12 +134,27 @@ foo: bar
 }
 
 func TestValidate_MissingRequired(t *testing.T) {
-	c := &Config{GitHubToken: " ", Repos: []string{"org/repo"}}
+	c := &Config{GitHubToken: " ", Repos: []string{"org/repo"}, ObservabilityPort: 8080}
 	if !errors.Is(c.Validate(), ErrMissingToken) {
 		t.Fatalf("expected ErrMissingToken")
 	}
-	c = &Config{GitHubToken: "ghp", Repos: []string{"   "}}
+	c = &Config{GitHubToken: "ghp", Repos: []string{"   "}, ObservabilityPort: 8080}
 	if !errors.Is(c.Validate(), ErrMissingRepos) {
 		t.Fatalf("expected ErrMissingRepos")
+	}
+}
+
+func TestValidate_ObservabilityPort(t *testing.T) {
+	valid := &Config{GitHubToken: "ghp_test", Repos: []string{"org/repo"}, ObservabilityPort: 8080}
+	if err := valid.Validate(); err != nil {
+		t.Errorf("expected valid port to pass, got: %v", err)
+	}
+
+	for _, bad := range []int{0, -1, 65536, 99999} {
+		c := &Config{GitHubToken: "ghp_test", Repos: []string{"org/repo"}, ObservabilityPort: bad}
+		err := c.Validate()
+		if !errors.Is(err, ErrInvalidObservabilityPort) {
+			t.Errorf("port %d: expected ErrInvalidObservabilityPort, got: %v", bad, err)
+		}
 	}
 }

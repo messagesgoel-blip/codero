@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -210,6 +211,25 @@ func daemonCmd(configPath *string) *cobra.Command {
 			go func() {
 				defer wg.Done()
 				reconciler.Run(ctx)
+			}()
+
+			// Observability server: exposes /health, /queue, /metrics, /ready.
+			slotCounter := scheduler.NewSlotCounter(client)
+			obs := daemon.NewObservabilityServer(client, queue, slotCounter, db.Unwrap(),
+				strconv.Itoa(cfg.ObservabilityPort))
+			obs.Start()
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-ctx.Done()
+				stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer stopCancel()
+				if err := obs.Stop(stopCtx); err != nil {
+					loglib.Error("codero: observability server shutdown error",
+						loglib.FieldComponent, "daemon",
+						"error", err,
+					)
+				}
 			}()
 
 			// Webhook server: started only if explicitly enabled.

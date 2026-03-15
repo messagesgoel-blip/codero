@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -39,6 +40,9 @@ var (
 
 	// ErrMissingWebhookSecret is returned when webhook is enabled but no secret is set.
 	ErrMissingWebhookSecret = errors.New("webhook.secret is required when webhook.enabled is true")
+
+	// ErrInvalidObservabilityPort is returned when observability_port is outside 1..65535.
+	ErrInvalidObservabilityPort = errors.New("observability_port must be between 1 and 65535")
 )
 
 // RedisConfig holds Redis connection settings.
@@ -59,14 +63,15 @@ type WebhookConfig struct {
 
 // Config holds runtime configuration for the codero daemon.
 type Config struct {
-	GitHubToken string        `yaml:"github_token"`
-	Repos       []string      `yaml:"repos"`
-	Redis       RedisConfig   `yaml:"redis"`
-	PIDFile     string        `yaml:"pid_file"`
-	LogLevel    string        `yaml:"log_level"`
-	LogPath     string        `yaml:"log_path"`
-	DBPath      string        `yaml:"db_path"`
-	Webhook     WebhookConfig `yaml:"webhook"`
+	GitHubToken       string        `yaml:"github_token"`
+	Repos             []string      `yaml:"repos"`
+	Redis             RedisConfig   `yaml:"redis"`
+	PIDFile           string        `yaml:"pid_file"`
+	LogLevel          string        `yaml:"log_level"`
+	LogPath           string        `yaml:"log_path"`
+	DBPath            string        `yaml:"db_path"`
+	Webhook           WebhookConfig `yaml:"webhook"`
+	ObservabilityPort int           `yaml:"observability_port"`
 }
 
 // Load reads config from a YAML file at path and applies env overrides.
@@ -139,6 +144,7 @@ func defaults() *Config {
 			Port:    9090,
 			Path:    "/webhook/github",
 		},
+		ObservabilityPort: 8080,
 	}
 }
 
@@ -170,6 +176,16 @@ func applyEnvOverrides(c *Config) {
 	if v := os.Getenv("CODERO_WEBHOOK_SECRET"); v != "" {
 		c.Webhook.Secret = v
 	}
+	// CODERO_OBSERVABILITY_PORT overrides the HTTP port for the observability server.
+	if v := os.Getenv("CODERO_OBSERVABILITY_PORT"); v != "" {
+		p, err := strconv.Atoi(v)
+		if err != nil {
+			// Force Validate() to fail fast instead of silently using default.
+			c.ObservabilityPort = 0
+		} else {
+			c.ObservabilityPort = p
+		}
+	}
 }
 
 // Validate checks that required fields are present and non-empty.
@@ -187,6 +203,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Webhook.Enabled && strings.TrimSpace(c.Webhook.Secret) == "" {
 		return ErrMissingWebhookSecret
+	}
+	if c.ObservabilityPort < 1 || c.ObservabilityPort > 65535 {
+		return ErrInvalidObservabilityPort
 	}
 	return nil
 }
