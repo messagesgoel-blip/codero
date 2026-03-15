@@ -36,7 +36,53 @@ require_cmd() {
   return 0
 }
 
+strip_quotes() {
+  local raw="${1:-}"
+  raw="${raw%\"}"
+  raw="${raw#\"}"
+  raw="${raw%\'}"
+  raw="${raw#\'}"
+  printf '%s' "$raw"
+}
+
+read_key_from_file() {
+  local key="$1"
+  local env_file="$2"
+  local raw
+  raw="$(grep -E "^${key}=" "$env_file" 2>/dev/null | head -n 1 | cut -d'=' -f2- || true)"
+  strip_quotes "$raw"
+}
+
+find_env_file() {
+  if [ -n "${CODERO_ENV_FILE:-}" ] && [ -f "${CODERO_ENV_FILE}" ]; then
+    echo "${CODERO_ENV_FILE}"
+    return 0
+  fi
+
+  if [ -f "$REPO_PATH/.env" ]; then
+    echo "$REPO_PATH/.env"
+    return 0
+  fi
+
+  local common_dir repo_root_env
+  common_dir="$(git -C "$REPO_PATH" rev-parse --git-common-dir 2>/dev/null || true)"
+  if [ -n "$common_dir" ]; then
+    repo_root_env="$(cd "$REPO_PATH" && cd "$common_dir/.." 2>/dev/null && pwd)/.env"
+    if [ -f "$repo_root_env" ]; then
+      echo "$repo_root_env"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
 load_api_config() {
+  local env_file=""
+  if env_file="$(find_env_file)"; then
+    :
+  fi
+
   # Priority 1: Gemini API (free tier, reliable)
   if [ -n "${CODERO_AIDER_GEMINI_API_KEY:-}" ]; then
     echo "gemini||${CODERO_AIDER_GEMINI_API_KEY}"
@@ -50,23 +96,15 @@ load_api_config() {
   fi
 
 
-  if [ -f "$REPO_PATH/.env" ]; then
+  if [ -n "$env_file" ] && [ -f "$env_file" ]; then
     local gemini_key
-    gemini_key="$(grep -E '^CODERO_AIDER_GEMINI_API_KEY=' "$REPO_PATH/.env" 2>/dev/null | head -n 1 | cut -d'=' -f2- || true)"
-    gemini_key="${gemini_key%\"}"
-    gemini_key="${gemini_key#\"}"
-    gemini_key="${gemini_key%\'}"
-    gemini_key="${gemini_key#\'}"
+    gemini_key="$(read_key_from_file "CODERO_AIDER_GEMINI_API_KEY" "$env_file")"
     if [ -n "$gemini_key" ]; then
       echo "gemini||${gemini_key}"
       return 0
     fi
 
-    gemini_key="$(grep -E '^GEMINI_API_KEY=' "$REPO_PATH/.env" 2>/dev/null | head -n 1 | cut -d'=' -f2- || true)"
-    gemini_key="${gemini_key%\"}"
-    gemini_key="${gemini_key#\"}"
-    gemini_key="${gemini_key%\'}"
-    gemini_key="${gemini_key#\'}"
+    gemini_key="$(read_key_from_file "GEMINI_API_KEY" "$env_file")"
     if [ -n "$gemini_key" ]; then
       echo "gemini||${gemini_key}"
       return 0
@@ -81,13 +119,9 @@ load_api_config() {
     return 0
   fi
   
-  if [ -f "$REPO_PATH/.env" ]; then
+  if [ -n "$env_file" ] && [ -f "$env_file" ]; then
     local or_key
-    or_key="$(grep -E '^OPENROUTER_API_KEY=' "$REPO_PATH/.env" 2>/dev/null | head -n 1 | cut -d'=' -f2- || true)"
-    or_key="${or_key%\"}"
-    or_key="${or_key#\"}"
-    or_key="${or_key%\'}"
-    or_key="${or_key#\'}"
+    or_key="$(read_key_from_file "OPENROUTER_API_KEY" "$env_file")"
     if [ -n "$or_key" ]; then
       echo "openrouter|https://openrouter.ai/api/v1|$or_key"
       return 0
@@ -102,13 +136,9 @@ load_api_config() {
   fi
 
 
-  if [ -f "$REPO_PATH/.env" ]; then
+  if [ -n "$env_file" ] && [ -f "$env_file" ]; then
     local minimax_key
-    minimax_key="$(grep -E '^MINIMAX_API_KEY=' "$REPO_PATH/.env" 2>/dev/null | head -n 1 | cut -d'=' -f2- || true)"
-    minimax_key="${minimax_key%\"}"
-    minimax_key="${minimax_key#\"}"
-    minimax_key="${minimax_key%\'}"
-    minimax_key="${minimax_key#\'}"
+    minimax_key="$(read_key_from_file "MINIMAX_API_KEY" "$env_file")"
     if [ -n "$minimax_key" ]; then
       echo "minimax|https://api.minimax.chat/v1|$minimax_key"
       return 0
@@ -129,13 +159,9 @@ load_api_config() {
     fi
   done
 
-  if [ -f "$REPO_PATH/.env" ]; then
+  if [ -n "$env_file" ] && [ -f "$env_file" ]; then
     for key in LITELLM_MASTER_KEY LITELLM_API_KEY; do
-      litellm_key="$(grep -E "^${key}=" "$REPO_PATH/.env" 2>/dev/null | head -n 1 | cut -d'=' -f2- || true)"
-      litellm_key="${litellm_key%\"}"
-      litellm_key="${litellm_key#\"}"
-      litellm_key="${litellm_key%\'}"
-      litellm_key="${litellm_key#\'}"
+      litellm_key="$(read_key_from_file "$key" "$env_file")"
       if [ -n "$litellm_key" ]; then
         echo "litellm|${base_url}|${litellm_key}"
         return 0
@@ -145,24 +171,13 @@ load_api_config() {
 
   litellm_env_path="${LITELLM_ENV_PATH:-/opt/docker/apps/litellm/.env}"
   if [ -f "$litellm_env_path" ]; then
-    raw="$(grep -E '^LITELLM_MASTER_KEY=' "$litellm_env_path" | head -n 1 | cut -d= -f2- || true)"
-    raw="${raw%\"}"
-    raw="${raw#\"}"
-    raw="${raw%\'}"
-    raw="${raw#\'}"
-    if [ -n "$raw" ]; then
-      echo "litellm|${base_url}|$raw"
-      return 0
-    fi
-    raw="$(grep -E '^LITELLM_API_KEY=' "$litellm_env_path" | head -n 1 | cut -d= -f2- || true)"
-    raw="${raw%\"}"
-    raw="${raw#\"}"
-    raw="${raw%\'}"
-    raw="${raw#\'}"
-    if [ -n "$raw" ]; then
-      echo "litellm|${base_url}|$raw"
-      return 0
-    fi
+    for key in LITELLM_MASTER_KEY LITELLM_API_KEY OPENAI_API_KEY; do
+      litellm_key="$(read_key_from_file "$key" "$litellm_env_path")"
+      if [ -n "$litellm_key" ]; then
+        echo "litellm|${base_url}|${litellm_key}"
+        return 0
+      fi
+    done
   fi
 
   litellm_key="${OPENAI_API_KEY:-}"
@@ -171,12 +186,8 @@ load_api_config() {
     return 0
   fi
 
-  if [ -f "$REPO_PATH/.env" ]; then
-    litellm_key="$(grep -E '^OPENAI_API_KEY=' "$REPO_PATH/.env" 2>/dev/null | head -n 1 | cut -d'=' -f2- || true)"
-    litellm_key="${litellm_key%\"}"
-    litellm_key="${litellm_key#\"}"
-    litellm_key="${litellm_key%\'}"
-    litellm_key="${litellm_key#\'}"
+  if [ -n "$env_file" ] && [ -f "$env_file" ]; then
+    litellm_key="$(read_key_from_file "OPENAI_API_KEY" "$env_file")"
     if [ -n "$litellm_key" ]; then
       echo "litellm|${base_url}|${litellm_key}"
       return 0
@@ -202,10 +213,15 @@ main() {
     exit 1
   fi
 
+  if git -C "$REPO_PATH" diff --cached --quiet --exit-code -- .; then
+    echo "No staged changes to review."
+    exit 0
+  fi
+
   local diff
   diff="$(build_diff)"
   if [ -z "$diff" ]; then
-    echo "No uncommitted changes to review."
+    echo "No staged changes to review."
     exit 0
   fi
 
@@ -231,8 +247,12 @@ main() {
   echo "Model: $selected_model"
   echo "Timeout: ${TIMEOUT_SEC}s"
 
-  local message
+  local message review_payload
   message="Review the staged code changes for bugs, security issues, and code quality. List findings with file locations. If no issues, say 'No issues found.'"
+  review_payload="$message
+
+STAGED DIFF:
+$diff"
 
   cd "$REPO_PATH"
   
@@ -242,35 +262,35 @@ main() {
     --no-gitignore
     --no-show-model-warnings
     --yes
-    --message "$message"
+    --message "$review_payload"
   )
   
   case "$provider" in
     minimax)
       aider_args+=(
         --openai-api-base "$base_url"
-        --openai-api-key "$api_key"
       )
+      export OPENAI_API_KEY="$api_key"
       ;;
     openrouter)
       aider_args+=(
         --openai-api-base "$base_url"
-        --openai-api-key "$api_key"
       )
+      export OPENAI_API_KEY="$api_key"
       export OPENROUTER_API_KEY="$api_key"
       ;;
     litellm)
       aider_args+=(
         --openai-api-base "$base_url"
-        --openai-api-key "$api_key"
       )
+      export OPENAI_API_KEY="$api_key"
       ;;
     gemini)
       export GEMINI_API_KEY="$api_key"
       ;;
   esac
   
-  exit_code=0
+  local exit_code=0
   "$TIMEOUT_CMD" "$TIMEOUT_SEC" aider "${aider_args[@]}" 2>&1 || exit_code=$?
   if [ $exit_code -ne 0 ]; then
     if [ $exit_code -eq 124 ]; then

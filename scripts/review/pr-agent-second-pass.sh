@@ -95,22 +95,19 @@ load_litellm_key() {
 
 model_list_to_json() {
   local input="$1"
-  local item first=1 out="["
-  IFS=',' read -r -a items <<< "$input"
-  for item in "${items[@]}"; do
-    item="$(echo "$item" | xargs)"
-    [ -z "$item" ] && continue
-    if [ "$first" -eq 0 ]; then
-      out+=","
-    fi
-    out+="\"$item\""
-    first=0
-  done
-  out+="]"
-  printf '%s' "$out"
+  printf '%s' "$input" | jq -R -s -c '
+    split(",")
+    | map(gsub("^\\s+|\\s+$"; ""))
+    | map(select(length > 0))
+  '
 }
 
 main() {
+  if ! require_cmd jq; then
+    echo "Error: required command not found: jq" >&2
+    exit 1
+  fi
+
   if ! require_cmd "$PR_AGENT_BIN"; then
     echo "Error: pr-agent binary not found ($PR_AGENT_BIN)" >&2
     echo "Install with: pip install pr-agent" >&2
@@ -150,27 +147,15 @@ main() {
   echo "Fallback models: $fallback_json"
 
   local result exit_code=0
-  if [ -n "$TIMEOUT_CMD" ]; then
-    result=$("$TIMEOUT_CMD" "$TIMEOUT_SEC" sh -c "
-      cd '$REPO_PATH' &&
-      OPENAI__API_BASE='$litellm_base' \
-      OPENAI__KEY='$litellm_key' \
-      CONFIG__MODEL='$PRIMARY_MODEL' \
-      CONFIG__FALLBACK_MODELS='$fallback_json' \
-      GITHUB__USER_TOKEN='$github_token' \
-      $PR_AGENT_BIN review --local 2>&1
-    " 2>&1) || exit_code=$?
-  else
-    result=$(sh -c "
-      cd '$REPO_PATH' &&
-      OPENAI__API_BASE='$litellm_base' \
-      OPENAI__KEY='$litellm_key' \
-      CONFIG__MODEL='$PRIMARY_MODEL' \
-      CONFIG__FALLBACK_MODELS='$fallback_json' \
-      GITHUB__USER_TOKEN='$github_token' \
-      $PR_AGENT_BIN review --local 2>&1
-    " 2>&1) || exit_code=$?
-  fi
+  result="$(
+    cd "$REPO_PATH" &&
+      OPENAI__API_BASE="$litellm_base" \
+      OPENAI__KEY="$litellm_key" \
+      CONFIG__MODEL="$PRIMARY_MODEL" \
+      CONFIG__FALLBACK_MODELS="$fallback_json" \
+      GITHUB__USER_TOKEN="$github_token" \
+      "$TIMEOUT_CMD" "$TIMEOUT_SEC" "$PR_AGENT_BIN" review --local 2>&1
+  )" || exit_code=$?
   if [ $exit_code -ne 0 ]; then
     if [ $exit_code -eq 124 ]; then
       echo "Error: PR-Agent review timed out after ${TIMEOUT_SEC}s"

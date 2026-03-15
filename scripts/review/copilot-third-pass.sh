@@ -161,7 +161,7 @@ main() {
   local diff
   diff="$(build_diff)"
   if [ -z "$diff" ]; then
-    echo "No uncommitted changes to review."
+    echo "No staged changes to review."
     exit 0
   fi
 

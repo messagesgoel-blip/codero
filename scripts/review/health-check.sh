@@ -18,11 +18,28 @@ failures=0
 # Check tool availability
 echo "=== Tool Availability ==="
 required_tools=(semgrep openai)
-for tool in semgrep aider copilot coderabbit openai; do
+checked_tools=(semgrep openai aider copilot pr-agent coderabbit)
+
+is_required_tool() {
+  local tool="$1"
+  local req
+  for req in "${required_tools[@]}"; do
+    if [ "$req" = "$tool" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+has_tool() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+for tool in "${checked_tools[@]}"; do
   if command -v "$tool" >/dev/null 2>&1; then
     echo "✓ $tool: installed"
   else
-    if [[ " ${required_tools[*]} " =~ " $tool " ]]; then
+    if is_required_tool "$tool"; then
       echo "✗ $tool: NOT INSTALLED (required)"
       failures=$((failures + 1))
     else
@@ -140,9 +157,37 @@ echo "=== Quick Gate Test (empty diff) ==="
 probe_gate() {
   local script="$1"
   local name="$2"
+  local tool="${3:-}"
+  local gate_required=false
   if [ -n "$TIMEOUT_CMD" ]; then
+    if [ -n "$tool" ] && is_required_tool "$tool"; then
+      gate_required=true
+    fi
+
+    if [ -n "$tool" ] && ! has_tool "$tool"; then
+      if [ "$gate_required" = true ]; then
+        echo "✗ $name gate probe skipped: required tool '$tool' is missing"
+        failures=$((failures + 1))
+      else
+        echo "⚠ $name gate probe skipped: optional tool '$tool' is missing"
+      fi
+      return
+    fi
+
+    local tmp_index
+    tmp_index="$(mktemp "${TMPDIR:-/tmp}/codero-health-index.XXXXXX")"
+    rm -f "$tmp_index"
+
+    if git -C "$REPO_ROOT" rev-parse --verify HEAD >/dev/null 2>&1; then
+      GIT_INDEX_FILE="$tmp_index" git -C "$REPO_ROOT" read-tree HEAD
+    else
+      GIT_INDEX_FILE="$tmp_index" git -C "$REPO_ROOT" read-tree --empty
+    fi
+
     local output
-    output="$("$TIMEOUT_CMD" 10 bash "$script" 2>&1 || true)"
+    output="$(GIT_INDEX_FILE="$tmp_index" CODERO_REPO_PATH="$REPO_ROOT" "$TIMEOUT_CMD" 10 bash "$script" 2>&1 || true)"
+    rm -f "$tmp_index"
+
     if echo "$output" | grep -qiE "No uncommitted changes|No staged changes|No staged files|No changes|skipped|PASSED"; then
       echo "✓ $name gate: responds correctly to empty diff"
       passes=$((passes + 1))
@@ -150,7 +195,9 @@ probe_gate() {
       echo "⚠ $name gate: not authenticated (run 'coderabbit auth login')"
     else
       echo "⚠ $name gate: may have issues (output: $(echo "$output" | tail -1 | cut -c1-50))"
-      failures=$((failures + 1))
+      if [ "$gate_required" = true ]; then
+        failures=$((failures + 1))
+      fi
     fi
   else
     echo "⚠ Skipping $name gate probe (timeout utility missing)"
@@ -158,12 +205,12 @@ probe_gate() {
 }
 
 # Probe gates
-probe_gate "scripts/review/semgrep-zero-pass.sh" "Semgrep"
-probe_gate "scripts/review/copilot-third-pass.sh" "Copilot"
-probe_gate "scripts/review/aider-first-pass.sh" "Aider"
-probe_gate "scripts/review/gemini-second-pass.sh" "Gemini"
-probe_gate "scripts/review/pr-agent-second-pass.sh" "pr-agent"
-probe_gate "scripts/review/coderabbit-second-pass.sh" "coderabbit"
+probe_gate "scripts/review/semgrep-zero-pass.sh" "Semgrep" "semgrep"
+probe_gate "scripts/review/copilot-third-pass.sh" "Copilot" "copilot"
+probe_gate "scripts/review/aider-first-pass.sh" "Aider" "aider"
+probe_gate "scripts/review/gemini-second-pass.sh" "Gemini" ""
+probe_gate "scripts/review/pr-agent-second-pass.sh" "pr-agent" "pr-agent"
+probe_gate "scripts/review/coderabbit-second-pass.sh" "coderabbit" "coderabbit"
 
 # Summary
 echo "========================================"

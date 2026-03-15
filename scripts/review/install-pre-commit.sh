@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Install Codero 4-pass review as pre-commit hook for a target repo.
+# Install Codero 6-pass review as pre-commit hook for a target repo.
 # Supports git worktrees via git rev-parse --git-common-dir.
 
 if [ "$#" -lt 1 ]; then
@@ -35,18 +35,26 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 export CODERO_REPO_PATH="$REPO_ROOT"
 export CODERO_MODEL_ALIAS="cacheflow_agent"
-export CODERO_ROOT="${CODERO_ROOT:-/srv/storage/local/codero}"
+export CODERO_ROOT="ACTUAL_CODERO_ROOT"
+export CODERO_ENV_FILE="${CODERO_ENV_FILE:-$CODERO_ROOT/.env}"
 
 # Prefer local scripts if available, fallback to global
 if [ -x "$REPO_ROOT/scripts/review/two-pass-review.sh" ]; then
   exec "$REPO_ROOT/scripts/review/two-pass-review.sh"
-else
+elif [ -x "$CODERO_ROOT/scripts/review/two-pass-review.sh" ]; then
   exec "$CODERO_ROOT/scripts/review/two-pass-review.sh"
+else
+  echo "Error: two-pass-review.sh not found in repo or CODERO_ROOT ($CODERO_ROOT)" >&2
+  exit 1
 fi
 HOOK
 
+export CODERO_ROOT
+perl -0777 -pe 's/ACTUAL_CODERO_ROOT/\Q$ENV{CODERO_ROOT}\E/g' "$HOOK_PATH" > "${HOOK_PATH}.tmp"
+mv "${HOOK_PATH}.tmp" "$HOOK_PATH"
+
 chmod +x "$HOOK_PATH"
 
-echo "Installed Codero 4-pass pre-commit hook: $HOOK_PATH"
+echo "Installed Codero 6-pass pre-commit hook: $HOOK_PATH"
 echo "  Model alias: cacheflow_agent"
 echo "  Mode: fast (default)"

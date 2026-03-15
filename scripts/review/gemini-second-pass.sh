@@ -6,7 +6,8 @@ set -euo pipefail
 # No OAuth/Gemini CLI dependency.
 
 REPO_PATH="${CODERO_REPO_PATH:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-TIMEOUT_SEC="${CODERO_SECOND_PASS_TIMEOUT_SEC:-45}"
+# API calls can exceed 45s on larger staged diffs; override via CODERO_SECOND_PASS_TIMEOUT_SEC.
+TIMEOUT_SEC="${CODERO_SECOND_PASS_TIMEOUT_SEC:-180}"
 GEMINI_MODEL="${CODERO_GEMINI_MODEL:-gemini-2.5-flash-lite}"
 
 # Portable timeout command (macOS uses gtimeout)
@@ -44,8 +45,37 @@ read_key_from_file() {
   strip_quotes "$raw"
 }
 
+find_env_file() {
+  if [ -n "${CODERO_ENV_FILE:-}" ] && [ -f "${CODERO_ENV_FILE}" ]; then
+    echo "${CODERO_ENV_FILE}"
+    return 0
+  fi
+
+  if [ -f "$REPO_PATH/.env" ]; then
+    echo "$REPO_PATH/.env"
+    return 0
+  fi
+
+  local common_dir repo_root_env
+  common_dir="$(git -C "$REPO_PATH" rev-parse --git-common-dir 2>/dev/null || true)"
+  if [ -n "$common_dir" ]; then
+    repo_root_env="$(cd "$REPO_PATH" && cd "$common_dir/.." 2>/dev/null && pwd)/.env"
+    if [ -f "$repo_root_env" ]; then
+      echo "$repo_root_env"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
 load_api_config() {
-  local base_url key raw litellm_env_path
+  local base_url key raw litellm_env_path env_file
+  env_file=""
+  if env_file="$(find_env_file)"; then
+    :
+  fi
+
   base_url="${GEMINI_API_BASE:-https://generativelanguage.googleapis.com/v1beta}"
   raw="$(strip_quotes "${CODERO_GEMINI_SECOND_PASS_API_KEY:-}")"
   if [ -n "$raw" ]; then
@@ -57,13 +87,13 @@ load_api_config() {
     printf 'gemini|%s|%s' "$base_url" "$raw"
     return 0
   fi
-  if [ -f "$REPO_PATH/.env" ]; then
-    raw="$(read_key_from_file "CODERO_GEMINI_SECOND_PASS_API_KEY" "$REPO_PATH/.env")"
+  if [ -n "$env_file" ] && [ -f "$env_file" ]; then
+    raw="$(read_key_from_file "CODERO_GEMINI_SECOND_PASS_API_KEY" "$env_file")"
     if [ -n "$raw" ]; then
       printf 'gemini|%s|%s' "$base_url" "$raw"
       return 0
     fi
-    raw="$(read_key_from_file "GEMINI_API_KEY" "$REPO_PATH/.env")"
+    raw="$(read_key_from_file "GEMINI_API_KEY" "$env_file")"
     if [ -n "$raw" ]; then
       printf 'gemini|%s|%s' "$base_url" "$raw"
       return 0
@@ -80,9 +110,9 @@ load_api_config() {
     fi
   done
 
-  if [ -f "$REPO_PATH/.env" ]; then
+  if [ -n "$env_file" ] && [ -f "$env_file" ]; then
     for key in LITELLM_MASTER_KEY LITELLM_API_KEY OPENAI_API_KEY; do
-      raw="$(read_key_from_file "$key" "$REPO_PATH/.env")"
+      raw="$(read_key_from_file "$key" "$env_file")"
       if [ -n "$raw" ]; then
         printf 'litellm|%s|%s' "$base_url" "$raw"
         return 0
@@ -167,7 +197,8 @@ run_via_gemini_api() {
   local prompt="$3"
   local endpoint payload response exit_code content err
 
-  endpoint="${base_url%/}/models/${GEMINI_MODEL}:generateContent?key=${api_key}"
+  # Keep keys out of URL query strings to avoid leakage in process lists and URL logs.
+  endpoint="${base_url%/}/models/${GEMINI_MODEL}:generateContent"
   payload="$(jq -n \
     --arg prompt "$prompt" \
     '{
@@ -184,6 +215,7 @@ run_via_gemini_api() {
   exit_code=0
   response=$("$TIMEOUT_CMD" "$TIMEOUT_SEC" curl -sS -X POST "$endpoint" \
     -H "Content-Type: application/json" \
+    -H "x-goog-api-key: ${api_key}" \
     -d "$payload" 2>&1) || exit_code=$?
 
   if [ $exit_code -ne 0 ]; then
