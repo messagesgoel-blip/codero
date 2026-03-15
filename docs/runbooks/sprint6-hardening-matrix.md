@@ -288,12 +288,12 @@ curl -s http://localhost:8080/metrics | grep queue_stalled
 
 ### Rollback / Reset
 ```bash
-# Release a blocked branch
+# Release a blocked branch (DB update + re-enqueue)
 sqlite3 /var/lib/codero/codero.db "
 UPDATE branch_states SET state = 'queued_cli', retry_count = 0 WHERE state = 'blocked' LIMIT 1;"
 
-# Re-enqueue the branch
-./codero queue --repo owner/repo
+# Enqueue the released branch in Redis
+redis-cli ZADD "codero:owner_repo:queue:pending" 0 "<branch-name>"
 ```
 
 ### Related Endpoints
@@ -373,8 +373,12 @@ When a review fails, the branch transitions appropriately based on retry_count.
 
 ### Trigger / Fault Injection
 ```bash
-# Use stub provider that returns error
-# In test: runner.NewStubProvider(errors.New("simulated failure"))
+# Use stub provider with artificial delay (0 = immediate)
+# In test: runner.NewStubProvider(0) returns canned findings
+
+# To simulate failure, use errorProvider in tests:
+# type errorProvider struct{ err error }
+# func (e *errorProvider) Review(...) (*ReviewResponse, error) { return nil, e.err }
 
 # Or misconfigure a real provider
 ./codero daemon --config codero-bad-provider.yaml

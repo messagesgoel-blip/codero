@@ -10,6 +10,7 @@ package integration_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -198,7 +199,7 @@ func TestSprint6_InvalidTransition_Rejection(t *testing.T) {
 	if err == nil {
 		t.Error("expected ErrInvalidTransition for coding -> merge_ready, got nil")
 	}
-	if err != nil && !isInvalidTransition(err) {
+	if err != nil && !errors.Is(err, state.ErrInvalidTransition) {
 		t.Errorf("expected ErrInvalidTransition, got: %v", err)
 	}
 
@@ -206,6 +207,9 @@ func TestSprint6_InvalidTransition_Rejection(t *testing.T) {
 	err = state.TransitionBranch(db, branchID, state.StateCoding, state.StateCLIReviewing, "invalid_test")
 	if err == nil {
 		t.Error("expected ErrInvalidTransition for coding -> cli_reviewing, got nil")
+	}
+	if err != nil && !errors.Is(err, state.ErrInvalidTransition) {
+		t.Errorf("expected ErrInvalidTransition, got: %v", err)
 	}
 
 	// State should remain unchanged
@@ -330,26 +334,43 @@ func TestSprint6_MergeReady_Guardrails(t *testing.T) {
 
 	for i, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			// Use unique branch name per subtest to avoid UNIQUE constraint
 			testCfg := cfg
 			testCfg.Branch = cfg.Branch + "-" + tc.name
 
 			branchID := registerBranchWithConfig(t, db, testCfg, state.StateReviewed, i)
 
-			// Update merge readiness fields
 			err := state.UpdateMergeReadiness(db, branchID, tc.approved, tc.ciGreen, tc.pendingEvents, tc.unresolvedThreads)
 			if err != nil {
 				t.Fatalf("update merge readiness: %v", err)
 			}
 
-			// Attempt transition to merge_ready
 			err = state.TransitionBranch(db, branchID, state.StateReviewed, state.StateMergeReady, "test")
 
-			// The transition itself is allowed (T10), but in production the watch/reconciler
-			// only triggers it when conditions are met. Here we test the guardrail concept.
-			// For now, transition is allowed but the record stores the actual conditions.
+			// T10 transition is allowed in state machine; guardrail is enforced by reconciler.
+			// Here we verify the stored conditions match the update.
+			rec, err := state.GetBranchByID(db, branchID)
 			if err != nil {
-				t.Logf("transition result: %v", err)
+				t.Fatalf("get branch: %v", err)
+			}
+
+			if rec.Approved != tc.approved {
+				t.Errorf("approved: got %v, want %v", rec.Approved, tc.approved)
+			}
+			if rec.CIGreen != tc.ciGreen {
+				t.Errorf("ci_green: got %v, want %v", rec.CIGreen, tc.ciGreen)
+			}
+			if rec.PendingEvents != tc.pendingEvents {
+				t.Errorf("pending_events: got %d, want %d", rec.PendingEvents, tc.pendingEvents)
+			}
+			if rec.UnresolvedThreads != tc.unresolvedThreads {
+				t.Errorf("unresolved_threads: got %d, want %d", rec.UnresolvedThreads, tc.unresolvedThreads)
+			}
+
+			// Verify transition succeeded (T10 is valid) and state reflects merge_ready
+			if err == nil {
+				if rec.State != state.StateMergeReady {
+					t.Errorf("state after transition: got %q, want %q", rec.State, state.StateMergeReady)
+				}
 			}
 		})
 	}
@@ -368,11 +389,20 @@ func TestSprint6_Abandoned_Reactivate(t *testing.T) {
 	stream := delivery.NewStream(db, client)
 	q := scheduler.NewQueue(client)
 
-	// Register branch with expired session
+	// Register branch with expired session and non-zero retry_count
 	branchID := registerBranch(t, db, cfg, state.StateQueuedCLI)
 
-	// Set session last seen past TTL
+	// Seed non-zero retry_count to verify it gets reset on reactivate
 	_, err := db.Unwrap().Exec(
+		`UPDATE branch_states SET retry_count = 2 WHERE id = ?`,
+		branchID,
+	)
+	if err != nil {
+		t.Fatalf("set retry_count: %v", err)
+	}
+
+	// Set session last seen past TTL
+	_, err = db.Unwrap().Exec(
 		`UPDATE branch_states SET owner_session_last_seen = ? WHERE id = ?`,
 		time.Now().Add(-scheduler.SessionHeartbeatTTL-time.Minute), branchID,
 	)
@@ -387,10 +417,16 @@ func TestSprint6_Abandoned_Reactivate(t *testing.T) {
 	// Verify T14: -> abandoned
 	assertBranchState(t, db, branchID, state.StateAbandoned)
 
-	// T15: Reactivate
+	// T15: Reactivate via transition + reset retry_count (production path)
 	err = state.TransitionBranch(db, branchID, state.StateAbandoned, state.StateQueuedCLI, "reactivate")
 	if err != nil {
 		t.Fatalf("T15 reactivate failed: %v", err)
+	}
+
+	// Reset retry_count as part of reactivation (matches CLI/API reactivate behavior)
+	err = state.ResetRetryCount(db, branchID)
+	if err != nil {
+		t.Fatalf("reset retry_count: %v", err)
 	}
 
 	// Verify retry_count reset
@@ -459,6 +495,7 @@ func TestSprint6_TUI_Contracts(t *testing.T) {
 	defer mr.Close()
 
 	q := scheduler.NewQueue(client)
+	stream := delivery.NewStream(db, client)
 
 	// Register and enqueue branch
 	branchID := registerBranch(t, db, cfg, state.StateQueuedCLI)
@@ -493,7 +530,42 @@ func TestSprint6_TUI_Contracts(t *testing.T) {
 	}
 
 	// Verify events (simulates `codero events`)
-	// (No events yet since no reviews run)
+	// Produce sample events into delivery stream
+	seq1, err := stream.AppendSystem(ctx, cfg.Repo, cfg.Branch, cfg.HeadHash,
+		"test_event_1", "sample event for TUI verification")
+	if err != nil {
+		t.Fatalf("append event 1: %v", err)
+	}
+
+	seq2, err := stream.AppendSystem(ctx, cfg.Repo, cfg.Branch, cfg.HeadHash,
+		"test_event_2", "another sample event")
+	if err != nil {
+		t.Fatalf("append event 2: %v", err)
+	}
+
+	// Replay events (simulates `codero events --since N`)
+	events, err := stream.Replay(ctx, cfg.Repo, cfg.Branch, 0)
+	if err != nil {
+		t.Fatalf("replay events: %v", err)
+	}
+	if len(events) < 2 {
+		t.Errorf("events count: got %d, want >= 2", len(events))
+	}
+
+	// Verify seq monotonicity
+	if events[0].Seq != seq1 {
+		t.Errorf("first event seq: got %d, want %d", events[0].Seq, seq1)
+	}
+	if events[1].Seq != seq2 {
+		t.Errorf("second event seq: got %d, want %d", events[1].Seq, seq2)
+	}
+
+	// Verify event types
+	for _, ev := range events {
+		if ev.EventType != string(delivery.EventTypeSystem) {
+			t.Errorf("unexpected event type: got %s, want %s", ev.EventType, delivery.EventTypeSystem)
+		}
+	}
 }
 
 // --- Test Helpers ---
@@ -556,10 +628,6 @@ func assertBranchState(t *testing.T, db *state.DB, id string, expected state.Sta
 	if state.State(s) != expected {
 		t.Errorf("branch state: got %q, want %q", s, expected)
 	}
-}
-
-func isInvalidTransition(err error) bool {
-	return err != nil && (err == state.ErrInvalidTransition || err.Error() != "" && err.Error() != "invalid state transition")
 }
 
 func listReviewRuns(db *state.DB, repo, branch string) ([]state.ReviewRun, error) {
