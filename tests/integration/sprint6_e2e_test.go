@@ -510,7 +510,7 @@ func TestSprint6_TUI_Contracts(t *testing.T) {
 		t.Fatalf("queue list: %v", err)
 	}
 	if len(entries) != 1 {
-		t.Errorf("queue entries: got %d, want 1", len(entries))
+		t.Fatalf("queue entries: got %d, want 1", len(entries))
 	}
 	if entries[0].Branch != cfg.Branch {
 		t.Errorf("queue entry branch: got %s, want %s", entries[0].Branch, cfg.Branch)
@@ -545,7 +545,7 @@ func TestSprint6_TUI_Contracts(t *testing.T) {
 		t.Fatalf("replay events: %v", err)
 	}
 	if len(events) < 2 {
-		t.Errorf("events count: got %d, want >= 2", len(events))
+		t.Fatalf("events count: got %d, want >= 2", len(events))
 	}
 
 	// Verify seq monotonicity
@@ -634,6 +634,9 @@ func listReviewRuns(db *state.DB, repo, branch string) ([]state.ReviewRun, error
 			return nil, err
 		}
 		runs = append(runs, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return runs, nil
 }
