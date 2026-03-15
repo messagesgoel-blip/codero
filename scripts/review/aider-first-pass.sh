@@ -38,6 +38,11 @@ require_cmd() {
 
 load_api_config() {
   # Priority 1: Gemini API (free tier, reliable)
+  if [ -n "${CODERO_AIDER_GEMINI_API_KEY:-}" ]; then
+    echo "gemini||${CODERO_AIDER_GEMINI_API_KEY}"
+    return 0
+  fi
+  
   
   if [ -n "${GEMINI_API_KEY:-}" ]; then
     echo "gemini||${GEMINI_API_KEY}"
@@ -47,6 +52,16 @@ load_api_config() {
 
   if [ -f "$REPO_PATH/.env" ]; then
     local gemini_key
+    gemini_key="$(grep -E '^CODERO_AIDER_GEMINI_API_KEY=' "$REPO_PATH/.env" 2>/dev/null | head -n 1 | cut -d'=' -f2- || true)"
+    gemini_key="${gemini_key%\"}"
+    gemini_key="${gemini_key#\"}"
+    gemini_key="${gemini_key%\'}"
+    gemini_key="${gemini_key#\'}"
+    if [ -n "$gemini_key" ]; then
+      echo "gemini||${gemini_key}"
+      return 0
+    fi
+
     gemini_key="$(grep -E '^GEMINI_API_KEY=' "$REPO_PATH/.env" 2>/dev/null | head -n 1 | cut -d'=' -f2- || true)"
     gemini_key="${gemini_key%\"}"
     gemini_key="${gemini_key#\"}"

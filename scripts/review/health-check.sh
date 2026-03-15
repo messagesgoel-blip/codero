@@ -62,7 +62,7 @@ fi
 
 echo "=== API Keys ==="
 # Backend/provider credentials (any one required)
-provider_keys=(GEMINI_API_KEY OPENROUTER_API_KEY MINIMAX_API_KEY LITELLM_MASTER_KEY LITELLM_API_KEY OPENAI_API_KEY)
+provider_keys=(CODERO_AIDER_GEMINI_API_KEY CODERO_GEMINI_SECOND_PASS_API_KEY GEMINI_API_KEY OPENROUTER_API_KEY MINIMAX_API_KEY LITELLM_MASTER_KEY LITELLM_API_KEY OPENAI_API_KEY)
 provider_found=false
 for key in "${provider_keys[@]}"; do
   if [ -n "${!key-}" ]; then

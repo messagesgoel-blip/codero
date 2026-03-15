@@ -47,12 +47,22 @@ read_key_from_file() {
 load_api_config() {
   local base_url key raw litellm_env_path
   base_url="${GEMINI_API_BASE:-https://generativelanguage.googleapis.com/v1beta}"
+  raw="$(strip_quotes "${CODERO_GEMINI_SECOND_PASS_API_KEY:-}")"
+  if [ -n "$raw" ]; then
+    printf 'gemini|%s|%s' "$base_url" "$raw"
+    return 0
+  fi
   raw="$(strip_quotes "${GEMINI_API_KEY:-}")"
   if [ -n "$raw" ]; then
     printf 'gemini|%s|%s' "$base_url" "$raw"
     return 0
   fi
   if [ -f "$REPO_PATH/.env" ]; then
+    raw="$(read_key_from_file "CODERO_GEMINI_SECOND_PASS_API_KEY" "$REPO_PATH/.env")"
+    if [ -n "$raw" ]; then
+      printf 'gemini|%s|%s' "$base_url" "$raw"
+      return 0
+    fi
     raw="$(read_key_from_file "GEMINI_API_KEY" "$REPO_PATH/.env")"
     if [ -n "$raw" ]; then
       printf 'gemini|%s|%s' "$base_url" "$raw"
