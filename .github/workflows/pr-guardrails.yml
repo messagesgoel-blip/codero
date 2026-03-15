@@ -1,0 +1,41 @@
+name: PR Guardrails
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+jobs:
+  guardrails:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify pre-commit hook exists and is executable
+        run: |
+          set -euo pipefail
+          test -f .githooks/pre-commit
+          test -x .githooks/pre-commit
+
+      - name: Enforce emergency commit pairing
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "$BASE_REF"
+          range="origin/${BASE_REF}..${HEAD_SHA}"
+          subjects="$(git log --format=%s "$range")"
+
+          emergency_count="$(printf '%s\n' "$subjects" | grep -Ec '\[EMERGENCY\]' || true)"
+          fix_count="$(printf '%s\n' "$subjects" | grep -Ec '\[EMERGENCY-FIX\]' || true)"
+
+          echo "emergency_count=$emergency_count"
+          echo "fix_count=$fix_count"
+
+          if [ "$emergency_count" -gt 0 ] && [ "$fix_count" -lt "$emergency_count" ]; then
+            echo "PR contains [EMERGENCY] commit(s) without matching [EMERGENCY-FIX] follow-up commit(s)." >&2
+            exit 1
+          fi
