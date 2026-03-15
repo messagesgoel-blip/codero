@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -59,14 +60,15 @@ type WebhookConfig struct {
 
 // Config holds runtime configuration for the codero daemon.
 type Config struct {
-	GitHubToken string        `yaml:"github_token"`
-	Repos       []string      `yaml:"repos"`
-	Redis       RedisConfig   `yaml:"redis"`
-	PIDFile     string        `yaml:"pid_file"`
-	LogLevel    string        `yaml:"log_level"`
-	LogPath     string        `yaml:"log_path"`
-	DBPath      string        `yaml:"db_path"`
-	Webhook     WebhookConfig `yaml:"webhook"`
+	GitHubToken       string        `yaml:"github_token"`
+	Repos             []string      `yaml:"repos"`
+	Redis             RedisConfig   `yaml:"redis"`
+	PIDFile           string        `yaml:"pid_file"`
+	LogLevel          string        `yaml:"log_level"`
+	LogPath           string        `yaml:"log_path"`
+	DBPath            string        `yaml:"db_path"`
+	Webhook           WebhookConfig `yaml:"webhook"`
+	ObservabilityPort int           `yaml:"observability_port"`
 }
 
 // Load reads config from a YAML file at path and applies env overrides.
@@ -139,6 +141,7 @@ func defaults() *Config {
 			Port:    9090,
 			Path:    "/webhook/github",
 		},
+		ObservabilityPort: 8080,
 	}
 }
 
@@ -169,6 +172,12 @@ func applyEnvOverrides(c *Config) {
 	}
 	if v := os.Getenv("CODERO_WEBHOOK_SECRET"); v != "" {
 		c.Webhook.Secret = v
+	}
+	// CODERO_OBSERVABILITY_PORT overrides the HTTP port for the observability server.
+	if v := os.Getenv("CODERO_OBSERVABILITY_PORT"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil && p > 0 {
+			c.ObservabilityPort = p
+		}
 	}
 }
 

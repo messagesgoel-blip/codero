@@ -9,7 +9,10 @@ import (
 )
 
 // requiredScopes lists the GitHub OAuth scopes the token must carry.
-var requiredScopes = []string{"repo", "checks:write", "admin:repo_hook"}
+// checks:write is not grantable via classic PAT (it does not appear in
+// X-OAuth-Scopes for classic personal access tokens); the Checks API is
+// not consumed in Phase 1. Re-add when Checks API usage is introduced.
+var requiredScopes = []string{"repo", "admin:repo_hook"}
 
 // githubUserEndpoint is the lightweight endpoint used for scope inspection.
 // A GET to this endpoint always returns X-OAuth-Scopes regardless of body content.
