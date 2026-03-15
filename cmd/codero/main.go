@@ -48,6 +48,9 @@ func main() {
 		queueCmd(&configPath),
 		branchCmd(&configPath),
 		eventsCmd(&configPath),
+		scorecardCmd(&configPath),
+		recordProvingEventCmd(&configPath),
+		recordPrecommitCmd(&configPath),
 	)
 
 	if err := root.Execute(); err != nil {
