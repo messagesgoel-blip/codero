@@ -310,8 +310,10 @@ func TestSprint6_LeaseExpiry_BlockedTransition(t *testing.T) {
 	}
 }
 
-// TestSprint6_MergeReady_Guardrails verifies that merge_ready can only be reached
-// when all four conditions are met simultaneously.
+// TestSprint6_MergeReady_Guardrails verifies that merge_ready conditions
+// are correctly persisted and the transition is valid in the state machine.
+// Note: T10 (reviewed -> merge_ready) is always a valid transition in the state machine.
+// The actual guardrail (conditions check) is enforced by the reconciler/watch in production.
 func TestSprint6_MergeReady_Guardrails(t *testing.T) {
 	cfg := defaultTestConfig()
 	db := openTestDB(t)
@@ -322,14 +324,13 @@ func TestSprint6_MergeReady_Guardrails(t *testing.T) {
 		ciGreen           bool
 		pendingEvents     int
 		unresolvedThreads int
-		shouldAllow       bool
 	}{
-		{"all conditions met", true, true, 0, 0, true},
-		{"missing approval", false, true, 0, 0, false},
-		{"ci not green", true, false, 0, 0, false},
-		{"pending events", true, true, 1, 0, false},
-		{"unresolved threads", true, true, 0, 1, false},
-		{"multiple failures", false, false, 2, 3, false},
+		{"all conditions met", true, true, 0, 0},
+		{"missing approval", false, true, 0, 0},
+		{"ci not green", true, false, 0, 0},
+		{"pending events", true, true, 1, 0},
+		{"unresolved threads", true, true, 0, 1},
+		{"multiple failures", false, false, 2, 3},
 	}
 
 	for i, tc := range tests {
@@ -337,22 +338,25 @@ func TestSprint6_MergeReady_Guardrails(t *testing.T) {
 			testCfg := cfg
 			testCfg.Branch = cfg.Branch + "-" + tc.name
 
-			branchID := registerBranchWithConfig(t, db, testCfg, state.StateReviewed, i)
+			branchID := registerBranch(t, db, testCfg, state.StateReviewed)
 
 			err := state.UpdateMergeReadiness(db, branchID, tc.approved, tc.ciGreen, tc.pendingEvents, tc.unresolvedThreads)
 			if err != nil {
 				t.Fatalf("update merge readiness: %v", err)
 			}
 
-			err = state.TransitionBranch(db, branchID, state.StateReviewed, state.StateMergeReady, "test")
-
 			// T10 transition is allowed in state machine; guardrail is enforced by reconciler.
-			// Here we verify the stored conditions match the update.
+			err = state.TransitionBranch(db, branchID, state.StateReviewed, state.StateMergeReady, "test")
+			if err != nil {
+				t.Fatalf("T10 transition failed: %v", err)
+			}
+
 			rec, err := state.GetBranchByID(db, branchID)
 			if err != nil {
 				t.Fatalf("get branch: %v", err)
 			}
 
+			// Verify stored conditions match the update
 			if rec.Approved != tc.approved {
 				t.Errorf("approved: got %v, want %v", rec.Approved, tc.approved)
 			}
@@ -366,12 +370,12 @@ func TestSprint6_MergeReady_Guardrails(t *testing.T) {
 				t.Errorf("unresolved_threads: got %d, want %d", rec.UnresolvedThreads, tc.unresolvedThreads)
 			}
 
-			// Verify transition succeeded (T10 is valid) and state reflects merge_ready
-			if err == nil {
-				if rec.State != state.StateMergeReady {
-					t.Errorf("state after transition: got %q, want %q", rec.State, state.StateMergeReady)
-				}
+			// Verify state is merge_ready (T10 succeeded)
+			if rec.State != state.StateMergeReady {
+				t.Errorf("state after transition: got %q, want %q", rec.State, state.StateMergeReady)
 			}
+
+			_ = i // silence unused variable warning if needed
 		})
 	}
 }
@@ -593,19 +597,6 @@ func openTestRedis(t *testing.T) (*redislib.Client, *miniredis.Miniredis) {
 }
 
 func registerBranch(t *testing.T, db *state.DB, cfg Sprint6E2ETestConfig, initialState state.State) string {
-	t.Helper()
-	id := uuid.New().String()
-	_, err := db.Unwrap().Exec(`
-		INSERT INTO branch_states (id, repo, branch, head_hash, state, max_retries, queue_priority)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, id, cfg.Repo, cfg.Branch, cfg.HeadHash, string(initialState), cfg.MaxRetries, cfg.QueuePriority)
-	if err != nil {
-		t.Fatalf("insert branch: %v", err)
-	}
-	return id
-}
-
-func registerBranchWithConfig(t *testing.T, db *state.DB, cfg Sprint6E2ETestConfig, initialState state.State, idx int) string {
 	t.Helper()
 	id := uuid.New().String()
 	_, err := db.Unwrap().Exec(`
