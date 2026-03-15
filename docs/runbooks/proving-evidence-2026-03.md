@@ -135,7 +135,7 @@
 | Daemon restart recovery | PASS ✓ | Integration tests cover |
 | SIGKILL aftermath recovery | PENDING | Not tested in this run |
 | Duplicate webhook delivery handling | PASS ✓ | TestIntegration_WebhookDedup |
-| Pre-commit loops enforced by hook | PENDING | Phase 2 requirement; requires hook enforcement in active repos |
+| Pre-commit loops enforced by hook | PENDING | Phase 1 requirement; requires hook enforcement in active repos |
 
 ---
 
@@ -143,7 +143,7 @@
 
 ### Completed ✓
 - Integration test suite: 14/14 tests passing
-- Failure mode drills: 8/10 verified via tests
+- Failure mode drills: 9/10 verified via tests
 - E2E lifecycle: Verified via TestSprint6_E2E_Lifecycle
 - Merge-ready guardrails: All 6 conditions tested
 - Webhook dedup: Verified
@@ -152,7 +152,7 @@
 ### Pending
 - Real 30-day usage data collection
 - SIGKILL recovery drill (manual)
-- Pre-commit hook enforcement (Phase 2)
+- Pre-commit hook enforcement (Phase 1)
 
 ### Critical Items at Zero
 - branches_reviewed_7_days

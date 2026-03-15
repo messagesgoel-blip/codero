@@ -178,7 +178,11 @@ func applyEnvOverrides(c *Config) {
 	}
 	// CODERO_OBSERVABILITY_PORT overrides the HTTP port for the observability server.
 	if v := os.Getenv("CODERO_OBSERVABILITY_PORT"); v != "" {
-		if p, err := strconv.Atoi(v); err == nil {
+		p, err := strconv.Atoi(v)
+		if err != nil {
+			// Force Validate() to fail fast instead of silently using default.
+			c.ObservabilityPort = 0
+		} else {
 			c.ObservabilityPort = p
 		}
 	}

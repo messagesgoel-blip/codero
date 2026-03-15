@@ -22,7 +22,7 @@
 | FR-005 | Webhook outage / delivery failure | Webhook receiver, reconciler | `webhook_delivery_failures` counter, polling fallback active | Automatic fallback to polling mode (60s interval); continue operation | Monitor `/health` webhook status; check polling logs | `scripts/test-webhook-outage.sh` | pending |
 | FR-006 | Queue stall / starvation | Dispatch queue | `queue_stalled` event, all items at `max_retries` | Dispatch halts; emit `queue_stalled` event for operator intervention | Investigate blocked items; `codero record-event --type queue_stall`; manual requeue or resolution | `scripts/test-queue-stall.sh` | pending |
 | FR-007 | Duplicate webhook delivery | Webhook receiver | `webhook_duplicates_dropped` counter | Drop via Redis NX fast path; secondary durable idempotency check in `webhook_deliveries` table | None required; automatic deduplication | `scripts/test-webhook-duplicate.sh` | pending |
-| FR-008 | SIGTERM graceful shutdown | Daemon | Graceful shutdown log, drained count | Stop accepting new submissions; drain in-flight work up to grace period; exit cleanly | None required; monitor shutdown logs | `kill -TERM $PID` | defined |
+| FR-008 | SIGTERM graceful shutdown | Daemon | Graceful shutdown log, drained count | Stop accepting new submissions; drain in-flight work up to grace period; exit cleanly | None required; monitor shutdown logs | `kill -TERM $PID` | pending |
 
 ---
 
@@ -118,7 +118,7 @@ Phase 1 sign-off requires explicit drills for all scenarios:
 ### Test Evidence (2026-03-15)
 
 All integration tests pass:
-```
+```text
 go test ./tests/integration -v
 - TestIntegration_WebhookDedup: PASS
 - TestIntegration_ReconciliationDriftRepair: PASS
@@ -136,7 +136,7 @@ go test ./tests/integration -v
 - TestSprint6_Delivery_SeqNoRegression: PASS
 - TestSprint6_TUI_Contracts: PASS
 
-Result: 14/14 tests PASS
+Result: 15/15 tests PASS
 ```
 
 ---

@@ -152,8 +152,9 @@ func TestValidate_ObservabilityPort(t *testing.T) {
 
 	for _, bad := range []int{0, -1, 65536, 99999} {
 		c := &Config{GitHubToken: "ghp_test", Repos: []string{"org/repo"}, ObservabilityPort: bad}
-		if !errors.Is(c.Validate(), ErrInvalidObservabilityPort) {
-			t.Errorf("port %d: expected ErrInvalidObservabilityPort, got: %v", bad, c.Validate())
+		err := c.Validate()
+		if !errors.Is(err, ErrInvalidObservabilityPort) {
+			t.Errorf("port %d: expected ErrInvalidObservabilityPort, got: %v", bad, err)
 		}
 	}
 }
