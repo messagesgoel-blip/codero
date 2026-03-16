@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -93,11 +94,10 @@ func (c *Client) GetPRState(ctx context.Context, repo, branch string) (*webhook.
 		return nil, fmt.Errorf("list PR reviews: %w", err)
 	}
 
-	approved, changesRequested := resolveApprovalStatus(reviews)
-	unresolvedThreads := 0
-	if changesRequested {
-		unresolvedThreads = 1
-	}
+	approved, _ := resolveApprovalStatus(reviews)
+	// countChangesRequested is a conservative proxy for unresolved threads:
+	// proper thread resolution requires the GitHub GraphQL review-threads API.
+	unresolvedThreads := countChangesRequested(reviews)
 
 	runs, err := c.ListCheckRuns(ctx, repo, pr.HeadSHA)
 	if err != nil {
@@ -129,8 +129,11 @@ func (c *Client) FindOpenPR(ctx context.Context, repo, branch string) (*PRInfo, 
 		}
 	}
 
-	url := fmt.Sprintf("%s/repos/%s/pulls?state=open&head=%s&per_page=1",
-		c.apiURL, repo, headFilter)
+	q := url.Values{}
+	q.Set("state", "open")
+	q.Set("head", headFilter)
+	q.Set("per_page", "1")
+	endpoint := fmt.Sprintf("%s/repos/%s/pulls?%s", c.apiURL, repo, q.Encode())
 
 	var pulls []struct {
 		Number int    `json:"number"`
@@ -139,7 +142,7 @@ func (c *Client) FindOpenPR(ctx context.Context, repo, branch string) (*PRInfo, 
 			SHA string `json:"sha"`
 		} `json:"head"`
 	}
-	if err := c.getJSON(ctx, url, &pulls); err != nil {
+	if err := c.getJSON(ctx, endpoint, &pulls); err != nil {
 		return nil, fmt.Errorf("find open PR: %w", err)
 	}
 	if len(pulls) == 0 {
@@ -340,6 +343,26 @@ func parseLinkNext(header string) string {
 		}
 	}
 	return ""
+}
+
+// countChangesRequested returns the number of distinct reviewers whose current
+// state is CHANGES_REQUESTED. Used as a conservative proxy for unresolved
+// threads; the actual count requires the GitHub GraphQL review-threads API.
+func countChangesRequested(reviews []Review) int {
+	latest := make(map[string]string)
+	for _, r := range reviews {
+		switch r.State {
+		case "APPROVED", "CHANGES_REQUESTED", "DISMISSED":
+			latest[r.User] = r.State
+		}
+	}
+	count := 0
+	for _, st := range latest {
+		if st == "CHANGES_REQUESTED" {
+			count++
+		}
+	}
+	return count
 }
 
 // resolveApprovalStatus scans reviews in submission order.

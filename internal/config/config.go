@@ -234,9 +234,12 @@ func applyEnvOverrides(c *Config) {
 	if v := os.Getenv("CODERO_DASHBOARD_PUBLIC_BASE_URL"); v != "" {
 		c.DashboardPublicBaseURL = v
 	}
-	// CODERO_AUTO_MERGE_ENABLED=true activates automatic PR merging on merge_ready.
-	if v := os.Getenv("CODERO_AUTO_MERGE_ENABLED"); v == "true" || v == "1" {
-		c.AutoMerge.Enabled = true
+	// CODERO_AUTO_MERGE_ENABLED overrides auto-merge in either direction so
+	// operators can disable it via env even when the YAML has enabled: true.
+	if v := os.Getenv("CODERO_AUTO_MERGE_ENABLED"); v != "" {
+		if enabled, err := strconv.ParseBool(v); err == nil {
+			c.AutoMerge.Enabled = enabled
+		}
 	}
 	// CODERO_AUTO_MERGE_METHOD overrides the GitHub merge strategy ("merge", "squash", "rebase").
 	if v := os.Getenv("CODERO_AUTO_MERGE_METHOD"); v != "" {

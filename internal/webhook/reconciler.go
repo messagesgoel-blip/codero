@@ -233,13 +233,46 @@ func (r *Reconciler) reconcileBranch(ctx context.Context, b state.BranchRecord) 
 }
 
 // maybeMerge calls the GitHub Merge API if auto-merge is configured and the
-// PR number is known. On success it transitions the branch to closed (T18).
-// On failure it logs the error and leaves the branch in merge_ready so the next
-// reconcile cycle can retry (or detect revoked conditions).
+// PR number is known. It reloads the branch from the DB immediately before
+// the external call to guard against stale snapshots: if another worker has
+// revoked merge_ready or the head hash has changed since this cycle started,
+// the merge is skipped rather than issued against outdated state.
+// On success it transitions the branch to closed (T18). On failure it logs
+// the error and leaves the branch in merge_ready for the next cycle.
 func (r *Reconciler) maybeMerge(ctx context.Context, b state.BranchRecord, ghState *GitHubState) {
 	if r.merger == nil || ghState.PRNumber == 0 {
 		return
 	}
+
+	// Reload to get the current durable state — b may be a stale snapshot.
+	current, err := state.GetBranch(r.db, b.Repo, b.Branch)
+	if err != nil {
+		loglib.Info("reconciler: auto-merge skipped (reload failed)",
+			loglib.FieldComponent, "reconciler",
+			loglib.FieldRepo, b.Repo,
+			loglib.FieldBranch, b.Branch,
+			"error", err,
+		)
+		return
+	}
+	if current.State != state.StateMergeReady {
+		loglib.Info("reconciler: auto-merge skipped (state no longer merge_ready)",
+			loglib.FieldComponent, "reconciler",
+			loglib.FieldRepo, b.Repo,
+			loglib.FieldBranch, b.Branch,
+			loglib.FieldFromState, string(current.State),
+		)
+		return
+	}
+	if current.HeadHash != ghState.HeadHash {
+		loglib.Info("reconciler: auto-merge skipped (head hash changed)",
+			loglib.FieldComponent, "reconciler",
+			loglib.FieldRepo, b.Repo,
+			loglib.FieldBranch, b.Branch,
+		)
+		return
+	}
+
 	if err := r.merger.MergePR(ctx, b.Repo, ghState.PRNumber, ghState.HeadHash, r.mergeMethod); err != nil {
 		loglib.Error("reconciler: auto-merge failed",
 			loglib.FieldComponent, "reconciler",
@@ -258,12 +291,8 @@ func (r *Reconciler) maybeMerge(ctx context.Context, b state.BranchRecord, ghSta
 		"pr_number", ghState.PRNumber,
 		"merge_method", r.mergeMethod,
 	)
-	// PR is now merged on GitHub; mirror the terminal state locally (T18).
-	// Always transition from merge_ready regardless of what b.State was before
-	// (the branch may have just been transitioned to merge_ready in this cycle).
-	mergeReadyRecord := b
-	mergeReadyRecord.State = state.StateMergeReady
-	r.transitionIfValid(mergeReadyRecord, state.StateClosed, "auto_merged")
+	// PR is merged on GitHub; mirror the terminal state locally (T18).
+	r.transitionIfValid(*current, state.StateClosed, "auto_merged")
 }
 
 func (r *Reconciler) maybeClose(b state.BranchRecord, trigger string) {
