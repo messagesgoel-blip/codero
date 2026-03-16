@@ -15,8 +15,10 @@ import (
 	"text/tabwriter"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/codero/codero/internal/gate"
 	"github.com/codero/codero/internal/state"
+	"github.com/codero/codero/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -631,25 +633,24 @@ Examples:
 	return cmd
 }
 
-// runGateStatusWatch polls progress.env and redraws the TUI until a terminal state.
+// runGateStatusWatch runs the Bubble Tea TUI to display gate status.
 func runGateStatusWatch(repoPath string, intervalSec int) error {
 	if intervalSec < 1 {
 		intervalSec = 5
 	}
 	interval := time.Duration(intervalSec) * time.Second
 
-	for {
-		result := readProgressEnvAsResult(repoPath)
-		// Clear screen and reposition cursor to top-left.
-		fmt.Print("\033[H\033[2J")
-		fmt.Print(RenderGateStatusBox(result, repoPath))
-		if result.IsFinal() {
-			printGateActions(result)
-			return nil
-		}
-		fmt.Printf("  Watching… next refresh in %ds  (Ctrl-C to exit)\n", intervalSec)
-		time.Sleep(interval)
+	initialVM := tui.AdapterFromPath(repoPath)
+	cfg := tui.Config{
+		RepoPath:  repoPath,
+		Interval:  interval,
+		Theme:     tui.DefaultTheme,
+		WatchMode: true,
+		InitialVM: initialVM,
 	}
+	p := tea.NewProgram(tui.New(cfg), tea.WithAltScreen())
+	_, err := p.Run()
+	return err
 }
 
 // readProgressEnvAsResult reads .codero/gate-heartbeat/progress.env and converts

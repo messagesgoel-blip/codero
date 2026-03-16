@@ -1,6 +1,11 @@
 language: "en-US"
 
 reviews:
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    base_branches:
+      - ".*"
   profile: "chill"
   request_changes_workflow: false
   high_level_summary: true
