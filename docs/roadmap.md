@@ -273,7 +273,7 @@ Sprint 4 (Phase 2 start):
 
 - `local_review` state transitions are implemented in `internal/state` (T02/T03/T04).
 - `codero commit-gate` is implemented and wired to the shared heartbeat gate contract.
-- Active pre-commit gate order is `Copilot -> LiteLLM` with shared deterministic blockers in the same pipeline.
+- `codero commit-gate` renders a `Copilot -> LiteLLM` heartbeat pipeline, while `scripts/review/two-pass-review.sh` still enforces Semgrep as a mandatory blocker pass.
 - `/gate` observability endpoint is live for dashboard parity with CLI gate progress.
 - Proving-period metrics commands (`scorecard`, `record-event`, `record-precommit`) are implemented and `commit-gate` now auto-records provider outcomes.
 - TUI v2-alpha is shipped for `codero gate-status --watch` with Bubble Tea 3-pane layout, keyboard-first controls, and authoritative/non-authoritative gate separation.

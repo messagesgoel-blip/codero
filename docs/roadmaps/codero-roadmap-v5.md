@@ -617,7 +617,7 @@ Program-level criteria (reviewed at phase gates):
   - idempotent writes (`INSERT OR IGNORE`) using `run_id + provider` as deterministic ID
   - manual `record-precommit` no longer required in normal flow
 - hardening matrix closure and first end-to-end test execution evidence - **complete**
-  - all 10 failure-mode scenarios verified (FR-001 through FR-008 in failure-recovery-matrix.md)
+  - all 8 failure-mode scenarios verified (FR-001 through FR-008 in failure-recovery-matrix.md)
   - TestSprint6_E2E_Lifecycle documents the full T02→T04→T06→T08→T10 lifecycle path
   - proving-evidence-2026-03.md updated with complete evidence log
 
