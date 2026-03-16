@@ -53,6 +53,9 @@ func main() {
 		scorecardCmd(&configPath),
 		recordProvingEventCmd(&configPath),
 		recordPrecommitCmd(&configPath),
+		preflightCmd(),
+		dailySnapshotCmd(&configPath),
+		exitGateCmd(&configPath),
 	)
 
 	if err := root.Execute(); err != nil {

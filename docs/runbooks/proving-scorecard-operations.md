@@ -198,16 +198,145 @@ codero record-precommit --repo owner/repo --branch feature/x --provider litellm 
 
 ---
 
-## Automated Daily Collection
+## Preflight Checker
 
-For automated daily snapshot collection, add to cron:
+Run before any evidence collection to verify shared tools and hook enforcement across all managed repos:
 
 ```bash
-# /etc/cron.d/codero-scorecard
-0 8 * * * codero /usr/local/bin/codero scorecard --save --output json > /var/log/codero/scorecard.log 2>&1
+codero preflight
 ```
 
-This runs at 08:00 UTC daily and saves the snapshot to the database.
+Exit codes:
+- `0` — all checks pass
+- `1` — one or more checks failed
+
+Checks performed:
+- Shared tools available at `/srv/storage/shared/tools/bin`: `semgrep`, `gitleaks`, `pre-commit`, `poetry`, `ruff`
+- Gate heartbeat binary present: `/srv/storage/shared/agent-toolkit/bin/gate-heartbeat`
+- Pre-commit hook enforced on every repo in `docs/managed-repos.txt`
+
+### Remediation Paths
+
+| Failure | Cause | Fix |
+|---------|-------|-----|
+| Tool missing | Shared venv not installed | `cd /srv/storage/shared && poetry install` |
+| Heartbeat binary missing | Toolkit not installed | `ls /srv/storage/shared/agent-toolkit/bin/` — check toolkit path |
+| Hook missing/stale | `.githooks/pre-commit` absent or not executable | `bash scripts/review/install-pre-commit-all.sh` then re-run preflight |
+| Hook not symlink | Local hook instead of shared toolkit | Delete `.githooks/pre-commit`, then run the install script |
+
+---
+
+## Automated Daily Collection
+
+Use the new `daily-snapshot` command instead of the manual cron approach. It includes preflight gating, idempotency, timestamped logging, and retention.
+
+```bash
+# One-off manual run
+codero daily-snapshot --snapshot-dir ~/.codero/snapshots
+
+# Verify today's snapshot exists
+codero daily-snapshot --verify-only --snapshot-dir ~/.codero/snapshots
+
+# Custom retention (default: 45 days)
+codero daily-snapshot --snapshot-dir ~/.codero/snapshots --retain-days 60
+```
+
+### Install with cron (recommended)
+
+```bash
+crontab -e
+# Paste from scripts/automation/codero-daily.cron
+```
+
+The cron template at `scripts/automation/codero-daily.cron` configures a 02:05 daily run with per-day log rotation.
+
+### Install with systemd timer
+
+```bash
+cp scripts/automation/codero-daily.service ~/.config/systemd/user/
+cp scripts/automation/codero-daily.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now codero-daily.timer
+systemctl --user list-timers codero-daily.timer
+```
+
+### Verify automation is working
+
+```bash
+# Check today's snapshot in DB
+codero daily-snapshot --verify-only
+
+# Check file output
+ls -lh ~/.codero/snapshots/
+
+# Check logs
+cat ~/.codero/logs/daily-snapshot-$(date +%Y%m%d).log
+```
+
+### Rollback
+
+DB rows in `proving_snapshots` are never deleted (audit trail). To remove an erroneous record:
+
+```sql
+DELETE FROM proving_snapshots WHERE snapshot_date = '2026-01-15';
+```
+
+Snapshot files are managed by retention (default 45 days). Delete manually if needed:
+
+```bash
+rm ~/.codero/snapshots/proving-snapshot-2026-01-15.json
+```
+
+---
+
+## Exit-Gate Tracker
+
+Monitor Phase 1F readiness and compute gaps to close:
+
+```bash
+# Human-readable table (default)
+codero exit-gate
+
+# JSON for automation/CI
+codero exit-gate --output json
+
+# Markdown block for evidence pasting
+codero exit-gate --output markdown
+```
+
+### Sample output
+
+```
+Phase 1F Exit-Gate Status
+══════════════════════════════════════════════════════
+ CRITERION                         REQUIRED  VALUE     STATUS
+──────────────────────────────────────────────────────
+ Consecutive days ≥ 30             yes       12        NOT_READY  gap: need 18 more days
+ Active repos ≥ 2                  yes       3         READY
+ Branches reviewed/week ≥ 3        yes       4         READY
+ Stale detections ≥ 2 (30d)        yes       1         NOT_READY  gap: need 1 more detection
+ Lease expiry recoveries ≥ 1       yes       2         READY
+ Precommit reviews ≥ 10/repo/wk    yes       11        READY
+ Manual DB repairs = 0             yes       0         READY
+ Missed deliveries = 0             yes       0         READY
+ Queue stall incidents = 0         no        0         READY
+ Unresolved gate failures = 0      no        0         READY
+──────────────────────────────────────────────────────
+ Overall: NOT_READY  (2 required criteria unmet)
+══════════════════════════════════════════════════════
+Gaps to close:
+  • consecutive_days_gte_30: need 18 more days
+  • stale_detections_gte_2: need 1 more detection
+```
+
+### Weekly operator workflow
+
+```bash
+# Generate and commit weekly report
+codero exit-gate --output markdown >> docs/runbooks/proving-evidence-2026-03.md
+git add docs/runbooks/proving-evidence-2026-03.md
+git commit -m "chore: weekly Phase 1F exit-gate snapshot $(date +%Y-%m-%d)"
+```
 
 ---
 

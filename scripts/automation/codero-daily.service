@@ -1,0 +1,17 @@
+[Unit]
+Description=Codero daily proving snapshot
+Documentation=https://github.com/codero/codero/blob/main/docs/runbooks/proving-scorecard-operations.md
+After=network.target
+
+[Service]
+Type=oneshot
+# Override CODERO_BIN if the binary is not on the system PATH
+Environment=CODERO_BIN=/usr/local/bin/codero
+Environment=SNAPSHOT_DIR=%h/.codero/snapshots
+Environment=RETAIN_DAYS=45
+ExecStart=/srv/storage/repo/codero/scripts/automation/daily-snapshot.sh
+# Log to syslog as well as the script's log file
+StandardOutput=journal
+StandardError=journal
+# Do not restart on failure — operator should investigate
+Restart=no

@@ -394,3 +394,58 @@ func ComputeProvingScorecard(ctx context.Context, db *DB) (*ProvingScorecard, er
 
 	return card, nil
 }
+
+// CountConsecutiveDays returns the number of consecutive calendar days (ending today)
+// for which a proving snapshot exists. Used to track the 30-day streak requirement.
+func CountConsecutiveDays(ctx context.Context, db *DB) (int, error) {
+	rows, err := db.sql.QueryContext(ctx,
+		`SELECT snapshot_date FROM proving_snapshots ORDER BY snapshot_date DESC`)
+	if err != nil {
+		return 0, fmt.Errorf("count consecutive days: %w", err)
+	}
+	defer rows.Close()
+
+	streak := 0
+	expected := time.Now().Format("2006-01-02")
+	for rows.Next() {
+		var date string
+		if err := rows.Scan(&date); err != nil {
+			return 0, fmt.Errorf("count consecutive days: scan: %w", err)
+		}
+		if date != expected {
+			break
+		}
+		streak++
+		t, _ := time.Parse("2006-01-02", date)
+		expected = t.AddDate(0, 0, -1).Format("2006-01-02")
+	}
+	return streak, rows.Err()
+}
+
+// CountActiveRepos returns the count of distinct repos that have at least one
+// precommit review record within the given time window. This measures whether
+// all managed repositories are actively being proved.
+func CountActiveRepos(ctx context.Context, db *DB, since time.Time) (int, error) {
+	var count int
+	err := db.sql.QueryRowContext(ctx,
+		`SELECT COUNT(DISTINCT repo) FROM precommit_reviews WHERE created_at >= ?`,
+		since.UTC().Format("2006-01-02 15:04:05"),
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count active repos: %w", err)
+	}
+	return count, nil
+}
+
+// SnapshotExistsForDate returns true when a proving snapshot for the given YYYY-MM-DD
+// date already exists in the database. Used by daily-snapshot for idempotency.
+func SnapshotExistsForDate(ctx context.Context, db *DB, date string) (bool, error) {
+	var count int
+	err := db.sql.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM proving_snapshots WHERE snapshot_date = ?`, date,
+	).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("snapshot exists check: %w", err)
+	}
+	return count > 0, nil
+}

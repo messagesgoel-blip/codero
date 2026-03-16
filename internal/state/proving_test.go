@@ -638,3 +638,189 @@ func TestCreatePrecommitReview_CountsInScorecard(t *testing.T) {
 	}
 }
 
+// --- CountConsecutiveDays tests ---
+
+func TestCountConsecutiveDays_Empty(t *testing.T) {
+	db, cleanup := setupTestProvingDB(t)
+	defer cleanup()
+
+	streak, err := CountConsecutiveDays(context.Background(), db)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if streak != 0 {
+		t.Errorf("expected streak=0 on empty DB, got %d", streak)
+	}
+}
+
+func TestCountConsecutiveDays_StreakEndsYesterday(t *testing.T) {
+	db, cleanup := setupTestProvingDB(t)
+	defer cleanup()
+
+	// Insert yesterday and two days ago but NOT today → streak should be 0
+	ctx := context.Background()
+	for i := 1; i <= 3; i++ {
+		d := time.Now().UTC().AddDate(0, 0, -i).Format("2006-01-02")
+		if _, err := db.sql.ExecContext(ctx,
+			`INSERT INTO proving_snapshots (snapshot_date, scorecard_json) VALUES (?, '{}')`, d); err != nil {
+			t.Fatalf("insert day %d: %v", i, err)
+		}
+	}
+
+	streak, err := CountConsecutiveDays(ctx, db)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Today is missing → streak starts from yesterday only if we change definition,
+	// but the contract says "ending today". Today is missing → streak = 0.
+	if streak != 0 {
+		t.Errorf("expected streak=0 (today missing), got %d", streak)
+	}
+}
+
+func TestCountConsecutiveDays_IncludesToday(t *testing.T) {
+	db, cleanup := setupTestProvingDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	// Insert today + 4 previous consecutive days
+	for i := 0; i <= 4; i++ {
+		d := time.Now().UTC().AddDate(0, 0, -i).Format("2006-01-02")
+		if _, err := db.sql.ExecContext(ctx,
+			`INSERT INTO proving_snapshots (snapshot_date, scorecard_json) VALUES (?, '{}')`, d); err != nil {
+			t.Fatalf("insert day %d: %v", i, err)
+		}
+	}
+
+	streak, err := CountConsecutiveDays(ctx, db)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if streak != 5 {
+		t.Errorf("expected streak=5, got %d", streak)
+	}
+}
+
+func TestCountConsecutiveDays_GapBreaksStreak(t *testing.T) {
+	db, cleanup := setupTestProvingDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	// Today and yesterday, then skip a day, then 3 more
+	for _, offset := range []int{0, 1, 3, 4, 5} {
+		d := time.Now().UTC().AddDate(0, 0, -offset).Format("2006-01-02")
+		if _, err := db.sql.ExecContext(ctx,
+			`INSERT INTO proving_snapshots (snapshot_date, scorecard_json) VALUES (?, '{}')`, d); err != nil {
+			t.Fatalf("insert offset %d: %v", offset, err)
+		}
+	}
+
+	streak, err := CountConsecutiveDays(ctx, db)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Gap at offset 2 breaks the streak — only today+yesterday consecutive
+	if streak != 2 {
+		t.Errorf("expected streak=2 (gap at day 2), got %d", streak)
+	}
+}
+
+// --- CountActiveRepos tests ---
+
+func TestCountActiveRepos_Empty(t *testing.T) {
+	db, cleanup := setupTestProvingDB(t)
+	defer cleanup()
+
+	count, err := CountActiveRepos(context.Background(), db, time.Now().AddDate(0, 0, -7))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("expected 0 active repos, got %d", count)
+	}
+}
+
+func TestCountActiveRepos_MultipleRepos(t *testing.T) {
+	db, cleanup := setupTestProvingDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	recent := time.Now().UTC().AddDate(0, 0, -2).Format("2006-01-02 15:04:05")
+
+	for _, repo := range []string{"codero/codero", "cacheflow/cacheflow", "mathkit/mathkit"} {
+		_, err := db.sql.ExecContext(ctx,
+			`INSERT INTO precommit_reviews (id, repo, branch, provider, status, created_at)
+ VALUES (?, ?, 'main', 'copilot', 'passed', ?)`,
+			"pc-"+repo, repo, recent)
+		if err != nil {
+			t.Fatalf("insert for %s: %v", repo, err)
+		}
+	}
+
+	count, err := CountActiveRepos(ctx, db, time.Now().AddDate(0, 0, -7))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("expected 3 active repos, got %d", count)
+	}
+}
+
+func TestCountActiveRepos_OutsideWindow(t *testing.T) {
+	db, cleanup := setupTestProvingDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	old := time.Now().UTC().AddDate(0, 0, -30).Format("2006-01-02 15:04:05")
+
+	_, err := db.sql.ExecContext(ctx,
+		`INSERT INTO precommit_reviews (id, repo, branch, provider, status, created_at)
+ VALUES ('pc-old', 'old/repo', 'main', 'copilot', 'passed', ?)`, old)
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	// Query with 7-day window — old record should not count
+	count, err := CountActiveRepos(ctx, db, time.Now().AddDate(0, 0, -7))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("expected 0 active repos (outside window), got %d", count)
+	}
+}
+
+// --- SnapshotExistsForDate tests ---
+
+func TestSnapshotExistsForDate_Missing(t *testing.T) {
+	db, cleanup := setupTestProvingDB(t)
+	defer cleanup()
+
+	exists, err := SnapshotExistsForDate(context.Background(), db, "2026-01-01")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if exists {
+		t.Error("expected false for non-existent date")
+	}
+}
+
+func TestSnapshotExistsForDate_Present(t *testing.T) {
+	db, cleanup := setupTestProvingDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	if _, err := db.sql.ExecContext(ctx,
+		`INSERT INTO proving_snapshots (snapshot_date, scorecard_json) VALUES ('2026-01-15', '{}')`,
+	); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	exists, err := SnapshotExistsForDate(ctx, db, "2026-01-15")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !exists {
+		t.Error("expected true for present date")
+	}
+}

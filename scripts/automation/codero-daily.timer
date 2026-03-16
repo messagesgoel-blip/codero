@@ -1,0 +1,13 @@
+[Unit]
+Description=Codero daily proving snapshot timer
+
+[Timer]
+# Run once per day at 02:00 local time; delay up to 10 min to avoid burst
+OnCalendar=*-*-* 02:00:00
+RandomizedDelaySec=600
+# Catch up if the machine was off when the timer fired
+Persistent=true
+Unit=codero-daily.service
+
+[Install]
+WantedBy=timers.target
