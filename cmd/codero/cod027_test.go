@@ -171,10 +171,10 @@ func TestGateStatusWatch_NonTTY_FailState(t *testing.T) {
 	}
 }
 
-// --- TestGateStatusWatch_NonTTY_OutputIsOneLineJSON ---
-// Output must be a single compact JSON object followed by a newline (no prose).
+// --- TestGateStatusWatch_NonTTY_OutputIsJSONOnly ---
+// Output must be JSON only (no prose).
 
-func TestGateStatusWatch_NonTTY_OutputIsOneLineJSON(t *testing.T) {
+func TestGateStatusWatch_NonTTY_OutputIsJSONOnly(t *testing.T) {
 	repoPath := makeProgressEnv(t, []string{
 		"RUN_ID=run-compact",
 		"STATUS=PENDING",

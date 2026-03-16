@@ -598,8 +598,9 @@ The TUI shows:
   - Blocker comments explaining why the gate failed (if FAIL)
   - Actionable next-step hints for common interventions
 
-In non-interactive (pipe/CI) contexts the command never prompts for input and
-exits with code 1 when the gate is in FAIL state, 0 for PASS/PENDING.
+In non-interactive (pipe/CI) contexts the command never prompts for input.
+One-shot mode exits with code 1 when the gate is in FAIL state; watch mode
+always exits 0 and reports status via the JSON payload.
 
 Flags:
   --watch         poll and redraw until PASS or FAIL (Bubble Tea TUI)
