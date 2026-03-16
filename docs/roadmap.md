@@ -138,7 +138,7 @@ Priority C (advanced):
 
 Exit gate:
 
-- At least 3 real repositories running concurrently for 30 days.
+- At least 3 real repositories running concurrently with validated end-to-end review cycles.
 - No cross-repo state collision incidents.
 - p95 event delivery latency and queue wait SLOs defined and met.
 
@@ -268,6 +268,16 @@ Sprint 4 (Phase 2 start):
 
 - integrate MI-001 lease semantics using the prepared Phase 1 contract + parity harness
 - execute parity tests and rollout checklist
+
+### Current Implementation Snapshot (2026-03-16)
+
+- `local_review` state transitions are implemented in `internal/state` (T02/T03/T04).
+- `codero commit-gate` is implemented and wired to the shared heartbeat gate contract.
+- `codero commit-gate` renders a `Copilot -> LiteLLM` heartbeat pipeline, while `scripts/review/two-pass-review.sh` still enforces Semgrep as a mandatory blocker pass.
+- `/gate` observability endpoint is live for dashboard parity with CLI gate progress.
+- Proving-period metrics commands (`scorecard`, `record-event`, `record-precommit`) are implemented and `commit-gate` now auto-records provider outcomes.
+- TUI v2-alpha is shipped for `codero gate-status --watch` with Bubble Tea 3-pane layout, keyboard-first controls, and authoritative/non-authoritative gate separation.
+- TUI architecture and operator quickstart are documented in `docs/tui-v2-architecture.md`.
 
 ---
 

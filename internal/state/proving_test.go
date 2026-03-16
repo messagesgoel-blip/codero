@@ -414,3 +414,227 @@ func setupTestProvingDB(t *testing.T) (*DB, func()) {
 
 	return db, cleanup
 }
+
+// --- CreatePrecommitReviewIdempotent tests ---
+
+// TestCreatePrecommitReviewIdempotent_InsertOnce verifies that the first insert succeeds.
+func TestCreatePrecommitReviewIdempotent_InsertOnce(t *testing.T) {
+	db, cleanup := setupTestProvingDB(t)
+	defer cleanup()
+
+	rev := &PrecommitReview{
+		ID:       "pc-run001-copilot",
+		Repo:     "owner/repo",
+		Branch:   "feat/x",
+		Provider: "copilot",
+		Status:   "passed",
+	}
+
+	if err := CreatePrecommitReviewIdempotent(context.Background(), db, rev); err != nil {
+		t.Fatalf("first insert failed: %v", err)
+	}
+
+	// Verify record exists.
+	var count int
+	_ = db.sql.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM precommit_reviews WHERE id = ?`, rev.ID).Scan(&count)
+	if count != 1 {
+		t.Errorf("expected 1 record, got %d", count)
+	}
+}
+
+// TestCreatePrecommitReviewIdempotent_DuplicateSkipped verifies that a second
+// insert with the same ID is silently ignored (INSERT OR IGNORE).
+func TestCreatePrecommitReviewIdempotent_DuplicateSkipped(t *testing.T) {
+	db, cleanup := setupTestProvingDB(t)
+	defer cleanup()
+
+	rev := &PrecommitReview{
+		ID:       "pc-run002-litellm",
+		Repo:     "owner/repo",
+		Branch:   "feat/y",
+		Provider: "litellm",
+		Status:   "passed",
+	}
+
+	if err := CreatePrecommitReviewIdempotent(context.Background(), db, rev); err != nil {
+		t.Fatalf("first insert failed: %v", err)
+	}
+
+	// Second insert with same ID — must not return an error.
+	if err := CreatePrecommitReviewIdempotent(context.Background(), db, rev); err != nil {
+		t.Errorf("duplicate insert should be silently skipped, got error: %v", err)
+	}
+
+	// Row count must remain 1.
+	var count int
+	_ = db.sql.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM precommit_reviews WHERE id = ?`, rev.ID).Scan(&count)
+	if count != 1 {
+		t.Errorf("expected exactly 1 record after duplicate insert, got %d", count)
+	}
+}
+
+// TestCreatePrecommitReviewIdempotent_TwoProvidersSameRun verifies that copilot and
+// litellm records for the same run_id are stored as separate rows.
+func TestCreatePrecommitReviewIdempotent_TwoProvidersSameRun(t *testing.T) {
+	db, cleanup := setupTestProvingDB(t)
+	defer cleanup()
+
+	runID := "20260316-abc999"
+
+	for _, p := range []struct {
+		id, provider, status string
+	}{
+		{"pc-" + runID + "-copilot", "copilot", "passed"},
+		{"pc-" + runID + "-litellm", "litellm", "failed"},
+	} {
+		rev := &PrecommitReview{
+			ID:       p.id,
+			Repo:     "owner/repo",
+			Branch:   "feat/z",
+			Provider: p.provider,
+			Status:   p.status,
+		}
+		if err := CreatePrecommitReviewIdempotent(context.Background(), db, rev); err != nil {
+			t.Fatalf("insert %s failed: %v", p.provider, err)
+		}
+	}
+
+	var count int
+	_ = db.sql.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM precommit_reviews WHERE id LIKE ?`, "pc-"+runID+"-%").Scan(&count)
+	if count != 2 {
+		t.Errorf("expected 2 records for run %s, got %d", runID, count)
+	}
+}
+
+// TestCreatePrecommitReviewIdempotent_GateStatusMapping verifies PASS/FAIL/error
+// status values accepted from the gate-state-to-precommit-status mapping.
+func TestCreatePrecommitReviewIdempotent_GateStatusMapping(t *testing.T) {
+	db, cleanup := setupTestProvingDB(t)
+	defer cleanup()
+
+	cases := []struct {
+		id     string
+		status string
+	}{
+		{"pc-map-passed", "passed"},
+		{"pc-map-failed", "failed"},
+		{"pc-map-error", "error"},
+	}
+
+	for _, tc := range cases {
+		rev := &PrecommitReview{
+			ID:       tc.id,
+			Repo:     "owner/repo",
+			Branch:   "feat/map",
+			Provider: "copilot",
+			Status:   tc.status,
+		}
+		if err := CreatePrecommitReviewIdempotent(context.Background(), db, rev); err != nil {
+			t.Errorf("insert with status=%q failed: %v", tc.status, err)
+		}
+	}
+
+	// Verify all three records are present.
+	var count int
+	_ = db.sql.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM precommit_reviews WHERE repo = 'owner/repo' AND branch = 'feat/map'`).Scan(&count)
+	if count != 3 {
+		t.Errorf("expected 3 records, got %d", count)
+	}
+}
+
+// TestCreatePrecommitReviewIdempotent_PollingLoop verifies that calling the
+// idempotent function multiple times (simulating a polling loop that retries
+// on the same run_id) results in exactly one record.
+func TestCreatePrecommitReviewIdempotent_PollingLoop(t *testing.T) {
+	db, cleanup := setupTestProvingDB(t)
+	defer cleanup()
+
+	rev := &PrecommitReview{
+		ID:       "pc-poll-run-copilot",
+		Repo:     "owner/repo",
+		Branch:   "feat/poll",
+		Provider: "copilot",
+		Status:   "passed",
+	}
+
+	// Simulate being called 5 times (e.g. polling loop).
+	for i := 0; i < 5; i++ {
+		if err := CreatePrecommitReviewIdempotent(context.Background(), db, rev); err != nil {
+			t.Fatalf("call %d failed: %v", i+1, err)
+		}
+	}
+
+	var count int
+	_ = db.sql.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM precommit_reviews WHERE id = ?`, rev.ID).Scan(&count)
+	if count != 1 {
+		t.Errorf("expected exactly 1 record after 5 idempotent calls, got %d", count)
+	}
+}
+
+// TestCreatePrecommitReview_NonIdempotent verifies the original CreatePrecommitReview
+// still returns an error on duplicate ID (preserving existing behavior).
+func TestCreatePrecommitReview_NonIdempotent(t *testing.T) {
+	db, cleanup := setupTestProvingDB(t)
+	defer cleanup()
+
+	rev := &PrecommitReview{
+		ID:       "pc-non-idempotent-test",
+		Repo:     "owner/repo",
+		Branch:   "feat/ni",
+		Provider: "litellm",
+		Status:   "passed",
+	}
+
+	if err := CreatePrecommitReview(context.Background(), db, rev); err != nil {
+		t.Fatalf("first insert failed: %v", err)
+	}
+
+	// Second insert with same ID must fail (UNIQUE constraint).
+	if err := CreatePrecommitReview(context.Background(), db, rev); err == nil {
+		t.Error("expected error on duplicate insert with CreatePrecommitReview, got nil")
+	}
+}
+
+// TestCreatePrecommitReview_CountsInScorecard verifies that auto-recorded entries
+// are correctly aggregated by ComputeProvingScorecard.
+func TestCreatePrecommitReview_CountsInScorecard(t *testing.T) {
+	db, cleanup := setupTestProvingDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now()
+	recentTime := now.AddDate(0, 0, -3).Format("2006-01-02 15:04:05")
+
+	// Insert 3 records within the 7-day window.
+	for i, p := range []struct{ id, provider string }{
+		{"pc-sc-run1-copilot", "copilot"},
+		{"pc-sc-run1-litellm", "litellm"},
+		{"pc-sc-run2-copilot", "copilot"},
+	} {
+		_, err := db.sql.ExecContext(ctx, `
+			INSERT INTO precommit_reviews (id, repo, branch, provider, status, created_at)
+			VALUES (?, 'owner/repo', 'feat/sc', ?, 'passed', ?)`,
+			p.id, p.provider, recentTime)
+		if err != nil {
+			t.Fatalf("insert %d failed: %v", i, err)
+		}
+	}
+
+	card, err := ComputeProvingScorecard(ctx, db)
+	if err != nil {
+		t.Fatalf("ComputeProvingScorecard failed: %v", err)
+	}
+
+	if card.PrecommitReviews7Days != 3 {
+		t.Errorf("PrecommitReviews7Days: got %d, want 3", card.PrecommitReviews7Days)
+	}
+	if card.PrecommitReviewsByRepo["owner/repo"] != 3 {
+		t.Errorf("PrecommitReviewsByRepo[owner/repo]: got %d, want 3", card.PrecommitReviewsByRepo["owner/repo"])
+	}
+}
+

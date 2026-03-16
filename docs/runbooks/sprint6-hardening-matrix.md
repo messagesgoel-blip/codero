@@ -607,6 +607,12 @@ WHERE branch = 'test-branch';"
 | `codero why` | Show score breakdown |
 | `codero reactivate --repo R --branch B` | Reactivate abandoned |
 | `codero release --repo R --branch B` | Release blocked |
+| `codero gate-status` | Show gate run status (TUI view) |
+| `codero gate-status --watch` | Launch Bubble Tea 3-pane live TUI (gate timeline, center tabs, action pane) until PASS/FAIL |
+| `codero gate-status --logs` | Show gate log path and last entries |
+| `codero commit-gate` | Run gate and auto-record outcomes to scorecard |
+
+For detailed layout and keymap, see `docs/tui-v2-architecture.md`.
 
 ---
 
@@ -619,6 +625,7 @@ WHERE branch = 'test-branch';"
 | `GET /metrics` | Prometheus metrics |
 | `GET /api/v1/agent-metrics` | Effectiveness metrics |
 | `GET /ready` | Readiness probe |
+| `GET /gate` | Current gate progress (same state as TUI — dashboard parity) |
 
 ---
 

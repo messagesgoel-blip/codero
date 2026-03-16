@@ -45,6 +45,7 @@ func main() {
 		statusCmd(&configPath),
 		versionCmd(),
 		commitGateCmd(),
+		gateStatusCmd(),
 		registerCmd(),
 		queueCmd(&configPath),
 		branchCmd(&configPath),
@@ -331,6 +332,10 @@ func versionCmd() *cobra.Command {
 // commitGateCmd runs the pre-commit review gate via the shared gate-heartbeat contract.
 // It polls the shared heartbeat binary until STATUS: PASS or STATUS: FAIL, rendering
 // a live progress bar during the run. All timeouts are env-driven and independent.
+//
+// On terminal state, provider-level outcomes (copilot, litellm) are automatically
+// persisted to the proving scorecard DB. Failures to write metrics are warnings only
+// and do not affect gate exit behavior.
 func commitGateCmd() *cobra.Command {
 	var repoPath string
 
@@ -349,6 +354,9 @@ Semgrep deterministic checks run inside the shared gate pipeline as a
 hard blocker before AI pass/fail resolution.
 Each gate has its own independent timeout; one gate timeout does not
 reduce the next gate's budget.
+
+On completion, provider-level outcomes are automatically recorded in the
+proving scorecard DB. Manual use of 'record-precommit' is no longer required.
 
 Timeout and polling are configurable via environment variables:
   CODERO_COPILOT_TIMEOUT_SEC      Copilot gate timeout (default: 15)
@@ -390,6 +398,10 @@ Timeout and polling are configurable via environment variables:
 				return fmt.Errorf("commit gate error: %w", err)
 			}
 
+			// Auto-record provider outcomes to proving scorecard DB.
+			// This is a best-effort write; failures are warnings, not fatal.
+			autoRecordGateOutcomes(cmd.Context(), result, repoPath, *configPathForCmd(cmd))
+
 			switch result.Status {
 			case gate.StatusPass:
 				fmt.Println("✅ Commit gate PASSED")
@@ -407,6 +419,57 @@ Timeout and polling are configurable via environment variables:
 		"path to repository (default: current directory)")
 
 	return cmd
+}
+
+// autoRecordGateOutcomes persists per-provider pre-commit gate outcomes to the
+// proving scorecard DB. Each provider (copilot, litellm) is recorded with an
+// idempotent ID derived from run_id + provider, so repeated calls for the same
+// gate run are safe (INSERT OR IGNORE).
+//
+// Failures to load config or open the DB are printed as warnings only; they do
+// not affect the gate exit code or CLI behavior.
+func autoRecordGateOutcomes(ctx context.Context, result gate.Result, repoPath, configPath string) {
+	cfg, err := loadConfig(configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gate-metrics: config unavailable, skipping auto-record (%v)\n", err)
+		return
+	}
+
+	db, err := state.Open(cfg.DBPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gate-metrics: DB unavailable, skipping auto-record (%v)\n", err)
+		return
+	}
+	defer db.Close()
+
+	branch, err := getCurrentBranchAt(repoPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gate-metrics: branch detection failed (%v)\n", err)
+	}
+	repo := ""
+	if len(cfg.Repos) > 0 {
+		repo = cfg.Repos[0]
+	}
+
+	for _, p := range []struct{ provider, gateState string }{
+		{"copilot", result.CopilotStatus},
+		{"litellm", result.LiteLLMStatus},
+	} {
+		if p.gateState == "" {
+			continue
+		}
+		id := fmt.Sprintf("pc-%s-%s", result.RunID, p.provider)
+		rev := &state.PrecommitReview{
+			ID:       id,
+			Repo:     repo,
+			Branch:   branch,
+			Provider: p.provider,
+			Status:   GateStateToPrecommitStatus(p.gateState),
+		}
+		if err := state.CreatePrecommitReviewIdempotent(ctx, db, rev); err != nil {
+			fmt.Fprintf(os.Stderr, "gate-metrics: record %s: %v\n", p.provider, err)
+		}
+	}
 }
 
 // registerCmd registers a branch for local review or queue submission.
@@ -514,7 +577,16 @@ func configPathForCmd(cmd *cobra.Command) *string {
 
 // getCurrentBranch returns the current git branch.
 func getCurrentBranch() (string, error) {
+	return getCurrentBranchAt("")
+}
+
+// getCurrentBranchAt returns the current git branch at repoPath.
+// If repoPath is empty, it uses the current working directory.
+func getCurrentBranchAt(repoPath string) (string, error) {
 	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	if repoPath != "" {
+		cmd.Dir = repoPath
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("git branch: %w", err)

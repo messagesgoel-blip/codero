@@ -1,18 +1,25 @@
 package main
 
 import (
+	"bufio"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 	"text/tabwriter"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/codero/codero/internal/gate"
 	"github.com/codero/codero/internal/state"
+	"github.com/codero/codero/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -502,10 +509,10 @@ Status: "passed", "failed", or "error"`,
 				return fmt.Errorf("--repo, --branch, --provider, and --status are required")
 			}
 
-			validProviders := map[string]bool{"litellm": true, "coderabbit": true}
+			validProviders := map[string]bool{"litellm": true, "coderabbit": true, "copilot": true}
 			validStatuses := map[string]bool{"passed": true, "failed": true, "error": true}
 			if !validProviders[provider] {
-				return fmt.Errorf("invalid provider: %s (valid: litellm, coderabbit)", provider)
+				return fmt.Errorf("invalid provider: %s (valid: copilot, litellm, coderabbit)", provider)
 			}
 			if !validStatuses[status] {
 				return fmt.Errorf("invalid status: %s (valid: passed, failed, error)", status)
@@ -542,7 +549,7 @@ Status: "passed", "failed", or "error"`,
 
 	cmd.Flags().StringVarP(&repo, "repo", "R", "", "repository (owner/repo) (required)")
 	cmd.Flags().StringVarP(&branch, "branch", "b", "", "branch name (required)")
-	cmd.Flags().StringVar(&provider, "provider", "", "review provider: litellm or coderabbit (required)")
+	cmd.Flags().StringVar(&provider, "provider", "", "review provider: copilot, litellm, or coderabbit (required)")
 	cmd.Flags().StringVar(&status, "status", "", "review result: passed, failed, or error (required)")
 
 	return cmd
@@ -554,4 +561,419 @@ func generatePrecommitID() string {
 		return fmt.Sprintf("pc-fallback-%d", time.Now().UnixNano())
 	}
 	return fmt.Sprintf("pc-%s", hex.EncodeToString(b))
+}
+
+// gateStatusCmd shows the current pre-commit gate status in a rich terminal TUI.
+//
+// It reads from the same .codero/gate-heartbeat/progress.env source as the /gate
+// dashboard endpoint, guaranteeing that TUI and dashboard display identical state.
+//
+// Flags:
+//
+//	--watch        Poll progress.env every interval and redraw until terminal state
+//	--interval     Polling interval in seconds for --watch (default: 5)
+//	--logs         Print the gate log directory path and last entries
+//	--repo-path    Path to repository root (default: current directory)
+func gateStatusCmd() *cobra.Command {
+	var (
+		repoPath    string
+		watchMode   bool
+		intervalSec int
+		showLogs    bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "gate-status",
+		Short: "Show pre-commit gate status in TUI view",
+		Long: `Display the current pre-commit gate status with a rich terminal layout.
+
+Reads from .codero/gate-heartbeat/progress.env — the same source used by the
+/gate observability endpoint — ensuring CLI/TUI/dashboard display parity.
+
+The TUI shows:
+  - Overall STATUS (PENDING / PASS / FAIL) with visual indicator
+  - Per-gate progress bar (copilot and litellm), icons identical to commit-gate
+  - Current active gate and elapsed time
+  - Blocker comments explaining why the gate failed (if FAIL)
+  - Actionable next-step hints for common interventions
+
+Examples:
+  codero gate-status                    # one-shot display
+  codero gate-status --watch            # live display, redraws every 5s
+  codero gate-status --watch --interval 10
+  codero gate-status --logs             # show gate log path and last entries`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if repoPath == "" {
+				absPath, err := os.Getwd()
+				if err != nil {
+					return fmt.Errorf("getwd: %w", err)
+				}
+				repoPath = absPath
+			}
+
+			if showLogs {
+				return printGateLogs(repoPath)
+			}
+
+			if watchMode {
+				return runGateStatusWatch(repoPath, intervalSec)
+			}
+
+			result := readProgressEnvAsResult(repoPath)
+			fmt.Print(RenderGateStatusBox(result, repoPath))
+			printGateActions(result, repoPath)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVarP(&repoPath, "repo-path", "r", "", "path to repository (default: current directory)")
+	cmd.Flags().BoolVarP(&watchMode, "watch", "w", false, "poll and redraw until PASS or FAIL")
+	cmd.Flags().IntVar(&intervalSec, "interval", 5, "polling interval in seconds (for --watch)")
+	cmd.Flags().BoolVarP(&showLogs, "logs", "l", false, "show gate log directory path and last log entries")
+
+	return cmd
+}
+
+// runGateStatusWatch runs the Bubble Tea TUI to display gate status.
+func runGateStatusWatch(repoPath string, intervalSec int) error {
+	if intervalSec < 1 {
+		intervalSec = 5
+	}
+	interval := time.Duration(intervalSec) * time.Second
+
+	initialVM := tui.AdapterFromPath(repoPath)
+	cfg := tui.Config{
+		RepoPath:  repoPath,
+		Interval:  interval,
+		Theme:     tui.DefaultTheme,
+		WatchMode: true,
+		InitialVM: initialVM,
+	}
+	p := tea.NewProgram(tui.New(cfg), tea.WithAltScreen())
+	_, err := p.Run()
+	return err
+}
+
+// readProgressEnvAsResult reads .codero/gate-heartbeat/progress.env and converts
+// it to a gate.Result. Uses the same parsing logic as the /gate endpoint.
+// Returns a default pending result when no progress file exists.
+func readProgressEnvAsResult(repoPath string) gate.Result {
+	progressFile := filepath.Join(repoPath, ".codero", "gate-heartbeat", "progress.env")
+	data, err := os.ReadFile(progressFile)
+	if err != nil {
+		return gate.Result{
+			Status:        gate.StatusPending,
+			CopilotStatus: "pending",
+			LiteLLMStatus: "pending",
+		}
+	}
+	return parseEnvToResult(string(data))
+}
+
+// parseEnvToResult converts KEY=VALUE pairs from progress.env into a gate.Result.
+// This mirrors the field mapping used by the /gate observability endpoint.
+func parseEnvToResult(envContent string) gate.Result {
+	fields := make(map[string]string)
+	scanner := bufio.NewScanner(strings.NewReader(envContent))
+	for scanner.Scan() {
+		line := scanner.Text()
+		key, val, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		fields[strings.TrimSpace(key)] = strings.TrimSpace(val)
+	}
+
+	r := gate.Result{
+		RunID:         fields["RUN_ID"],
+		ProgressBar:   fields["PROGRESS_BAR"],
+		CurrentGate:   fields["CURRENT_GATE"],
+		CopilotStatus: fields["COPILOT_STATUS"],
+		LiteLLMStatus: fields["LITELLM_STATUS"],
+	}
+	if raw := fields["ELAPSED_SEC"]; raw != "" {
+		if elapsed, err := strconv.Atoi(raw); err == nil {
+			r.ElapsedSec = elapsed
+		}
+	}
+	if raw := fields["POLL_AFTER_SEC"]; raw != "" {
+		if pollAfter, err := strconv.Atoi(raw); err == nil {
+			r.PollAfterSec = pollAfter
+		}
+	}
+
+	switch fields["STATUS"] {
+	case "PASS":
+		r.Status = gate.StatusPass
+	case "FAIL":
+		r.Status = gate.StatusFail
+	default:
+		r.Status = gate.StatusPending
+	}
+
+	if fields["COPILOT_STATUS"] == "" {
+		r.CopilotStatus = "pending"
+	}
+	if fields["LITELLM_STATUS"] == "" {
+		r.LiteLLMStatus = "pending"
+	}
+
+	// COMMENTS in progress.env may be newline-separated or pipe-separated.
+	if raw := fields["COMMENTS"]; raw != "" && raw != "none" {
+		for _, c := range strings.Split(raw, "|") {
+			if c = strings.TrimSpace(c); c != "" {
+				r.Comments = append(r.Comments, c)
+			}
+		}
+	}
+
+	return r
+}
+
+// RenderGateStatusBox renders a full-height terminal box displaying gate state.
+// The progress bar icons are produced by gate.RenderBar, identical to commit-gate.
+// The STATUS line and icon match the /gate JSON response fields exactly.
+//
+// Exported so it can be unit-tested without file I/O.
+func RenderGateStatusBox(r gate.Result, repoPath string) string {
+	const width = 64
+
+	statusLabel, statusIcon, statusColor := gateStatusDisplay(r.Status)
+	bar := r.ProgressBar
+	if bar == "" {
+		bar = gate.RenderBar(r.CopilotStatus, r.LiteLLMStatus, r.CurrentGate)
+	}
+
+	currentGate := r.CurrentGate
+	if currentGate == "" {
+		currentGate = "none"
+	}
+
+	var sb strings.Builder
+
+	// ── header ──────────────────────────────────────────────────────────────
+	header := fmt.Sprintf(" CODERO PRE-COMMIT GATE   STATUS: %s %s%s\033[0m",
+		statusColor, statusLabel, statusIcon)
+	sb.WriteString(boxTop(width))
+	sb.WriteString(boxRow(header, width))
+	sb.WriteString(boxMid(width))
+
+	// ── gate progress bar (identical to commit-gate CLI output) ─────────────
+	sb.WriteString(boxRow(fmt.Sprintf(" Gate:    %s", bar), width))
+	sb.WriteString(boxRow(fmt.Sprintf(" Current: %-12s │ Run ID: %s",
+		currentGate, truncate(r.RunID, 28)), width))
+
+	// ── blocker comments ─────────────────────────────────────────────────────
+	if len(r.Comments) > 0 {
+		sb.WriteString(boxMid(width))
+		sb.WriteString(boxRow(" Blockers:", width))
+		for _, c := range r.Comments {
+			sb.WriteString(boxRow(fmt.Sprintf("   • %s", c), width))
+		}
+		sb.WriteString(boxMid(width))
+		sb.WriteString(boxRow(" Next steps: fix blockers, then run: codero commit-gate", width))
+	} else if r.Status == gate.StatusPass {
+		sb.WriteString(boxMid(width))
+		sb.WriteString(boxRow(" ✅ Gate passed — commit is allowed.", width))
+	} else if r.Status == gate.StatusPending {
+		sb.WriteString(boxMid(width))
+		sb.WriteString(boxRow(" Gate run in progress — polling…", width))
+	}
+
+	// ── progress.env path hint ───────────────────────────────────────────────
+	if repoPath != "" {
+		envPath := filepath.Join(repoPath, ".codero", "gate-heartbeat", "progress.env")
+		sb.WriteString(boxMid(width))
+		sb.WriteString(boxRow(fmt.Sprintf(" State file: %s", truncate(envPath, width-15)), width))
+	}
+
+	sb.WriteString(boxBot(width))
+	return sb.String()
+}
+
+// printGateActions prints the available intervention actions after the TUI box.
+func printGateActions(r gate.Result, repoPath string) {
+	fmt.Println()
+	fmt.Println("  Actions:")
+	fmt.Println("    r   retry gate     →  codero commit-gate")
+	fmt.Println("    l   gate logs      →  codero gate-status --logs")
+	fmt.Println("    b   branch view    →  codero branch")
+	fmt.Println("    q   quit")
+	fmt.Println()
+	if r.Status == gate.StatusFail {
+		fmt.Println("  Run: codero commit-gate   (after fixing blockers above)")
+	}
+
+	fmt.Print("  Enter action (r/l/b/q, or Enter to skip): ")
+	var input string
+	_, _ = fmt.Scanln(&input)
+	input = strings.TrimSpace(strings.ToLower(input))
+	switch input {
+	case "r":
+		fmt.Println("\n  Launching: codero commit-gate …")
+		// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+		cmd := exec.Command(os.Args[0], "commit-gate", "--repo-path", repoPath) //nolint:gosec
+		if repoPath != "" {
+			cmd.Dir = repoPath
+		}
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		_ = cmd.Run()
+	case "l":
+		_ = printGateLogs(repoPath)
+	case "b":
+		fmt.Println("\n  Launching: codero branch …")
+		// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+		cmd := exec.Command(os.Args[0], "branch") //nolint:gosec
+		if repoPath != "" {
+			cmd.Dir = repoPath
+		}
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		_ = cmd.Run()
+	}
+}
+
+// printGateLogs prints the gate log directory path and last 20 lines of the
+// most recent log file, if available.
+func printGateLogs(repoPath string) error {
+	if repoPath == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getwd: %w", err)
+		}
+		repoPath = wd
+	}
+	logDir := filepath.Join(repoPath, ".codero", "gate-heartbeat")
+	fmt.Printf("Gate log directory: %s\n\n", logDir)
+
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("  (no gate runs recorded yet)")
+			return nil
+		}
+		return fmt.Errorf("read log dir: %w", err)
+	}
+
+	var logFiles []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".log") {
+			logFiles = append(logFiles, filepath.Join(logDir, e.Name()))
+		}
+	}
+
+	if len(logFiles) == 0 {
+		fmt.Println("  (no .log files found in gate directory)")
+		return nil
+	}
+
+	// Show the last log file (alphabetically last = most recent by convention).
+	lastLog := logFiles[len(logFiles)-1]
+	fmt.Printf("Latest log: %s\n", lastLog)
+
+	data, err := os.ReadFile(lastLog)
+	if err != nil {
+		return fmt.Errorf("read log file: %w", err)
+	}
+
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	const maxLines = 20
+	start := 0
+	if len(lines) > maxLines {
+		start = len(lines) - maxLines
+		fmt.Printf("  (showing last %d of %d lines)\n", maxLines, len(lines))
+	}
+	fmt.Println()
+	for _, l := range lines[start:] {
+		fmt.Println("  " + l)
+	}
+	return nil
+}
+
+// gateStatusDisplay returns human label, icon, and ANSI color code for a status.
+func gateStatusDisplay(s gate.Status) (label, icon, ansiColor string) {
+	switch s {
+	case gate.StatusPass:
+		return "PASS", " ✅", "\033[32m" // green
+	case gate.StatusFail:
+		return "FAIL", " ⚠️ ", "\033[31m" // red
+	default:
+		return "PENDING", " 🔄", "\033[33m" // yellow
+	}
+}
+
+// GateStateToPrecommitStatus maps a gate-level state string to the three-valued
+// precommit review status used in the proving scorecard.
+//
+// Exported so it is accessible from tests and from the commit-gate auto-write path.
+//
+// Mapping rationale:
+//   - "pass"                → "passed"  (gate completed with no findings)
+//   - "blocked", "timeout"  → "failed"  (gate found blockers or exceeded budget)
+//   - all others            → "error"   (infra_fail, pending, running, unknown)
+func GateStateToPrecommitStatus(gateState string) string {
+	switch gateState {
+	case "pass":
+		return "passed"
+	case "blocked", "timeout":
+		return "failed"
+	default:
+		return "error"
+	}
+}
+
+// ── box drawing helpers ──────────────────────────────────────────────────────
+
+func boxTop(w int) string {
+	return "┌" + strings.Repeat("─", w-2) + "┐\n"
+}
+func boxBot(w int) string {
+	return "└" + strings.Repeat("─", w-2) + "┘\n"
+}
+func boxMid(w int) string {
+	return "├" + strings.Repeat("─", w-2) + "┤\n"
+}
+
+// boxRow pads content to fill the box width and adds side borders.
+func boxRow(content string, w int) string {
+	// Strip ANSI codes to compute visible length.
+	visible := ansiStrip(content)
+	pad := w - 2 - len([]rune(visible))
+	if pad < 0 {
+		pad = 0
+	}
+	return "│" + content + strings.Repeat(" ", pad) + "│\n"
+}
+
+// ansiStrip removes ANSI escape sequences for length calculation.
+func ansiStrip(s string) string {
+	var out strings.Builder
+	inEsc := false
+	for _, r := range s {
+		if inEsc {
+			if r == 'm' {
+				inEsc = false
+			}
+			continue
+		}
+		if r == '\033' {
+			inEsc = true
+			continue
+		}
+		out.WriteRune(r)
+	}
+	return out.String()
+}
+
+// truncate shortens a string to max characters, adding "…" if truncated.
+func truncate(s string, max int) string {
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	if max < 4 {
+		return string(runes[:max])
+	}
+	return string(runes[:max-1]) + "…"
 }
