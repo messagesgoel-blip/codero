@@ -801,7 +801,10 @@ func printGateActions(r gate.Result, repoPath string) {
 	case "r":
 		fmt.Println("\n  Launching: codero commit-gate …")
 		// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-		cmd := exec.Command(os.Args[0], "commit-gate") //nolint:gosec
+		cmd := exec.Command(os.Args[0], "commit-gate", "--repo-path", repoPath) //nolint:gosec
+		if repoPath != "" {
+			cmd.Dir = repoPath
+		}
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		_ = cmd.Run()
@@ -811,6 +814,9 @@ func printGateActions(r gate.Result, repoPath string) {
 		fmt.Println("\n  Launching: codero branch …")
 		// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 		cmd := exec.Command(os.Args[0], "branch") //nolint:gosec
+		if repoPath != "" {
+			cmd.Dir = repoPath
+		}
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		_ = cmd.Run()

@@ -400,7 +400,7 @@ Timeout and polling are configurable via environment variables:
 
 			// Auto-record provider outcomes to proving scorecard DB.
 			// This is a best-effort write; failures are warnings, not fatal.
-			autoRecordGateOutcomes(cmd.Context(), result, repoPath)
+			autoRecordGateOutcomes(cmd.Context(), result, repoPath, *configPathForCmd(cmd))
 
 			switch result.Status {
 			case gate.StatusPass:
@@ -428,11 +428,7 @@ Timeout and polling are configurable via environment variables:
 //
 // Failures to load config or open the DB are printed as warnings only; they do
 // not affect the gate exit code or CLI behavior.
-func autoRecordGateOutcomes(ctx context.Context, result gate.Result, repoPath string) {
-	configPath := os.Getenv("CODERO_CONFIG_PATH")
-	if configPath == "" {
-		configPath = "codero.yaml"
-	}
+func autoRecordGateOutcomes(ctx context.Context, result gate.Result, repoPath, configPath string) {
 	cfg, err := loadConfig(configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "gate-metrics: config unavailable, skipping auto-record (%v)\n", err)
@@ -446,7 +442,7 @@ func autoRecordGateOutcomes(ctx context.Context, result gate.Result, repoPath st
 	}
 	defer db.Close()
 
-	branch, err := getCurrentBranch()
+	branch, err := getCurrentBranchAt(repoPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "gate-metrics: branch detection failed (%v)\n", err)
 	}
@@ -581,7 +577,16 @@ func configPathForCmd(cmd *cobra.Command) *string {
 
 // getCurrentBranch returns the current git branch.
 func getCurrentBranch() (string, error) {
+	return getCurrentBranchAt("")
+}
+
+// getCurrentBranchAt returns the current git branch at repoPath.
+// If repoPath is empty, it uses the current working directory.
+func getCurrentBranchAt(repoPath string) (string, error) {
 	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	if repoPath != "" {
+		cmd.Dir = repoPath
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("git branch: %w", err)

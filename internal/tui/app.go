@@ -2,6 +2,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -569,8 +570,10 @@ func retryGateCmd(repoPath string) tea.Cmd {
 		if err != nil {
 			return errMsg{err}
 		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
 		// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-		cmd := exec.Command(bin, "commit-gate", "--repo-path", repoPath)
+		cmd := exec.CommandContext(ctx, bin, "commit-gate", "--repo-path", repoPath)
 		cmd.Dir = repoPath
 		out, err := cmd.CombinedOutput()
 		if err != nil {
@@ -583,7 +586,7 @@ func retryGateCmd(repoPath string) tea.Cmd {
 // openLogsCmd reads the gate log directory.
 func openLogsCmd(repoPath string) tea.Cmd {
 	return func() tea.Msg {
-		logDir := filepath.Join(repoPath, ".codero", "gate-heartbeat", "logs")
+		logDir := filepath.Join(repoPath, ".codero", "gate-heartbeat")
 		entries, err := os.ReadDir(logDir)
 		if err != nil {
 			return outputMsg{lines: []string{"log dir not found: " + logDir}}
