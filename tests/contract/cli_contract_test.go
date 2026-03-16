@@ -38,7 +38,7 @@ func TestCommitGateCommandExists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected commit-gate command to exist: %v\noutput: %s", err, string(out))
 	}
-	if !strings.Contains(string(out), "two-pass review") {
+	if !strings.Contains(string(out), "gate-heartbeat") {
 		t.Fatalf("commit-gate help missing expected text: %s", string(out))
 	}
 }
