@@ -45,6 +45,7 @@ func newTestHandler(t *testing.T) (*dashboard.Handler, *sql.DB) {
 // seedBranch inserts one branch_states row.
 func seedBranch(t *testing.T, db *sql.DB, repo, branch, st string) {
 	t.Helper()
+	// nosemgrep: go.lang.security.audit.sqli.gosql-sqli.gosql-sqli
 	_, err := db.Exec(`INSERT INTO branch_states
 		(id, repo, branch, head_hash, state, retry_count, max_retries, approved, ci_green,
 		 pending_events, unresolved_threads, owner_session_id, queue_priority)
@@ -73,6 +74,7 @@ func seedRun(t *testing.T, db *sql.DB, id, repo, branch, provider, status string
 func seedFinding(t *testing.T, db *sql.DB, runID, repo, branch, severity, source string) {
 	t.Helper()
 	uid := fmt.Sprintf("f-%s-%s-%d", runID, source, time.Now().UnixNano())
+	// nosemgrep: go.lang.security.audit.sqli.gosql-sqli.gosql-sqli
 	_, err := db.Exec(`INSERT INTO findings
 		(id, run_id, repo, branch, severity, category, file, line, message, source, rule_id, ts)
 		VALUES (?,?,?,?,?,?,?,0,?,?,?,?)`,
