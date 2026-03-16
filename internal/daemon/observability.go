@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -60,7 +61,7 @@ func NewObservabilityServer(redisClient *redis.Client, queue *scheduler.Queue, s
 
 	mux := http.NewServeMux()
 	server := &http.Server{
-		Addr:    host + ":" + port,
+		Addr:    net.JoinHostPort(host, port),
 		Handler: mux,
 	}
 

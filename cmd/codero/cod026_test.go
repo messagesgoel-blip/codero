@@ -273,7 +273,7 @@ func TestRunDashboardCheck_AllHealthy(t *testing.T) {
 	if !strings.Contains(buf.String(), "All endpoints healthy") {
 		t.Errorf("expected 'All endpoints healthy' in output, got: %s", buf.String())
 	}
-	wantPaths := []string{"/dashboard/", "/api/v1/dashboard/overview", "/gate"}
+	wantPaths := []string{"/dashboard/", "/dashboard/api/v1/dashboard/overview", "/gate"}
 	if !reflect.DeepEqual(requestedPaths, wantPaths) {
 		t.Errorf("requested paths: got %v, want %v", requestedPaths, wantPaths)
 	}

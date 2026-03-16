@@ -645,7 +645,7 @@ Examples:
 			}
 
 			ttyInteractive := tui.IsInteractiveTTY()
-			promptInteractive := ttyInteractive && !noPrompt
+			promptInteractive := ttyInteractive && !noPrompt && !jsonOutput
 			if promptInteractive {
 				printGateActions(result, repoPath)
 			}

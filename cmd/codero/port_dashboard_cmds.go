@@ -75,9 +75,10 @@ Examples:
 			}
 
 			dashURL := baseURL + basePath + "/"
+			overviewURL := baseURL + basePath + "/api/v1/dashboard/overview"
 
 			fmt.Printf("Dashboard URL:  %s\n", dashURL)
-			fmt.Printf("Overview API:   %s/api/v1/dashboard/overview\n", baseURL)
+			fmt.Printf("Overview API:   %s\n", overviewURL)
 			fmt.Printf("Gate endpoint:  %s/gate\n", baseURL)
 
 			if checkMode {
@@ -113,7 +114,7 @@ func runDashboardCheck(baseURL, basePath string) error {
 	}
 	endpoints := []endpoint{
 		{"dashboard SPA", baseURL + basePath + "/"},
-		{"overview API", baseURL + "/api/v1/dashboard/overview"},
+		{"overview API", baseURL + basePath + "/api/v1/dashboard/overview"},
 		{"gate endpoint", baseURL + "/gate"},
 	}
 
@@ -244,7 +245,7 @@ Examples:
 			fmt.Fprintf(w, "observability\t%s:%d\t%s\n", displayHost, obsPort, localBase)
 			fmt.Fprintf(w, "dashboard SPA\t%s:%d\t%s\n", displayHost, obsPort, dashURL)
 			fmt.Fprintf(w, "gate endpoint\t%s:%d\t%s/gate\n", displayHost, obsPort, localBase)
-			fmt.Fprintf(w, "overview API\t%s:%d\t%s/api/v1/dashboard/overview\n", displayHost, obsPort, localBase)
+			fmt.Fprintf(w, "overview API\t%s:%d\t%s%s/api/v1/dashboard/overview\n", displayHost, obsPort, localBase, dashBasePath)
 			if webhookEnabled {
 				fmt.Fprintf(w, "webhook receiver\t0.0.0.0:%d\t(HTTP, path /webhook/github)\n", webhookPort)
 			} else {

@@ -56,7 +56,8 @@ Detects and warns on `observability_port` / `webhook.port` conflicts.
 | `--json` | Emit gate status as compact JSON (no TUI, no prompt, scriptable) |
 | `--no-prompt` | Disable interactive action prompt even in a TTY |
 
-In non-interactive contexts (pipe, CI, `--no-prompt`): exits 1 on FAIL, 0 on PASS/PENDING.
+In non-interactive contexts (pipe, CI): exits 1 on FAIL, 0 on PASS/PENDING.
+`--no-prompt` disables the interactive action menu but does not change TTY-based exit semantics by itself.
 The old ad-hoc TTY check (`os.Stdin.Stat()`) is replaced by the new centralised
 `tui.IsInteractiveTTY()` helper, which checks both stdin and stdout.
 
