@@ -62,6 +62,8 @@ PROGRESS_BAR=[+ copilot:pass] [+ litellm:pass]
 CURRENT_GATE=none
 COPILOT_STATUS=pass
 LITELLM_STATUS=pass
+ELAPSED_SEC=12
+POLL_AFTER_SEC=180
 COMMENTS=none
 `
 	r := parseEnvToResult(env)
@@ -77,6 +79,12 @@ COMMENTS=none
 	}
 	if r.LiteLLMStatus != "pass" {
 		t.Errorf("LiteLLMStatus: got %q, want pass", r.LiteLLMStatus)
+	}
+	if r.ElapsedSec != 12 {
+		t.Errorf("ElapsedSec: got %d, want 12", r.ElapsedSec)
+	}
+	if r.PollAfterSec != 180 {
+		t.Errorf("PollAfterSec: got %d, want 180", r.PollAfterSec)
 	}
 	if len(r.Comments) != 0 {
 		t.Errorf("Comments: got %v, want empty (COMMENTS=none)", r.Comments)
@@ -145,6 +153,17 @@ func TestParseEnvToResult_UnknownStatus(t *testing.T) {
 	// Unknown status should be treated as PENDING.
 	if r.Status != gate.StatusPending {
 		t.Errorf("unknown STATUS: got %q, want PENDING", r.Status)
+	}
+}
+
+func TestParseEnvToResult_InvalidElapsedAndPollFallbackToZero(t *testing.T) {
+	env := "STATUS=PENDING\nELAPSED_SEC=abc\nPOLL_AFTER_SEC=xyz\n"
+	r := parseEnvToResult(env)
+	if r.ElapsedSec != 0 {
+		t.Errorf("ElapsedSec: got %d, want 0 on parse error", r.ElapsedSec)
+	}
+	if r.PollAfterSec != 0 {
+		t.Errorf("PollAfterSec: got %d, want 0 on parse error", r.PollAfterSec)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -689,6 +690,16 @@ func parseEnvToResult(envContent string) gate.Result {
 		CurrentGate:   fields["CURRENT_GATE"],
 		CopilotStatus: fields["COPILOT_STATUS"],
 		LiteLLMStatus: fields["LITELLM_STATUS"],
+	}
+	if raw := fields["ELAPSED_SEC"]; raw != "" {
+		if elapsed, err := strconv.Atoi(raw); err == nil {
+			r.ElapsedSec = elapsed
+		}
+	}
+	if raw := fields["POLL_AFTER_SEC"]; raw != "" {
+		if pollAfter, err := strconv.Atoi(raw); err == nil {
+			r.PollAfterSec = pollAfter
+		}
 	}
 
 	switch fields["STATUS"] {
