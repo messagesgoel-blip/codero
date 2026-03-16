@@ -126,7 +126,12 @@ func runDailySnapshot(ctx context.Context, configPath string, opts dailySnapshot
 	}
 	defer db.Close()
 
-	// 3. Verify snapshot dir writable (if provided)
+	// 3. Verify-only mode (read-only)
+	if opts.verifyOnly {
+		return runVerifyOnly(ctx, db, opts.snapshotDir, today, ts())
+	}
+
+	// 4. Verify snapshot dir writable (if provided)
 	if opts.snapshotDir != "" {
 		if err := os.MkdirAll(opts.snapshotDir, 0755); err != nil {
 			return fmt.Errorf("daily-snapshot: cannot create snapshot directory %s: %w",
@@ -137,12 +142,7 @@ func runDailySnapshot(ctx context.Context, configPath string, opts dailySnapshot
 			return fmt.Errorf("daily-snapshot: snapshot directory not writable %s: %w",
 				opts.snapshotDir, err)
 		}
-		os.Remove(testFile)
-	}
-
-	// 4. Verify-only mode
-	if opts.verifyOnly {
-		return runVerifyOnly(ctx, db, opts.snapshotDir, today, ts())
+		_ = os.Remove(testFile)
 	}
 
 	// 5. Idempotency: skip if today's snapshot already exists in DB
