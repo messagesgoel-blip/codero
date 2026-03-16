@@ -23,11 +23,21 @@ type GitHubState struct {
 	Repo              string
 	Branch            string
 	HeadHash          string // current HEAD on GitHub
+	PRNumber          int    // pull request number (0 if unknown)
 	PROpen            bool
 	Approved          bool
 	CIGreen           bool
 	PendingEvents     int
 	UnresolvedThreads int
+}
+
+// AutoMerger can merge a pull request on GitHub once merge-ready conditions
+// are confirmed. Implemented by internal/github.Client; can be stubbed in tests.
+type AutoMerger interface {
+	// MergePR merges the pull request identified by prNumber.
+	// sha is the expected HEAD SHA; GitHub rejects the merge if it has changed.
+	// mergeMethod must be "merge", "squash", or "rebase".
+	MergePR(ctx context.Context, repo string, prNumber int, sha, mergeMethod string) error
 }
 
 // GitHubClient is the interface for querying GitHub PR state.
@@ -58,10 +68,12 @@ func (s *StubGitHubClient) GetPRState(_ context.Context, repo, branch string) (*
 // durable branch records. It is the correctness backstop in all modes and the
 // only ingestion mechanism in polling-only mode.
 type Reconciler struct {
-	db       *state.DB
-	github   GitHubClient
-	repos    []string
-	interval time.Duration
+	db          *state.DB
+	github      GitHubClient
+	repos       []string
+	interval    time.Duration
+	merger      AutoMerger // nil → auto-merge disabled
+	mergeMethod string     // "merge", "squash", or "rebase"
 }
 
 // NewReconciler creates a Reconciler.
@@ -78,6 +90,19 @@ func NewReconciler(db *state.DB, github GitHubClient, repos []string, webhookEna
 		repos:    repos,
 		interval: interval,
 	}
+}
+
+// WithAutoMerge enables automatic PR merging when a branch reaches merge_ready.
+// merger is typically a *github.Client; method must be "merge", "squash", or
+// "rebase" (defaults to "squash" if empty).
+// Returns the same *Reconciler to allow method chaining.
+func (r *Reconciler) WithAutoMerge(merger AutoMerger, method string) *Reconciler {
+	if method == "" {
+		method = "squash"
+	}
+	r.merger = merger
+	r.mergeMethod = method
+	return r
 }
 
 // RunOnce executes a single reconciliation cycle and returns.
@@ -190,6 +215,9 @@ func (r *Reconciler) reconcileBranch(ctx context.Context, b state.BranchRecord) 
 			r.transitionIfValid(b, state.StateCoding, "merge_ready_conditions_revoked")
 			return
 		}
+		// Conditions still met — attempt auto-merge (idempotent; no-op if disabled).
+		r.maybeMerge(ctx, b, ghState)
+		return
 	}
 
 	// Detect: reviewed branch now meets merge_ready conditions → T10.
@@ -197,9 +225,45 @@ func (r *Reconciler) reconcileBranch(ctx context.Context, b state.BranchRecord) 
 		if ghState.Approved && ghState.CIGreen &&
 			ghState.PendingEvents == 0 && ghState.UnresolvedThreads == 0 {
 			r.transitionIfValid(b, state.StateMergeReady, "merge_ready_conditions_met")
+			// Attempt auto-merge immediately after the merge_ready transition.
+			r.maybeMerge(ctx, b, ghState)
 			return
 		}
 	}
+}
+
+// maybeMerge calls the GitHub Merge API if auto-merge is configured and the
+// PR number is known. On success it transitions the branch to closed (T18).
+// On failure it logs the error and leaves the branch in merge_ready so the next
+// reconcile cycle can retry (or detect revoked conditions).
+func (r *Reconciler) maybeMerge(ctx context.Context, b state.BranchRecord, ghState *GitHubState) {
+	if r.merger == nil || ghState.PRNumber == 0 {
+		return
+	}
+	if err := r.merger.MergePR(ctx, b.Repo, ghState.PRNumber, ghState.HeadHash, r.mergeMethod); err != nil {
+		loglib.Error("reconciler: auto-merge failed",
+			loglib.FieldComponent, "reconciler",
+			loglib.FieldRepo, b.Repo,
+			loglib.FieldBranch, b.Branch,
+			"pr_number", ghState.PRNumber,
+			"error", err,
+		)
+		return
+	}
+	loglib.Info("reconciler: auto-merge succeeded",
+		loglib.FieldEventType, loglib.EventTransition,
+		loglib.FieldComponent, "reconciler",
+		loglib.FieldRepo, b.Repo,
+		loglib.FieldBranch, b.Branch,
+		"pr_number", ghState.PRNumber,
+		"merge_method", r.mergeMethod,
+	)
+	// PR is now merged on GitHub; mirror the terminal state locally (T18).
+	// Always transition from merge_ready regardless of what b.State was before
+	// (the branch may have just been transitioned to merge_ready in this cycle).
+	mergeReadyRecord := b
+	mergeReadyRecord.State = state.StateMergeReady
+	r.transitionIfValid(mergeReadyRecord, state.StateClosed, "auto_merged")
 }
 
 func (r *Reconciler) maybeClose(b state.BranchRecord, trigger string) {

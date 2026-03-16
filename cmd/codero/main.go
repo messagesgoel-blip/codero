@@ -221,6 +221,14 @@ func daemonCmd(configPath *string) *cobra.Command {
 				cfg.Repos,
 				cfg.Webhook.Enabled,
 			)
+			if cfg.AutoMerge.Enabled {
+				reconciler.WithAutoMerge(gh, cfg.AutoMerge.Method)
+				loglib.Info("codero: auto-merge enabled",
+					loglib.FieldEventType, loglib.EventStartup,
+					loglib.FieldComponent, "daemon",
+					"merge_method", cfg.AutoMerge.Method,
+				)
+			}
 			wg.Add(1)
 			go func() {
 				defer wg.Done()

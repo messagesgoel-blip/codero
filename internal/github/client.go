@@ -107,6 +107,7 @@ func (c *Client) GetPRState(ctx context.Context, repo, branch string) (*webhook.
 		Repo:              repo,
 		Branch:            branch,
 		HeadHash:          pr.HeadSHA,
+		PRNumber:          pr.Number,
 		PROpen:            true,
 		Approved:          approved,
 		CIGreen:           isCIGreen(runs),
@@ -235,6 +236,61 @@ func (c *Client) ListCheckRuns(ctx context.Context, repo, sha string) ([]CheckRu
 		}
 	}
 	return runs, nil
+}
+
+// MergePR merges a pull request via the GitHub Merge API.
+// mergeMethod must be "merge", "squash", or "rebase"; defaults to "squash" if empty.
+// sha is the expected HEAD commit SHA — GitHub rejects the call with 409 if it
+// has changed since the caller last fetched state.
+//
+// Implements webhook.AutoMerger.
+func (c *Client) MergePR(ctx context.Context, repo string, prNumber int, sha, mergeMethod string) error {
+	if mergeMethod == "" {
+		mergeMethod = "squash"
+	}
+	url := fmt.Sprintf("%s/repos/%s/pulls/%d/merge", c.apiURL, repo, prNumber)
+	body := struct {
+		SHA         string `json:"sha"`
+		MergeMethod string `json:"merge_method"`
+	}{
+		SHA:         sha,
+		MergeMethod: mergeMethod,
+	}
+	return c.putJSON(ctx, url, body)
+}
+
+// putJSON performs an authenticated PUT request with a JSON body and discards
+// the response body on success.
+func (c *Client) putJSON(ctx context.Context, url string, body any) error {
+	b, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("marshal request body: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, strings.NewReader(string(b)))
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("http put: %w", err)
+	}
+	defer func() { _, _ = io.Copy(io.Discard, resp.Body); resp.Body.Close() }()
+
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusCreated:
+		return nil
+	case http.StatusMethodNotAllowed:
+		return fmt.Errorf("PR not mergeable (405)")
+	case http.StatusConflict:
+		return fmt.Errorf("merge conflict or SHA mismatch (409)")
+	default:
+		return fmt.Errorf("github API %s returned HTTP %d", url, resp.StatusCode)
+	}
 }
 
 // getJSON performs an authenticated GET request and JSON-decodes the response.

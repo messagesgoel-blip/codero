@@ -2,6 +2,7 @@ package webhook_test
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -288,6 +289,140 @@ func TestReconciler_NoPR_CodingStateSkipped(t *testing.T) {
 	}
 }
 
+func TestReconciler_AutoMerge_Success(t *testing.T) {
+	db := openTestDB(t)
+
+	repo, branch := "owner/repo", "feat/automerge"
+	id := insertBranch(t, db, repo, branch, state.StateReviewed, "abc123")
+
+	ghClient := &mockGitHubClient{
+		state: map[string]*webhook.GitHubState{
+			repo + "/" + branch: {
+				Repo:              repo,
+				Branch:            branch,
+				HeadHash:          "abc123",
+				PRNumber:          42,
+				PROpen:            true,
+				Approved:          true,
+				CIGreen:           true,
+				PendingEvents:     0,
+				UnresolvedThreads: 0,
+			},
+		},
+	}
+
+	merger := &mockAutoMerger{}
+	rec := webhook.NewReconciler(db, ghClient, []string{repo}, false).
+		WithAutoMerge(merger, "squash")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		rec.Run(ctx)
+		close(done)
+	}()
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	<-done
+
+	if !merger.called {
+		t.Error("expected MergePR to be called, but it was not")
+	}
+	if merger.lastPRNumber != 42 {
+		t.Errorf("MergePR called with PR#%d, want 42", merger.lastPRNumber)
+	}
+	if merger.lastMethod != "squash" {
+		t.Errorf("MergePR called with method %q, want squash", merger.lastMethod)
+	}
+	if got := getDBState(t, db, id); got != state.StateClosed {
+		t.Errorf("state: got %q, want closed (auto-merged)", got)
+	}
+}
+
+func TestReconciler_AutoMerge_FailureLeavesMergeReady(t *testing.T) {
+	db := openTestDB(t)
+
+	repo, branch := "owner/repo", "feat/mergefail"
+	id := insertBranch(t, db, repo, branch, state.StateMergeReady, "abc123")
+
+	ghClient := &mockGitHubClient{
+		state: map[string]*webhook.GitHubState{
+			repo + "/" + branch: {
+				Repo:     repo,
+				Branch:   branch,
+				HeadHash: "abc123",
+				PRNumber: 7,
+				PROpen:   true,
+				Approved: true,
+				CIGreen:  true,
+			},
+		},
+	}
+
+	merger := &mockAutoMerger{failWith: fmt.Errorf("merge conflict (409)")}
+	rec := webhook.NewReconciler(db, ghClient, []string{repo}, false).
+		WithAutoMerge(merger, "squash")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		rec.Run(ctx)
+		close(done)
+	}()
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	<-done
+
+	if !merger.called {
+		t.Error("expected MergePR to be called")
+	}
+	// On failure the branch must remain merge_ready, not be closed.
+	if got := getDBState(t, db, id); got != state.StateMergeReady {
+		t.Errorf("state: got %q, want merge_ready (merge failed)", got)
+	}
+}
+
+func TestReconciler_AutoMerge_DisabledWhenNoPRNumber(t *testing.T) {
+	db := openTestDB(t)
+
+	repo, branch := "owner/repo", "feat/noprnumber"
+	id := insertBranch(t, db, repo, branch, state.StateReviewed, "abc123")
+
+	ghClient := &mockGitHubClient{
+		state: map[string]*webhook.GitHubState{
+			repo + "/" + branch: {
+				Repo: repo, Branch: branch, HeadHash: "abc123",
+				PRNumber: 0, // unknown
+				PROpen:   true, Approved: true, CIGreen: true,
+			},
+		},
+	}
+
+	merger := &mockAutoMerger{}
+	rec := webhook.NewReconciler(db, ghClient, []string{repo}, false).
+		WithAutoMerge(merger, "squash")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan struct{})
+	go func() { rec.Run(ctx); close(done) }()
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	<-done
+
+	if merger.called {
+		t.Error("MergePR must not be called when PRNumber is 0")
+	}
+	// Should still reach merge_ready even without merging.
+	if got := getDBState(t, db, id); got != state.StateMergeReady {
+		t.Errorf("state: got %q, want merge_ready", got)
+	}
+}
+
 // mockGitHubClient returns pre-configured states for testing.
 type mockGitHubClient struct {
 	state map[string]*webhook.GitHubState // key: "repo/branch"
@@ -300,4 +435,19 @@ func (m *mockGitHubClient) GetPRState(_ context.Context, repo, branch string) (*
 		return nil, nil // no PR
 	}
 	return s, nil
+}
+
+// mockAutoMerger records calls to MergePR for assertions.
+type mockAutoMerger struct {
+	called       bool
+	lastPRNumber int
+	lastMethod   string
+	failWith     error
+}
+
+func (m *mockAutoMerger) MergePR(_ context.Context, _ string, prNumber int, _, method string) error {
+	m.called = true
+	m.lastPRNumber = prNumber
+	m.lastMethod = method
+	return m.failWith
 }

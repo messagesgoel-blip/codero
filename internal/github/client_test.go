@@ -165,6 +165,53 @@ func TestListPRReviews(t *testing.T) {
 	}
 }
 
+func TestMergePR_Success(t *testing.T) {
+	srv, client := newTestServer(t, map[string]http.HandlerFunc{
+		"/repos/owner/repo/pulls/7/merge": func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPut {
+				t.Errorf("expected PUT, got %s", r.Method)
+			}
+			w.WriteHeader(http.StatusOK)
+			if err := json.NewEncoder(w).Encode(map[string]any{"merged": true}); err != nil {
+				t.Errorf("encode: %v", err)
+			}
+		},
+	})
+	defer srv.Close()
+
+	if err := client.MergePR(context.Background(), "owner/repo", 7, "abc123", "squash"); err != nil {
+		t.Fatalf("MergePR: %v", err)
+	}
+}
+
+func TestMergePR_Conflict(t *testing.T) {
+	srv, client := newTestServer(t, map[string]http.HandlerFunc{
+		"/repos/owner/repo/pulls/7/merge": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusConflict)
+		},
+	})
+	defer srv.Close()
+
+	err := client.MergePR(context.Background(), "owner/repo", 7, "abc123", "squash")
+	if err == nil {
+		t.Fatal("expected error for 409 Conflict, got nil")
+	}
+}
+
+func TestMergePR_NotMergeable(t *testing.T) {
+	srv, client := newTestServer(t, map[string]http.HandlerFunc{
+		"/repos/owner/repo/pulls/7/merge": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		},
+	})
+	defer srv.Close()
+
+	err := client.MergePR(context.Background(), "owner/repo", 7, "abc123", "squash")
+	if err == nil {
+		t.Fatal("expected error for 405 MethodNotAllowed, got nil")
+	}
+}
+
 func TestListPRReviewComments(t *testing.T) {
 	payload := []map[string]any{
 		{

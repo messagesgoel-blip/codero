@@ -659,10 +659,21 @@ Four gaps closed in this sprint:
   Shows merge-readiness fields, latest findings, and recent delivery events.
 - Also adds `RunOnce(ctx)` to `Reconciler` (used by `poll` and tests).
 
+#### 7E. Auto-merge (`internal/webhook`, `internal/github`, `internal/config`)
+
+- Closes the final step of the automation loop: "branch becomes `merge_ready` → repo auto-merge completes the cycle" (roadmap 3.3).
+- New `AutoMerger` interface in `internal/webhook`: `MergePR(ctx, repo string, prNumber int, sha, mergeMethod string) error`.
+- `github.Client.MergePR` implements `AutoMerger` via `PUT /repos/{repo}/pulls/{number}/merge`.
+- `webhook.GitHubState` gains `PRNumber int` so the reconciler has the PR number without an extra API call.
+- `Reconciler.WithAutoMerge(merger, method)` enables auto-merge (functional option, existing `NewReconciler` signature unchanged).
+- On `→ merge_ready` (T10) and on each subsequent reconcile of a branch already in `merge_ready`, the reconciler calls `MergePR`. On success: `merge_ready → closed` (T18). On failure (conflict, SHA mismatch): error is logged and branch stays in `merge_ready` so the next cycle retries.
+- `Config.AutoMerge` (`auto_merge.enabled`, `auto_merge.method`) with env overrides `CODERO_AUTO_MERGE_ENABLED` and `CODERO_AUTO_MERGE_METHOD`. Default: disabled; method defaults to `squash`. Invalid methods are rejected at startup.
+
 **Invariants preserved:**
 - All state transitions still go through `state.TransitionBranch` — no raw SQL in new code.
 - Polling-only mode remains fully functional; real GitHub client is used by the reconciler in both modes.
 - Webhook processor uses the same delivery stream and state DB as the runner.
+- Auto-merge is opt-in (default disabled); setting `auto_merge.enabled: false` keeps the previous behaviour exactly.
 
 ---
 
