@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,6 +14,7 @@ import (
 	"github.com/codero/codero/internal/config"
 	"github.com/codero/codero/internal/daemon"
 	"github.com/codero/codero/internal/delivery"
+	"github.com/codero/codero/internal/gate"
 	loglib "github.com/codero/codero/internal/log"
 	redislib "github.com/codero/codero/internal/redis"
 	"github.com/codero/codero/internal/runner"
@@ -45,6 +45,7 @@ func main() {
 		statusCmd(&configPath),
 		versionCmd(),
 		commitGateCmd(),
+		gateStatusCmd(),
 		registerCmd(),
 		queueCmd(&configPath),
 		branchCmd(&configPath),
@@ -52,6 +53,9 @@ func main() {
 		scorecardCmd(&configPath),
 		recordProvingEventCmd(&configPath),
 		recordPrecommitCmd(&configPath),
+		preflightCmd(),
+		dailySnapshotCmd(&configPath),
+		exitGateCmd(&configPath),
 	)
 
 	if err := root.Execute(); err != nil {
@@ -216,7 +220,7 @@ func daemonCmd(configPath *string) *cobra.Command {
 			// Observability server: exposes /health, /queue, /metrics, /ready.
 			slotCounter := scheduler.NewSlotCounter(client)
 			obs := daemon.NewObservabilityServer(client, queue, slotCounter, db.Unwrap(),
-				strconv.Itoa(cfg.ObservabilityPort))
+				strconv.Itoa(cfg.ObservabilityPort), version)
 			obs.Start()
 			wg.Add(1)
 			go func() {
@@ -328,23 +332,41 @@ func versionCmd() *cobra.Command {
 	}
 }
 
-// commitGateCmd runs the pre-commit review gate.
-// It executes the repo's two-pass-review.sh script and returns non-zero if the gate fails.
+// commitGateCmd runs the pre-commit review gate via the shared gate-heartbeat contract.
+// It polls the shared heartbeat binary until STATUS: PASS or STATUS: FAIL, rendering
+// a live progress bar during the run. All timeouts are env-driven and independent.
+//
+// On terminal state, provider-level outcomes (copilot, litellm) are automatically
+// persisted to the proving scorecard DB. Failures to write metrics are warnings only
+// and do not affect gate exit behavior.
 func commitGateCmd() *cobra.Command {
-	var (
-		timeout   int
-		repoPath  string
-		scriptDir string
-	)
+	var repoPath string
 
 	cmd := &cobra.Command{
 		Use:   "commit-gate",
-		Short: "Run pre-commit review gate",
-		Long: `Run the mandatory two-pass review gate before commit.
+		Short: "Run pre-commit review gate via shared heartbeat",
+		Long: `Run the mandatory pre-commit review gate before committing.
 
-This command delegates to two-pass-review.sh in the repo.
-The script defines stage order and blocking behavior.
-Exit code 0 allows commit, non-zero aborts.`,
+Delegates to the shared gate-heartbeat contract:
+  - First call starts the run and returns STATUS: PENDING
+  - Subsequent polls return PENDING until the gate completes
+  - Terminal states: STATUS: PASS (commit allowed) or STATUS: FAIL (commit blocked)
+
+Gate sequence: Copilot first, LiteLLM second.
+Semgrep deterministic checks run inside the shared gate pipeline as a
+hard blocker before AI pass/fail resolution.
+Each gate has its own independent timeout; one gate timeout does not
+reduce the next gate's budget.
+
+On completion, provider-level outcomes are automatically recorded in the
+proving scorecard DB. Manual use of 'record-precommit' is no longer required.
+
+Timeout and polling are configurable via environment variables:
+  CODERO_COPILOT_TIMEOUT_SEC      Copilot gate timeout (default: 15)
+  CODERO_LITELLM_TIMEOUT_SEC      LiteLLM gate timeout (default: 45)
+  CODERO_GATE_TOTAL_TIMEOUT_SEC   Overall gate wall-clock budget (default: 180)
+  CODERO_GATE_POLL_INTERVAL_SEC   Poll interval between heartbeat calls (default: 180)
+  CODERO_GATE_HEARTBEAT_BIN       Path to gate-heartbeat binary`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if repoPath == "" {
 				absPath, err := os.Getwd()
@@ -354,71 +376,103 @@ Exit code 0 allows commit, non-zero aborts.`,
 				repoPath = absPath
 			}
 
-			if scriptDir == "" {
-				possiblePaths := []string{
-					filepath.Join(repoPath, ".codero", "scripts", "review"),
-					filepath.Join(repoPath, "scripts", "review"),
-				}
-				for _, p := range possiblePaths {
-					if _, err := os.Stat(p); err == nil {
-						scriptDir = p
-						break
-					}
-				}
-				if scriptDir == "" {
-					return fmt.Errorf("could not find review scripts directory; pass --script-dir")
-				}
+			cfg := gate.LoadConfig()
+			cfg.RepoPath = repoPath
+
+			if _, err := os.Stat(cfg.HeartbeatBin); err != nil {
+				return fmt.Errorf("gate-heartbeat not found at %s (set CODERO_GATE_HEARTBEAT_BIN to override)", cfg.HeartbeatBin)
 			}
 
-			twoPassScript := filepath.Join(scriptDir, "two-pass-review.sh")
-			if _, err := os.Stat(twoPassScript); err != nil {
-				return fmt.Errorf("two-pass-review.sh not found in %s", scriptDir)
-			}
+			fmt.Printf("Starting pre-commit review gate...\n")
+			fmt.Printf("  copilot timeout: %ds  litellm timeout: %ds  total: %ds\n",
+				cfg.CopilotTimeoutSec, cfg.LiteLLMTimeoutSec, cfg.GateTotalTimeoutSec)
 
-			fmt.Println("Running pre-commit review gate...")
-			env := os.Environ()
-			env = append(env, fmt.Sprintf("CODERO_REPO_PATH=%s", repoPath))
-			if timeout > 0 {
-				env = append(env, fmt.Sprintf("CODERO_REVIEW_PASS_TIMEOUT_SEC=%d", timeout))
-			}
+			runner := &gate.Runner{Cfg: cfg}
 
-			ctx := cmd.Context()
-			if timeout > 0 {
-				var cancel context.CancelFunc
-				ctx, cancel = context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
-				defer cancel()
-			}
+			result, err := runner.Run(cmd.Context(), func(r gate.Result) {
+				fmt.Printf("\r%s", gate.FormatProgressLine(r))
+			})
 
-			// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-			execCmd := exec.CommandContext(ctx, twoPassScript)
-			execCmd.Env = env
-			execCmd.Dir = repoPath
-			execCmd.Stdin = os.Stdin
-			execCmd.Stdout = os.Stdout
-			execCmd.Stderr = os.Stderr
+			fmt.Println() // end the progress line
+			fmt.Println()
+			fmt.Print(gate.FormatSummary(result))
 
-			err := execCmd.Run()
 			if err != nil {
-				if execErr, ok := err.(*exec.ExitError); ok {
-					fmt.Println("\n⚠️  Commit gate FAILED")
-					return fmt.Errorf("commit gate failed (exit code: %d)", execErr.ExitCode())
-				}
 				return fmt.Errorf("commit gate error: %w", err)
 			}
 
-			fmt.Println("\n✅ Commit gate PASSED")
-			return nil
+			// Auto-record provider outcomes to proving scorecard DB.
+			// This is a best-effort write; failures are warnings, not fatal.
+			autoRecordGateOutcomes(cmd.Context(), result, repoPath, *configPathForCmd(cmd))
+
+			switch result.Status {
+			case gate.StatusPass:
+				fmt.Println("✅ Commit gate PASSED")
+				return nil
+			case gate.StatusFail:
+				fmt.Println("⚠️  Commit gate FAILED")
+				return fmt.Errorf("commit gate failed")
+			default:
+				return fmt.Errorf("commit gate: unexpected status %q", result.Status)
+			}
 		},
 	}
 
-	cmd.Flags().IntVarP(&timeout, "timeout", "t", 300,
-		"timeout for each review pass in seconds (default: 300)")
 	cmd.Flags().StringVarP(&repoPath, "repo-path", "r", "",
 		"path to repository (default: current directory)")
-	cmd.Flags().StringVar(&scriptDir, "script-dir", "",
-		"path to review scripts directory")
 
 	return cmd
+}
+
+// autoRecordGateOutcomes persists per-provider pre-commit gate outcomes to the
+// proving scorecard DB. Each provider (copilot, litellm) is recorded with an
+// idempotent ID derived from run_id + provider, so repeated calls for the same
+// gate run are safe (INSERT OR IGNORE).
+//
+// Failures to load config or open the DB are printed as warnings only; they do
+// not affect the gate exit code or CLI behavior.
+func autoRecordGateOutcomes(ctx context.Context, result gate.Result, repoPath, configPath string) {
+	cfg, err := loadConfig(configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gate-metrics: config unavailable, skipping auto-record (%v)\n", err)
+		return
+	}
+
+	db, err := state.Open(cfg.DBPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gate-metrics: DB unavailable, skipping auto-record (%v)\n", err)
+		return
+	}
+	defer db.Close()
+
+	branch, err := getCurrentBranchAt(repoPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gate-metrics: branch detection failed (%v)\n", err)
+	}
+	repo := ""
+	if len(cfg.Repos) > 0 {
+		repo = cfg.Repos[0]
+	}
+
+	for _, p := range []struct{ provider, gateState string }{
+		{"copilot", result.CopilotStatus},
+		{"litellm", result.LiteLLMStatus},
+	} {
+		if p.gateState == "" {
+			continue
+		}
+		id := fmt.Sprintf("pc-%s-%s", result.RunID, p.provider)
+		rev := &state.PrecommitReview{
+			ID:       id,
+			Repo:     repo,
+			Branch:   branch,
+			Provider: p.provider,
+			Status:   GateStateToPrecommitStatus(p.gateState),
+		}
+		if err := state.CreatePrecommitReviewIdempotent(ctx, db, rev); err != nil {
+			fmt.Fprintf(os.Stderr, "gate-metrics: record %s: %v\n", p.provider, err)
+		}
+	}
 }
 
 // registerCmd registers a branch for local review or queue submission.
@@ -526,7 +580,16 @@ func configPathForCmd(cmd *cobra.Command) *string {
 
 // getCurrentBranch returns the current git branch.
 func getCurrentBranch() (string, error) {
+	return getCurrentBranchAt("")
+}
+
+// getCurrentBranchAt returns the current git branch at repoPath.
+// If repoPath is empty, it uses the current working directory.
+func getCurrentBranchAt(repoPath string) (string, error) {
 	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	if repoPath != "" {
+		cmd.Dir = repoPath
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("git branch: %w", err)

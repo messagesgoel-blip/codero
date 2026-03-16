@@ -11,12 +11,16 @@ package integration_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/codero/codero/internal/delivery"
+	"github.com/codero/codero/internal/gate"
 	redislib "github.com/codero/codero/internal/redis"
 	"github.com/codero/codero/internal/runner"
 	"github.com/codero/codero/internal/scheduler"
@@ -639,4 +643,188 @@ func listReviewRuns(db *state.DB, repo, branch string) ([]state.ReviewRun, error
 		return nil, err
 	}
 	return runs, nil
+}
+
+// --- Heartbeat gate integration tests ---
+
+// TestSprint6_HeartbeatGate_CodingToQueuedCLI validates the full
+// coding -> local_review -> commit-gate (pass) -> queued_cli lifecycle
+// using the shared heartbeat gate client with a stub heartbeat script.
+func TestSprint6_HeartbeatGate_CodingToQueuedCLI(t *testing.T) {
+	cfg := defaultTestConfig()
+	db := openTestDB(t)
+
+	// Register branch in coding state (T01: new -> coding)
+	branchID := registerBranch(t, db, cfg, state.StateCoding)
+	assertBranchState(t, db, branchID, state.StateCoding)
+
+	// T02: coding -> local_review (agent signals working tree changes ready)
+	err := state.TransitionBranch(db, branchID, state.StateCoding, state.StateLocalReview, "agent_ready_for_review")
+	if err != nil {
+		t.Fatalf("T02 failed: %v", err)
+	}
+	assertBranchState(t, db, branchID, state.StateLocalReview)
+
+	// Simulate shared heartbeat gate: PENDING then PASS.
+	repoPath := t.TempDir()
+	gateResult, err := runStubGate(t, repoPath, []string{
+		`STATUS: PENDING
+RUN_ID: integration-run-1
+ELAPSED_SEC: 2
+POLL_AFTER_SEC: 1
+PROGRESS_BAR: [* copilot:running] [o litellm:pending]
+CURRENT_GATE: copilot
+COPILOT_STATUS: running
+LITELLM_STATUS: pending
+`,
+		`STATUS: PASS
+RUN_ID: integration-run-1
+PROGRESS_BAR: [+ copilot:pass] [+ litellm:pass]
+CURRENT_GATE: none
+COPILOT_STATUS: pass
+LITELLM_STATUS: pass
+COMMENTS: none
+`,
+	})
+	if err != nil {
+		t.Fatalf("stub gate run failed: %v", err)
+	}
+	if gateResult.Status != gate.StatusPass {
+		t.Fatalf("gate result: got %q, want PASS", gateResult.Status)
+	}
+
+	// Verify progress bar was updated during polling.
+	if gateResult.CopilotStatus != "pass" {
+		t.Errorf("CopilotStatus: got %q, want pass", gateResult.CopilotStatus)
+	}
+	if gateResult.LiteLLMStatus != "pass" {
+		t.Errorf("LiteLLMStatus: got %q, want pass", gateResult.LiteLLMStatus)
+	}
+
+	// T04: local_review -> queued_cli (both pre-commit loops passed)
+	err = state.TransitionBranch(db, branchID, state.StateLocalReview, state.StateQueuedCLI, "commit_gate_passed")
+	if err != nil {
+		t.Fatalf("T04 failed: %v", err)
+	}
+	assertBranchState(t, db, branchID, state.StateQueuedCLI)
+}
+
+// TestSprint6_HeartbeatGate_FailBlocksTransition validates that a FAIL gate
+// result prevents the local_review -> queued_cli transition.
+func TestSprint6_HeartbeatGate_FailBlocksTransition(t *testing.T) {
+	cfg := defaultTestConfig()
+	cfg.Branch = cfg.Branch + "-fail-test"
+	db := openTestDB(t)
+
+	branchID := registerBranch(t, db, cfg, state.StateLocalReview)
+	assertBranchState(t, db, branchID, state.StateLocalReview)
+
+	repoPath := t.TempDir()
+	gateResult, err := runStubGate(t, repoPath, []string{`STATUS: FAIL
+RUN_ID: fail-run-2
+PROGRESS_BAR: [x copilot:blocked] [+ litellm:pass]
+CURRENT_GATE: none
+COPILOT_STATUS: blocked
+LITELLM_STATUS: pass
+COMMENTS:
+BLOCK: missing unit tests
+`})
+	if err != nil {
+		t.Fatalf("stub gate run failed: %v", err)
+	}
+	if gateResult.Status != gate.StatusFail {
+		t.Fatalf("gate result: got %q, want FAIL", gateResult.Status)
+	}
+
+	// On FAIL: agent should NOT transition to queued_cli;
+	// T03 applies: local_review -> coding (fix and re-submit).
+	err = state.TransitionBranch(db, branchID, state.StateLocalReview, state.StateCoding, "commit_gate_failed")
+	if err != nil {
+		t.Fatalf("T03 (fail path) failed: %v", err)
+	}
+	assertBranchState(t, db, branchID, state.StateCoding)
+
+	// Verify blocker comments are accessible.
+	if len(gateResult.Comments) == 0 {
+		t.Error("FAIL result should have blocker comments")
+	}
+}
+
+// TestSprint6_HeartbeatGate_ProgressBarRendering verifies that the shared
+// progress bar renderer produces identical output for CLI and TUI surfaces.
+func TestSprint6_HeartbeatGate_ProgressBarRendering(t *testing.T) {
+	cases := []struct {
+		name     string
+		copilot  string
+		litellm  string
+		current  string
+		wantIcon string
+	}{
+		{"all pending", "pending", "pending", "none", "○"},
+		{"copilot running", "running", "pending", "copilot", "●"},
+		{"litellm running", "pass", "running", "litellm", "✓"},
+		{"both passed", "pass", "pass", "none", "✓"},
+		{"copilot blocked", "blocked", "pass", "none", "✗"},
+		{"copilot infra_fail", "infra_fail", "pass", "none", "!"},
+		{"copilot timeout", "timeout", "pending", "none", "⏱"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bar := gate.RenderBar(tc.copilot, tc.litellm, tc.current)
+			if !strings.Contains(bar, tc.wantIcon) {
+				t.Errorf("RenderBar(%q, %q, %q): missing icon %q in %q",
+					tc.copilot, tc.litellm, tc.current, tc.wantIcon, bar)
+			}
+		})
+	}
+}
+
+// runStubGate creates a stub gate-heartbeat script that returns the given
+// responses in sequence, then runs the gate.Runner against it.
+func runStubGate(t *testing.T, dir string, responses []string) (gate.Result, error) {
+	t.Helper()
+
+	counterFile := filepath.Join(dir, "counter")
+	for i, resp := range responses {
+		respFile := filepath.Join(dir, fmt.Sprintf("resp-%d", i))
+		if err := os.WriteFile(respFile, []byte(resp), 0600); err != nil {
+			t.Fatalf("write response %d: %v", i, err)
+		}
+	}
+
+	maxIdx := len(responses) - 1
+	script := fmt.Sprintf(`#!/usr/bin/env bash
+set -euo pipefail
+DIR="%s"
+COUNTER="%s"
+MAX=%d
+n=0
+if [ -f "$COUNTER" ]; then
+  n=$(cat "$COUNTER")
+fi
+if [ "$n" -gt "$MAX" ]; then n=$MAX; fi
+cat "$DIR/resp-$n"
+echo $((n+1)) > "$COUNTER"
+`, dir, counterFile, maxIdx)
+
+	scriptPath := filepath.Join(dir, "stub-heartbeat.sh")
+	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+		t.Fatalf("write stub script: %v", err)
+	}
+
+	cfg := gate.Config{
+		HeartbeatBin:        scriptPath,
+		CopilotTimeoutSec:   gate.DefaultCopilotTimeoutSec,
+		LiteLLMTimeoutSec:   gate.DefaultLiteLLMTimeoutSec,
+		GateTotalTimeoutSec: gate.DefaultGateTotalTimeoutSec,
+		PollIntervalSec:     1, // fast poll for tests
+		RepoPath:            dir,
+	}
+
+	runner := &gate.Runner{Cfg: cfg}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	return runner.Run(ctx, nil)
 }

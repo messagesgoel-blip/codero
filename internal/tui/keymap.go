@@ -1,0 +1,77 @@
+package tui
+
+import "github.com/charmbracelet/bubbles/key"
+
+// KeyMap holds all operator keyboard shortcuts.
+type KeyMap struct {
+	Up       key.Binding
+	Down     key.Binding
+	Left     key.Binding
+	Right    key.Binding
+	PageUp   key.Binding
+	PageDown key.Binding
+	Home     key.Binding
+	End      key.Binding
+
+	FocusLeft   key.Binding
+	FocusCenter key.Binding
+	FocusRight  key.Binding
+	NextPane    key.Binding
+
+	NextTab key.Binding
+	PrevTab key.Binding
+	Tab1    key.Binding
+	Tab2    key.Binding
+	Tab3    key.Binding
+	Tab4    key.Binding
+
+	Retry  key.Binding
+	Logs   key.Binding
+	Branch key.Binding
+
+	Search  key.Binding
+	Palette key.Binding
+	Refresh key.Binding
+	Help    key.Binding
+	Quit    key.Binding
+}
+
+// DefaultKeyMap returns the default operator key bindings.
+func DefaultKeyMap() KeyMap {
+	return KeyMap{
+		Up:       key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
+		Down:     key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
+		Left:     key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "left")),
+		Right:    key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "right")),
+		PageUp:   key.NewBinding(key.WithKeys("pgup", "ctrl+u"), key.WithHelp("pgup/C-u", "page up")),
+		PageDown: key.NewBinding(key.WithKeys("pgdown", "ctrl+d"), key.WithHelp("pgdn/C-d", "page down")),
+		Home:     key.NewBinding(key.WithKeys("home", "g"), key.WithHelp("home/g", "top")),
+		End:      key.NewBinding(key.WithKeys("end", "G"), key.WithHelp("end/G", "bottom")),
+
+		FocusLeft:   key.NewBinding(key.WithKeys("ctrl+left", "ctrl+h"), key.WithHelp("C-←", "focus left")),
+		FocusCenter: key.NewBinding(key.WithKeys("ctrl+right", "ctrl+l"), key.WithHelp("C-→", "focus center")),
+		NextPane:    key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next pane")),
+
+		NextTab: key.NewBinding(key.WithKeys("shift+right", "]"), key.WithHelp("]/S-→", "next tab")),
+		PrevTab: key.NewBinding(key.WithKeys("shift+left", "["), key.WithHelp("[/S-←", "prev tab")),
+		Tab1:    key.NewBinding(key.WithKeys("1"), key.WithHelp("1", "output")),
+		Tab2:    key.NewBinding(key.WithKeys("2"), key.WithHelp("2", "events")),
+		Tab3:    key.NewBinding(key.WithKeys("3"), key.WithHelp("3", "queue")),
+		Tab4:    key.NewBinding(key.WithKeys("4"), key.WithHelp("4", "findings")),
+
+		Retry:  key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "retry gate")),
+		Logs:   key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "logs")),
+		Branch: key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "branch view")),
+
+		Search:  key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
+		Palette: key.NewBinding(key.WithKeys("ctrl+p", ":"), key.WithHelp("C-p/:", "command palette")),
+		Refresh: key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("C-r", "refresh")),
+		Help:    key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
+		Quit:    key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
+	}
+}
+
+// ShortHelp returns the minimal key hints for the bottom bar.
+func (k KeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.NextPane, k.NextTab, k.Retry, k.Logs, k.Palette, k.Quit}
+}

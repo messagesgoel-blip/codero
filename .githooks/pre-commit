@@ -1,60 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-cd "$repo_root"
+# Portable hook wrapper for local and CI environments.
+# Prefer shared agent-toolkit hook when present; fallback to repo-local gate.
+SHARED_HOOK="/srv/storage/shared/agent-toolkit/hooks/pre-commit"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+LOCAL_GATE="$REPO_ROOT/scripts/review/two-pass-review.sh"
 
-mapfile -t staged < <(git diff --cached --name-only)
-if [ "${#staged[@]}" -eq 0 ]; then
-  exit 0
+if [ -x "$SHARED_HOOK" ]; then
+  exec "$SHARED_HOOK" "$@"
 fi
 
-for file in "${staged[@]}"; do
-  [ -f "$file" ] || continue
-  if grep -nE '^(<<<<<<<|=======|>>>>>>>|.*SECRET.*|.*PASSWORD.*|.*TOKEN.*|.*API_KEY.*|.*PRIVATE_KEY.*|.*CLIENT_SECRET.*)' "$file" >/dev/null 2>&1; then
-    echo "pre-commit blocked: potential sensitive data or merge conflict markers in $file" >&2
-    exit 1
-  fi
-done
-
-for file in "${staged[@]}"; do
-  [[ "$file" == *.sh ]] || continue
-  [ -f "$file" ] || continue
-  if ! bash -n "$file"; then
-    echo "pre-commit blocked: bash syntax error in $file" >&2
-    exit 1
-  fi
-done
-
-for file in "${staged[@]}"; do
-  [[ "$file" == *.py ]] || continue
-  [ -f "$file" ] || continue
-  if ! python3 -m py_compile "$file"; then
-    echo "pre-commit blocked: python syntax error in $file" >&2
-    exit 1
-  fi
-done
-
-run_go_checks=0
-for file in "${staged[@]}"; do
-  if [[ "$file" == *.go ]] || [[ "$file" == "go.mod" ]] || [[ "$file" == "go.sum" ]]; then
-    run_go_checks=1
-    break
-  fi
-done
-
-if [ "$run_go_checks" -eq 1 ]; then
-  mapfile -t go_staged < <(printf '%s\n' "${staged[@]}" | awk '/\.go$/')
-  if [ "${#go_staged[@]}" -gt 0 ]; then
-    unformatted="$(gofmt -l "${go_staged[@]}")"
-    if [ -n "$unformatted" ]; then
-      echo "pre-commit blocked: gofmt required for staged files:" >&2
-      echo "$unformatted" >&2
-      exit 1
-    fi
-  fi
-
-  echo "Running codero lint/unit checks..." >&2
-  go vet ./...
-  go test ./...
+if [ -x "$LOCAL_GATE" ]; then
+  exec "$LOCAL_GATE" "$@"
 fi
+
+echo "pre-commit: no executable hook backend found" >&2
+exit 1

@@ -1,0 +1,19 @@
+# Codero daily proving snapshot — cron template (RECOMMENDED)
+# ---------------------------------------------------------------------------
+# Install:
+#   crontab -e
+#   Paste the line below (adjust path and env vars as needed).
+#
+# The script logs to ~/.codero/logs/daily-snapshot-YYYYMMDD.log.
+# Errors are also mailed to the cron user (ensure MAILTO is set).
+# ---------------------------------------------------------------------------
+
+CODERO_BIN=/usr/local/bin/codero
+SNAPSHOT_DIR=/home/operator/.codero/snapshots
+RETAIN_DAYS=45
+SHELL=/bin/bash
+MAILTO=operator@example.com
+
+# Run at 02:05 every day (offset slightly from the systemd timer)
+5 2 * * * CODERO_BIN=$CODERO_BIN SNAPSHOT_DIR=$SNAPSHOT_DIR RETAIN_DAYS=$RETAIN_DAYS \
+    /srv/storage/repo/codero/scripts/automation/daily-snapshot.sh >> /home/operator/.codero/logs/cron.log 2>&1

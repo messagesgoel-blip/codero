@@ -1,14 +1,18 @@
 package daemon
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/codero/codero/internal/gate"
 	loglib "github.com/codero/codero/internal/log"
 	"github.com/codero/codero/internal/redis"
 	"github.com/codero/codero/internal/scheduler"
@@ -21,6 +25,7 @@ import (
 // - /metrics: Returns Prometheus-compatible text format metrics
 // - /ready: Returns readiness status for Kubernetes probes
 // - /api/v1/agent-metrics: Returns effectiveness metrics per agent and project
+// - /gate: Returns the current pre-commit gate progress (dashboard UI parity)
 type ObservabilityServer struct {
 	server      *http.Server           // HTTP server for serving endpoints
 	redisClient *redis.Client          // Redis client for health checks
@@ -29,14 +34,32 @@ type ObservabilityServer struct {
 	db          *sql.DB                // SQLite state store for metrics queries
 	startTime   time.Time              // Process start time for uptime calculation
 	mu          sync.RWMutex           // Mutex for thread-safe state access
+	repoPath    string                 // Repo path for gate progress file lookup
+	version     string                 // Binary version string set via ldflags
 }
 
 // NewObservabilityServer creates a new observability server.
-func NewObservabilityServer(redisClient *redis.Client, queue *scheduler.Queue, slotCounter *scheduler.SlotCounter, db *sql.DB, port string) *ObservabilityServer {
+func NewObservabilityServer(redisClient *redis.Client, queue *scheduler.Queue, slotCounter *scheduler.SlotCounter, db *sql.DB, port string, version string) *ObservabilityServer {
 	mux := http.NewServeMux()
 	server := &http.Server{
 		Addr:    ":" + port,
 		Handler: mux,
+	}
+
+	repoPath := os.Getenv("CODERO_REPO_PATH")
+	if repoPath == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			repoPath = "/"
+			loglib.Warn("observability: failed to resolve working directory; using fallback repo path",
+				loglib.FieldEventType, "observability_repo_path_fallback",
+				loglib.FieldComponent, "daemon",
+				"error", err,
+				"repo_path", repoPath,
+			)
+		} else {
+			repoPath = wd
+		}
 	}
 
 	obs := &ObservabilityServer{
@@ -46,6 +69,8 @@ func NewObservabilityServer(redisClient *redis.Client, queue *scheduler.Queue, s
 		slotCounter: slotCounter,
 		db:          db,
 		startTime:   time.Now(),
+		repoPath:    repoPath,
+		version:     version,
 	}
 
 	// Register routes
@@ -54,6 +79,7 @@ func NewObservabilityServer(redisClient *redis.Client, queue *scheduler.Queue, s
 	mux.HandleFunc("/metrics", obs.handleMetrics)
 	mux.HandleFunc("/ready", obs.handleReady)
 	mux.HandleFunc("/api/v1/agent-metrics", obs.handleAgentMetrics)
+	mux.HandleFunc("/gate", obs.handleGate)
 
 	return obs
 }
@@ -87,7 +113,7 @@ func (o *ObservabilityServer) handleHealth(w http.ResponseWriter, r *http.Reques
 	status := map[string]interface{}{
 		"status":         "ok",
 		"uptime_seconds": time.Since(o.startTime).Seconds(),
-		"version":        "dev",
+		"version":        o.version,
 	}
 
 	// Check Redis connectivity
@@ -287,3 +313,72 @@ func (o *ObservabilityServer) handleReady(w http.ResponseWriter, r *http.Request
 
 // DefaultObservabilityPort is the default port for observability endpoints.
 const DefaultObservabilityPort = "8080"
+
+// handleGate returns the current pre-commit gate progress as JSON.
+// Reads .codero/gate-heartbeat/progress.env written by two-pass-review.sh.
+// This endpoint provides dashboard UI parity with the CLI progress bar.
+//
+// Response fields match the shared progress contract:
+//
+//	PROGRESS_BAR, CURRENT_GATE, COPILOT_STATUS, LITELLM_STATUS
+func (o *ObservabilityServer) handleGate(w http.ResponseWriter, r *http.Request) {
+	progressFile := o.repoPath + "/.codero/gate-heartbeat/progress.env"
+	data, err := os.ReadFile(progressFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":         "no_run",
+				"progress_bar":   gate.RenderBar("pending", "pending", "none"),
+				"current_gate":   "none",
+				"copilot_status": "pending",
+				"litellm_status": "pending",
+				"generated_at":   time.Now().Format(time.RFC3339),
+			})
+			return
+		}
+		http.Error(w, fmt.Sprintf("read progress file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	fields := parseProgressEnv(string(data))
+
+	bar := fields["PROGRESS_BAR"]
+	if bar == "" {
+		bar = gate.RenderBar(
+			fields["COPILOT_STATUS"],
+			fields["LITELLM_STATUS"],
+			fields["CURRENT_GATE"],
+		)
+	}
+
+	resp := map[string]interface{}{
+		"run_id":         fields["RUN_ID"],
+		"status":         fields["STATUS"],
+		"progress_bar":   bar,
+		"current_gate":   fields["CURRENT_GATE"],
+		"copilot_status": fields["COPILOT_STATUS"],
+		"litellm_status": fields["LITELLM_STATUS"],
+		"elapsed_sec":    fields["ELAPSED_SEC"],
+		"updated_at":     fields["UPDATED_AT"],
+		"generated_at":   time.Now().Format(time.RFC3339),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// parseProgressEnv parses KEY=VALUE pairs from progress.env content.
+func parseProgressEnv(content string) map[string]string {
+	fields := make(map[string]string)
+	scanner := bufio.NewScanner(strings.NewReader(content))
+	for scanner.Scan() {
+		line := scanner.Text()
+		key, val, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		fields[strings.TrimSpace(key)] = strings.TrimSpace(val)
+	}
+	return fields
+}
