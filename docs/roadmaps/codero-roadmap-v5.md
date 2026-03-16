@@ -59,7 +59,7 @@ That last change is deliberate. Repo-qualified identity, fairness, and delivery 
 - All branch lifecycle changes happen only through the canonical state machine.
 - No model output may directly cause a state transition.
 - Polling-only mode must remain fully functional. Webhooks are an optimization, not a requirement.
-- Operator actions must have identical semantics across CLI, TUI, and later web UI.
+- Operator actions must have identical semantics across CLI, TUI, and web UI.
 - Multi-repo correctness is a Phase 1 proving requirement. Multi-tenant isolation is Phase 2.
 - No phase is complete without tests, observability, runbooks, and recovery drills.
 - The roadmap does not own agent lifecycle. codero manages review orchestration, not agent scheduling.
@@ -237,7 +237,9 @@ This is another intentional conceptual correction. Multi-repo identity and fairn
 
 - CLI submit, heartbeat, poll, why, reactivate, init-worktree, commit-gate.
 - TUI queue, branch detail, event log, and effectiveness views.
+- Web dashboard with parity to core TUI operator actions (overview, settings, live activity, manual upload flow).
 - Health, queue, metrics, and agent-metrics endpoints.
+- `/dashboard` and `/gate` semantics remain contract-aligned with TUI/CLI gate state rendering.
 
 #### 1F. Hardening and readiness verification
 
@@ -310,7 +312,6 @@ Goal: make codero inspectable, supportable, and safe to run for others.
 
 ### Scope
 
-- Web dashboard with parity to core TUI operator actions.
 - RBAC and immutable operator audit log.
 - Live queue views via Redis pub/sub.
 - Status checks, inline annotations, and GitHub re-run triggers.
@@ -321,7 +322,7 @@ Goal: make codero inspectable, supportable, and safe to run for others.
 
 ### Exit gate
 
-- All Phase 1 operator actions are available with identical semantics in web UI.
+- Existing web UI/operator surfaces remain semantically consistent with CLI/TUI under Phase 3 controls.
 - Viewer role cannot execute state-changing actions.
 - Audit log covers every operator action.
 - Restore and deletion workflows are tested.
@@ -830,7 +831,7 @@ Cost and quota guardrails remain configurable, but progression is blocked strict
 
 ## Appendix E — Operator action semantics (binding)
 
-These semantics must remain consistent across CLI, TUI, and later web UI.
+These semantics must remain consistent across CLI, TUI, and web UI.
 
 | Action | Effect | Constraints |
 |---|---|---|
