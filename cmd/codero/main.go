@@ -345,6 +345,8 @@ Delegates to the shared gate-heartbeat contract:
   - Terminal states: STATUS: PASS (commit allowed) or STATUS: FAIL (commit blocked)
 
 Gate sequence: Copilot first, LiteLLM second.
+Semgrep deterministic checks run inside the shared gate pipeline as a
+hard blocker before AI pass/fail resolution.
 Each gate has its own independent timeout; one gate timeout does not
 reduce the next gate's budget.
 

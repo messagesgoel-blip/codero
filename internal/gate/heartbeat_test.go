@@ -1,7 +1,6 @@
 package gate_test
 
 import (
-	"os"
 	"strings"
 	"testing"
 
@@ -223,9 +222,9 @@ func TestLoadConfig_EnvOverrides(t *testing.T) {
 // is read independently — setting one does not affect the others.
 func TestLoadConfig_TimeoutIndependence(t *testing.T) {
 	// Set only the Copilot timeout; LiteLLM and total should remain at defaults.
-	os.Unsetenv("CODERO_LITELLM_TIMEOUT_SEC")
-	os.Unsetenv("CODERO_GATE_TOTAL_TIMEOUT_SEC")
-	os.Unsetenv("CODERO_GATE_POLL_INTERVAL_SEC")
+	t.Setenv("CODERO_LITELLM_TIMEOUT_SEC", "")
+	t.Setenv("CODERO_GATE_TOTAL_TIMEOUT_SEC", "")
+	t.Setenv("CODERO_GATE_POLL_INTERVAL_SEC", "")
 	t.Setenv("CODERO_COPILOT_TIMEOUT_SEC", "120")
 
 	cfg := gate.LoadConfig()

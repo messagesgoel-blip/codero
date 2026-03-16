@@ -31,12 +31,11 @@ func TestGateHeartbeat_Contract_BinaryExists(t *testing.T) {
 // TestGateHeartbeat_Contract_PendingOutput verifies the PENDING output format
 // from a fresh gate-heartbeat invocation.
 func TestGateHeartbeat_Contract_PendingOutput(t *testing.T) {
-	bin := resolveHeartbeatBin(t)
 	repoPath := t.TempDir()
 
 	// First invocation always starts a new run and returns PENDING.
 	cfg := gate.Config{
-		HeartbeatBin:        bin,
+		HeartbeatBin:        filepath.Join(repoPath, "stub-heartbeat.sh"),
 		CopilotTimeoutSec:   gate.DefaultCopilotTimeoutSec,
 		LiteLLMTimeoutSec:   gate.DefaultLiteLLMTimeoutSec,
 		GateTotalTimeoutSec: gate.DefaultGateTotalTimeoutSec,

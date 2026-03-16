@@ -1,100 +1,104 @@
-# Agent Rules (Repo-Neutral)
+# Codero Repo Policy
 
-This file defines mandatory operating rules for coding agents.
-It is intentionally repo-neutral and should work across projects.
+Global policy authority: `/srv/storage/AGENTS.md`.
+If any rule conflicts, global policy wins.
 
-## 1) Core Principles
+## Agent File Lock
+- Do not create new agent-policy files for this repo.
+- Keep all policy/notes in this file and `/srv/storage/AGENTS.md`.
+- Keep secrets only in `/srv/storage/SECRETS.md` (never in repo files).
 
-1. One agent, one branch, one active task.
-2. No direct work on `main` (or default protected branch).
-3. All work must be traceable to a task id.
-4. No "done" state without tests and PR.
+## Canonical Path
+`/srv/storage/repo/codero/`
 
-## 2) Branching and Task Ownership
+## Service Ownership
+Codero owns the orchestration control plane: daemon lifecycle, queue/lease/heartbeat coordination, repo/task state transitions, and operator status surfaces (CLI/TUI/API).
 
-1. Create a dedicated branch per task: `feat/COD-{task-id}-<short-description>`.
-2. Claim the task before coding in the repo's task board (or equivalent tracker).
-3. If a task is already `in_progress`, do not start parallel implementation.
-4. Keep branch scope narrow; one task branch should not contain unrelated changes.
-5. Each agent must work in its own dedicated git worktree; agents must not share the same worktree path.
+Does NOT own:
+- Cacheflow runtime behavior
+- Mathkit runtime behavior
+- Cross-repo direct code imports
 
-## 3) Pre-Commit Quality Gate
+## Stack
+- Runtime: Go (`cmd/`, `internal/`)
+- Storage: SQLite durable state + Redis coordination
+- API/ops surfaces: daemon observability endpoints (`/health`, `/queue`, `/metrics`, `/gate`)
+- Venv/tool env: `/srv/storage/shared/tools/venvs/codero`
 
-Before each commit, run the repository's local review gate.
+## Shared Tools (Mandatory)
+- Resolve tooling from: `/srv/storage/shared/tools/bin`
+- Required shared tools include: `ruff`, `gitleaks`, `semgrep`, `pre-commit`, `poetry`
+- Do not install tools into this repo.
+- Verify hook/tool wiring with:
+  - `(cd /srv/storage/repo/codero && /srv/storage/shared/agent-toolkit/bin/install-hooks --verify)`
 
-If the repo ships `scripts/review/two-pass-review.sh`, use it as the default prehook gate.
-In this repo, `scripts/review/two-pass-review.sh` is authoritative.
+## Shared Testing (Mandatory)
+- Use shared test entrypoints:
+  - `/srv/storage/shared/testing/codero.sh`
+  - `/srv/storage/shared/testing/run-tests`
+  - `/srv/storage/shared/testing/gate-matrix.sh`
+- Repo-local test helpers are allowed only when shipped with product/runtime behavior.
 
-Current mandatory gate policy:
+## Ownership And Gatekeepers
+| Path | Owns | Gatekeeper |
+|---|---|---|
+| `cmd/*` | CLI entrypoints | self |
+| `internal/*` | daemon/runtime logic | self |
+| `docs/*` | contracts/runbooks/roadmap artifacts | self |
+| `scripts/*` | shipped runtime scripts only | flag before editing |
+| `infra/*` | deployment/ops integration | flag before editing |
 
-1. Run `aider` first pass.
-2. Run `gemini` (LiteLLM) second pass.
-3. Two successful checks are mandatory before commit.
-4. Run `coderabbit` (CodeRabbit) third as the canonical second review loop after LiteLLM.
-5. If either `gemini` or `coderabbit` is rate-limited or times out, run fallback chain:
-   - `pr-agent` next
-   - additional fallback tooling only if still below two successful checks
-6. `coderabbit` is never a fallback when the canonical sequence is available.
-7. Fix findings before commit.
+## Repo-Specific Do-Not-Edit
+- `**/generated/**` (generated artifacts)
+- `**/*.lock` manual edits (tool-managed only)
+- `.githooks/*` (managed by shared toolkit install-hooks)
+- `.codero/gate-heartbeat/*` runtime state files (ephemeral)
 
-Operational rule:
+## Branch And PR Policy
+- Branch naming (repo convention): `feat/COD-{issue-id}-{short-description}`.
+- No direct commits to protected branches (`main`, `dev`).
+- PR required before task can be marked complete.
+- PR must include: linked issue, scope summary, tests run, deploy impact, env var changes.
+- On PR open, request:
+  - `@coderabbitai review`
+  - `@coderabbitai summary`
+- Do not merge with unresolved CodeRabbit blocking comments.
+- One agent = one branch = one dedicated worktree path.
 
-- All agents should use these shared review scripts.
-- Do not modify these shared scripts per-agent or per-task. Use the repository defaults as-is unless a dedicated infra/policy task explicitly changes them for everyone.
+## Review Gate Policy
+- Agents must not run or modify repo-local legacy gate scripts directly.
+- Use only shared heartbeat gate entrypoint:
+  - `/srv/storage/shared/agent-toolkit/bin/gate-heartbeat`
+- First call starts run.
+- If output is `STATUS: PENDING`, poll again after `POLL_AFTER_SEC` (default 180s).
+- Proceed only on `STATUS: PASS`.
+- On `STATUS: FAIL`, address returned comments in code; do not alter gate infrastructure in feature tasks.
 
-## 4) Validation Before Push
+## Local Dev Commands
+```bash
+# from repo root
+go test ./...
+go test ./... -race
 
-Run required checks before pushing:
+# shared session contract
+/srv/storage/shared/agent-toolkit/bin/agent-preflight codero
+/srv/storage/shared/agent-toolkit/bin/agent-finish-task codero "<summary>"
+```
 
-- lint
-- unit tests
-- contract/integration tests (as applicable)
+## Testing Notes
+- Prefer contract + integration coverage for state transitions and heartbeat flows.
+- Keep API contract docs in `docs/contracts/` in sync with runtime behavior.
+- For gate behavior changes, validate CLI and `/gate` endpoint parity.
 
-Use the project's standard command (for example `make ci`) when available.
+## Script Locality Rule
+Repo-local scripts are disallowed unless they are shipped runtime requirements and include:
+`KEEP_LOCAL: required for shipped runtime <reason>`
 
-## 5) Pull Request Rules
+All other automation belongs in `/srv/storage/shared/agent-toolkit` or `/srv/storage/shared/testing`.
 
-1. PR required for all branches targeting protected branches.
-2. PR must include:
-   - linked task id
-   - scope summary
-   - tests run
-   - risk + rollback notes
-3. Do not merge until required checks are green.
-
-## 6) Merge Authority
-
-Policy baseline:
-
-- Merge operations to protected branches are performed only by the designated merge authority (for this repo: Codex).
-- Human emergency overrides must be explicitly documented in the PR conversation.
-
-Technical note:
-
-- Actor-level enforcement depends on GitHub plan/repo type.
-- If strict actor enforcement is required, use org-level branch restrictions or equivalent rulesets.
-
-## 7) Legacy/Reference Copy Policy
-
-1. Do not bulk-copy from legacy repos.
-2. Intake only module-by-module.
-3. For each copied module, require:
-   - contract doc
-   - parity tests
-   - rollback note in PR
-
-## 8) Safety Rules
-
-1. Never expose secrets/tokens in code, logs, or artifacts.
-2. Do not rewrite shared history (`push --force`) unless explicitly approved.
-3. Stop and escalate if conflicting instructions or unexpected repo state appears.
-
-## 9) Definition of Done
-
-Work is done only when all are true:
-
-1. Task ownership is updated.
-2. Local review gate completed.
-3. Required checks passed.
-4. Changes committed and pushed on task branch.
-5. PR opened and ready for review/merge.
+## Definition Of Done
+A task is done only when all are true:
+1. Changes are in canonical path `/srv/storage/repo/codero`.
+2. Required tests/gates pass.
+3. Changes are committed on a task branch.
+4. PR is opened with required context.

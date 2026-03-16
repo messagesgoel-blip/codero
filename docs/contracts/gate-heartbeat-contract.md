@@ -15,8 +15,9 @@ any agent may commit. The gate enforces the Sprint 6 policy:
 1. Copilot reviews the diff first.
 2. LiteLLM reviews the diff second.
 3. Each gate has its own independent timeout.
-4. Infra/auth failures are non-blocking; explicit findings block.
-5. An agent must poll until `STATUS: PASS` before committing.
+4. Semgrep deterministic checks run as mandatory blockers in the shared gate pipeline.
+5. Infra/auth failures are non-blocking; explicit findings block.
+6. An agent must poll until `STATUS: PASS` before committing.
 
 ---
 
@@ -40,7 +41,7 @@ state (`PASS` or `FAIL`).
 
 Gate-heartbeat prints `KEY: VALUE` pairs to stdout, one per line:
 
-```
+```text
 STATUS: PENDING | PASS | FAIL
 RUN_ID: <timestamp-random>
 ELAPSED_SEC: <n>
@@ -81,6 +82,7 @@ COMMENTS:                    (FAIL only; "none" when no blockers)
 An `infra_fail` on a gate does **not** produce `STATUS: FAIL`. The gate policy
 requires at least one AI gate to pass. A gate that fails due to infrastructure
 issues counts as infra-bypassed (not as a blocker).
+Semgrep findings remain hard blockers independent of AI gate quorum.
 
 ---
 

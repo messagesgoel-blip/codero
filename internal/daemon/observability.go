@@ -47,7 +47,18 @@ func NewObservabilityServer(redisClient *redis.Client, queue *scheduler.Queue, s
 
 	repoPath := os.Getenv("CODERO_REPO_PATH")
 	if repoPath == "" {
-		repoPath, _ = os.Getwd()
+		wd, err := os.Getwd()
+		if err != nil {
+			repoPath = "/"
+			loglib.Warn("observability: failed to resolve working directory; using fallback repo path",
+				loglib.FieldEventType, "observability_repo_path_fallback",
+				loglib.FieldComponent, "daemon",
+				"error", err,
+				"repo_path", repoPath,
+			)
+		} else {
+			repoPath = wd
+		}
 	}
 
 	obs := &ObservabilityServer{

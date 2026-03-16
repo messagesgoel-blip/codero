@@ -169,7 +169,7 @@ load_api_config() {
     done
   fi
 
-  litellm_env_path="${LITELLM_ENV_PATH:-/opt/docker/apps/litellm/.env}"
+  litellm_env_path="${LITELLM_ENV_PATH:-/srv/storage/shared/config/litellm/.env}"
   if [ -f "$litellm_env_path" ]; then
     for key in LITELLM_MASTER_KEY LITELLM_API_KEY OPENAI_API_KEY; do
       litellm_key="$(read_key_from_file "$key" "$litellm_env_path")"

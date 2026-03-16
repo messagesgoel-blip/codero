@@ -7,6 +7,7 @@ package gate
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -155,7 +156,7 @@ func (r *Runner) Run(ctx context.Context, progressFn func(Result)) (Result, erro
 	env := buildEnv(r.Cfg)
 
 	for {
-		out, err := r.callHeartbeat(env)
+		out, err := r.callHeartbeat(ctx, env)
 		if err != nil {
 			return Result{Status: StatusFail}, fmt.Errorf("gate-heartbeat: %w", err)
 		}
@@ -183,16 +184,26 @@ func (r *Runner) Run(ctx context.Context, progressFn func(Result)) (Result, erro
 	}
 }
 
-func (r *Runner) callHeartbeat(env []string) (string, error) {
+func (r *Runner) callHeartbeat(ctx context.Context, env []string) (string, error) {
 	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-	cmd := exec.Command(r.Cfg.HeartbeatBin) //nolint:gosec
+	cmd := exec.CommandContext(ctx, r.Cfg.HeartbeatBin) //nolint:gosec
 	cmd.Env = env
 	if r.Cfg.RepoPath != "" {
 		cmd.Dir = r.Cfg.RepoPath
 	}
-	out, _ := cmd.CombinedOutput()
-	// gate-heartbeat exits non-zero on gate FAIL, which is expected; always
-	// return the output so the STATUS line can be parsed.
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		// A non-zero exit can still be valid if heartbeat emitted STATUS output.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && strings.Contains(string(out), "STATUS:") {
+			return string(out), nil
+		}
+		trimmed := strings.TrimSpace(string(out))
+		if trimmed != "" {
+			return "", fmt.Errorf("%w (output: %s)", err, trimmed)
+		}
+		return "", err
+	}
 	return string(out), nil
 }
 

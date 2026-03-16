@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -753,41 +754,30 @@ BLOCK: missing unit tests
 // progress bar renderer produces identical output for CLI and TUI surfaces.
 func TestSprint6_HeartbeatGate_ProgressBarRendering(t *testing.T) {
 	cases := []struct {
+		name     string
 		copilot  string
 		litellm  string
 		current  string
 		wantIcon string
 	}{
-		{"pending", "pending", "none", "○"},
-		{"running", "pending", "copilot", "●"},
-		{"pass", "running", "litellm", "✓"},
-		{"pass", "pass", "none", "✓"},
-		{"blocked", "pass", "none", "✗"},
-		{"infra_fail", "pass", "none", "!"},
-		{"timeout", "pending", "none", "⏱"},
+		{"all pending", "pending", "pending", "none", "○"},
+		{"copilot running", "running", "pending", "copilot", "●"},
+		{"litellm running", "pass", "running", "litellm", "✓"},
+		{"both passed", "pass", "pass", "none", "✓"},
+		{"copilot blocked", "blocked", "pass", "none", "✗"},
+		{"copilot infra_fail", "infra_fail", "pass", "none", "!"},
+		{"copilot timeout", "timeout", "pending", "none", "⏱"},
 	}
 
 	for _, tc := range cases {
-		bar := gate.RenderBar(tc.copilot, tc.litellm, tc.current)
-		if !contains(bar, tc.wantIcon) {
-			t.Errorf("RenderBar(%q, %q, %q): missing icon %q in %q",
-				tc.copilot, tc.litellm, tc.current, tc.wantIcon, bar)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			bar := gate.RenderBar(tc.copilot, tc.litellm, tc.current)
+			if !strings.Contains(bar, tc.wantIcon) {
+				t.Errorf("RenderBar(%q, %q, %q): missing icon %q in %q",
+					tc.copilot, tc.litellm, tc.current, tc.wantIcon, bar)
+			}
+		})
 	}
-}
-
-func contains(s, sub string) bool {
-	return len(sub) > 0 && len(s) >= len(sub) &&
-		(s == sub || len(s) > 0 && containsStr(s, sub))
-}
-
-func containsStr(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }
 
 // runStubGate creates a stub gate-heartbeat script that returns the given

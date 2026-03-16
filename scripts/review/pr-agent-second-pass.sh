@@ -102,9 +102,9 @@ load_litellm_key() {
     done
   fi
 
-  if [ -f /opt/docker/apps/litellm/.env ]; then
+  if [ -f /srv/storage/shared/config/litellm/.env ]; then
     for key in LITELLM_MASTER_KEY LITELLM_API_KEY; do
-      raw="$(grep -E "^${key}=" /opt/docker/apps/litellm/.env | head -n 1 | cut -d= -f2- || true)"
+      raw="$(grep -E "^${key}=" /srv/storage/shared/config/litellm/.env | head -n 1 | cut -d= -f2- || true)"
       raw="${raw%\"}"
       raw="${raw#\"}"
       raw="${raw%\'}"
