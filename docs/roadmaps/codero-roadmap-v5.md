@@ -624,6 +624,46 @@ Program-level criteria (reviewed at phase gates):
 
 After Sprint 6, the work shifts from implementation breadth to proving behavior under daily use.
 
+### Sprint 7 (COD-030) — Close the review loop
+
+**Goal:** Replace every stub integration point with real implementations so the automation loop (agent → commit → codero → CodeRabbit → agent) completes end-to-end without manual steps.
+
+Four gaps closed in this sprint:
+
+#### 7A. Real GitHub client (`internal/github`)
+
+- New package `internal/github` with `Client` implementing `webhook.GitHubClient`.
+- Methods: `GetPRState`, `FindOpenPR`, `ListPRReviews`, `ListPRReviewComments`, `ListCheckRuns`.
+- Same `net/http` + Bearer token pattern as `internal/config/scopes.go` — no SDK dependency.
+- Replaces `webhook.StubGitHubClient{}` in `daemonCmd`.
+
+#### 7B. Real CodeRabbit review provider (`internal/runner`)
+
+- New `GitHubProvider` in `internal/runner/github_provider.go` implementing `runner.Provider`.
+- Fetches CodeRabbit inline review comments and review-body summaries from the open PR.
+- Maps comment bodies to `normalizer.RawFinding` via heuristic severity inference.
+- Replaces `runner.NewStubProvider(0)` in `daemonCmd`.
+
+#### 7C. Real webhook event processor (`internal/webhook`)
+
+- New `EventProcessor` in `internal/webhook/processor.go` implementing `webhook.Processor`.
+- Handles `pull_request` (closed → T18, synchronize → T12), `pull_request_review` (approved/changes_requested), and `check_run` (completed) events.
+- Updates merge-readiness fields and appends system events to the delivery stream.
+- Replaces `&webhook.NopProcessor{}` in `daemonCmd`.
+
+#### 7D. `codero poll` and `codero why` CLI commands (`cmd/codero`)
+
+- `codero poll [--repo] [--branch]`: on-demand GitHub reconciliation for one branch.
+  Forces the same cycle the background reconciler runs every 60 s, outputs what changed.
+- `codero why [--repo] [--branch] [--limit N] [--json]`: explains current branch state.
+  Shows merge-readiness fields, latest findings, and recent delivery events.
+- Also adds `RunOnce(ctx)` to `Reconciler` (used by `poll` and tests).
+
+**Invariants preserved:**
+- All state transitions still go through `state.TransitionBranch` — no raw SQL in new code.
+- Polling-only mode remains fully functional; real GitHub client is used by the reconciler in both modes.
+- Webhook processor uses the same delivery stream and state DB as the runner.
+
 ---
 
 ## Appendix A — Canonical state machine (binding)

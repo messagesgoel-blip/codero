@@ -80,6 +80,12 @@ func NewReconciler(db *state.DB, github GitHubClient, repos []string, webhookEna
 	}
 }
 
+// RunOnce executes a single reconciliation cycle and returns.
+// It is exported for use by the `codero poll` command and tests.
+func (r *Reconciler) RunOnce(ctx context.Context) {
+	r.runCycle(ctx)
+}
+
 // Run starts the reconciliation loop. It blocks until ctx is cancelled.
 func (r *Reconciler) Run(ctx context.Context) {
 	loglib.Info("reconciler: starting",

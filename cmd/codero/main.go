@@ -15,6 +15,7 @@ import (
 	"github.com/codero/codero/internal/daemon"
 	"github.com/codero/codero/internal/delivery"
 	"github.com/codero/codero/internal/gate"
+	ghclient "github.com/codero/codero/internal/github"
 	loglib "github.com/codero/codero/internal/log"
 	redislib "github.com/codero/codero/internal/redis"
 	"github.com/codero/codero/internal/runner"
@@ -59,6 +60,8 @@ func main() {
 		tuiCmd(),
 		dashboardCmd(&configPath),
 		portsCmd(&configPath),
+		pollCmd(&configPath),
+		whyCmd(&configPath),
 	)
 
 	if err := root.Execute(); err != nil {
@@ -188,9 +191,13 @@ func daemonCmd(configPath *string) *cobra.Command {
 			queue := scheduler.NewQueue(client)
 			leaseMgr := scheduler.NewLeaseManager(client)
 
+			// GitHub client: shared by the review runner provider and the reconciler.
+			gh := ghclient.NewClient(cfg.GitHubToken)
+
 			// Review runner: consumes queued_cli branches and dispatches reviews.
+			// Uses the real GitHubProvider to fetch CodeRabbit review comments.
 			reviewRunner := runner.New(db, queue, leaseMgr, stream,
-				runner.NewStubProvider(0),
+				runner.NewGitHubProvider(gh),
 				runner.Config{Repos: cfg.Repos},
 			)
 			wg.Add(1)
@@ -210,7 +217,7 @@ func daemonCmd(configPath *string) *cobra.Command {
 			// Reconciler: polls GitHub for drift repair.
 			// webhookEnabled=false → polling-only mode (60s interval).
 			reconciler := webhook.NewReconciler(db,
-				&webhook.StubGitHubClient{},
+				gh,
 				cfg.Repos,
 				cfg.Webhook.Enabled,
 			)
@@ -244,7 +251,7 @@ func daemonCmd(configPath *string) *cobra.Command {
 			// Polling-only mode remains fully functional without it.
 			if cfg.Webhook.Enabled {
 				dedup := webhook.NewDeduplicator(db, client)
-				proc := &webhook.NopProcessor{}
+				proc := webhook.NewEventProcessor(db, stream)
 				handler := webhook.NewHandler(cfg.Webhook.Secret, dedup, proc)
 				addr := fmt.Sprintf(":%d", cfg.Webhook.Port)
 				srv := webhook.NewServer(addr, handler)
