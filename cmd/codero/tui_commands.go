@@ -622,6 +622,9 @@ Examples:
 				}
 				repoPath = absPath
 			}
+			if jsonOutput && (watchMode || showLogs) {
+				return fmt.Errorf("--json cannot be combined with --watch or --logs")
+			}
 
 			if showLogs {
 				return printGateLogs(repoPath)

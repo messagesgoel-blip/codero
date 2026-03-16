@@ -324,6 +324,20 @@ func TestRunDashboardCheck_PartialFailure(t *testing.T) {
 	}
 }
 
+func TestGateStatusCmd_JSONConflictsWithWatchAndLogs(t *testing.T) {
+	cmd := gateStatusCmd()
+	cmd.SetArgs([]string{"--json", "--watch"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error for --json with --watch")
+	}
+
+	cmd = gateStatusCmd()
+	cmd.SetArgs([]string{"--json", "--logs"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error for --json with --logs")
+	}
+}
+
 // --- portsCmd output ---
 
 func TestPortsCmd_DefaultOutput(t *testing.T) {
