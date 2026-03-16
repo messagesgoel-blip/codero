@@ -1,5 +1,5 @@
 # Build stage: compile the Go binary with CGO enabled (required by go-sqlite3).
-FROM golang:1.22-bullseye AS builder
+FROM golang:1.24.2-bullseye AS builder
 
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -23,7 +23,10 @@ COPY --from=builder /codero /usr/local/bin/codero
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 # Runtime data directories (overridden by volume mounts in production).
-RUN mkdir -p /data/db /data/logs /data/pids /data/tmp /data/snapshots
+RUN addgroup --system codero \
+    && adduser --system --ingroup codero --home /nonexistent --no-create-home codero \
+    && mkdir -p /data/db /data/logs /data/pids /data/tmp /data/snapshots \
+    && chown -R codero:codero /data
 
 VOLUME ["/data"]
 
@@ -31,6 +34,8 @@ EXPOSE 8080
 
 HEALTHCHECK --interval=10s --timeout=5s --retries=3 \
     CMD wget -qO- http://localhost:8080/health || exit 1
+
+USER codero
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["codero", "daemon"]

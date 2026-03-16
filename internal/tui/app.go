@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -558,7 +559,8 @@ func (m Model) buildOutputContent() string {
 	return sb.String()
 }
 
-// retryGateCmd executes `codero commit-gate` to retry.
+// retryGateCmd re-invokes the current codero binary with commit-gate.
+// Safe: bin is os.Executable() (self), args are static + validated repoPath.
 //
 //nolint:gosec
 func retryGateCmd(repoPath string) tea.Cmd {
@@ -567,9 +569,13 @@ func retryGateCmd(repoPath string) tea.Cmd {
 		if err != nil {
 			return errMsg{err}
 		}
+		// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 		cmd := exec.Command(bin, "commit-gate", "--repo-path", repoPath)
 		cmd.Dir = repoPath
-		out, _ := cmd.CombinedOutput()
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return errMsg{fmt.Errorf("commit-gate failed: %w", err)}
+		}
 		return outputMsg{lines: strings.Split(string(out), "\n")}
 	}
 }
@@ -577,7 +583,7 @@ func retryGateCmd(repoPath string) tea.Cmd {
 // openLogsCmd reads the gate log directory.
 func openLogsCmd(repoPath string) tea.Cmd {
 	return func() tea.Msg {
-		logDir := repoPath + "/.codero/gate-heartbeat/logs"
+		logDir := filepath.Join(repoPath, ".codero", "gate-heartbeat", "logs")
 		entries, err := os.ReadDir(logDir)
 		if err != nil {
 			return outputMsg{lines: []string{"log dir not found: " + logDir}}

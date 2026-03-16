@@ -446,7 +446,10 @@ func autoRecordGateOutcomes(ctx context.Context, result gate.Result, repoPath st
 	}
 	defer db.Close()
 
-	branch, _ := getCurrentBranch()
+	branch, err := getCurrentBranch()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gate-metrics: branch detection failed (%v)\n", err)
+	}
 	repo := ""
 	if len(cfg.Repos) > 0 {
 		repo = cfg.Repos[0]

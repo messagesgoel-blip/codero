@@ -42,6 +42,22 @@ func TestCompute_MinimumWidths(t *testing.T) {
 	}
 }
 
+func TestCompute_Narrow(t *testing.T) {
+	l := tui.Compute(50, 24)
+	if l.LeftW < 1 {
+		t.Errorf("LeftW: expected >=1, got %d", l.LeftW)
+	}
+	if l.CenterW < 1 {
+		t.Errorf("CenterW: expected >=1, got %d", l.CenterW)
+	}
+	if l.RightW < 1 {
+		t.Errorf("RightW: expected >=1, got %d", l.RightW)
+	}
+	if l.LeftW+l.CenterW+l.RightW != l.TotalW {
+		t.Errorf("pane widths %d+%d+%d != %d", l.LeftW, l.CenterW, l.RightW, l.TotalW)
+	}
+}
+
 func TestCompute_Zero(t *testing.T) {
 	l := tui.Compute(0, 0)
 	if l.TotalW < 1 {

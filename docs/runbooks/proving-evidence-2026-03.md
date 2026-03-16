@@ -177,8 +177,8 @@
 ## Next Steps
 
 1. Begin real usage with at least 2 repositories
-2. `commit-gate` runs automatically record precommit outcomes — no manual action needed
-3. Run `codero scorecard --save` daily to accumulate snapshot evidence
+2. `commit-gate` runs automatically record precommit outcomes — no manual action needed.
+3. Run `codero scorecard --save` daily to accumulate snapshot evidence.
 4. Continue accumulating 30 days of evidence
 
 ---

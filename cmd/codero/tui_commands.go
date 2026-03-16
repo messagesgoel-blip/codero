@@ -620,7 +620,7 @@ Examples:
 
 			result := readProgressEnvAsResult(repoPath)
 			fmt.Print(RenderGateStatusBox(result, repoPath))
-			printGateActions(result)
+			printGateActions(result, repoPath)
 			return nil
 		},
 	}
@@ -781,7 +781,7 @@ func RenderGateStatusBox(r gate.Result, repoPath string) string {
 }
 
 // printGateActions prints the available intervention actions after the TUI box.
-func printGateActions(r gate.Result) {
+func printGateActions(r gate.Result, repoPath string) {
 	fmt.Println()
 	fmt.Println("  Actions:")
 	fmt.Println("    r   retry gate     →  codero commit-gate")
@@ -806,7 +806,7 @@ func printGateActions(r gate.Result) {
 		cmd.Stderr = os.Stderr
 		_ = cmd.Run()
 	case "l":
-		_ = printGateLogs(os.Getenv("CODERO_REPO_PATH"))
+		_ = printGateLogs(repoPath)
 	case "b":
 		fmt.Println("\n  Launching: codero branch …")
 		// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command

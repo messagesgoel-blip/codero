@@ -49,7 +49,11 @@ func (p *EventsPane) refreshViewport() {
 	} else {
 		for _, e := range p.events {
 			ts := e.CreatedAt.Format("15:04:05")
-			line := fmt.Sprintf("  %s  %-20s  %s", ts, e.EventType, truncStr(e.Payload, p.width-40))
+			payloadWidth := p.width - 40
+			if payloadWidth < 0 {
+				payloadWidth = 0
+			}
+			line := fmt.Sprintf("  %s  %-20s  %s", ts, e.EventType, truncStr(e.Payload, payloadWidth))
 			sb.WriteString(p.theme.ListNormal.Render(line) + "\n")
 		}
 	}

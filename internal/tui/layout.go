@@ -41,9 +41,20 @@ func Compute(totalW, totalH int) Layout {
 	centerW := totalW - leftW - rightW
 	if centerW < minCenterW {
 		excess := minCenterW - centerW
-		leftW -= excess / 2
-		rightW -= excess - excess/2
-		centerW = minCenterW
+		leftReduction := minInt(leftW, excess/2)
+		rightReduction := minInt(rightW, excess-leftReduction)
+		leftW -= leftReduction
+		rightW -= rightReduction
+		if leftW < 1 {
+			leftW = 1
+		}
+		if rightW < 1 {
+			rightW = 1
+		}
+		centerW = totalW - leftW - rightW
+		if centerW < 1 {
+			centerW = 1
+		}
 	}
 
 	return Layout{
