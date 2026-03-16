@@ -10,15 +10,29 @@ import (
 )
 
 func TestCheckRedis_FailsWithNamedError(t *testing.T) {
-	// Reserve an ephemeral port, then close it to guarantee the address is not listening.
+	// Keep the listener open for the test duration so the port cannot be
+	// recycled by a concurrently-started miniredis instance between close and
+	// the CheckRedis call (TOCTOU fix). Each accepted connection is immediately
+	// closed so go-redis sees EOF on every PING attempt, causing CheckRedis to
+	// exhaust its retries and return ErrRedisUnavailable.
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("reserve port: %v", err)
+		t.Fatalf("listen: %v", err)
 	}
+	t.Cleanup(func() { l.Close() })
 	addr := l.Addr().String()
-	if err := l.Close(); err != nil {
-		t.Fatalf("close listener: %v", err)
-	}
+
+	// Accept connections and immediately close them; goroutine exits when the
+	// listener is closed by t.Cleanup.
+	go func() {
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				return // listener closed
+			}
+			conn.Close()
+		}
+	}()
 
 	err = CheckRedis(context.Background(), addr, "")
 	if err == nil {
