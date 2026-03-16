@@ -53,11 +53,32 @@ func (p *EventsPane) refreshViewport() {
 			if payloadWidth < 0 {
 				payloadWidth = 0
 			}
-			line := fmt.Sprintf("  %s  %-20s  %s", ts, e.EventType, truncStr(e.Payload, payloadWidth))
-			sb.WriteString(p.theme.ListNormal.Render(line) + "\n")
+			evStyle := p.eventTypeStyle(e.EventType)
+			tsStr := p.theme.Muted.Render(fmt.Sprintf("  %s  ", ts))
+			typeStr := evStyle.Render(fmt.Sprintf("%-20s", e.EventType))
+			payloadStr := p.theme.Base.Render(fmt.Sprintf("  %s", truncStr(e.Payload, payloadWidth)))
+			sb.WriteString(tsStr + typeStr + payloadStr + "\n")
 		}
 	}
 	p.viewport.SetContent(sb.String())
+}
+
+// eventTypeStyle maps delivery event types to visual styles.
+func (p EventsPane) eventTypeStyle(eventType string) lipgloss.Style {
+	switch {
+	case eventType == "finding_bundle" || eventType == "finding":
+		return p.theme.Fail
+	case eventType == "state_transition":
+		return p.theme.Accent
+	case eventType == "review_complete":
+		return p.theme.Pass
+	case eventType == "review_started", eventType == "gate_running":
+		return p.theme.Running
+	case eventType == "system", eventType == "error":
+		return p.theme.Warning
+	default:
+		return p.theme.Muted
+	}
 }
 
 func (p EventsPane) View() string {

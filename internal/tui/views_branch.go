@@ -47,17 +47,30 @@ func (p BranchPane) View() string {
 		if len(short) > 8 {
 			short = short[:8]
 		}
-		lines = append(lines, p.theme.Base.Render(fmt.Sprintf("  %s", truncStr(r.Branch, p.width-4))))
+		lines = append(lines, p.theme.Bold.Render(fmt.Sprintf("  %s", truncStr(r.Branch, p.width-4))))
 		lines = append(lines, p.theme.Muted.Render(fmt.Sprintf("  %s", r.Repo)))
 		lines = append(lines, "")
-		lines = append(lines, p.theme.Muted.Render(fmt.Sprintf("  state:   %s", string(r.State))))
+		stateStr := p.theme.StateStyle(r.State).Render(string(r.State))
+		lines = append(lines, fmt.Sprintf("  state:   %s", stateStr))
 		lines = append(lines, p.theme.Muted.Render(fmt.Sprintf("  commit:  %s", short)))
 		lines = append(lines, p.theme.Muted.Render(fmt.Sprintf("  retries: %d/%d", r.RetryCount, r.MaxRetries)))
+		// Show approval/CI indicators for post-review states; show ✗ when unmet.
+		postReview := r.State == state.StateReviewed || r.State == state.StateMergeReady
 		if r.Approved {
 			lines = append(lines, p.theme.Pass.Render("  ✓ approved"))
+		} else if postReview {
+			lines = append(lines, p.theme.Fail.Render("  ✗ approved"))
 		}
 		if r.CIGreen {
 			lines = append(lines, p.theme.Pass.Render("  ✓ CI green"))
+		} else if postReview {
+			lines = append(lines, p.theme.Fail.Render("  ✗ CI green"))
+		}
+		if r.PendingEvents > 0 {
+			lines = append(lines, p.theme.Warning.Render(fmt.Sprintf("  ! %d pending events", r.PendingEvents)))
+		}
+		if r.UnresolvedThreads > 0 {
+			lines = append(lines, p.theme.Warning.Render(fmt.Sprintf("  ! %d open threads", r.UnresolvedThreads)))
 		}
 	}
 

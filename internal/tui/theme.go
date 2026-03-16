@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/codero/codero/internal/state"
+)
 
 // Theme centralises all style tokens.
 type Theme struct {
@@ -130,8 +134,8 @@ func newAltTheme() Theme {
 }
 
 // GateStatusStyle returns the theme style for a given gate state string.
-func (t Theme) GateStatusStyle(state string) lipgloss.Style {
-	switch state {
+func (t Theme) GateStatusStyle(gateState string) lipgloss.Style {
+	switch gateState {
 	case "pass":
 		return t.Pass
 	case "running":
@@ -142,6 +146,26 @@ func (t Theme) GateStatusStyle(state string) lipgloss.Style {
 		return t.Warning
 	case "pending":
 		return t.Pending
+	default:
+		return t.Muted
+	}
+}
+
+// StateStyle returns the theme style for a branch lifecycle state.
+func (t Theme) StateStyle(s state.State) lipgloss.Style {
+	switch s {
+	case state.StateMergeReady:
+		return t.Pass
+	case state.StateReviewed:
+		return t.Accent
+	case state.StateCLIReviewing, state.StateLocalReview:
+		return t.Running
+	case state.StateQueuedCLI, state.StatePaused:
+		return t.Warning
+	case state.StateBlocked, state.StateStaleBranch, state.StateAbandoned:
+		return t.Fail
+	case state.StateCoding:
+		return t.Base
 	default:
 		return t.Muted
 	}

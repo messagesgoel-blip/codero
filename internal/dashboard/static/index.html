@@ -8,13 +8,15 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
 /* ── TOKENS ─────────────────────────────────────────────── */
-:root{--mono:'IBM Plex Mono',monospace;--sans:'IBM Plex Sans',sans-serif;--green:#5a9e3a;--green-b:rgba(90,158,58,.12);--red:#c94f4f;--red-b:rgba(201,79,79,.12);--amber:#c48a2a;--amber-b:rgba(196,138,42,.12);--blue:#4a8fc4;--blue-b:rgba(74,143,196,.12);--radius:4px}
-[data-theme="dark"]{--bg:#0d0d0d;--bg1:#111;--bg2:#161616;--bg3:#1c1c1c;--border:rgba(255,255,255,.07);--border2:rgba(255,255,255,.13);--text:#e2e0d8;--muted:#666460;--dim:#3a3836;--input-bg:#1c1c1c;color-scheme:dark}
+/* Light-mode / shared base values */
+:root{--mono:'IBM Plex Mono',monospace;--sans:'IBM Plex Sans',sans-serif;--green:#3d8c1e;--green-b:rgba(61,140,30,.13);--red:#c03838;--red-b:rgba(192,56,56,.13);--amber:#a06010;--amber-b:rgba(160,96,16,.13);--blue:#2e78b8;--blue-b:rgba(46,120,184,.13);--radius:4px}
+/* Dark mode — brighter semantic colours so they read on near-black */
+[data-theme="dark"]{--bg:#0d0d0d;--bg1:#111;--bg2:#161616;--bg3:#1e1e1e;--border:rgba(255,255,255,.08);--border2:rgba(255,255,255,.16);--text:#dedad2;--muted:#8a8580;--dim:#504d4a;--input-bg:#1c1c1c;--green:#5ec43a;--green-b:rgba(94,196,58,.15);--red:#e06464;--red-b:rgba(224,100,100,.15);--amber:#d49830;--amber-b:rgba(212,152,48,.15);--blue:#5aa3dc;--blue-b:rgba(90,163,220,.15);color-scheme:dark}
 [data-theme="light"]{--bg:#f5f4f0;--bg1:#fafaf8;--bg2:#f0eeea;--bg3:#e8e6e2;--border:rgba(0,0,0,.08);--border2:rgba(0,0,0,.14);--text:#1a1916;--muted:#888580;--dim:#c4c2be;--input-bg:#fff;color-scheme:light}
 /* ── RESET ─────────────────────────────────────────────── */
 *{box-sizing:border-box;margin:0;padding:0}html,body{height:100%}
 body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:12px;line-height:1.5;overflow-x:hidden;transition:background .2s,color .2s}
-[data-theme="dark"] body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.025) 2px,rgba(0,0,0,.025) 4px);pointer-events:none;z-index:9999}
+[data-theme="dark"] body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.012) 2px,rgba(0,0,0,.012) 4px);pointer-events:none;z-index:9999}
 /* ── NAV ────────────────────────────────────────────────── */
 nav{display:flex;align-items:center;gap:14px;padding:0 18px;height:40px;border-bottom:1px solid var(--border);background:var(--bg1);position:sticky;top:0;z-index:200;flex-shrink:0}
 .nav-logo{font-size:13px;font-weight:500;letter-spacing:.02em}.nav-logo span{color:var(--muted)}
@@ -57,6 +59,26 @@ nav{display:flex;align-items:center;gap:14px;padding:0 18px;height:40px;border-b
 .metric-val{font-size:21px;font-weight:300;line-height:1;margin-bottom:2px}
 .metric-val.green{color:var(--green)}.metric-val.red{color:var(--red)}.metric-val.amber{color:var(--amber)}
 .metric-label{font-size:9px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
+/* ── BRANCH STATE STRIP ─────────────────────────────────── */
+.state-strip{display:flex;gap:0;border-bottom:1px solid var(--border);flex-shrink:0;overflow:hidden}
+.state-chip{flex:1;display:flex;align-items:center;gap:5px;padding:5px 10px;border-right:1px solid var(--border);min-width:0}
+.state-chip:last-child{border-right:none}
+.sc-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.sc-label{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}
+.sc-count{font-size:12px;font-weight:500;margin-left:auto}
+.sc-coding .sc-dot{background:var(--muted)}.sc-coding .sc-count{color:var(--text)}
+.sc-reviewing .sc-dot{background:var(--amber)}.sc-reviewing .sc-count{color:var(--amber)}
+.sc-merge-ready .sc-dot{background:var(--green)}.sc-merge-ready .sc-count{color:var(--green)}
+.sc-blocked .sc-dot{background:var(--red)}.sc-blocked .sc-count{color:var(--red)}
+/* ── LIFECYCLE STATE BADGES ─────────────────────────────── */
+.ls{font-size:9px;padding:1px 5px;border-radius:2px;font-weight:500;white-space:nowrap}
+.ls-coding{color:var(--muted);background:var(--bg3)}
+.ls-local_review,.ls-queued_cli,.ls-cli_reviewing{color:var(--amber);background:var(--amber-b)}
+.ls-reviewed{color:var(--blue);background:var(--blue-b)}
+.ls-merge_ready{color:var(--green);background:var(--green-b)}
+.ls-stale_branch,.ls-abandoned,.ls-blocked{color:var(--red);background:var(--red-b)}
+.ls-paused{color:var(--amber);background:var(--amber-b)}
+.ls-closed{color:var(--muted);background:var(--bg3)}
 /* ── SPARKLINES ─────────────────────────────────────────── */
 .spark-row{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid var(--border);flex-shrink:0}
 .spark-cell{padding:8px 13px 5px}.spark-cell+.spark-cell{border-left:1px solid var(--border)}
@@ -168,10 +190,16 @@ table.runs td{padding:6px 11px;border-bottom:1px solid var(--border);font-size:1
   <div class="panel" style="overflow:hidden">
     <div style="display:flex;flex-direction:column;height:100%;overflow:hidden">
       <div class="metric-strip">
-        <div class="metric"><div class="metric-val green" id="m-runs">—</div><div class="metric-label">runs today</div></div>
+        <div class="metric"><div class="metric-val green" id="m-runs">—</div><div class="metric-label">reviews today</div></div>
         <div class="metric"><div class="metric-val green" id="m-pass">—</div><div class="metric-label">pass rate</div></div>
         <div class="metric"><div class="metric-val red"   id="m-blocked">—</div><div class="metric-label">blocked</div></div>
-        <div class="metric"><div class="metric-val amber" id="m-avg">—</div><div class="metric-label">avg gate time</div></div>
+        <div class="metric"><div class="metric-val amber" id="m-avg">—</div><div class="metric-label">avg review time</div></div>
+      </div>
+      <div class="state-strip">
+        <div class="state-chip sc-coding"><div class="sc-dot"></div><div class="sc-label">coding</div><div class="sc-count" id="sc-coding">—</div></div>
+        <div class="state-chip sc-reviewing"><div class="sc-dot"></div><div class="sc-label">reviewing</div><div class="sc-count" id="sc-reviewing">—</div></div>
+        <div class="state-chip sc-merge-ready"><div class="sc-dot"></div><div class="sc-label">merge ready</div><div class="sc-count" id="sc-merge-ready">—</div></div>
+        <div class="state-chip sc-blocked"><div class="sc-dot"></div><div class="sc-label">blocked/stale</div><div class="sc-count" id="sc-blocked-stale">—</div></div>
       </div>
       <div class="spark-row">
         <div class="spark-cell"><div class="spark-label">pass rate 7d</div><canvas class="spark" id="spark-pass"></canvas></div>
@@ -186,9 +214,9 @@ table.runs td{padding:6px 11px;border-bottom:1px solid var(--border);font-size:1
         <table class="runs">
           <thead><tr>
             <th>repo</th><th>branch / file</th><th>provider</th>
-            <th>gates</th><th>status</th><th>time</th>
+            <th>gates</th><th>status</th><th>lifecycle state</th><th>time</th>
           </tr></thead>
-          <tbody id="runs-tbody"><tr><td colspan="6"><div class="state-msg">loading…</div></td></tr></tbody>
+          <tbody id="runs-tbody"><tr><td colspan="7"><div class="state-msg">loading…</div></td></tr></tbody>
         </table>
       </div>
     </div>
@@ -197,7 +225,7 @@ table.runs td{padding:6px 11px;border-bottom:1px solid var(--border);font-size:1
   <!-- RIGHT -->
   <div class="panel right-col">
     <div class="panel-head"><div class="ph-label">Activity</div><div class="ph-meta" id="act-count">—</div></div>
-    <div class="activity-feed panel-scroll" id="activity-feed" style="max-height:200px"><div class="state-msg">loading…</div></div>
+    <div class="activity-feed panel-scroll" id="activity-feed"><div class="state-msg">loading…</div></div>
     <div class="panel-head" style="border-top:1px solid var(--border)"><div class="ph-label">Block reasons</div><div class="ph-meta">all time</div></div>
     <div id="block-list"><div class="state-msg">loading…</div></div>
     <div class="panel-head" style="border-top:1px solid var(--border)"><div class="ph-label">Gate health</div><div class="ph-meta">pass rate</div></div>
@@ -332,6 +360,14 @@ function renderMetrics(ov) {
   } else {
     el('m-avg').textContent = '—';
   }
+  // Branch lifecycle state breakdown.
+  const bs = ov.branch_states || {};
+  el('sc-coding').textContent      = bs.coding      ?? '—';
+  el('sc-reviewing').textContent   = (bs.reviewing  ?? bs.cli_reviewing ?? '—');
+  el('sc-merge-ready').textContent = bs.merge_ready ?? '—';
+  el('sc-blocked-stale').textContent = (
+    bs.blocked_stale != null ? bs.blocked_stale : '—'
+  );
 }
 
 /* ── SPARKLINES ──────────────────────────────────────────── */
@@ -398,7 +434,7 @@ function selectRepo(id) { selectedRepo = id; /* re-render highlights only */ }
 /* ── RUNS TABLE ──────────────────────────────────────────── */
 function renderRuns(runs) {
   if (!runs.length) {
-    el('runs-tbody').innerHTML = '<tr><td colspan="6"><div class="state-msg">no runs yet</div></td></tr>';
+    el('runs-tbody').innerHTML = '<tr><td colspan="7"><div class="state-msg">no runs yet</div></td></tr>';
     return;
   }
   el('runs-tbody').innerHTML = runs.slice(0, 50).map((r, i) => {
@@ -410,12 +446,17 @@ function renderRuns(runs) {
     const elapsed = r.started_at && r.finished_at
       ? ((new Date(r.finished_at) - new Date(r.started_at)) / 1000).toFixed(1) + 's'
       : '—';
+    const lcState = r.branch_state || '';
+    const lsBadge = lcState
+      ? `<span class="ls ls-${esc(lcState)}">${esc(lcState.replace(/_/g, ' '))}</span>`
+      : '<span style="color:var(--dim)">—</span>';
     return `<tr class="run-row ${i === 0 && r.status === 'running' ? 'live-row' : ''}">
       <td><div class="run-repo">${esc(r.repo)}</div></td>
       <td>${esc(r.branch)}${manual}</td>
       <td><span style="color:var(--muted)">${esc(r.provider)}</span></td>
       <td><div class="run-gates"><div class="rg ${r.status === 'completed' ? 'pass' : r.status === 'failed' ? 'fail' : r.status === 'running' ? 'run' : 'idle'}" title="${esc(r.provider)}"></div></div></td>
       <td><div class="rs ${r.status === 'completed' ? 'pass' : r.status === 'failed' ? 'fail' : r.status === 'running' ? 'run' : 'pending'}">${statusTxt}</div></td>
+      <td>${lsBadge}</td>
       <td><div class="rt">${elapsed}</div></td>
     </tr>`;
   }).join('');
