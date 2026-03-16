@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/codero/codero/internal/webhook"
 )
@@ -31,7 +32,7 @@ type Client struct {
 func NewClient(token string) *Client {
 	return &Client{
 		token:  token,
-		http:   http.DefaultClient,
+		http:   &http.Client{Timeout: 15 * time.Second},
 		apiURL: defaultAPIURL,
 	}
 }
@@ -152,90 +153,86 @@ func (c *Client) FindOpenPR(ctx context.Context, repo, branch string) (*PRInfo, 
 	}, nil
 }
 
-// ListPRReviews returns all reviews submitted on a pull request.
+// ListPRReviews returns all reviews submitted on a pull request, following
+// GitHub pagination until no further pages remain.
 func (c *Client) ListPRReviews(ctx context.Context, repo string, prNumber int) ([]Review, error) {
-	url := fmt.Sprintf("%s/repos/%s/pulls/%d/reviews?per_page=100", c.apiURL, repo, prNumber)
-
-	var raw []struct {
-		ID   int64 `json:"id"`
-		User struct {
-			Login string `json:"login"`
-		} `json:"user"`
-		State string `json:"state"`
-		Body  string `json:"body"`
-	}
-	if err := c.getJSON(ctx, url, &raw); err != nil {
-		return nil, fmt.Errorf("list PR reviews: %w", err)
-	}
-
-	reviews := make([]Review, len(raw))
-	for i, r := range raw {
-		reviews[i] = Review{
-			ID:    r.ID,
-			User:  r.User.Login,
-			State: r.State,
-			Body:  r.Body,
+	nextURL := fmt.Sprintf("%s/repos/%s/pulls/%d/reviews?per_page=100", c.apiURL, repo, prNumber)
+	var all []Review
+	for nextURL != "" {
+		var raw []struct {
+			ID   int64 `json:"id"`
+			User struct {
+				Login string `json:"login"`
+			} `json:"user"`
+			State string `json:"state"`
+			Body  string `json:"body"`
 		}
+		headers, err := c.getJSONPage(ctx, nextURL, &raw)
+		if err != nil {
+			return nil, fmt.Errorf("list PR reviews: %w", err)
+		}
+		for _, r := range raw {
+			all = append(all, Review{ID: r.ID, User: r.User.Login, State: r.State, Body: r.Body})
+		}
+		nextURL = parseLinkNext(headers.Get("Link"))
 	}
-	return reviews, nil
+	return all, nil
 }
 
-// ListPRReviewComments returns all inline review comments on a pull request.
+// ListPRReviewComments returns all inline review comments on a pull request,
+// following GitHub pagination until no further pages remain.
 func (c *Client) ListPRReviewComments(ctx context.Context, repo string, prNumber int) ([]ReviewComment, error) {
-	url := fmt.Sprintf("%s/repos/%s/pulls/%d/comments?per_page=100", c.apiURL, repo, prNumber)
-
-	var raw []struct {
-		ID   int64 `json:"id"`
-		User struct {
-			Login string `json:"login"`
-		} `json:"user"`
-		Body     string `json:"body"`
-		Path     string `json:"path"`
-		Line     int    `json:"line"`
-		CommitID string `json:"commit_id"`
-	}
-	if err := c.getJSON(ctx, url, &raw); err != nil {
-		return nil, fmt.Errorf("list PR review comments: %w", err)
-	}
-
-	comments := make([]ReviewComment, len(raw))
-	for i, r := range raw {
-		comments[i] = ReviewComment{
-			ID:       r.ID,
-			User:     r.User.Login,
-			Body:     r.Body,
-			Path:     r.Path,
-			Line:     r.Line,
-			CommitID: r.CommitID,
+	nextURL := fmt.Sprintf("%s/repos/%s/pulls/%d/comments?per_page=100", c.apiURL, repo, prNumber)
+	var all []ReviewComment
+	for nextURL != "" {
+		var raw []struct {
+			ID   int64 `json:"id"`
+			User struct {
+				Login string `json:"login"`
+			} `json:"user"`
+			Body     string `json:"body"`
+			Path     string `json:"path"`
+			Line     int    `json:"line"`
+			CommitID string `json:"commit_id"`
 		}
+		headers, err := c.getJSONPage(ctx, nextURL, &raw)
+		if err != nil {
+			return nil, fmt.Errorf("list PR review comments: %w", err)
+		}
+		for _, r := range raw {
+			all = append(all, ReviewComment{
+				ID: r.ID, User: r.User.Login, Body: r.Body,
+				Path: r.Path, Line: r.Line, CommitID: r.CommitID,
+			})
+		}
+		nextURL = parseLinkNext(headers.Get("Link"))
 	}
-	return comments, nil
+	return all, nil
 }
 
-// ListCheckRuns returns check runs for the given commit SHA.
+// ListCheckRuns returns check runs for the given commit SHA, following GitHub
+// pagination until no further pages remain.
 func (c *Client) ListCheckRuns(ctx context.Context, repo, sha string) ([]CheckRun, error) {
-	url := fmt.Sprintf("%s/repos/%s/commits/%s/check-runs?per_page=100", c.apiURL, repo, sha)
-
-	var resp struct {
-		CheckRuns []struct {
-			Name       string `json:"name"`
-			Status     string `json:"status"`
-			Conclusion string `json:"conclusion"`
-		} `json:"check_runs"`
-	}
-	if err := c.getJSON(ctx, url, &resp); err != nil {
-		return nil, fmt.Errorf("list check runs: %w", err)
-	}
-
-	runs := make([]CheckRun, len(resp.CheckRuns))
-	for i, r := range resp.CheckRuns {
-		runs[i] = CheckRun{
-			Name:       r.Name,
-			Status:     r.Status,
-			Conclusion: r.Conclusion,
+	nextURL := fmt.Sprintf("%s/repos/%s/commits/%s/check-runs?per_page=100", c.apiURL, repo, sha)
+	var all []CheckRun
+	for nextURL != "" {
+		var resp struct {
+			CheckRuns []struct {
+				Name       string `json:"name"`
+				Status     string `json:"status"`
+				Conclusion string `json:"conclusion"`
+			} `json:"check_runs"`
 		}
+		headers, err := c.getJSONPage(ctx, nextURL, &resp)
+		if err != nil {
+			return nil, fmt.Errorf("list check runs: %w", err)
+		}
+		for _, r := range resp.CheckRuns {
+			all = append(all, CheckRun{Name: r.Name, Status: r.Status, Conclusion: r.Conclusion})
+		}
+		nextURL = parseLinkNext(headers.Get("Link"))
 	}
-	return runs, nil
+	return all, nil
 }
 
 // MergePR merges a pull request via the GitHub Merge API.
@@ -295,9 +292,16 @@ func (c *Client) putJSON(ctx context.Context, url string, body any) error {
 
 // getJSON performs an authenticated GET request and JSON-decodes the response.
 func (c *Client) getJSON(ctx context.Context, url string, dst any) error {
+	_, err := c.getJSONPage(ctx, url, dst)
+	return err
+}
+
+// getJSONPage is like getJSON but also returns the response headers so callers
+// can follow Link: rel="next" pagination.
+func (c *Client) getJSONPage(ctx context.Context, url string, dst any) (http.Header, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return fmt.Errorf("build request: %w", err)
+		return nil, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Accept", "application/vnd.github+json")
@@ -305,18 +309,37 @@ func (c *Client) getJSON(ctx context.Context, url string, dst any) error {
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("http get: %w", err)
+		return nil, fmt.Errorf("http get: %w", err)
 	}
 	defer func() { _, _ = io.Copy(io.Discard, resp.Body); resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("github API %s returned HTTP %d", url, resp.StatusCode)
+		return nil, fmt.Errorf("github API %s returned HTTP %d", url, resp.StatusCode)
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(dst); err != nil {
-		return fmt.Errorf("decode response: %w", err)
+		return nil, fmt.Errorf("decode response: %w", err)
 	}
-	return nil
+	return resp.Header, nil
+}
+
+// parseLinkNext parses a GitHub Link response header and returns the URL for
+// rel="next", or "" when no next page exists.
+func parseLinkNext(header string) string {
+	for _, part := range strings.Split(header, ",") {
+		seg := strings.SplitN(strings.TrimSpace(part), ";", 2)
+		if len(seg) != 2 {
+			continue
+		}
+		if !strings.Contains(seg[1], `rel="next"`) {
+			continue
+		}
+		u := strings.TrimSpace(seg[0])
+		if len(u) >= 2 && u[0] == '<' && u[len(u)-1] == '>' {
+			return u[1 : len(u)-1]
+		}
+	}
+	return ""
 }
 
 // resolveApprovalStatus scans reviews in submission order.

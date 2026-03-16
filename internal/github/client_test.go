@@ -15,7 +15,13 @@ func newTestServer(t *testing.T, handlers map[string]http.HandlerFunc) (*httptes
 	t.Helper()
 	mux := http.NewServeMux()
 	for path, h := range handlers {
-		mux.HandleFunc(path, h)
+		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != "Bearer test-token" {
+				http.Error(w, "missing or invalid auth", http.StatusUnauthorized)
+				return
+			}
+			h(w, r)
+		})
 	}
 	srv := httptest.NewServer(mux)
 	client := NewClient("test-token").WithHTTPClient(srv.Client())

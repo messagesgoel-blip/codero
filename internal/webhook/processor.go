@@ -158,7 +158,13 @@ func (p *EventProcessor) handlePullRequestReview(ctx context.Context, ev GitHubE
 		approved, rec.CIGreen,
 		rec.PendingEvents, rec.UnresolvedThreads,
 	); err != nil {
-		return fmt.Errorf("update merge readiness: %w", err)
+		loglib.Error("webhook: update merge readiness failed",
+			loglib.FieldComponent, "webhook",
+			loglib.FieldRepo, ev.Repo,
+			loglib.FieldBranch, branch,
+			"error", err,
+		)
+		return nil
 	}
 
 	_, _ = p.stream.AppendSystem(ctx, ev.Repo, branch, headHash,
@@ -208,7 +214,13 @@ func (p *EventProcessor) handleCheckRun(ctx context.Context, ev GitHubEvent) err
 		rec.Approved, ciGreen,
 		rec.PendingEvents, rec.UnresolvedThreads,
 	); err != nil {
-		return fmt.Errorf("update merge readiness: %w", err)
+		loglib.Error("webhook: update merge readiness failed",
+			loglib.FieldComponent, "webhook",
+			loglib.FieldRepo, ev.Repo,
+			loglib.FieldBranch, branch,
+			"error", err,
+		)
+		return nil
 	}
 
 	_, _ = p.stream.AppendSystem(ctx, ev.Repo, branch, headHash,

@@ -62,6 +62,10 @@ func (p *GitHubProvider) Review(ctx context.Context, req ReviewRequest) (*Review
 		if !strings.EqualFold(c.User, codeRabbitUser) {
 			continue
 		}
+		// Skip comments from prior commits — only surface findings on the current head.
+		if req.HeadHash != "" && c.CommitID != "" && c.CommitID != req.HeadHash {
+			continue
+		}
 		findings = append(findings, normalizer.RawFinding{
 			Severity: inferSeverity(c.Body),
 			Category: "review",
