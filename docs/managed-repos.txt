@@ -1,6 +1,6 @@
 # One absolute path per line.
 # Add repos that must enforce Codero two-pass pre-commit review.
 
-/home/sanjay/codero
-/home/sanjay/cacheflow
-/home/sanjay/mathkit-v2
+/srv/storage/repo/codero
+/srv/storage/repo/cacheflow
+/srv/storage/repo/mathkit

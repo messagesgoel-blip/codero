@@ -2,7 +2,7 @@
 
 Run this before starting work on a task branch.
 
-1. Confirm you are in `/home/sanjay/codero`.
+1. Confirm you are in `/srv/storage/repo/codero`.
 2. Pull latest `main`.
 3. Create branch `feat/COD-{issue-id}-{short-description}`.
 4. Claim task in `docs/agent-task-board.md` (`in_progress`).
