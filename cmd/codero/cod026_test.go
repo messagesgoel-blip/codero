@@ -14,10 +14,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/codero/codero/internal/daemon"
 	"github.com/codero/codero/internal/gate"
+	"github.com/codero/codero/internal/redis"
+	"github.com/codero/codero/internal/scheduler"
 	"github.com/codero/codero/internal/tui"
 )
 
@@ -103,6 +108,83 @@ func TestPrintGateStatusJSON_FailWithComments(t *testing.T) {
 	}
 }
 
+func TestGateStatusJSON_ParityWithGateEndpoint(t *testing.T) {
+	repoPath := t.TempDir()
+	progressDir := filepath.Join(repoPath, ".codero", "gate-heartbeat")
+	if err := os.MkdirAll(progressDir, 0o755); err != nil {
+		t.Fatalf("mkdir progress dir: %v", err)
+	}
+	envContent := strings.Join([]string{
+		"RUN_ID=run-parity-1",
+		"STATUS=FAIL",
+		"COPILOT_STATUS=blocked",
+		"LITELLM_STATUS=pass",
+		"CURRENT_GATE=local-first-pass",
+		"COMMENTS=first blocker|second blocker",
+		"ELAPSED_SEC=17",
+		"PROGRESS_BAR=[! copilot:blocked] [! litellm:pass]",
+		"UPDATED_AT=2026-03-16T10:58:00-0400",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(progressDir, "progress.env"), []byte(envContent), 0o644); err != nil {
+		t.Fatalf("write progress.env: %v", err)
+	}
+
+	t.Setenv("CODERO_REPO_PATH", repoPath)
+	client := redis.New("127.0.0.1:0", "")
+	queue := scheduler.NewQueue(client)
+	slotCounter := scheduler.NewSlotCounter(client)
+	obs := daemon.NewObservabilityServer(client, queue, slotCounter, nil, "127.0.0.1", "0", "/dashboard", "test")
+
+	req := httptest.NewRequest(http.MethodGet, "/gate", nil)
+	rec := httptest.NewRecorder()
+	obs.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/gate status: got %d, want 200", rec.Code)
+	}
+	var gateOut map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &gateOut); err != nil {
+		t.Fatalf("unmarshal /gate JSON: %v", err)
+	}
+
+	orig := os.Stdout
+	rd, wr, _ := os.Pipe()
+	os.Stdout = wr
+	if err := printGateStatusJSON(parseEnvToResult(envContent)); err != nil {
+		t.Fatalf("printGateStatusJSON returned error: %v", err)
+	}
+	wr.Close()
+	os.Stdout = orig
+	var cliBuf bytes.Buffer
+	io.Copy(&cliBuf, rd) //nolint:errcheck
+
+	var cliOut map[string]any
+	if err := json.Unmarshal(cliBuf.Bytes(), &cliOut); err != nil {
+		t.Fatalf("unmarshal CLI JSON: %v", err)
+	}
+
+	cliCore := map[string]any{
+		"status":         cliOut["status"],
+		"copilot_status": cliOut["copilot_status"],
+		"litellm_status": cliOut["litellm_status"],
+		"current_gate":   cliOut["current_gate"],
+		"run_id":         cliOut["run_id"],
+		"comments":       cliOut["comments"],
+		"progress_bar":   cliOut["progress_bar"],
+	}
+	gateCore := map[string]any{
+		"status":         gateOut["status"],
+		"copilot_status": gateOut["copilot_status"],
+		"litellm_status": gateOut["litellm_status"],
+		"current_gate":   gateOut["current_gate"],
+		"run_id":         gateOut["run_id"],
+		"comments":       gateOut["comments"],
+		"progress_bar":   gateOut["progress_bar"],
+	}
+	if !reflect.DeepEqual(cliCore, gateCore) {
+		t.Fatalf("CLI /gate parity mismatch\ncli=%v\ngate=%v", cliCore, gateCore)
+	}
+}
+
 // --- resolveTheme ---
 
 func TestResolveTheme_Dark(t *testing.T) {
@@ -166,7 +248,9 @@ func TestResolveInitialTab(t *testing.T) {
 // --- dashboardCmd --check via mock HTTP server ---
 
 func TestRunDashboardCheck_AllHealthy(t *testing.T) {
+	var requestedPaths []string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestedPaths = append(requestedPaths, r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer ts.Close()
@@ -188,6 +272,10 @@ func TestRunDashboardCheck_AllHealthy(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "All endpoints healthy") {
 		t.Errorf("expected 'All endpoints healthy' in output, got: %s", buf.String())
+	}
+	wantPaths := []string{"/dashboard/", "/api/v1/dashboard/overview", "/gate"}
+	if !reflect.DeepEqual(requestedPaths, wantPaths) {
+		t.Errorf("requested paths: got %v, want %v", requestedPaths, wantPaths)
 	}
 }
 

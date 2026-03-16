@@ -51,7 +51,7 @@ Install pre-commit hook for a repo:
 
 ## CLI Commands Quick Reference
 
-```
+```bash
 codero daemon              Start the long-running daemon
 codero tui                 Launch the interactive Bubble Tea operator shell
 codero tui --view gate --interval 3
@@ -84,7 +84,7 @@ codero version             Print version
 
 When the daemon is running, the web dashboard is available at:
 
-```
+```text
 http://localhost:8080/dashboard/
 ```
 
@@ -100,7 +100,7 @@ dashboard_public_base_url: ""     # optional: override URL printed by "codero da
 
 Or via environment variables:
 
-```
+```bash
 CODERO_OBSERVABILITY_HOST=127.0.0.1
 CODERO_DASHBOARD_BASE_PATH=/codero/ui
 CODERO_DASHBOARD_PUBLIC_BASE_URL=https://ops.example.com

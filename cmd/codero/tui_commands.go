@@ -634,21 +634,21 @@ Examples:
 			result := readProgressEnvAsResult(repoPath)
 
 			if jsonOutput {
-				return printGateStatusJSON(result)
+				if err := printGateStatusJSON(result); err != nil {
+					return err
+				}
+			} else {
+				fmt.Print(RenderGateStatusBox(result, repoPath))
 			}
 
-			fmt.Print(RenderGateStatusBox(result, repoPath))
-
-			// Only prompt for interactive actions when:
-			//   1. Running in an interactive TTY, AND
-			//   2. --no-prompt was not set
-			interactive := tui.IsInteractiveTTY() && !noPrompt
-			if interactive {
+			ttyInteractive := tui.IsInteractiveTTY()
+			promptInteractive := ttyInteractive && !noPrompt
+			if promptInteractive {
 				printGateActions(result, repoPath)
 			}
 
 			// In non-interactive mode, exit 1 on FAIL so scripts can detect it.
-			if !interactive && result.Status == gate.StatusFail {
+			if !ttyInteractive && result.Status == gate.StatusFail {
 				return fmt.Errorf("gate status: FAIL")
 			}
 			return nil

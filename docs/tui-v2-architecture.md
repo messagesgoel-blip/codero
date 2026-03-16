@@ -130,4 +130,4 @@ non-interactive uses (scripts, CI hooks) never block waiting for keyboard input.
 | `--no-prompt` | Disable interactive action prompt even in a TTY |
 
 In non-interactive mode (pipe/CI): exits with code 1 on FAIL, 0 on PASS/PENDING.
-In interactive mode: shows action menu only when both `IsInteractiveTTY()` and `!--no-prompt`.
+In interactive mode: shows action menu only when `IsInteractiveTTY()` is true and the `--no-prompt` flag is not set.

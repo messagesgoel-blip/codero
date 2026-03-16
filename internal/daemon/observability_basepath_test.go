@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/codero/codero/internal/redis"
 	"github.com/codero/codero/internal/scheduler"
 )
@@ -20,8 +21,8 @@ import (
 // or Redis are not exercised here.
 func newTestMux(t *testing.T, basePath string) http.Handler {
 	t.Helper()
-	// Use a stub redis client (no real Redis needed for routing tests).
-	client := redis.New("127.0.0.1:0", "")
+	mr := miniredis.RunT(t)
+	client := redis.New(mr.Addr(), "")
 	queue := scheduler.NewQueue(client)
 	slotCounter := scheduler.NewSlotCounter(client)
 
@@ -97,8 +98,30 @@ func TestObservabilityServer_CustomBasePath_OldPathNotFound(t *testing.T) {
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
-	if rec.Code == http.StatusOK {
-		t.Errorf("/dashboard/ should not be served when base path is /codero/ui")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("/dashboard/: got %d, want 404 when base path is /codero/ui", rec.Code)
+	}
+}
+
+func TestObservabilityServer_RootRoutesRemainMounted(t *testing.T) {
+	defaultMux := newTestMux(t, "")
+	customMux := newTestMux(t, "/codero/ui")
+	routes := []string{"/health", "/queue?repo=org/repo", "/metrics", "/gate"}
+
+	for _, route := range routes {
+		req := httptest.NewRequest(http.MethodGet, route, nil)
+
+		defaultRec := httptest.NewRecorder()
+		defaultMux.ServeHTTP(defaultRec, req)
+		if defaultRec.Code != http.StatusOK {
+			t.Errorf("default mux %s: got %d, want 200", route, defaultRec.Code)
+		}
+
+		customRec := httptest.NewRecorder()
+		customMux.ServeHTTP(customRec, req)
+		if customRec.Code != http.StatusOK {
+			t.Errorf("custom-base mux %s: got %d, want 200", route, customRec.Code)
+		}
 	}
 }
 

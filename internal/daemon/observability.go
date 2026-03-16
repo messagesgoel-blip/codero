@@ -19,6 +19,7 @@ import (
 	loglib "github.com/codero/codero/internal/log"
 	"github.com/codero/codero/internal/redis"
 	"github.com/codero/codero/internal/scheduler"
+	"github.com/codero/codero/internal/tui/adapters"
 )
 
 // ObservabilityServer provides HTTP endpoints for health, queue status, and metrics.
@@ -147,6 +148,11 @@ func (o *ObservabilityServer) Start() {
 // Stop gracefully shuts down the observability server.
 func (o *ObservabilityServer) Stop(ctx context.Context) error {
 	return o.server.Shutdown(ctx)
+}
+
+// Handler exposes the observability HTTP handler for integration tests.
+func (o *ObservabilityServer) Handler() http.Handler {
+	return o.server.Handler
 }
 
 // handleHealth returns service health status.
@@ -364,7 +370,7 @@ const DefaultObservabilityPort = "8080"
 //
 //	PROGRESS_BAR, CURRENT_GATE, COPILOT_STATUS, LITELLM_STATUS
 func (o *ObservabilityServer) handleGate(w http.ResponseWriter, r *http.Request) {
-	progressFile := o.repoPath + "/.codero/gate-heartbeat/progress.env"
+	progressFile := filepath.Join(o.repoPath, ".codero", "gate-heartbeat", "progress.env")
 	data, err := os.ReadFile(progressFile)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -383,25 +389,25 @@ func (o *ObservabilityServer) handleGate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	result := adapters.ParseProgressEnv(string(data))
 	fields := parseProgressEnv(string(data))
-
-	bar := fields["PROGRESS_BAR"]
+	bar := result.ProgressBar
 	if bar == "" {
-		bar = gate.RenderBar(
-			fields["COPILOT_STATUS"],
-			fields["LITELLM_STATUS"],
-			fields["CURRENT_GATE"],
-		)
+		bar = gate.RenderBar(result.CopilotStatus, result.LiteLLMStatus, result.CurrentGate)
+	}
+	if result.Comments == nil {
+		result.Comments = []string{}
 	}
 
 	resp := map[string]interface{}{
-		"run_id":         fields["RUN_ID"],
-		"status":         fields["STATUS"],
+		"run_id":         result.RunID,
+		"status":         string(result.Status),
 		"progress_bar":   bar,
-		"current_gate":   fields["CURRENT_GATE"],
-		"copilot_status": fields["COPILOT_STATUS"],
-		"litellm_status": fields["LITELLM_STATUS"],
-		"elapsed_sec":    fields["ELAPSED_SEC"],
+		"current_gate":   result.CurrentGate,
+		"copilot_status": result.CopilotStatus,
+		"litellm_status": result.LiteLLMStatus,
+		"comments":       result.Comments,
+		"elapsed_sec":    result.ElapsedSec,
 		"updated_at":     fields["UPDATED_AT"],
 		"generated_at":   time.Now().Format(time.RFC3339),
 	}
@@ -421,6 +427,9 @@ func parseProgressEnv(content string) map[string]string {
 			continue
 		}
 		fields[strings.TrimSpace(key)] = strings.TrimSpace(val)
+	}
+	if err := scanner.Err(); err != nil {
+		return map[string]string{}
 	}
 	return fields
 }

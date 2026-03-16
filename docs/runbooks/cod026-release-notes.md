@@ -74,7 +74,7 @@ dashboard_public_base_url: ""        # override external URL (reverse-proxy use)
 ```
 
 Environment variable equivalents:
-```
+```text
 CODERO_OBSERVABILITY_HOST
 CODERO_DASHBOARD_BASE_PATH
 CODERO_DASHBOARD_PUBLIC_BASE_URL

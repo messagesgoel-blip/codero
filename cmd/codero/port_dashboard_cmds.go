@@ -9,6 +9,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"runtime"
@@ -40,7 +41,7 @@ Examples:
   codero dashboard --open            # open dashboard in default browser (interactive only)
   codero dashboard --port 9090       # override port (useful when testing non-default setups)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, _ := loadConfig(*configPath) // best-effort; fall back to defaults on error
+			cfg, cfgErr := loadConfig(*configPath) // best-effort; fall back to defaults on error
 
 			effectiveHost := host
 			effectivePort := port
@@ -62,6 +63,9 @@ Examples:
 			}
 			if effectivePort == 0 {
 				effectivePort = 8080
+			}
+			if cfgErr != nil {
+				fmt.Fprintf(os.Stderr, "note: config load error (%v); using defaults where needed\n", cfgErr)
 			}
 
 			// Determine base URL: prefer explicit public URL from config.
@@ -164,6 +168,14 @@ func isInteractiveEnv() bool {
 
 // openBrowser opens url in the default system browser.
 func openBrowser(url string) error {
+	parsed, err := neturl.Parse(url)
+	if err != nil {
+		return fmt.Errorf("invalid dashboard URL %q: %w", url, err)
+	}
+	if (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return fmt.Errorf("invalid dashboard URL %q: expected http(s) URL with host", url)
+	}
+
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
@@ -207,7 +219,9 @@ Examples:
 			if cfg != nil {
 				obsHost = cfg.ObservabilityHost
 				obsPort = cfg.ObservabilityPort
-				dashBasePath = cfg.DashboardBasePath
+				if cfg.DashboardBasePath != "" {
+					dashBasePath = cfg.DashboardBasePath
+				}
 				dashPublicURL = cfg.DashboardPublicBaseURL
 				webhookEnabled = cfg.Webhook.Enabled
 				webhookPort = cfg.Webhook.Port
