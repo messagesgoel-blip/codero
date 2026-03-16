@@ -325,16 +325,36 @@ func TestRunDashboardCheck_PartialFailure(t *testing.T) {
 }
 
 func TestGateStatusCmd_JSONConflictsWithWatchAndLogs(t *testing.T) {
+	// --json + --logs is still an error.
 	cmd := gateStatusCmd()
-	cmd.SetArgs([]string{"--json", "--watch"})
-	if err := cmd.Execute(); err == nil {
-		t.Fatal("expected error for --json with --watch")
-	}
-
-	cmd = gateStatusCmd()
 	cmd.SetArgs([]string{"--json", "--logs"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error for --json with --logs")
+	}
+
+	// --json + --watch is no longer an error: --json wins, TUI is bypassed.
+	// In tests stdin/stdout are non-TTY pipes, so --watch alone also falls back to JSON.
+	repoPath := t.TempDir()
+	cmd = gateStatusCmd()
+	cmd.SetArgs([]string{"--json", "--watch", "--repo-path", repoPath})
+
+	orig := os.Stdout
+	rd, wr, _ := os.Pipe()
+	os.Stdout = wr
+
+	execErr := cmd.Execute()
+
+	wr.Close()
+	os.Stdout = orig
+	var buf bytes.Buffer
+	io.Copy(&buf, rd) //nolint:errcheck
+
+	if execErr != nil {
+		t.Fatalf("--json --watch should not error in non-TTY context; got: %v", execErr)
+	}
+	var obj map[string]interface{}
+	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &obj); err != nil {
+		t.Fatalf("--json --watch output is not valid JSON: %v\noutput: %s", err, buf.String())
 	}
 }
 

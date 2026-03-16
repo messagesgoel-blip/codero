@@ -598,14 +598,15 @@ The TUI shows:
   - Blocker comments explaining why the gate failed (if FAIL)
   - Actionable next-step hints for common interventions
 
-In non-interactive (pipe/CI) contexts the command never prompts for input and
-exits with code 1 when the gate is in FAIL state, 0 for PASS/PENDING.
+In non-interactive (pipe/CI) contexts the command never prompts for input.
+One-shot mode exits with code 1 when the gate is in FAIL state; watch mode
+always exits 0 and reports status via the JSON payload.
 
 Flags:
   --watch         poll and redraw until PASS or FAIL (Bubble Tea TUI)
   --interval      polling interval in seconds (for --watch, default 5)
   --logs          print gate log directory path and last entries
-  --json          emit machine-readable JSON to stdout (one-shot, no TUI)
+  --json          emit machine-readable JSON to stdout (one-shot, no TUI; if combined with --watch, --json wins)
   --no-prompt     disable interactive action prompt even when in a TTY
 
 Examples:
@@ -622,8 +623,12 @@ Examples:
 				}
 				repoPath = absPath
 			}
-			if jsonOutput && (watchMode || showLogs) {
-				return fmt.Errorf("--json cannot be combined with --watch or --logs")
+			if jsonOutput && showLogs {
+				return fmt.Errorf("--json cannot be combined with --logs")
+			}
+			// When --json is set alongside --watch, --json wins (non-blocking, no TUI).
+			if jsonOutput && watchMode {
+				watchMode = false
 			}
 
 			if showLogs {
@@ -697,7 +702,17 @@ func printGateStatusJSON(r gate.Result) error {
 }
 
 // runGateStatusWatch runs the Bubble Tea TUI to display gate status.
+// When stdin or stdout is not a TTY (CI, pipe, Docker non-interactive), the TUI
+// cannot be initialised safely.  In that case the function falls back to
+// emitting a single JSON object using the same schema as gate-status --json
+// and returns immediately.
 func runGateStatusWatch(repoPath string, intervalSec int) error {
+	if !tui.IsInteractiveTTY() {
+		// Non-TTY fallback: emit one JSON snapshot and exit cleanly.
+		result := readProgressEnvAsResult(repoPath)
+		return printGateStatusJSON(result)
+	}
+
 	if intervalSec < 1 {
 		intervalSec = 5
 	}
