@@ -31,6 +31,8 @@ services:
     image: redis:7-alpine
     container_name: codero-redis-prod
     restart: unless-stopped
+    environment:
+      CODERO_REDIS_PASS: ${CODERO_REDIS_PASS:-}
     command: >
       redis-server
       --appendonly yes
@@ -39,7 +41,11 @@ services:
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test:
+        [
+          "CMD-SHELL",
+          "if [ -n \"$${CODERO_REDIS_PASS}\" ]; then redis-cli -a \"$${CODERO_REDIS_PASS}\" ping | grep -q PONG; else redis-cli ping | grep -q PONG; fi",
+        ]
       interval: 5s
       timeout: 3s
       retries: 5

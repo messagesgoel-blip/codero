@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -11,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -20,6 +18,7 @@ import (
 	"github.com/codero/codero/internal/gate"
 	"github.com/codero/codero/internal/state"
 	"github.com/codero/codero/internal/tui"
+	"github.com/codero/codero/internal/tui/adapters"
 	"github.com/spf13/cobra"
 )
 
@@ -673,61 +672,7 @@ func readProgressEnvAsResult(repoPath string) gate.Result {
 // parseEnvToResult converts KEY=VALUE pairs from progress.env into a gate.Result.
 // This mirrors the field mapping used by the /gate observability endpoint.
 func parseEnvToResult(envContent string) gate.Result {
-	fields := make(map[string]string)
-	scanner := bufio.NewScanner(strings.NewReader(envContent))
-	for scanner.Scan() {
-		line := scanner.Text()
-		key, val, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		fields[strings.TrimSpace(key)] = strings.TrimSpace(val)
-	}
-
-	r := gate.Result{
-		RunID:         fields["RUN_ID"],
-		ProgressBar:   fields["PROGRESS_BAR"],
-		CurrentGate:   fields["CURRENT_GATE"],
-		CopilotStatus: fields["COPILOT_STATUS"],
-		LiteLLMStatus: fields["LITELLM_STATUS"],
-	}
-	if raw := fields["ELAPSED_SEC"]; raw != "" {
-		if elapsed, err := strconv.Atoi(raw); err == nil {
-			r.ElapsedSec = elapsed
-		}
-	}
-	if raw := fields["POLL_AFTER_SEC"]; raw != "" {
-		if pollAfter, err := strconv.Atoi(raw); err == nil {
-			r.PollAfterSec = pollAfter
-		}
-	}
-
-	switch fields["STATUS"] {
-	case "PASS":
-		r.Status = gate.StatusPass
-	case "FAIL":
-		r.Status = gate.StatusFail
-	default:
-		r.Status = gate.StatusPending
-	}
-
-	if fields["COPILOT_STATUS"] == "" {
-		r.CopilotStatus = "pending"
-	}
-	if fields["LITELLM_STATUS"] == "" {
-		r.LiteLLMStatus = "pending"
-	}
-
-	// COMMENTS in progress.env may be newline-separated or pipe-separated.
-	if raw := fields["COMMENTS"]; raw != "" && raw != "none" {
-		for _, c := range strings.Split(raw, "|") {
-			if c = strings.TrimSpace(c); c != "" {
-				r.Comments = append(r.Comments, c)
-			}
-		}
-	}
-
-	return r
+	return adapters.ParseProgressEnv(envContent)
 }
 
 // RenderGateStatusBox renders a full-height terminal box displaying gate state.

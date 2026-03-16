@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -50,7 +51,7 @@ Examples:
   codero daily-snapshot --verify-only --snapshot-dir /var/lib/codero/snapshots
   codero daily-snapshot --retain-days 60 --snapshot-dir /mnt/audit/proving`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDailySnapshot(cmd.Context(), *configPath, dailySnapshotOpts{
+			err := runDailySnapshot(cmd.Context(), *configPath, dailySnapshotOpts{
 				snapshotDir:   snapshotDir,
 				retainDays:    retainDays,
 				verifyOnly:    verifyOnly,
@@ -58,6 +59,10 @@ Examples:
 				reposFile:     reposFile,
 				toolsDir:      toolsDir,
 			})
+			if errors.Is(err, errSnapshotMissing) {
+				os.Exit(snapshotExitCodeMissing)
+			}
+			return err
 		},
 	}
 
@@ -88,6 +93,8 @@ type dailySnapshotOpts struct {
 
 // snapshotExitCodeMissing is used by verify-only mode when snapshot is absent.
 const snapshotExitCodeMissing = 2
+
+var errSnapshotMissing = errors.New("snapshot missing")
 
 func runDailySnapshot(ctx context.Context, configPath string, opts dailySnapshotOpts) error {
 	ts := func() string { return time.Now().UTC().Format("2006-01-02T15:04:05Z") }
@@ -226,8 +233,7 @@ func runVerifyOnly(ctx context.Context, db *state.DB, snapshotDir, today, ts str
 	}
 
 	if !dbExists {
-		// Exit code 2 signals "missing" to callers without polluting regular errors.
-		os.Exit(snapshotExitCodeMissing)
+		return errSnapshotMissing
 	}
 	return nil
 }

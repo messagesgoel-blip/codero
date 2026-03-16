@@ -660,7 +660,7 @@ func TestCountConsecutiveDays_StreakEndsYesterday(t *testing.T) {
 	// Insert yesterday and two days ago but NOT today → streak should be 0
 	ctx := context.Background()
 	for i := 1; i <= 3; i++ {
-		d := time.Now().UTC().AddDate(0, 0, -i).Format("2006-01-02")
+		d := time.Now().AddDate(0, 0, -i).Format("2006-01-02")
 		if _, err := db.sql.ExecContext(ctx,
 			`INSERT INTO proving_snapshots (snapshot_date, scorecard_json) VALUES (?, '{}')`, d); err != nil {
 			t.Fatalf("insert day %d: %v", i, err)
@@ -685,7 +685,7 @@ func TestCountConsecutiveDays_IncludesToday(t *testing.T) {
 	ctx := context.Background()
 	// Insert today + 4 previous consecutive days
 	for i := 0; i <= 4; i++ {
-		d := time.Now().UTC().AddDate(0, 0, -i).Format("2006-01-02")
+		d := time.Now().AddDate(0, 0, -i).Format("2006-01-02")
 		if _, err := db.sql.ExecContext(ctx,
 			`INSERT INTO proving_snapshots (snapshot_date, scorecard_json) VALUES (?, '{}')`, d); err != nil {
 			t.Fatalf("insert day %d: %v", i, err)
@@ -708,7 +708,7 @@ func TestCountConsecutiveDays_GapBreaksStreak(t *testing.T) {
 	ctx := context.Background()
 	// Today and yesterday, then skip a day, then 3 more
 	for _, offset := range []int{0, 1, 3, 4, 5} {
-		d := time.Now().UTC().AddDate(0, 0, -offset).Format("2006-01-02")
+		d := time.Now().AddDate(0, 0, -offset).Format("2006-01-02")
 		if _, err := db.sql.ExecContext(ctx,
 			`INSERT INTO proving_snapshots (snapshot_date, scorecard_json) VALUES (?, '{}')`, d); err != nil {
 			t.Fatalf("insert offset %d: %v", offset, err)
