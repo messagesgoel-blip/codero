@@ -61,6 +61,9 @@ type Config struct {
 	Theme     Theme
 	WatchMode bool
 	InitialVM adapters.GateViewModel
+	// InitialTab sets the center-pane tab that is active when the TUI starts.
+	// Defaults to TabOutput when zero value.
+	InitialTab Tab
 }
 
 // Model is the root Bubble Tea model for the Codero TUI.
@@ -121,6 +124,7 @@ func New(cfg Config) Model {
 		gateVM:       cfg.InitialVM,
 		paletteInput: palette,
 		searchInput:  search,
+		activeTab:    cfg.InitialTab,
 	}
 	m.gatePane.SetVM(cfg.InitialVM)
 	return m

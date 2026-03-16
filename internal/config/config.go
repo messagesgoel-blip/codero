@@ -43,6 +43,9 @@ var (
 
 	// ErrInvalidObservabilityPort is returned when observability_port is outside 1..65535.
 	ErrInvalidObservabilityPort = errors.New("observability_port must be between 1 and 65535")
+
+	// ErrInvalidDashboardBasePath is returned when dashboard_base_path does not start with '/'.
+	ErrInvalidDashboardBasePath = errors.New("dashboard_base_path must start with '/'")
 )
 
 // RedisConfig holds Redis connection settings.
@@ -72,6 +75,19 @@ type Config struct {
 	DBPath            string        `yaml:"db_path"`
 	Webhook           WebhookConfig `yaml:"webhook"`
 	ObservabilityPort int           `yaml:"observability_port"`
+	// ObservabilityHost controls the bind address for the HTTP server.
+	// Default "" binds on all interfaces (0.0.0.0). Set to "127.0.0.1" to
+	// restrict to loopback only in environments that require it.
+	ObservabilityHost string `yaml:"observability_host"`
+	// DashboardBasePath is the URL path prefix under which the dashboard SPA
+	// and its API routes are served. Default: "/dashboard".
+	// Useful for reverse-proxy deployments at e.g. "/codero/dashboard".
+	DashboardBasePath string `yaml:"dashboard_base_path"`
+	// DashboardPublicBaseURL overrides the base URL printed by "codero dashboard"
+	// and returned by "codero ports". Useful when deployed behind a reverse proxy
+	// where the external URL differs from the bind address.
+	// Example: "https://ops.example.com/codero"
+	DashboardPublicBaseURL string `yaml:"dashboard_public_base_url"`
 }
 
 // Load reads config from a YAML file at path and applies env overrides.
@@ -145,6 +161,8 @@ func defaults() *Config {
 			Path:    "/webhook/github",
 		},
 		ObservabilityPort: 8080,
+		ObservabilityHost: "",
+		DashboardBasePath: "/dashboard",
 	}
 }
 
@@ -186,6 +204,18 @@ func applyEnvOverrides(c *Config) {
 			c.ObservabilityPort = p
 		}
 	}
+	// CODERO_OBSERVABILITY_HOST overrides the bind host for the observability server.
+	if v := os.Getenv("CODERO_OBSERVABILITY_HOST"); v != "" {
+		c.ObservabilityHost = v
+	}
+	// CODERO_DASHBOARD_BASE_PATH overrides the URL prefix for the dashboard SPA.
+	if v := os.Getenv("CODERO_DASHBOARD_BASE_PATH"); v != "" {
+		c.DashboardBasePath = v
+	}
+	// CODERO_DASHBOARD_PUBLIC_BASE_URL overrides the externally visible dashboard URL.
+	if v := os.Getenv("CODERO_DASHBOARD_PUBLIC_BASE_URL"); v != "" {
+		c.DashboardPublicBaseURL = v
+	}
 }
 
 // Validate checks that required fields are present and non-empty.
@@ -206,6 +236,9 @@ func (c *Config) Validate() error {
 	}
 	if c.ObservabilityPort < 1 || c.ObservabilityPort > 65535 {
 		return ErrInvalidObservabilityPort
+	}
+	if c.DashboardBasePath != "" && !strings.HasPrefix(c.DashboardBasePath, "/") {
+		return ErrInvalidDashboardBasePath
 	}
 	return nil
 }

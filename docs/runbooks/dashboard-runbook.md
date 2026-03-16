@@ -79,6 +79,37 @@ curl -sI http://localhost:8080/dashboard/ | head -5
 | `CODERO_DB_PATH` | (from config) | SQLite DB path; also used to derive settings file directory |
 | `CODERO_REPO_PATH` | CWD | Repo path for gate progress file lookup |
 | `CODERO_OBSERVABILITY_PORT` | `8080` | Port for the observability + dashboard server |
+| `CODERO_OBSERVABILITY_HOST` | `""` (all interfaces) | Bind address for the observability server. Set to `127.0.0.1` for loopback-only. |
+| `CODERO_DASHBOARD_BASE_PATH` | `/dashboard` | URL prefix for the dashboard SPA. Change for reverse-proxy deployments. |
+| `CODERO_DASHBOARD_PUBLIC_BASE_URL` | `""` | External base URL (overrides address shown by `codero dashboard` and `codero ports`). |
+
+### Port and Base-Path Configuration Examples
+
+**Default (local dev):**
+```yaml
+observability_port: 8080
+# dashboard available at http://localhost:8080/dashboard/
+```
+
+**Loopback-only (production, behind a reverse proxy):**
+```yaml
+observability_host: "127.0.0.1"
+observability_port: 8080
+dashboard_public_base_url: "https://ops.example.com"
+```
+
+**Custom base path (reverse proxy serves at /codero/ui/):**
+```yaml
+dashboard_base_path: /codero/ui
+dashboard_public_base_url: "https://ops.example.com"
+# dashboard available at https://ops.example.com/codero/ui/
+```
+
+**Check configuration quickly:**
+```bash
+codero dashboard --check
+codero ports
+```
 
 ---
 

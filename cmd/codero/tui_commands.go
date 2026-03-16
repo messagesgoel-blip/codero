@@ -579,6 +579,8 @@ func gateStatusCmd() *cobra.Command {
 		watchMode   bool
 		intervalSec int
 		showLogs    bool
+		jsonOutput  bool
+		noPrompt    bool
 	)
 
 	cmd := &cobra.Command{
@@ -596,11 +598,22 @@ The TUI shows:
   - Blocker comments explaining why the gate failed (if FAIL)
   - Actionable next-step hints for common interventions
 
+In non-interactive (pipe/CI) contexts the command never prompts for input and
+exits with code 1 when the gate is in FAIL state, 0 for PASS/PENDING.
+
+Flags:
+  --watch         poll and redraw until PASS or FAIL (Bubble Tea TUI)
+  --interval      polling interval in seconds (for --watch, default 5)
+  --logs          print gate log directory path and last entries
+  --json          emit machine-readable JSON to stdout (one-shot, no TUI)
+  --no-prompt     disable interactive action prompt even when in a TTY
+
 Examples:
   codero gate-status                    # one-shot display
   codero gate-status --watch            # live display, redraws every 5s
   codero gate-status --watch --interval 10
-  codero gate-status --logs             # show gate log path and last entries`,
+  codero gate-status --logs             # show gate log path and last entries
+  codero gate-status --json             # scriptable JSON output`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if repoPath == "" {
 				absPath, err := os.Getwd()
@@ -608,6 +621,9 @@ Examples:
 					return fmt.Errorf("getwd: %w", err)
 				}
 				repoPath = absPath
+			}
+			if jsonOutput && (watchMode || showLogs) {
+				return fmt.Errorf("--json cannot be combined with --watch or --logs")
 			}
 
 			if showLogs {
@@ -619,8 +635,25 @@ Examples:
 			}
 
 			result := readProgressEnvAsResult(repoPath)
-			fmt.Print(RenderGateStatusBox(result, repoPath))
-			printGateActions(result, repoPath)
+
+			if jsonOutput {
+				if err := printGateStatusJSON(result); err != nil {
+					return err
+				}
+			} else {
+				fmt.Print(RenderGateStatusBox(result, repoPath))
+			}
+
+			ttyInteractive := tui.IsInteractiveTTY()
+			promptInteractive := ttyInteractive && !noPrompt && !jsonOutput
+			if promptInteractive {
+				printGateActions(result, repoPath)
+			}
+
+			// In non-interactive mode, exit 1 on FAIL so scripts can detect it.
+			if !ttyInteractive && result.Status == gate.StatusFail {
+				return fmt.Errorf("gate status: FAIL")
+			}
 			return nil
 		},
 	}
@@ -629,8 +662,38 @@ Examples:
 	cmd.Flags().BoolVarP(&watchMode, "watch", "w", false, "poll and redraw until PASS or FAIL")
 	cmd.Flags().IntVar(&intervalSec, "interval", 5, "polling interval in seconds (for --watch)")
 	cmd.Flags().BoolVarP(&showLogs, "logs", "l", false, "show gate log directory path and last log entries")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "emit gate status as JSON (scriptable, non-interactive)")
+	cmd.Flags().BoolVar(&noPrompt, "no-prompt", false, "disable interactive action prompt even in a TTY")
 
 	return cmd
+}
+
+// printGateStatusJSON emits the gate result as a JSON object to stdout.
+// This is the machine-readable path used by --json; it never prompts.
+func printGateStatusJSON(r gate.Result) error {
+	out := struct {
+		Status        string   `json:"status"`
+		CopilotStatus string   `json:"copilot_status"`
+		LiteLLMStatus string   `json:"litellm_status"`
+		CurrentGate   string   `json:"current_gate"`
+		RunID         string   `json:"run_id"`
+		Comments      []string `json:"comments"`
+		ProgressBar   string   `json:"progress_bar"`
+	}{
+		Status:        string(r.Status),
+		CopilotStatus: r.CopilotStatus,
+		LiteLLMStatus: r.LiteLLMStatus,
+		CurrentGate:   r.CurrentGate,
+		RunID:         r.RunID,
+		Comments:      r.Comments,
+		ProgressBar:   r.ProgressBar,
+	}
+	if out.Comments == nil {
+		out.Comments = []string{}
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
 }
 
 // runGateStatusWatch runs the Bubble Tea TUI to display gate status.
@@ -757,8 +820,8 @@ func printGateActions(r gate.Result, repoPath string) {
 		fmt.Println("  Run: codero commit-gate   (after fixing blockers above)")
 	}
 
-	fi, err := os.Stdin.Stat()
-	if err != nil || (fi.Mode()&os.ModeCharDevice) == 0 {
+	// Guard interactive prompt behind IsInteractiveTTY (centralised check).
+	if !tui.IsInteractiveTTY() {
 		return
 	}
 

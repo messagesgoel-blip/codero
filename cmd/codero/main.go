@@ -56,6 +56,9 @@ func main() {
 		preflightCmd(),
 		dailySnapshotCmd(&configPath),
 		exitGateCmd(&configPath),
+		tuiCmd(),
+		dashboardCmd(&configPath),
+		portsCmd(&configPath),
 	)
 
 	if err := root.Execute(); err != nil {
@@ -220,7 +223,8 @@ func daemonCmd(configPath *string) *cobra.Command {
 			// Observability server: exposes /health, /queue, /metrics, /ready.
 			slotCounter := scheduler.NewSlotCounter(client)
 			obs := daemon.NewObservabilityServer(client, queue, slotCounter, db.Unwrap(),
-				strconv.Itoa(cfg.ObservabilityPort), version)
+				cfg.ObservabilityHost, strconv.Itoa(cfg.ObservabilityPort),
+				cfg.DashboardBasePath, version)
 			obs.Start()
 			wg.Add(1)
 			go func() {

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 	loglib "github.com/codero/codero/internal/log"
 	"github.com/codero/codero/internal/redis"
 	"github.com/codero/codero/internal/scheduler"
+	"github.com/codero/codero/internal/tui/adapters"
 )
 
 // ObservabilityServer provides HTTP endpoints for health, queue status, and metrics.
@@ -42,10 +44,24 @@ type ObservabilityServer struct {
 }
 
 // NewObservabilityServer creates a new observability server.
-func NewObservabilityServer(redisClient *redis.Client, queue *scheduler.Queue, slotCounter *scheduler.SlotCounter, db *sql.DB, port string, version string) *ObservabilityServer {
+// host is the bind address (empty string → all interfaces); port is the TCP port string.
+// dashboardBasePath is the URL prefix for the dashboard SPA (default "/dashboard").
+func NewObservabilityServer(redisClient *redis.Client, queue *scheduler.Queue, slotCounter *scheduler.SlotCounter, db *sql.DB, host, port, dashboardBasePath, version string) *ObservabilityServer {
+	if dashboardBasePath == "" {
+		dashboardBasePath = "/dashboard"
+	}
+	// Normalise: must start with "/" and must not end with "/" (except bare "/").
+	if !strings.HasPrefix(dashboardBasePath, "/") {
+		dashboardBasePath = "/" + dashboardBasePath
+	}
+	dashboardBasePath = strings.TrimRight(dashboardBasePath, "/")
+	if dashboardBasePath == "" {
+		dashboardBasePath = "/dashboard"
+	}
+
 	mux := http.NewServeMux()
 	server := &http.Server{
-		Addr:    ":" + port,
+		Addr:    net.JoinHostPort(host, port),
 		Handler: mux,
 	}
 
@@ -92,7 +108,7 @@ func NewObservabilityServer(redisClient *redis.Client, queue *scheduler.Queue, s
 	dashHandler := dashboard.NewHandler(db, dashboard.NewSettingsStore(settingsDir))
 	dashHandler.RegisterRoutes(mux)
 
-	// Serve dashboard static files under /dashboard/.
+	// Serve dashboard static files under dashboardBasePath + "/".
 	// Files are embedded from internal/dashboard/static/ at build time.
 	staticFS, err := fs.Sub(dashboard.Static, "static")
 	if err != nil {
@@ -100,10 +116,12 @@ func NewObservabilityServer(redisClient *redis.Client, queue *scheduler.Queue, s
 			loglib.FieldComponent, "daemon", "error", err)
 	} else {
 		fileServer := http.FileServer(http.FS(staticFS))
-		mux.Handle("/dashboard/", http.StripPrefix("/dashboard", fileServer))
-		// Redirect bare /dashboard to /dashboard/ so the SPA loads correctly.
-		mux.HandleFunc("/dashboard", func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, "/dashboard/", http.StatusMovedPermanently)
+		// Strip the base path before serving static files so that the embedded
+		// index.html is served for any path under dashboardBasePath/.
+		mux.Handle(dashboardBasePath+"/", http.StripPrefix(dashboardBasePath, fileServer))
+		// Redirect bare dashboardBasePath to dashboardBasePath/ so the SPA loads.
+		mux.HandleFunc(dashboardBasePath, func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, dashboardBasePath+"/", http.StatusMovedPermanently)
 		})
 	}
 
@@ -131,6 +149,11 @@ func (o *ObservabilityServer) Start() {
 // Stop gracefully shuts down the observability server.
 func (o *ObservabilityServer) Stop(ctx context.Context) error {
 	return o.server.Shutdown(ctx)
+}
+
+// Handler exposes the observability HTTP handler for integration tests.
+func (o *ObservabilityServer) Handler() http.Handler {
+	return o.server.Handler
 }
 
 // handleHealth returns service health status.
@@ -216,7 +239,7 @@ func (o *ObservabilityServer) handleMetrics(w http.ResponseWriter, r *http.Reque
 	// This endpoint serves Prometheus text format metrics, not HTML. Prometheus is the only consumer.
 	fmt.Fprintf(w, "# HELP codero_uptime_seconds Seconds since service start\n")
 	fmt.Fprintf(w, "# TYPE codero_uptime_seconds gauge\n")
-	fmt.Fprintf(w, "codero_uptime_seconds %.2f\n", uptime)
+	fmt.Fprintf(w, "codero_uptime_seconds %.2f\n", uptime) //nolint:errcheck // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 
 	// Queue metrics
 	if o.queue != nil {
@@ -348,7 +371,7 @@ const DefaultObservabilityPort = "8080"
 //
 //	PROGRESS_BAR, CURRENT_GATE, COPILOT_STATUS, LITELLM_STATUS
 func (o *ObservabilityServer) handleGate(w http.ResponseWriter, r *http.Request) {
-	progressFile := o.repoPath + "/.codero/gate-heartbeat/progress.env"
+	progressFile := filepath.Join(o.repoPath, ".codero", "gate-heartbeat", "progress.env")
 	data, err := os.ReadFile(progressFile)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -367,25 +390,25 @@ func (o *ObservabilityServer) handleGate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	result := adapters.ParseProgressEnv(string(data))
 	fields := parseProgressEnv(string(data))
-
-	bar := fields["PROGRESS_BAR"]
+	bar := result.ProgressBar
 	if bar == "" {
-		bar = gate.RenderBar(
-			fields["COPILOT_STATUS"],
-			fields["LITELLM_STATUS"],
-			fields["CURRENT_GATE"],
-		)
+		bar = gate.RenderBar(result.CopilotStatus, result.LiteLLMStatus, result.CurrentGate)
+	}
+	if result.Comments == nil {
+		result.Comments = []string{}
 	}
 
 	resp := map[string]interface{}{
-		"run_id":         fields["RUN_ID"],
-		"status":         fields["STATUS"],
+		"run_id":         result.RunID,
+		"status":         string(result.Status),
 		"progress_bar":   bar,
-		"current_gate":   fields["CURRENT_GATE"],
-		"copilot_status": fields["COPILOT_STATUS"],
-		"litellm_status": fields["LITELLM_STATUS"],
-		"elapsed_sec":    fields["ELAPSED_SEC"],
+		"current_gate":   result.CurrentGate,
+		"copilot_status": result.CopilotStatus,
+		"litellm_status": result.LiteLLMStatus,
+		"comments":       result.Comments,
+		"elapsed_sec":    result.ElapsedSec,
 		"updated_at":     fields["UPDATED_AT"],
 		"generated_at":   time.Now().Format(time.RFC3339),
 	}
@@ -405,6 +428,9 @@ func parseProgressEnv(content string) map[string]string {
 			continue
 		}
 		fields[strings.TrimSpace(key)] = strings.TrimSpace(val)
+	}
+	if err := scanner.Err(); err != nil {
+		return map[string]string{}
 	}
 	return fields
 }

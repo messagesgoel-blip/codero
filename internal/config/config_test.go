@@ -158,3 +158,68 @@ func TestValidate_ObservabilityPort(t *testing.T) {
 		}
 	}
 }
+
+// TestNewFields_COD026 verifies the new config fields added in COD-026.
+func TestNewFields_COD026(t *testing.T) {
+	c := defaults()
+	if c.ObservabilityHost != "" {
+		t.Errorf("default ObservabilityHost: want empty string, got %q", c.ObservabilityHost)
+	}
+	if c.DashboardBasePath != "/dashboard" {
+		t.Errorf("default DashboardBasePath: want /dashboard, got %q", c.DashboardBasePath)
+	}
+	if c.DashboardPublicBaseURL != "" {
+		t.Errorf("default DashboardPublicBaseURL: want empty, got %q", c.DashboardPublicBaseURL)
+	}
+}
+
+func TestValidate_DashboardBasePath(t *testing.T) {
+	good := &Config{
+		GitHubToken:       "ghp_test",
+		Repos:             []string{"org/repo"},
+		ObservabilityPort: 8080,
+		DashboardBasePath: "/my-dashboard",
+	}
+	if err := good.Validate(); err != nil {
+		t.Errorf("valid base path should pass: %v", err)
+	}
+
+	emptyPath := &Config{
+		GitHubToken:       "ghp_test",
+		Repos:             []string{"org/repo"},
+		ObservabilityPort: 8080,
+		DashboardBasePath: "",
+	}
+	if err := emptyPath.Validate(); err != nil {
+		t.Errorf("empty base path should pass: %v", err)
+	}
+
+	bad := &Config{
+		GitHubToken:       "ghp_test",
+		Repos:             []string{"org/repo"},
+		ObservabilityPort: 8080,
+		DashboardBasePath: "no-leading-slash",
+	}
+	if err := bad.Validate(); !errors.Is(err, ErrInvalidDashboardBasePath) {
+		t.Errorf("no-leading-slash: expected ErrInvalidDashboardBasePath, got %v", err)
+	}
+}
+
+func TestEnvOverrides_COD026(t *testing.T) {
+	t.Setenv("CODERO_OBSERVABILITY_HOST", "127.0.0.1")
+	t.Setenv("CODERO_DASHBOARD_BASE_PATH", "/codero/ui")
+	t.Setenv("CODERO_DASHBOARD_PUBLIC_BASE_URL", "https://ops.example.com")
+
+	c := defaults()
+	applyEnvOverrides(c)
+
+	if c.ObservabilityHost != "127.0.0.1" {
+		t.Errorf("ObservabilityHost: got %q, want 127.0.0.1", c.ObservabilityHost)
+	}
+	if c.DashboardBasePath != "/codero/ui" {
+		t.Errorf("DashboardBasePath: got %q, want /codero/ui", c.DashboardBasePath)
+	}
+	if c.DashboardPublicBaseURL != "https://ops.example.com" {
+		t.Errorf("DashboardPublicBaseURL: got %q, want https://ops.example.com", c.DashboardPublicBaseURL)
+	}
+}
