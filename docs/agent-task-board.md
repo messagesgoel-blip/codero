@@ -14,7 +14,7 @@ Use this file as the single source of truth for active agent work.
 
 | Task ID | Branch | Owner Agent | Status | Started (UTC) | Updated (UTC) | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| COD-023 | feat/COD-023-shared-heartbeat-gate | gcb (Copilot-B) | in_progress | 2026-03-16T01:44:11Z | 2026-03-16T01:44:11Z | Replace local commit-gate branch flow with shared heartbeat contract; wire progress bar in CLI/TUI + /gate dashboard endpoint |
+| COD-023 | feat/COD-023-shared-heartbeat-gate | gcb (Copilot-B) | review | 2026-03-16T01:44:11Z | 2026-03-16T02:10:00Z | Replace local commit-gate branch flow with shared heartbeat contract; wire progress bar in CLI/TUI + /gate dashboard endpoint. PR #24 open. |
 | COD-020 | feat/COD-020-phase1f-proving-bootstrap | Codex | in_progress | 2026-03-15T00:00:00Z | 2026-03-15T00:00:00Z | Phase 1F proving-period bootstrap: daily scorecard, snapshot history, runbook updates |
 | COD-010 | feat/COD-010-p1-s4-01-wfq-queue | Codex | review | 2026-03-14T11:11:00Z | 2026-03-14T15:30:00Z | Sprint 4: completed queue_stalled detection, observability endpoints (/health, /queue, /metrics), slot counter with atomic INCR/DECR via Lua |
 
