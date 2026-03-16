@@ -4,6 +4,8 @@ import "github.com/charmbracelet/lipgloss"
 
 // Theme centralises all style tokens.
 type Theme struct {
+	// Name identifies the theme variant (e.g. "dark", "light").
+	Name   string
 	Base   lipgloss.Style
 	Bold   lipgloss.Style
 	Muted  lipgloss.Style
@@ -79,6 +81,7 @@ func newDefaultTheme() Theme {
 		GatePipeline:      lipgloss.NewStyle().Foreground(muted).Italic(true),
 		Palette:           lipgloss.NewStyle().Background(bgPalette).BorderStyle(lipgloss.RoundedBorder()).BorderForeground(activeBorder).Padding(0, 1),
 		PaletteInput:      lipgloss.NewStyle().Foreground(fg),
+		Name:              "dark",
 	}
 }
 
@@ -122,6 +125,7 @@ func newAltTheme() Theme {
 		GatePipeline:      lipgloss.NewStyle().Foreground(muted).Italic(true),
 		Palette:           lipgloss.NewStyle().Background(bgPalette).BorderStyle(lipgloss.RoundedBorder()).BorderForeground(activeBorder).Padding(0, 1),
 		PaletteInput:      lipgloss.NewStyle().Foreground(fg),
+		Name:              "light",
 	}
 }
 

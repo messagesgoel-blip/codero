@@ -81,3 +81,53 @@ codero gate-status --watch
 # Custom poll interval
 codero gate-status --watch --interval 10
 ```
+
+## `codero tui` — Canonical Interactive Entrypoint (COD-026)
+
+`codero tui` is the first-class interactive operator shell introduced in COD-026.
+It supersedes the previous `gate-status --watch` workaround as the recommended
+way to launch the full 3-pane TUI.
+
+### New Config Fields on `tui.Config`
+
+| Field | Type | Description |
+|---|---|---|
+| `InitialTab` | `tui.Tab` | Center-pane tab to activate on launch (default `TabOutput`) |
+
+### Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--repo-path / -r` | CWD | Repository root |
+| `--interval` | `5` | Auto-refresh interval in seconds |
+| `--theme` | `dark` | Theme name: `dark`, `light`, `system`, `dracula`, `vscode` |
+| `--view` | `gate` | Initial center-pane view: `gate`, `queue`, `events`, `output`, `findings` |
+| `--no-alt-screen` | `false` | Disable alt-screen mode (useful in tmux or terminals that do not support it) |
+
+### Examples
+
+```bash
+codero tui
+codero tui --view gate --interval 3
+codero tui --theme dracula
+codero tui --no-alt-screen          # tmux / CI-adjacent terminals
+```
+
+### Interactive Detection
+
+The TUI requires a real terminal. It uses `tui.IsInteractiveTTY()` (in `internal/tui/tty.go`),
+which checks that both `os.Stdin` and `os.Stdout` are character devices. If either is a pipe
+(e.g. in CI), the command returns an error instead of attempting to render the TUI.
+
+The same helper is used by `gate-status` to guard the interactive action prompt, ensuring that
+non-interactive uses (scripts, CI hooks) never block waiting for keyboard input.
+
+## `gate-status` Non-Interactive Improvements (COD-026)
+
+| Flag | Effect |
+|------|--------|
+| `--json` | Emit gate status as JSON (no TUI, no prompt) |
+| `--no-prompt` | Disable interactive action prompt even in a TTY |
+
+In non-interactive mode (pipe/CI): exits with code 1 on FAIL, 0 on PASS/PENDING.
+In interactive mode: shows action menu only when both `IsInteractiveTTY()` and `!--no-prompt`.

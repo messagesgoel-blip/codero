@@ -42,10 +42,24 @@ type ObservabilityServer struct {
 }
 
 // NewObservabilityServer creates a new observability server.
-func NewObservabilityServer(redisClient *redis.Client, queue *scheduler.Queue, slotCounter *scheduler.SlotCounter, db *sql.DB, port string, version string) *ObservabilityServer {
+// host is the bind address (empty string → all interfaces); port is the TCP port string.
+// dashboardBasePath is the URL prefix for the dashboard SPA (default "/dashboard").
+func NewObservabilityServer(redisClient *redis.Client, queue *scheduler.Queue, slotCounter *scheduler.SlotCounter, db *sql.DB, host, port, dashboardBasePath, version string) *ObservabilityServer {
+	if dashboardBasePath == "" {
+		dashboardBasePath = "/dashboard"
+	}
+	// Normalise: must start with "/" and must not end with "/" (except bare "/").
+	if !strings.HasPrefix(dashboardBasePath, "/") {
+		dashboardBasePath = "/" + dashboardBasePath
+	}
+	dashboardBasePath = strings.TrimRight(dashboardBasePath, "/")
+	if dashboardBasePath == "" {
+		dashboardBasePath = "/dashboard"
+	}
+
 	mux := http.NewServeMux()
 	server := &http.Server{
-		Addr:    ":" + port,
+		Addr:    host + ":" + port,
 		Handler: mux,
 	}
 
@@ -92,7 +106,7 @@ func NewObservabilityServer(redisClient *redis.Client, queue *scheduler.Queue, s
 	dashHandler := dashboard.NewHandler(db, dashboard.NewSettingsStore(settingsDir))
 	dashHandler.RegisterRoutes(mux)
 
-	// Serve dashboard static files under /dashboard/.
+	// Serve dashboard static files under dashboardBasePath + "/".
 	// Files are embedded from internal/dashboard/static/ at build time.
 	staticFS, err := fs.Sub(dashboard.Static, "static")
 	if err != nil {
@@ -100,10 +114,12 @@ func NewObservabilityServer(redisClient *redis.Client, queue *scheduler.Queue, s
 			loglib.FieldComponent, "daemon", "error", err)
 	} else {
 		fileServer := http.FileServer(http.FS(staticFS))
-		mux.Handle("/dashboard/", http.StripPrefix("/dashboard", fileServer))
-		// Redirect bare /dashboard to /dashboard/ so the SPA loads correctly.
-		mux.HandleFunc("/dashboard", func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, "/dashboard/", http.StatusMovedPermanently)
+		// Strip the base path before serving static files so that the embedded
+		// index.html is served for any path under dashboardBasePath/.
+		mux.Handle(dashboardBasePath+"/", http.StripPrefix(dashboardBasePath, fileServer))
+		// Redirect bare dashboardBasePath to dashboardBasePath/ so the SPA loads.
+		mux.HandleFunc(dashboardBasePath, func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, dashboardBasePath+"/", http.StatusMovedPermanently)
 		})
 	}
 
@@ -216,7 +232,7 @@ func (o *ObservabilityServer) handleMetrics(w http.ResponseWriter, r *http.Reque
 	// This endpoint serves Prometheus text format metrics, not HTML. Prometheus is the only consumer.
 	fmt.Fprintf(w, "# HELP codero_uptime_seconds Seconds since service start\n")
 	fmt.Fprintf(w, "# TYPE codero_uptime_seconds gauge\n")
-	fmt.Fprintf(w, "codero_uptime_seconds %.2f\n", uptime)
+	fmt.Fprintf(w, "codero_uptime_seconds %.2f\n", uptime) //nolint:errcheck // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 
 	// Queue metrics
 	if o.queue != nil {

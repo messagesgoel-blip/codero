@@ -14,6 +14,8 @@ Use this file as the single source of truth for active agent work.
 
 | Task ID | Branch | Owner Agent | Status | Started (UTC) | Updated (UTC) | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
+| COD-026 | feat/COD-026-tui-commands-and-web-port-hardening | Copilot | in_progress | 2026-03-16T14:03:00Z | 2026-03-16T14:03:00Z | TUI command polish (codero tui, gate-status --json/--no-prompt, dashboard, ports), web port/routing hardening, config normalization |
+| COD-025 | feat/COD-025-dashboard | Copilot | done | 2026-03-16T09:00:00Z | 2026-03-16T09:15:00Z | Web dashboard SPA embedded in binary, 9 API endpoints, SSE stream, settings, upload. PR #27 merged. |
 | COD-024 | feat/COD-024-sprint6-tui-and-metrics | Codex | review | 2026-03-16T00:00:00Z | 2026-03-16T00:00:00Z | Sprint 6 TUI v2-alpha shipped (`gate-status --watch` Bubble Tea 3-pane), gate/dashboard parity preserved, auto gate-to-metric writes completed, hardening evidence documented. |
 | COD-023 | feat/COD-023-shared-heartbeat-gate | gcb (Copilot-B) | review | 2026-03-16T01:44:11Z | 2026-03-16T02:10:00Z | Replace local commit-gate branch flow with shared heartbeat contract; wire progress bar in CLI/TUI + /gate dashboard endpoint. PR #24 open. |
 | COD-020 | feat/COD-020-phase1f-proving-bootstrap | Codex | in_progress | 2026-03-15T00:00:00Z | 2026-03-15T00:00:00Z | Phase 1F proving-period bootstrap: daily scorecard, snapshot history, runbook updates |

@@ -49,6 +49,64 @@ Install pre-commit hook for a repo:
 - `docs/adr/`
 - `CONTRIBUTING.md`
 
+## CLI Commands Quick Reference
+
+```
+codero daemon              Start the long-running daemon
+codero tui                 Launch the interactive Bubble Tea operator shell
+codero tui --view gate --interval 3
+codero tui --theme dracula --no-alt-screen
+
+codero gate-status         One-shot gate status display
+codero gate-status --watch           Live gate watch (TUI)
+codero gate-status --json            Machine-readable JSON output
+codero gate-status --no-prompt       Disable interactive prompt (CI-safe)
+
+codero dashboard           Print effective dashboard URL
+codero dashboard --check             Validate /dashboard/, overview API, /gate
+codero dashboard --open              Open in default browser (interactive only)
+codero dashboard --port 9090         Override port for check
+
+codero ports               Show all active network bindings and URLs
+
+codero commit-gate         Run pre-commit review gate
+codero register [branch]   Register branch for review
+codero queue [repo]        Show queue state
+codero branch [branch]     Show branch details
+codero events [branch]     Show delivery events
+codero scorecard           Generate proving period scorecard
+codero preflight           Run system preflight checks
+codero status              Report daemon status
+codero version             Print version
+```
+
+### Web Dashboard
+
+When the daemon is running, the web dashboard is available at:
+
+```
+http://localhost:8080/dashboard/
+```
+
+The base path and bind address are configurable:
+
+```yaml
+# codero.yaml
+observability_host: ""        # bind all interfaces (default); use "127.0.0.1" for loopback-only
+observability_port: 8080      # default
+dashboard_base_path: /dashboard   # default; change for reverse-proxy deployments
+dashboard_public_base_url: ""     # optional: override URL printed by "codero dashboard"
+```
+
+Or via environment variables:
+
+```
+CODERO_OBSERVABILITY_HOST=127.0.0.1
+CODERO_DASHBOARD_BASE_PATH=/codero/ui
+CODERO_DASHBOARD_PUBLIC_BASE_URL=https://ops.example.com
+```
+
+
 ## Canonical roadmap source
 
 The canonical roadmap for Codero is `docs/roadmap.md`.
