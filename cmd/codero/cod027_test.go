@@ -30,13 +30,25 @@ var jsonKeys = []string{
 
 // captureStdout redirects os.Stdout to a pipe, runs f, then returns the
 // captured output and restores os.Stdout.
+// os.Stdout is always restored via defer, so f panicking cannot leave it
+// redirected for subsequent tests. The pipe descriptors are also closed via
+// defer so they are never leaked even if f panics.
 func captureStdout(f func()) string {
 	orig := os.Stdout
-	rd, wr, _ := os.Pipe()
+	rd, wr, err := os.Pipe()
+	if err != nil {
+		panic("captureStdout: os.Pipe failed: " + err.Error())
+	}
+	// Deferred cleanup closes both ends; the explicit wr.Close() below still
+	// runs first on the normal path so io.Copy sees EOF.
+	defer func() {
+		_ = wr.Close()
+		_ = rd.Close()
+		os.Stdout = orig
+	}()
 	os.Stdout = wr
 	f()
-	wr.Close()
-	os.Stdout = orig
+	wr.Close() //nolint:errcheck // signal EOF to reader on normal path
 	var buf bytes.Buffer
 	io.Copy(&buf, rd) //nolint:errcheck
 	return buf.String()
@@ -200,11 +212,7 @@ func TestGateStatusWatch_NonTTY_OutputIsJSONOnly(t *testing.T) {
 	if err := json.Unmarshal([]byte(trimmed), &obj); err != nil {
 		t.Fatalf("output is not valid JSON: %v", err)
 	}
-
-	// Must not contain non-JSON prose.
-	if strings.Contains(out, "PENDING") && !strings.Contains(out, "{") {
-		t.Error("output contains prose text; expected only JSON")
-	}
+	_ = obj
 }
 
 // --- TestGateStatusJSON_Regression ---
