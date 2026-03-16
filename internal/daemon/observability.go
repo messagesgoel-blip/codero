@@ -35,10 +35,11 @@ type ObservabilityServer struct {
 	startTime   time.Time              // Process start time for uptime calculation
 	mu          sync.RWMutex           // Mutex for thread-safe state access
 	repoPath    string                 // Repo path for gate progress file lookup
+	version     string                 // Binary version string set via ldflags
 }
 
 // NewObservabilityServer creates a new observability server.
-func NewObservabilityServer(redisClient *redis.Client, queue *scheduler.Queue, slotCounter *scheduler.SlotCounter, db *sql.DB, port string) *ObservabilityServer {
+func NewObservabilityServer(redisClient *redis.Client, queue *scheduler.Queue, slotCounter *scheduler.SlotCounter, db *sql.DB, port string, version string) *ObservabilityServer {
 	mux := http.NewServeMux()
 	server := &http.Server{
 		Addr:    ":" + port,
@@ -69,6 +70,7 @@ func NewObservabilityServer(redisClient *redis.Client, queue *scheduler.Queue, s
 		db:          db,
 		startTime:   time.Now(),
 		repoPath:    repoPath,
+		version:     version,
 	}
 
 	// Register routes
@@ -111,7 +113,7 @@ func (o *ObservabilityServer) handleHealth(w http.ResponseWriter, r *http.Reques
 	status := map[string]interface{}{
 		"status":         "ok",
 		"uptime_seconds": time.Since(o.startTime).Seconds(),
-		"version":        "dev",
+		"version":        o.version,
 	}
 
 	// Check Redis connectivity
