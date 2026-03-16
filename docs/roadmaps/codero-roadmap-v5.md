@@ -607,10 +607,11 @@ Program-level criteria (reviewed at phase gates):
 - pre-commit hook enforcement using shared toolkit hooks and gate-heartbeat - implemented
 - TUI/operator surface parity for gate progress and interventions - **implemented**
   - `codero gate-status` shows run status, active gate, progress bar (identical icons to `commit-gate`), and blocker comments
-  - `--watch` flag for live polling TUI with ANSI redraw until terminal state
+  - `--watch` flag now runs TUI v2-alpha (Bubble Tea 3-pane layout with adaptive split and keyboard-first navigation)
   - `--logs` flag to inspect gate log directory
   - interactive prompt for retry/logs/branch-view actions
   - `/gate` endpoint and TUI share the same `progress.env` source and `gate.RenderBar()` call — verified by unit tests
+  - TUI v2 architecture and operator quickstart documented in `docs/tui-v2-architecture.md`
 - effectiveness metrics baseline (`scorecard`, `record-event`, `record-precommit`) - implemented; automatic gate-to-metric writes - **implemented**
   - `commit-gate` auto-records per-provider (`copilot`, `litellm`) outcomes on every terminal result
   - idempotent writes (`INSERT OR IGNORE`) using `run_id + provider` as deterministic ID

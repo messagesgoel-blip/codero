@@ -275,7 +275,9 @@ Sprint 4 (Phase 2 start):
 - `codero commit-gate` is implemented and wired to the shared heartbeat gate contract.
 - Active pre-commit gate order is `Copilot -> LiteLLM` with shared deterministic blockers in the same pipeline.
 - `/gate` observability endpoint is live for dashboard parity with CLI gate progress.
-- Proving-period metrics commands (`scorecard`, `record-event`, `record-precommit`) are implemented; automatic gate-result recording remains open.
+- Proving-period metrics commands (`scorecard`, `record-event`, `record-precommit`) are implemented and `commit-gate` now auto-records provider outcomes.
+- TUI v2-alpha is shipped for `codero gate-status --watch` with Bubble Tea 3-pane layout, keyboard-first controls, and authoritative/non-authoritative gate separation.
+- TUI architecture and operator quickstart are documented in `docs/tui-v2-architecture.md`.
 
 ---
 
