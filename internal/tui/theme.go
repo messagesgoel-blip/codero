@@ -4,10 +4,10 @@ import "github.com/charmbracelet/lipgloss"
 
 // Theme centralises all style tokens.
 type Theme struct {
-	Base    lipgloss.Style
-	Bold    lipgloss.Style
-	Muted   lipgloss.Style
-	Accent  lipgloss.Style
+	Base   lipgloss.Style
+	Bold   lipgloss.Style
+	Muted  lipgloss.Style
+	Accent lipgloss.Style
 
 	Pass    lipgloss.Style
 	Fail    lipgloss.Style
@@ -55,30 +55,30 @@ func newDefaultTheme() Theme {
 	bgPalette := lipgloss.Color("#1A1B26")
 
 	return Theme{
-		Base:    lipgloss.NewStyle().Foreground(fg),
-		Bold:    lipgloss.NewStyle().Foreground(fg).Bold(true),
-		Muted:   lipgloss.NewStyle().Foreground(muted),
-		Accent:  lipgloss.NewStyle().Foreground(accent).Bold(true),
-		Pass:    lipgloss.NewStyle().Foreground(pass).Bold(true),
-		Fail:    lipgloss.NewStyle().Foreground(fail).Bold(true),
-		Running: lipgloss.NewStyle().Foreground(running).Bold(true),
-		Pending: lipgloss.NewStyle().Foreground(muted),
-		Warning: lipgloss.NewStyle().Foreground(warn),
-		PaneBorder:   lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(border),
-		PaneTitle:    lipgloss.NewStyle().Foreground(paneTitle).Bold(true),
-		ActiveBorder: lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(activeBorder),
-		TabActive:    lipgloss.NewStyle().Foreground(fg).Bold(true).Underline(true),
-		TabInactive:  lipgloss.NewStyle().Foreground(muted),
-		ListSelected: lipgloss.NewStyle().Background(selected).Foreground(fg).Bold(true),
-		ListNormal:   lipgloss.NewStyle().Foreground(fg),
-		ListHeader:   lipgloss.NewStyle().Foreground(paneTitle).Bold(true),
-		BottomBar: lipgloss.NewStyle().Background(bgPane).Foreground(muted),
-		KeyHint:   lipgloss.NewStyle().Background(selected).Foreground(fg).Padding(0, 1),
-		KeyLabel:  lipgloss.NewStyle().Foreground(muted),
+		Base:              lipgloss.NewStyle().Foreground(fg),
+		Bold:              lipgloss.NewStyle().Foreground(fg).Bold(true),
+		Muted:             lipgloss.NewStyle().Foreground(muted),
+		Accent:            lipgloss.NewStyle().Foreground(accent).Bold(true),
+		Pass:              lipgloss.NewStyle().Foreground(pass).Bold(true),
+		Fail:              lipgloss.NewStyle().Foreground(fail).Bold(true),
+		Running:           lipgloss.NewStyle().Foreground(running).Bold(true),
+		Pending:           lipgloss.NewStyle().Foreground(muted),
+		Warning:           lipgloss.NewStyle().Foreground(warn),
+		PaneBorder:        lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(border),
+		PaneTitle:         lipgloss.NewStyle().Foreground(paneTitle).Bold(true),
+		ActiveBorder:      lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(activeBorder),
+		TabActive:         lipgloss.NewStyle().Foreground(fg).Bold(true).Underline(true),
+		TabInactive:       lipgloss.NewStyle().Foreground(muted),
+		ListSelected:      lipgloss.NewStyle().Background(selected).Foreground(fg).Bold(true),
+		ListNormal:        lipgloss.NewStyle().Foreground(fg),
+		ListHeader:        lipgloss.NewStyle().Foreground(paneTitle).Bold(true),
+		BottomBar:         lipgloss.NewStyle().Background(bgPane).Foreground(muted),
+		KeyHint:           lipgloss.NewStyle().Background(selected).Foreground(fg).Padding(0, 1),
+		KeyLabel:          lipgloss.NewStyle().Foreground(muted),
 		GateAuthoritative: lipgloss.NewStyle().Foreground(fg),
 		GatePipeline:      lipgloss.NewStyle().Foreground(muted).Italic(true),
-		Palette:      lipgloss.NewStyle().Background(bgPalette).BorderStyle(lipgloss.RoundedBorder()).BorderForeground(activeBorder).Padding(0, 1),
-		PaletteInput: lipgloss.NewStyle().Foreground(fg),
+		Palette:           lipgloss.NewStyle().Background(bgPalette).BorderStyle(lipgloss.RoundedBorder()).BorderForeground(activeBorder).Padding(0, 1),
+		PaletteInput:      lipgloss.NewStyle().Foreground(fg),
 	}
 }
 
@@ -98,30 +98,30 @@ func newAltTheme() Theme {
 	bgPalette := lipgloss.Color("#252526")
 
 	return Theme{
-		Base:    lipgloss.NewStyle().Foreground(fg),
-		Bold:    lipgloss.NewStyle().Foreground(fg).Bold(true),
-		Muted:   lipgloss.NewStyle().Foreground(muted),
-		Accent:  lipgloss.NewStyle().Foreground(accent).Bold(true),
-		Pass:    lipgloss.NewStyle().Foreground(pass).Bold(true),
-		Fail:    lipgloss.NewStyle().Foreground(fail).Bold(true),
-		Running: lipgloss.NewStyle().Foreground(running).Bold(true),
-		Pending: lipgloss.NewStyle().Foreground(muted),
-		Warning: lipgloss.NewStyle().Foreground(warn),
-		PaneBorder:   lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(border),
-		PaneTitle:    lipgloss.NewStyle().Foreground(paneTitle).Bold(true),
-		ActiveBorder: lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(activeBorder),
-		TabActive:    lipgloss.NewStyle().Foreground(fg).Bold(true).Underline(true),
-		TabInactive:  lipgloss.NewStyle().Foreground(muted),
-		ListSelected: lipgloss.NewStyle().Background(selected).Foreground(fg).Bold(true),
-		ListNormal:   lipgloss.NewStyle().Foreground(fg),
-		ListHeader:   lipgloss.NewStyle().Foreground(paneTitle).Bold(true),
-		BottomBar: lipgloss.NewStyle().Background(bgPane).Foreground(muted),
-		KeyHint:   lipgloss.NewStyle().Background(selected).Foreground(fg).Padding(0, 1),
-		KeyLabel:  lipgloss.NewStyle().Foreground(muted),
+		Base:              lipgloss.NewStyle().Foreground(fg),
+		Bold:              lipgloss.NewStyle().Foreground(fg).Bold(true),
+		Muted:             lipgloss.NewStyle().Foreground(muted),
+		Accent:            lipgloss.NewStyle().Foreground(accent).Bold(true),
+		Pass:              lipgloss.NewStyle().Foreground(pass).Bold(true),
+		Fail:              lipgloss.NewStyle().Foreground(fail).Bold(true),
+		Running:           lipgloss.NewStyle().Foreground(running).Bold(true),
+		Pending:           lipgloss.NewStyle().Foreground(muted),
+		Warning:           lipgloss.NewStyle().Foreground(warn),
+		PaneBorder:        lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(border),
+		PaneTitle:         lipgloss.NewStyle().Foreground(paneTitle).Bold(true),
+		ActiveBorder:      lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(activeBorder),
+		TabActive:         lipgloss.NewStyle().Foreground(fg).Bold(true).Underline(true),
+		TabInactive:       lipgloss.NewStyle().Foreground(muted),
+		ListSelected:      lipgloss.NewStyle().Background(selected).Foreground(fg).Bold(true),
+		ListNormal:        lipgloss.NewStyle().Foreground(fg),
+		ListHeader:        lipgloss.NewStyle().Foreground(paneTitle).Bold(true),
+		BottomBar:         lipgloss.NewStyle().Background(bgPane).Foreground(muted),
+		KeyHint:           lipgloss.NewStyle().Background(selected).Foreground(fg).Padding(0, 1),
+		KeyLabel:          lipgloss.NewStyle().Foreground(muted),
 		GateAuthoritative: lipgloss.NewStyle().Foreground(fg),
 		GatePipeline:      lipgloss.NewStyle().Foreground(muted).Italic(true),
-		Palette:      lipgloss.NewStyle().Background(bgPalette).BorderStyle(lipgloss.RoundedBorder()).BorderForeground(activeBorder).Padding(0, 1),
-		PaletteInput: lipgloss.NewStyle().Foreground(fg),
+		Palette:           lipgloss.NewStyle().Background(bgPalette).BorderStyle(lipgloss.RoundedBorder()).BorderForeground(activeBorder).Padding(0, 1),
+		PaletteInput:      lipgloss.NewStyle().Foreground(fg),
 	}
 }
 

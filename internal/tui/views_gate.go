@@ -97,5 +97,5 @@ func (p GatePane) View() string {
 	return lipgloss.NewStyle().Width(p.width).Height(p.height).Render(content)
 }
 
-func (p *GatePane) SetSize(w, h int) { p.width = w; p.height = h }
+func (p *GatePane) SetSize(w, h int)                { p.width = w; p.height = h }
 func (p *GatePane) SetVM(vm adapters.GateViewModel) { p.vm = vm }
