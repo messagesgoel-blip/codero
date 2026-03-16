@@ -177,14 +177,16 @@ func runDailySnapshot(ctx context.Context, configPath string, opts dailySnapshot
 	// 8. Save to file (append-only: never overwrite existing dates)
 	if opts.snapshotDir != "" {
 		filePath := filepath.Join(opts.snapshotDir, today+".json")
-		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		if _, err := os.Stat(filePath); err == nil {
+			fmt.Printf("[%s] daily-snapshot: file already exists (append-only, keeping existing): %s\n",
+				ts(), filePath)
+		} else if os.IsNotExist(err) {
 			if err := os.WriteFile(filePath, cardJSON, 0644); err != nil {
 				return fmt.Errorf("daily-snapshot: write file %s: %w", filePath, err)
 			}
 			fmt.Printf("[%s] daily-snapshot: snapshot file written: %s\n", ts(), filePath)
 		} else {
-			fmt.Printf("[%s] daily-snapshot: file already exists (append-only, keeping existing): %s\n",
-				ts(), filePath)
+			return fmt.Errorf("daily-snapshot: stat file %s: %w", filePath, err)
 		}
 
 		// 9. Retention: remove files older than retainDays (DB rows preserved)
@@ -213,8 +215,11 @@ func runVerifyOnly(ctx context.Context, db *state.DB, snapshotDir, today, ts str
 
 	fileExists := false
 	if snapshotDir != "" {
-		if _, err := os.Stat(filepath.Join(snapshotDir, today+".json")); err == nil {
+		filePath := filepath.Join(snapshotDir, today+".json")
+		if _, err := os.Stat(filePath); err == nil {
 			fileExists = true
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("verify-only: stat file snapshot %s: %w", filePath, err)
 		}
 	}
 
@@ -232,7 +237,7 @@ func runVerifyOnly(ctx context.Context, db *state.DB, snapshotDir, today, ts str
 		}
 	}
 
-	if !dbExists {
+	if !dbExists || (snapshotDir != "" && !fileExists) {
 		return errSnapshotMissing
 	}
 	return nil

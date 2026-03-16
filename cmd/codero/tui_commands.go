@@ -660,6 +660,14 @@ func readProgressEnvAsResult(repoPath string) gate.Result {
 	progressFile := filepath.Join(repoPath, ".codero", "gate-heartbeat", "progress.env")
 	data, err := os.ReadFile(progressFile)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			return gate.Result{
+				Status:        gate.StatusFail,
+				CopilotStatus: "error",
+				LiteLLMStatus: "error",
+				Comments:      []string{fmt.Sprintf("failed to read progress file: %v", err)},
+			}
+		}
 		return gate.Result{
 			Status:        gate.StatusPending,
 			CopilotStatus: "pending",
@@ -747,6 +755,11 @@ func printGateActions(r gate.Result, repoPath string) {
 	fmt.Println()
 	if r.Status == gate.StatusFail {
 		fmt.Println("  Run: codero commit-gate   (after fixing blockers above)")
+	}
+
+	fi, err := os.Stdin.Stat()
+	if err != nil || (fi.Mode()&os.ModeCharDevice) == 0 {
+		return
 	}
 
 	fmt.Print("  Enter action (r/l/b/q, or Enter to skip): ")

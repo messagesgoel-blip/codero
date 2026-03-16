@@ -436,8 +436,10 @@ func TestCreatePrecommitReviewIdempotent_InsertOnce(t *testing.T) {
 
 	// Verify record exists.
 	var count int
-	_ = db.sql.QueryRowContext(context.Background(),
-		`SELECT COUNT(*) FROM precommit_reviews WHERE id = ?`, rev.ID).Scan(&count)
+	if err := db.sql.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM precommit_reviews WHERE id = ?`, rev.ID).Scan(&count); err != nil {
+		t.Fatalf("count query failed: %v", err)
+	}
 	if count != 1 {
 		t.Errorf("expected 1 record, got %d", count)
 	}
@@ -468,8 +470,10 @@ func TestCreatePrecommitReviewIdempotent_DuplicateSkipped(t *testing.T) {
 
 	// Row count must remain 1.
 	var count int
-	_ = db.sql.QueryRowContext(context.Background(),
-		`SELECT COUNT(*) FROM precommit_reviews WHERE id = ?`, rev.ID).Scan(&count)
+	if err := db.sql.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM precommit_reviews WHERE id = ?`, rev.ID).Scan(&count); err != nil {
+		t.Fatalf("count query failed: %v", err)
+	}
 	if count != 1 {
 		t.Errorf("expected exactly 1 record after duplicate insert, got %d", count)
 	}
@@ -502,8 +506,10 @@ func TestCreatePrecommitReviewIdempotent_TwoProvidersSameRun(t *testing.T) {
 	}
 
 	var count int
-	_ = db.sql.QueryRowContext(context.Background(),
-		`SELECT COUNT(*) FROM precommit_reviews WHERE id LIKE ?`, "pc-"+runID+"-%").Scan(&count)
+	if err := db.sql.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM precommit_reviews WHERE id LIKE ?`, "pc-"+runID+"-%").Scan(&count); err != nil {
+		t.Fatalf("count query failed: %v", err)
+	}
 	if count != 2 {
 		t.Errorf("expected 2 records for run %s, got %d", runID, count)
 	}
@@ -539,8 +545,10 @@ func TestCreatePrecommitReviewIdempotent_GateStatusMapping(t *testing.T) {
 
 	// Verify all three records are present.
 	var count int
-	_ = db.sql.QueryRowContext(context.Background(),
-		`SELECT COUNT(*) FROM precommit_reviews WHERE repo = 'owner/repo' AND branch = 'feat/map'`).Scan(&count)
+	if err := db.sql.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM precommit_reviews WHERE repo = 'owner/repo' AND branch = 'feat/map'`).Scan(&count); err != nil {
+		t.Fatalf("count query failed: %v", err)
+	}
 	if count != 3 {
 		t.Errorf("expected 3 records, got %d", count)
 	}
@@ -569,8 +577,10 @@ func TestCreatePrecommitReviewIdempotent_PollingLoop(t *testing.T) {
 	}
 
 	var count int
-	_ = db.sql.QueryRowContext(context.Background(),
-		`SELECT COUNT(*) FROM precommit_reviews WHERE id = ?`, rev.ID).Scan(&count)
+	if err := db.sql.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM precommit_reviews WHERE id = ?`, rev.ID).Scan(&count); err != nil {
+		t.Fatalf("count query failed: %v", err)
+	}
 	if count != 1 {
 		t.Errorf("expected exactly 1 record after 5 idempotent calls, got %d", count)
 	}
