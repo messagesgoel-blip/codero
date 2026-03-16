@@ -6,12 +6,15 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/codero/codero/internal/dashboard"
 	"github.com/codero/codero/internal/gate"
 	loglib "github.com/codero/codero/internal/log"
 	"github.com/codero/codero/internal/redis"
@@ -73,13 +76,36 @@ func NewObservabilityServer(redisClient *redis.Client, queue *scheduler.Queue, s
 		version:     version,
 	}
 
-	// Register routes
+	// Register observability routes
 	mux.HandleFunc("/health", obs.handleHealth)
 	mux.HandleFunc("/queue", obs.handleQueue)
 	mux.HandleFunc("/metrics", obs.handleMetrics)
 	mux.HandleFunc("/ready", obs.handleReady)
 	mux.HandleFunc("/api/v1/agent-metrics", obs.handleAgentMetrics)
 	mux.HandleFunc("/gate", obs.handleGate)
+
+	// Register dashboard API routes and static file serving.
+	settingsDir := filepath.Dir(os.Getenv("CODERO_DB_PATH"))
+	if settingsDir == "." || settingsDir == "" {
+		settingsDir = os.TempDir()
+	}
+	dashHandler := dashboard.NewHandler(db, dashboard.NewSettingsStore(settingsDir))
+	dashHandler.RegisterRoutes(mux)
+
+	// Serve dashboard static files under /dashboard/.
+	// Files are embedded from internal/dashboard/static/ at build time.
+	staticFS, err := fs.Sub(dashboard.Static, "static")
+	if err != nil {
+		loglib.Error("dashboard: failed to create sub-FS for static assets",
+			loglib.FieldComponent, "daemon", "error", err)
+	} else {
+		fileServer := http.FileServer(http.FS(staticFS))
+		mux.Handle("/dashboard/", http.StripPrefix("/dashboard", fileServer))
+		// Redirect bare /dashboard to /dashboard/ so the SPA loads correctly.
+		mux.HandleFunc("/dashboard", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/dashboard/", http.StatusMovedPermanently)
+		})
+	}
 
 	return obs
 }

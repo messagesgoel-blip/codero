@@ -150,7 +150,7 @@ Goal: make codero operationally boring and supportable.
 
 Scope:
 
-- TUI + dashboard parity for queue, state, failures, and interventions.
+- Hardening and scale-readiness for existing TUI + dashboard operator surfaces.
 - Runbooks for incident classes (stuck lease, webhook delay, Redis outage, queue stall).
 - Backfill/reconcile jobs and consistency audits.
 - Security hardening and secret handling.
@@ -223,7 +223,7 @@ Code:
 - lint + unit tests mandatory
 - mutation or property tests on state transitions and lease logic
 - Tooling alignment: for the current Go codebase, v4 Stage 1.5 ESLint/Prettier is superseded by Go-native gates (`gofmt`, `go vet`, `go test`) in CI.
-- JS/TS linting is introduced only when a JS/TS surface (for example, dashboard frontend) is added.
+- JS/TS linting and typecheck are mandatory for dashboard/frontend surfaces now that Phase 1E includes web UI delivery.
 
 Contracts:
 
@@ -275,6 +275,7 @@ Sprint 4 (Phase 2 start):
 - `codero commit-gate` is implemented and wired to the shared heartbeat gate contract.
 - `codero commit-gate` renders a `Copilot -> LiteLLM` heartbeat pipeline, while `scripts/review/two-pass-review.sh` still enforces Semgrep as a mandatory blocker pass.
 - `/gate` observability endpoint is live for dashboard parity with CLI gate progress.
+- Phase 1E web dashboard is implemented for operator parity (overview/settings/live activity/manual upload) and served at `/dashboard`.
 - Proving-period metrics commands (`scorecard`, `record-event`, `record-precommit`) are implemented and `commit-gate` now auto-records provider outcomes.
 - TUI v2-alpha is shipped for `codero gate-status --watch` with Bubble Tea 3-pane layout, keyboard-first controls, and authoritative/non-authoritative gate separation.
 - TUI architecture and operator quickstart are documented in `docs/tui-v2-architecture.md`.
