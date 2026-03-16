@@ -172,11 +172,18 @@ Snapshots stored in:
 
 ### Pre-commit reviews not tracked
 
-**Cause:** Pre-commit tracking requires explicit recording. The `commit-gate` command should be updated to record reviews.
+**Cause:** No `commit-gate` runs have completed, or runs completed before auto-recording was available.
 
-**Solution:** Record pre-commit reviews via code hooks or manually:
+**Solution:** Pre-commit reviews are now recorded **automatically** by `codero commit-gate` on every terminal result. No manual action is required in normal flow.
+
+- `commit-gate` writes one idempotent record per provider (`copilot`, `litellm`) on PASS or FAIL.
+- Records use `INSERT OR IGNORE` with a deterministic ID (`pc-{run_id}-{provider}`), so polling retries or re-runs with the same run ID do not create duplicates.
+- If the state DB is unavailable, a warning is printed to stderr and the gate exit behavior is unaffected.
+
+If you need to backfill records from a run that predates auto-recording, use the manual command:
 ```bash
-# After a pre-commit review
+# Manual backfill only — not required in normal flow
+codero record-precommit --repo owner/repo --branch feature/x --provider copilot --status passed
 codero record-precommit --repo owner/repo --branch feature/x --provider litellm --status passed
 ```
 

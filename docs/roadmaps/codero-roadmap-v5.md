@@ -118,7 +118,7 @@ There is no scheduler wrapper. Agent work is triggered manually or by external o
 
 The intended automation loop is:
 
-operator or external orchestration starts agent -> agent works in isolated worktree -> agent requests pre-commit review -> Loop 1 LiteLLM review passes -> Loop 2 CodeRabbit pre-commit review passes -> pre-commit hook allows commit -> agent submits branch -> codero queues and dispatches PR review -> findings are delivered -> operator or orchestration re-triggers agent with findings -> agent fixes and re-submits -> codero confirms approval, CI green, zero pending events, and no unresolved review threads -> branch becomes merge_ready -> repo auto-merge completes the cycle.
+operator or external orchestration starts agent -> agent works in isolated worktree -> agent requests pre-commit review -> shared gate-heartbeat runs Copilot then LiteLLM (with Semgrep as deterministic blocker in the same pipeline) -> pre-commit hook allows commit on PASS -> agent submits branch -> codero queues and dispatches PR review -> findings are delivered -> operator or orchestration re-triggers agent with findings -> agent fixes and re-submits -> codero confirms approval, CI green, zero pending events, and no unresolved review threads -> branch becomes merge_ready -> repo auto-merge completes the cycle.
 
 ### 3.4 Data layer by phase
 
@@ -229,9 +229,9 @@ This is another intentional conceptual correction. Multi-repo identity and fairn
 #### 1D. Pre-commit local review loops
 
 - `local_review` state.
-- Sequential LiteLLM then CodeRabbit local review.
+- Shared gate-heartbeat pipeline: Copilot then LiteLLM, with Semgrep deterministic blocking checks.
 - Hook-based commit enforcement.
-- Separate pre-commit slot limits and daily cost cap.
+- Independent per-gate timeout budgets and shared heartbeat progress reporting.
 
 #### 1E. Operator surfaces and observability
 
@@ -239,14 +239,14 @@ This is another intentional conceptual correction. Multi-repo identity and fairn
 - TUI queue, branch detail, event log, and effectiveness views.
 - Health, queue, metrics, and agent-metrics endpoints.
 
-#### 1F. Hardening and proving period
+#### 1F. Hardening and readiness verification
 
 - Failure-mode audit.
 - End-to-end integration cycle.
 - Redis loss and restart drills.
 - Webhook replay tests.
 - Unresolved review thread cross-check tests.
-- 30-day real-use sign-off with explicit activity thresholds.
+- readiness sign-off with explicit activity thresholds and recovery evidence.
 
 ### Out of scope
 
@@ -259,7 +259,7 @@ This is another intentional conceptual correction. Multi-repo identity and fairn
 
 All of the following must be true:
 
-- 30 days of daily use completed across at least two active repositories.
+- Daily use is active across at least two active repositories, with scorecard evidence captured during hardening.
 - Minimum operating thresholds achieved: 3 branches reviewed per week, 2 stale detections observed, 1 lease-expiry recovery observed, and 10 pre-commit reviews per project per week.
 - Zero manual DB repair incidents.
 - Zero missed feedback deliveries.
@@ -270,14 +270,14 @@ All of the following must be true:
 
 ### Phase gate to Phase 2
 
-Phase 2 does **not** begin immediately after implementation completes. It begins only after a proving period.
+Phase 2 may begin immediately after Phase 1 implementation completes, once the Phase 1 exit gate evidence is complete.
 
 Default gate:
 
-- formal 30-day sign-off complete, and
-- sustained boring daily use for a longer proving window, target 3-6 months, with 6 months as the default bar unless there is a strong reason to accelerate.
+- all Phase 1 exit criteria are satisfied and documented
+- release owner approves progression based on evidence, without a fixed calendar wait
 
-That preserves the original v4 principle: build it for yourself first and prove it in unremarkable daily use.
+The gate is evidence-based rather than time-based.
 
 ---
 
@@ -530,7 +530,7 @@ Named operating modes:
 - healthy
 - degraded: Redis unavailable
 - degraded: GitHub unavailable
-- degraded: CodeRabbit unavailable
+- degraded: Copilot unavailable
 - degraded: LiteLLM unavailable
 - degraded: webhook unavailable (polling fallback)
 - read-only/drain
@@ -602,12 +602,23 @@ Program-level criteria (reviewed at phase gates):
 
 ### Sprint 6
 
-- `local_review` activation
-- LiteLLM and CodeRabbit pre-commit loops
-- pre-commit hook enforcement and commit-gate
-- TUI operator surface
-- effectiveness metrics
-- hardening matrix and first end-to-end test
+- `local_review` activation (`coding -> local_review -> queued_cli`) - implemented
+- shared pre-commit gate wiring via `commit-gate` + heartbeat progress (`Copilot -> LiteLLM`) - implemented
+- pre-commit hook enforcement using shared toolkit hooks and gate-heartbeat - implemented
+- TUI/operator surface parity for gate progress and interventions - **implemented**
+  - `codero gate-status` shows run status, active gate, progress bar (identical icons to `commit-gate`), and blocker comments
+  - `--watch` flag for live polling TUI with ANSI redraw until terminal state
+  - `--logs` flag to inspect gate log directory
+  - interactive prompt for retry/logs/branch-view actions
+  - `/gate` endpoint and TUI share the same `progress.env` source and `gate.RenderBar()` call — verified by unit tests
+- effectiveness metrics baseline (`scorecard`, `record-event`, `record-precommit`) - implemented; automatic gate-to-metric writes - **implemented**
+  - `commit-gate` auto-records per-provider (`copilot`, `litellm`) outcomes on every terminal result
+  - idempotent writes (`INSERT OR IGNORE`) using `run_id + provider` as deterministic ID
+  - manual `record-precommit` no longer required in normal flow
+- hardening matrix closure and first end-to-end test execution evidence - **complete**
+  - all 10 failure-mode scenarios verified (FR-001 through FR-008 in failure-recovery-matrix.md)
+  - TestSprint6_E2E_Lifecycle documents the full T02→T04→T06→T08→T10 lifecycle path
+  - proving-evidence-2026-03.md updated with complete evidence log
 
 After Sprint 6, the work shifts from implementation breadth to proving behavior under daily use.
 
@@ -755,7 +766,7 @@ This rule is deterministic and cannot be bypassed by summarization or model opin
 
 ## Appendix D — Pre-commit local review contract (binding)
 
-Before any agent can commit, it must pass two sequential local review loops.
+Before any agent can commit, it must pass the shared pre-commit gate pipeline.
 
 ### D.1 State behavior
 
@@ -765,12 +776,13 @@ Before any agent can commit, it must pass two sequential local review loops.
 
 ### D.2 Loop order
 
-The order is fixed and permanent:
+The order is fixed and permanent in the heartbeat contract:
 
-1. LiteLLM local review
-2. CodeRabbit pre-commit review
+1. Copilot gate
+2. LiteLLM gate
 
-They are never run in parallel. LiteLLM acts as a cheap filter before expensive CodeRabbit slot consumption.
+Semgrep deterministic checks run in the same shared gate pipeline as hard blockers.
+The AI gates are never run in parallel.
 
 ### D.3 Working tree diff rules
 
@@ -790,29 +802,28 @@ This includes staged, unstaged, and newly tracked files without requiring a temp
 
 ### D.5 Loop semantics
 
-LiteLLM loop:
+Copilot gate:
 
 - synchronous
 - returns structured findings directly to the agent
-- does not consume CodeRabbit slot budget
 - malformed model output is discarded and logged
 - if Redis is unavailable while checking circuit breaker state, treat breaker as closed and allow call timeout to govern
 
-CodeRabbit pre-commit loop:
+LiteLLM gate:
 
-- runs only after LiteLLM pass
-- uses separate slot accounting from PR review dispatch
-- rate limited via Redis and Lua
-- subject to daily hard cap until real invoice data validates cost assumptions
+- runs only after Copilot gate
+- uses an independent timeout budget from Copilot
+- emits progress status consumed by both CLI and `/gate` endpoint
 
 ### D.6 Delivery of findings
 
 - pre-commit findings are returned synchronously to the agent
 - `inbox.log` is reserved for PR-level feedback, not pre-commit findings
 
-### D.7 Initial economic guardrail
+### D.7 Initial guardrails
 
-Until real invoice data is known, the daily CodeRabbit pre-commit cap defaults to 50 per day and is treated as a hard safety limit.
+Use independent per-gate timeout budgets and an overall gate wall-clock budget from the heartbeat contract.
+Cost and quota guardrails remain configurable, but progression is blocked strictly by deterministic/AI gate status.
 
 ---
 
@@ -901,7 +912,7 @@ Phase 1 sign-off requires explicit drills for all of the above, not only unit te
 |---|---|
 | Queue primitive in Go Phase 2 | Use Asynq rather than BullMQ or River |
 | Managed Redis baseline | Non-cluster mode first; revisit cluster mode only when scale justifies redesign |
-| CodeRabbit cost assumptions | Do not trust estimates; validate against real invoice before relaxing cap |
+| Pre-commit gate baseline | Use shared heartbeat contract (`Copilot -> LiteLLM`) with deterministic blockers in the same pipeline |
 | Scheduler ownership | No scheduler wrapper; codero does not own agent lifecycle |
 | TUI longevity | TUI remains first-class for self-hosted and personal use |
 | Workflow engine upgrade | Temporal is conditional, not default |
@@ -914,7 +925,7 @@ Phase 1 sign-off requires explicit drills for all of the above, not only unit te
 | GitHub App onboarding | Phase 2 | External installation flow is not required for personal proof |
 | RBAC and immutable audit log | Phase 3 | Single-operator Phase 1 does not need role separation |
 | Billing and metering | Phase 4 | Commercial work starts only after product and operations prove out |
-| Direct model backend | Phase 3 or 4 | CodeRabbit plus LiteLLM wrapper is enough initially |
+| Additional local review providers | Phase 3 or 4 | Shared heartbeat baseline is sufficient for Phase 1/2 execution |
 | Temporal | conditional revisit only | Adopt only if workflow complexity or drift makes it necessary |
 
 ### H.3 Revisit triggers
@@ -1003,7 +1014,7 @@ Use scorecard trends at phase gates:
 This roadmap is acceptable only if:
 
 - critical runtime behavior is explicit, not implied by reference to older docs
-- phase sequencing respects the proving period, rather than compressing it away
+- phase sequencing is evidence-based and avoids fixed calendar delays
 - module intake is a standing discipline rather than a one-time migration event
 - multi-repo correctness is validated during personal proof
 - the pre-commit local review loop is fully specified and enforceable

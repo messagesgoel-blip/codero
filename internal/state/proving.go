@@ -60,6 +60,22 @@ func CreatePrecommitReview(ctx context.Context, db *DB, r *PrecommitReview) erro
 	return nil
 }
 
+// CreatePrecommitReviewIdempotent inserts a precommit review record, silently
+// skipping the insert if a record with the same ID already exists.
+// This is used by the commit-gate auto-write path to prevent duplicate entries
+// when the same run_id is observed more than once (e.g. during polling retries).
+func CreatePrecommitReviewIdempotent(ctx context.Context, db *DB, r *PrecommitReview) error {
+	_, err := db.sql.ExecContext(ctx,
+		`INSERT OR IGNORE INTO precommit_reviews (id, repo, branch, provider, status, error)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		r.ID, r.Repo, r.Branch, r.Provider, r.Status, r.Error,
+	)
+	if err != nil {
+		return fmt.Errorf("create precommit review (idempotent): %w", err)
+	}
+	return nil
+}
+
 func ListPrecommitReviewsByRepo(ctx context.Context, db *DB, repo string, since time.Time) ([]PrecommitReview, error) {
 	const q = `
 		SELECT id, repo, branch, provider, status, error, created_at
