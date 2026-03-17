@@ -173,7 +173,7 @@ Set via `--profile` flag or `CODERO_GATES_PROFILE` env var. `fast` is accepted a
 | `CODERO_TOOL_GITLEAKS` | `gitleaks` | Path override for gitleaks |
 | `CODERO_TOOL_RUFF` | `ruff` | Path override for ruff |
 | `CODERO_TOOL_YAMLLINT` | `yamllint` | Path override for yamllint |
-| `CODERO_GATE_CHECK_REPORT_PATH` | `.codero/gate-check/last-report.json` | Path where the CLI writes the JSON report (read by dashboard) |
+| `CODERO_GATE_CHECK_REPORT_PATH` | `.codero/gate-check/last-report.json` | Path where `gate-check` writes the canonical JSON report (read by dashboard/TUI) |
 
 ---
 
@@ -224,12 +224,15 @@ written by the CLI. To wire them together:
 ```bash
 # Write report after a gate-check run
 # Precedence: --report-path > CODERO_GATE_CHECK_REPORT_PATH > default
-codero gate-check --report-path .codero/gate-check/last-report.json
+codero gate-check --json --report-path .codero/gate-check/last-report.json
 
 # Or configure via env (default matches dashboard)
 export CODERO_GATE_CHECK_REPORT_PATH=.codero/gate-check/last-report.json
-codero gate-check
+codero gate-check --json
 ```
+
+`--report-path` takes precedence over `CODERO_GATE_CHECK_REPORT_PATH`, and both
+forms write the same canonical JSON payload whether or not `--json` is used.
 
 The dashboard serves the raw canonical JSON wrapped in:
 ```json

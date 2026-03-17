@@ -1,11 +1,17 @@
 package contract
 
 import (
+	"bytes"
+	"encoding/json"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/codero/codero/internal/gatecheck"
 )
 
 func repoRoot(t *testing.T) string {
@@ -156,4 +162,142 @@ func TestGateCheckFastProfileAlias(t *testing.T) {
 	if !strings.Contains(string(out), `"profile": "portable"`) {
 		t.Fatalf("gate-check fast profile alias should resolve to portable profile\noutput: %s", string(out))
 	}
+}
+
+func TestGateCheckJSONFailureExitCode(t *testing.T) {
+	root := repoRoot(t)
+	repo := gateCheckRepoWithConflict(t)
+	reportPath := filepath.Join(t.TempDir(), "report.json")
+
+	cmd := exec.Command("go", "run", "./cmd/codero", "gate-check", "--json", "--repo-path", repo)
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "CODERO_GATE_CHECK_REPORT_PATH="+reportPath)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected gate-check --json to fail for merge-markers fixture\noutput: %s", string(out))
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		if exitErr.ExitCode() != 1 {
+			t.Fatalf("gate-check --json exit code: got %d, want 1\noutput: %s", exitErr.ExitCode(), string(out))
+		}
+	} else {
+		t.Fatalf("expected exec.ExitError, got %T: %v\noutput: %s", err, err, string(out))
+	}
+
+	reportJSON := extractJSONPayload(t, out)
+	var report gatecheck.Report
+	if err := json.Unmarshal(reportJSON, &report); err != nil {
+		t.Fatalf("decode failing gate-check JSON: %v\noutput: %s", err, string(reportJSON))
+	}
+	if report.Summary.OverallStatus != gatecheck.StatusFail {
+		t.Fatalf("failing JSON report overall_status: got %q, want fail", report.Summary.OverallStatus)
+	}
+	if _, err := os.Stat(reportPath); err != nil {
+		t.Fatalf("expected JSON-mode report file at %s: %v", reportPath, err)
+	}
+}
+
+func TestGateCheckJSONReportPathEnv(t *testing.T) {
+	root := repoRoot(t)
+	repo := gateCheckRepoClean(t)
+	reportPath := filepath.Join(t.TempDir(), "env-report.json")
+
+	cmd := exec.Command("go", "run", "./cmd/codero", "gate-check", "--json", "--profile", "off", "--repo-path", repo)
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "CODERO_GATE_CHECK_REPORT_PATH="+reportPath)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("gate-check --json with env report path failed: %v\noutput: %s", err, string(out))
+	}
+
+	if _, err := os.Stat(reportPath); err != nil {
+		t.Fatalf("expected JSON-mode report file at %s: %v", reportPath, err)
+	}
+
+	var stdoutReport gatecheck.Report
+	if err := json.Unmarshal(out, &stdoutReport); err != nil {
+		t.Fatalf("decode stdout JSON report: %v\noutput: %s", err, string(out))
+	}
+	fileReport, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatalf("read JSON-mode report file: %v", err)
+	}
+	var persistedReport gatecheck.Report
+	if err := json.Unmarshal(fileReport, &persistedReport); err != nil {
+		t.Fatalf("decode persisted JSON report: %v\nfile: %s", err, string(fileReport))
+	}
+	if !reflect.DeepEqual(stdoutReport, persistedReport) {
+		t.Fatalf("stdout JSON and persisted report differ:\nstdout=%+v\nfile=%+v", stdoutReport, persistedReport)
+	}
+}
+
+func TestGateCheckJSONReportPathFlagOverridesEnv(t *testing.T) {
+	root := repoRoot(t)
+	repo := gateCheckRepoClean(t)
+	envReportPath := filepath.Join(t.TempDir(), "env-report.json")
+	flagReportPath := filepath.Join(t.TempDir(), "flag-report.json")
+
+	cmd := exec.Command("go", "run", "./cmd/codero", "gate-check", "--json", "--profile", "off", "--repo-path", repo, "--report-path", flagReportPath)
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "CODERO_GATE_CHECK_REPORT_PATH="+envReportPath)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("gate-check --json with explicit report-path failed: %v\noutput: %s", err, string(out))
+	}
+
+	if _, err := os.Stat(flagReportPath); err != nil {
+		t.Fatalf("expected flag report file at %s: %v", flagReportPath, err)
+	}
+	if _, err := os.Stat(envReportPath); !os.IsNotExist(err) {
+		t.Fatalf("env report path should not be written when flag is set; stat err=%v", err)
+	}
+}
+
+func gateCheckRepoClean(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\noutput: %s", args, err, string(out))
+		}
+	}
+
+	git("init", "-q")
+	git("config", "user.email", "test@example.com")
+	git("config", "user.name", "test")
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("clean\n"), 0o644); err != nil {
+		t.Fatalf("write tracked file: %v", err)
+	}
+	git("add", "tracked.txt")
+	git("commit", "-q", "-m", "init")
+	return dir
+}
+
+func gateCheckRepoWithConflict(t *testing.T) string {
+	t.Helper()
+	dir := gateCheckRepoClean(t)
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("<<<<<<< HEAD\nbad\n=======\nworse\n>>>>>>> branch\n"), 0o644); err != nil {
+		t.Fatalf("write conflict file: %v", err)
+	}
+	cmd := exec.Command("git", "add", "tracked.txt")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git add conflict file: %v\noutput: %s", err, string(out))
+	}
+	return dir
+}
+
+func extractJSONPayload(t *testing.T, out []byte) []byte {
+	t.Helper()
+	start := bytes.IndexByte(out, '{')
+	end := bytes.LastIndexByte(out, '}')
+	if start < 0 || end < start {
+		t.Fatalf("unable to locate JSON object in output:\n%s", string(out))
+	}
+	return out[start : end+1]
 }
