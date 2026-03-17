@@ -325,10 +325,13 @@ jobs:
               --repo "${GITHUB_REPOSITORY}" \
               --json body,comments \
               | jq -r '
-                  ((.comments // []) | length) as $n |
-                  if $n > 0 then ((.comments // []) | last | .body // "")
-                  else (.body // "")
-                  end
+                  [
+                    ((.comments // []) | reverse | map(.body)),
+                    [(.body // "")]
+                  ]
+                  | flatten
+                  | map(select(test("<!--[[:space:]]*regression-sig:[[:space:]]*[^ >]+[[:space:]]*-->")))
+                  | .[0] // ""
                 ' 2>/dev/null \
               | sed -n 's/.*<!-- regression-sig: \([^ >]*\) -->.*/\1/p' \
               | head -n 1 || echo "")"
