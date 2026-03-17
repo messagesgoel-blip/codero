@@ -34,6 +34,14 @@ codero gate-check --profile fast
 codero gate-check --profile off
 ```
 
+### JSON mode behavior
+
+When using `--json` flag:
+- The canonical JSON report is emitted to stdout
+- The report is also persisted to file when `--report-path` or `CODERO_GATE_CHECK_REPORT_PATH` is set
+- Exit code is 0 for pass, 1 for fail (same as non-JSON mode)
+- Report-path precedence: `--report-path` > `CODERO_GATE_CHECK_REPORT_PATH` > default path
+
 ---
 
 ## Profiles
@@ -173,7 +181,7 @@ Set via `--profile` flag or `CODERO_GATES_PROFILE` env var. `fast` is accepted a
 | `CODERO_TOOL_GITLEAKS` | `gitleaks` | Path override for gitleaks |
 | `CODERO_TOOL_RUFF` | `ruff` | Path override for ruff |
 | `CODERO_TOOL_YAMLLINT` | `yamllint` | Path override for yamllint |
-| `CODERO_GATE_CHECK_REPORT_PATH` | `.codero/gate-check/last-report.json` | Path where `gate-check` writes the canonical JSON report (read by dashboard/TUI) |
+| `CODERO_GATE_CHECK_REPORT_PATH` | `.codero/gate-check/last-report.json` | Path where `gate-check` writes the canonical JSON report (read by dashboard/TUI). This applies to both CLI and JSON modes. Precedence: `--report-path` flag > this environment variable > default path. |
 
 ---
 
@@ -183,6 +191,8 @@ Set via `--profile` flag or `CODERO_GATES_PROFILE` env var. `fast` is accepted a
 |---|---|
 | `0` | Overall `pass` |
 | `1` | Overall `fail` or runtime error |
+
+Note: Both CLI and JSON modes follow the same exit code semantics. In JSON mode, the command still exits with code 1 when checks fail, even though the JSON payload is emitted to stdout.
 
 ---
 

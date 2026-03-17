@@ -19,6 +19,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/codero/codero/internal/dashboard"
+	"github.com/codero/codero/internal/gatecheck"
 	"github.com/codero/codero/internal/state"
 )
 
@@ -620,6 +621,23 @@ func TestGateChecks_WithReport(t *testing.T) {
 	// Report should not be null
 	if string(resp["report"]) == "null" {
 		t.Error("report should not be null when file exists")
+	}
+
+	var report gatecheck.Report
+	if err := json.Unmarshal(resp["report"], &report); err != nil {
+		t.Fatalf("unmarshal report: %v", err)
+	}
+	if report.Summary.OverallStatus != gatecheck.StatusPass {
+		t.Fatalf("overall_status = %q, want %q", report.Summary.OverallStatus, gatecheck.StatusPass)
+	}
+	if len(report.Checks) != 2 {
+		t.Fatalf("checks length = %d, want 2", len(report.Checks))
+	}
+	if report.Checks[0].ReasonCode != gatecheck.ReasonNotInScope || report.Checks[0].Reason != "no staged files" {
+		t.Fatalf("first check lost reason fields: got reason_code=%q reason=%q", report.Checks[0].ReasonCode, report.Checks[0].Reason)
+	}
+	if report.Checks[1].ReasonCode != gatecheck.ReasonNotInScope || report.Checks[1].Reason != "AI gate runs separately" {
+		t.Fatalf("second check lost reason fields: got reason_code=%q reason=%q", report.Checks[1].ReasonCode, report.Checks[1].Reason)
 	}
 }
 

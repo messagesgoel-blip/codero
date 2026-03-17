@@ -216,7 +216,7 @@ func FromCheckReport(r gatecheck.Report) CheckReportViewModel {
 			reason = string(c.ReasonCode)
 		}
 		if reason == "" && (c.Status == gatecheck.StatusSkip || c.Status == gatecheck.StatusDisabled) {
-			reason = "not_applicable"
+			reason = string(gatecheck.ReasonNotApplicable)
 		}
 		tool := c.ToolName
 		checks = append(checks, CheckViewModel{
