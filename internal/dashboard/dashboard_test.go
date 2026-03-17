@@ -19,6 +19,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/codero/codero/internal/dashboard"
+	"github.com/codero/codero/internal/gatecheck"
 	"github.com/codero/codero/internal/state"
 )
 
@@ -560,3 +561,90 @@ func TestSettingsStore_PersistFile(t *testing.T) {
 var _ = fmt.Sprintf
 var _ = sql.ErrNoRows
 var _ fs.FS = nil
+
+/* ══════════════════════ GATE CHECKS ═════════════════════════ */
+
+func TestGateChecks_NoReport(t *testing.T) {
+	h, _ := newTestHandler(t)
+	// No report file → expect 200 with report:null
+	t.Setenv("CODERO_GATE_CHECK_REPORT_PATH", filepath.Join(t.TempDir(), "nonexistent.json"))
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/gate-checks", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]json.RawMessage
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if string(resp["report"]) != "null" {
+		t.Errorf("expected report:null when no file, got %s", resp["report"])
+	}
+	if _, ok := resp["message"]; !ok {
+		t.Error("expected 'message' field when no report")
+	}
+}
+
+func TestGateChecks_WithReport(t *testing.T) {
+	h, _ := newTestHandler(t)
+
+	// Write a minimal gate-check report JSON to a temp file.
+	dir := t.TempDir()
+	reportPath := filepath.Join(dir, "last-report.json")
+	sampleReport := `{
+"summary": {"overall_status":"pass","passed":1,"failed":0,"skipped":2,"infra_bypassed":0,"disabled":3,"total":6,"required_failed":0,"required_disabled":0,"profile":"portable","schema_version":"1"},
+"checks": [
+{"id":"file-size","name":"File size limit","group":"format","required":true,"enabled":true,"status":"skip","reason":"no staged files","reason_code":"not_in_scope","duration_ms":0},
+{"id":"ai-gate","name":"AI review gate","group":"ai","required":false,"enabled":false,"status":"disabled","reason_code":"not_in_scope","reason":"AI gate runs separately","duration_ms":0}
+],
+"run_at":"2025-01-01T00:00:00Z"
+}`
+	if err := os.WriteFile(reportPath, []byte(sampleReport), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("CODERO_GATE_CHECK_REPORT_PATH", reportPath)
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/gate-checks", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]json.RawMessage
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if _, ok := resp["report"]; !ok {
+		t.Error("expected 'report' field in response")
+	}
+	if _, ok := resp["generated_at"]; !ok {
+		t.Error("expected 'generated_at' field in response")
+	}
+	// Report should not be null
+	if string(resp["report"]) == "null" {
+		t.Error("report should not be null when file exists")
+	}
+
+	var report gatecheck.Report
+	if err := json.Unmarshal(resp["report"], &report); err != nil {
+		t.Fatalf("unmarshal report: %v", err)
+	}
+	if report.Summary.OverallStatus != gatecheck.StatusPass {
+		t.Fatalf("overall_status = %q, want %q", report.Summary.OverallStatus, gatecheck.StatusPass)
+	}
+	if len(report.Checks) != 2 {
+		t.Fatalf("checks length = %d, want 2", len(report.Checks))
+	}
+	if report.Checks[0].ReasonCode != gatecheck.ReasonNotInScope || report.Checks[0].Reason != "no staged files" {
+		t.Fatalf("first check lost reason fields: got reason_code=%q reason=%q", report.Checks[0].ReasonCode, report.Checks[0].Reason)
+	}
+	if report.Checks[1].ReasonCode != gatecheck.ReasonNotInScope || report.Checks[1].Reason != "AI gate runs separately" {
+		t.Fatalf("second check lost reason fields: got reason_code=%q reason=%q", report.Checks[1].ReasonCode, report.Checks[1].Reason)
+	}
+}
+
+func TestGateChecks_MethodNotAllowed(t *testing.T) {
+	h, _ := newTestHandler(t)
+	rec := doRequest(t, h, http.MethodPost, "/api/v1/dashboard/gate-checks", nil)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("want 405, got %d", rec.Code)
+	}
+}

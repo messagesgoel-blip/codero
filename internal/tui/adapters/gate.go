@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/codero/codero/internal/gate"
+	"github.com/codero/codero/internal/gatecheck"
 )
 
 // GateViewModel is the display-ready model for the gate progress pane.
@@ -156,5 +157,92 @@ func staticPipelineRows() []PipelineRow {
 	return []PipelineRow{
 		{Name: "gitleaks", Status: "pending", Note: "local · non-authoritative"},
 		{Name: "semgrep", Status: "pending", Note: "local · non-authoritative"},
+	}
+}
+
+// CheckViewModel is the display-ready model for a single gate check row.
+type CheckViewModel struct {
+	ID       string
+	Name     string
+	Group    string
+	Status   string
+	Required bool
+	Enabled  bool
+	Reason   string
+	Tool     string
+	DurMS    int64
+}
+
+// CheckSummaryViewModel holds the aggregated counters from a gate-check run.
+type CheckSummaryViewModel struct {
+	Overall       string
+	Passed        int
+	Failed        int
+	Skipped       int
+	InfraBypassed int
+	Disabled      int
+	Total         int
+	Profile       string
+}
+
+// CheckReportViewModel is the top-level TUI model for a gate-check report.
+type CheckReportViewModel struct {
+	Summary CheckSummaryViewModel
+	Checks  []CheckViewModel
+}
+
+// StatusIcon returns an icon character for a check status string.
+func StatusIcon(status string) string {
+	switch status {
+	case "pass":
+		return "✓"
+	case "fail":
+		return "✗"
+	case "skip":
+		return "○"
+	case "disabled":
+		return "–"
+	default:
+		return "?"
+	}
+}
+
+// FromCheckReport converts a gatecheck.Report into a CheckReportViewModel.
+func FromCheckReport(r gatecheck.Report) CheckReportViewModel {
+	checks := make([]CheckViewModel, 0, len(r.Checks))
+	for _, c := range r.Checks {
+		reason := c.Reason
+		if reason == "" && c.ReasonCode != "" {
+			reason = string(c.ReasonCode)
+		}
+		if reason == "" && (c.Status == gatecheck.StatusSkip || c.Status == gatecheck.StatusDisabled) {
+			reason = string(gatecheck.ReasonNotApplicable)
+		}
+		tool := c.ToolName
+		checks = append(checks, CheckViewModel{
+			ID:       c.ID,
+			Name:     c.Name,
+			Group:    string(c.Group),
+			Status:   string(c.Status),
+			Required: c.Required,
+			Enabled:  c.Enabled,
+			Reason:   reason,
+			Tool:     tool,
+			DurMS:    c.DurationMS,
+		})
+	}
+	s := r.Summary
+	return CheckReportViewModel{
+		Summary: CheckSummaryViewModel{
+			Overall:       string(s.OverallStatus),
+			Passed:        s.Passed,
+			Failed:        s.Failed,
+			Skipped:       s.Skipped,
+			InfraBypassed: s.InfraBypassed,
+			Disabled:      s.Disabled,
+			Total:         s.Total,
+			Profile:       string(s.Profile),
+		},
+		Checks: checks,
 	}
 }
