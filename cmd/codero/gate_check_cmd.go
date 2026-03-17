@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"text/tabwriter"
 	"time"
 
@@ -183,26 +184,23 @@ func parseGateCheckProfile(raw string) (gatecheck.Profile, bool) {
 }
 
 // saveGateCheckReport writes report as JSON to path, creating parent dirs as needed.
-func saveGateCheckReport(report gatecheck.Report, path string) error {
-	if err := os.MkdirAll(osDir(path), 0o755); err != nil {
-		return err
+func saveGateCheckReport(report gatecheck.Report, path string) (err error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create report directory: %w", err)
 	}
 	f, err := os.Create(path) //nolint:gosec
 	if err != nil {
-		return err
+		return fmt.Errorf("create report file: %w", err)
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("close report file: %w", cerr)
+		}
+	}()
 	enc := json.NewEncoder(f)
 	enc.SetIndent("", "  ")
-	return enc.Encode(report)
-}
-
-// osDir returns the directory component of a file path.
-func osDir(path string) string {
-	for i := len(path) - 1; i >= 0; i-- {
-		if path[i] == '/' || path[i] == os.PathSeparator {
-			return path[:i]
-		}
+	if err = enc.Encode(report); err != nil {
+		return fmt.Errorf("encode report: %w", err)
 	}
-	return "."
+	return nil
 }

@@ -29,3 +29,26 @@ func TestFromCheckReport_ReasonVisibleForSkipDisabled(t *testing.T) {
 		t.Errorf("disabled check reason should be visible")
 	}
 }
+
+func TestFromCheckReport_FallsBackToCanonicalNotApplicableReason(t *testing.T) {
+	report := gatecheck.Report{
+		Summary: gatecheck.Summary{SchemaVersion: gatecheck.SchemaVersion},
+		Checks: []gatecheck.CheckResult{
+			{ID: "skip-check", Status: gatecheck.StatusSkip},
+			{ID: "disabled-check", Status: gatecheck.StatusDisabled},
+		},
+		RunAt: time.Now().UTC(),
+	}
+
+	vm := adapters.FromCheckReport(report)
+	if len(vm.Checks) != 2 {
+		t.Fatalf("expected 2 checks, got %d", len(vm.Checks))
+	}
+
+	want := string(gatecheck.ReasonNotApplicable)
+	for i, check := range vm.Checks {
+		if check.Reason != want {
+			t.Fatalf("check[%d] reason = %q, want %q", i, check.Reason, want)
+		}
+	}
+}
