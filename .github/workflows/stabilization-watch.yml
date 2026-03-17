@@ -244,22 +244,22 @@ jobs:
 
           echo "Recovery confirmed: posting resolution comment and closing issue #${EXISTING}"
 
-          RECOVERY_BODY="$(cat <<RECOVERY
-          ## Stabilization Recovered
+          RECOVERY_BODY="$(cat <<-RECOVERY
+          	## Stabilization Recovered
 
-          **Resolved at:** ${triage_at}
-          **Run:** [${GITHUB_RUN_ID}](${RUN_URL})
-          **Trigger:** \`${GITHUB_EVENT_NAME}\`
+          	**Resolved at:** ${triage_at}
+          	**Run:** [${GITHUB_RUN_ID}](${RUN_URL})
+          	**Trigger:** \`${GITHUB_EVENT_NAME}\`
 
-          | Category | Count |
-          |---|---:|
-          | NEW_FAIL | ${new_fail_count} |
-          | MISSING_FROM_CURRENT | ${missing_count} |
-          | NEW_SKIP | ${new_skip_count} |
-          | RECOVERED | ${recovered_count} |
-          | UNCHANGED | ${unchanged_count} |
+          	| Category | Count |
+          	|---|---:|
+          	| NEW_FAIL | ${new_fail_count} |
+          	| MISSING_FROM_CURRENT | ${missing_count} |
+          	| NEW_SKIP | ${new_skip_count} |
+          	| RECOVERED | ${recovered_count} |
+          	| UNCHANGED | ${unchanged_count} |
 
-          > Auto-closed by stabilization-watch run \`${GITHUB_RUN_ID}\` — \`${cur_ver}\` is now regression-free.
+          	> Auto-closed by stabilization-watch run \`${GITHUB_RUN_ID}\` — \`${cur_ver}\` is now regression-free.
           RECOVERY
           )"
 
@@ -338,30 +338,30 @@ jobs:
               exit 0
             fi
 
-            COMMENT_BODY="$(cat <<COMMENT
-          ## ${cur_ver} Stabilization Regression -- Update
+            COMMENT_BODY="$(cat <<-COMMENT
+          	## ${cur_ver} Stabilization Regression -- Update
 
-          **Detected at:** ${triage_at}
-          **Run:** [${GITHUB_RUN_ID}](${RUN_URL})
-          **Trigger:** \`${GITHUB_EVENT_NAME}\`
-          **NEW_FAILs:** ${new_fail_count}
-          **MISSING_FROM_CURRENT:** ${missing_count}
-          **Regression IDs:** ${regression_ids}
+          	**Detected at:** ${triage_at}
+          	**Run:** [${GITHUB_RUN_ID}](${RUN_URL})
+          	**Trigger:** \`${GITHUB_EVENT_NAME}\`
+          	**NEW_FAILs:** ${new_fail_count}
+          	**MISSING_FROM_CURRENT:** ${missing_count}
+          	**Regression IDs:** ${regression_ids}
 
-          ### Regression Checks
+          	### Regression Checks
 
-          | ID | Group | Name | Category | Baseline | Current | Persistent |
-          |---|---|---|---|---|---|---|
-          ${FAILING_TABLE}
+          	| ID | Group | Name | Category | Baseline | Current | Persistent |
+          	|---|---|---|---|---|---|---|
+          	${FAILING_TABLE}
 
-          ### Next steps
+          	### Next steps
 
-          1. Review the [workflow run](${RUN_URL}) artifacts (\`triage.json\`, \`triage-human.txt\`).
-          2. Consult the [stabilization runbook](${RUNBOOK_URL}) for backout criteria.
-          3. If two consecutive runs show the same NEW_FAIL/MISSING_FROM_CURRENT -- execute rollback.
+          	1. Review the [workflow run](${RUN_URL}) artifacts (\`triage.json\`, \`triage-human.txt\`).
+          	2. Consult the [stabilization runbook](${RUNBOOK_URL}) for backout criteria.
+          	3. If two consecutive runs show the same NEW_FAIL/MISSING_FROM_CURRENT -- execute rollback.
 
-          <!-- regression-sig: ${regression_sig} -->
-          > Auto-updated by stabilization-watch run \`${GITHUB_RUN_ID}\`.
+          	<!-- regression-sig: ${regression_sig} -->
+          	> Auto-updated by stabilization-watch run \`${GITHUB_RUN_ID}\`.
           COMMENT
             )"
             echo "Adding comment to existing issue #${EXISTING} (sig: ${regression_sig})"
@@ -369,30 +369,30 @@ jobs:
               --repo "${GITHUB_REPOSITORY}" \
               --body "${COMMENT_BODY}"
           else
-            ISSUE_BODY="$(cat <<ISSUE
-          ## ${cur_ver} Stabilization Regression Detected
+            ISSUE_BODY="$(cat <<-ISSUE
+          	## ${cur_ver} Stabilization Regression Detected
 
-          **First seen:** ${triage_at}
-          **Run:** [${GITHUB_RUN_ID}](${RUN_URL})
-          **Trigger:** \`${GITHUB_EVENT_NAME}\`
-          **NEW_FAILs:** ${new_fail_count}
-          **MISSING_FROM_CURRENT:** ${missing_count}
-          **Regression IDs:** ${regression_ids}
+          	**First seen:** ${triage_at}
+          	**Run:** [${GITHUB_RUN_ID}](${RUN_URL})
+          	**Trigger:** \`${GITHUB_EVENT_NAME}\`
+          	**NEW_FAILs:** ${new_fail_count}
+          	**MISSING_FROM_CURRENT:** ${missing_count}
+          	**Regression IDs:** ${regression_ids}
 
-          ### Regression Checks
+          	### Regression Checks
 
-          | ID | Group | Name | Category | Baseline | Current | Persistent |
-          |---|---|---|---|---|---|---|
-          ${FAILING_TABLE}
+          	| ID | Group | Name | Category | Baseline | Current | Persistent |
+          	|---|---|---|---|---|---|---|
+          	${FAILING_TABLE}
 
-          ### Next steps
+          	### Next steps
 
-          1. Review the [workflow run](${RUN_URL}) artifacts (\`triage.json\`, \`triage-human.txt\`).
-          2. Consult the [stabilization runbook](${RUNBOOK_URL}) for backout criteria.
-          3. If two consecutive runs show the same NEW_FAIL/MISSING_FROM_CURRENT -- execute rollback.
+          	1. Review the [workflow run](${RUN_URL}) artifacts (\`triage.json\`, \`triage-human.txt\`).
+          	2. Consult the [stabilization runbook](${RUNBOOK_URL}) for backout criteria.
+          	3. If two consecutive runs show the same NEW_FAIL/MISSING_FROM_CURRENT -- execute rollback.
 
-          <!-- regression-sig: ${regression_sig} -->
-          > Auto-opened by stabilization-watch run \`${GITHUB_RUN_ID}\`.
+          	<!-- regression-sig: ${regression_sig} -->
+          	> Auto-opened by stabilization-watch run \`${GITHUB_RUN_ID}\`.
           ISSUE
             )"
             echo "Creating new regression issue (sig: ${regression_sig})"
