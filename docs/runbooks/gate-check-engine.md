@@ -242,7 +242,7 @@ codero gate-check --json
 ```
 
 `--report-path` takes precedence over `CODERO_GATE_CHECK_REPORT_PATH`, and both
-forms write the same canonical JSON payload whether or not `--json` is used.
+forms write the same canonical JSON payload regardless of `--json` usage.
 
 The dashboard serves the raw canonical JSON wrapped in:
 ```json
