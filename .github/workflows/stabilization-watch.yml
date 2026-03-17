@@ -2,22 +2,22 @@ name: v1.2.1 Stabilization Watch
 
 # 48-hour operational watch for v1.2.1 post-promotion.
 # Runs release-status on both v1.2.1 (new) and v1.2.0 (baseline) every 6 hours,
-# computes a status delta, and fails only on new FAILs in v1.2.1.
+# runs stabilization-triage for self-classifying regression detection, and
+# fails only on NEW_FAILs.  Regressions trigger an automated GitHub Issue.
 #
-# Checks aggregated per run:
-#   v1.2.1  prove (C-001..C-022) + verify (V-001..V-010) + validate (RR-001) + drift
-#   v1.2.0  same set — used as regression baseline
-#
-# Failure policy:
-#   NEW_FAIL  — check is FAIL in v1.2.1 but was PASS/SKIP in v1.2.0 → workflow fails
-#   DEGRADED  — check is SKIP in v1.2.1, was PASS in v1.2.0 → recorded, not a failure
-#   STABLE    — no change → workflow passes
+# Triage categories (stabilization-triage.sh):
+#   NEW_FAIL    — check is FAIL in v1.2.1 but PASS/SKIP in v1.2.0 → workflow fails + issue opened
+#   NEW_SKIP    — check is SKIP in v1.2.1, was PASS in v1.2.0 → warning, workflow passes
+#   RECOVERED   — check is PASS/SKIP in v1.2.1, was FAIL in v1.2.0 → improvement
+#   UNCHANGED   — no status change
 #
 # Artifacts uploaded per run:
 #   stabilization-v121.json   — v1.2.1 release-status JSON
 #   stabilization-v120.json   — v1.2.0 baseline release-status JSON
-#   stabilization-diff.md     — human-readable comparison
-#   stabilization-diff.json   — machine-readable delta
+#   triage.json               — machine-readable triage output
+#   triage-human.txt          — human-readable triage summary
+#   stabilization-diff.md     — detailed check-level comparison (compare-release-status.sh)
+#   stabilization-diff.json   — machine-readable delta (compare-release-status.sh)
 
 on:
   schedule:
@@ -35,6 +35,11 @@ on:
         description: "Comparison baseline version (e.g. v1.2.0)"
         required: false
         default: "v1.2.0"
+
+permissions:
+  actions:  read
+  contents: read
+  issues:   write
 
 jobs:
   stabilization-watch:
@@ -62,8 +67,10 @@ jobs:
         run: |
           chmod +x scripts/automation/release-status.sh
           chmod +x scripts/automation/compare-release-status.sh
+          chmod +x scripts/automation/stabilization-triage.sh
 
-      # Run v1.2.1 (new) release-status
+      # ── Collect release-status reports ──────────────────────────────────────
+
       - name: Run release-status for new version (${{ env.NEW_VERSION }})
         run: |
           mkdir -p ci-artifacts
@@ -77,7 +84,6 @@ jobs:
           echo "--- Human Summary (new) ---"
           cat ci-artifacts/stabilization-v121-human.txt
 
-      # Run v1.2.0 (baseline) release-status
       - name: Run release-status for baseline (${{ env.BASELINE_VERSION }})
         run: |
           CODERO_BIN=./bin/codero \
@@ -90,8 +96,66 @@ jobs:
           echo "--- Human Summary (baseline) ---"
           cat ci-artifacts/stabilization-v120-human.txt
 
-      # Compare the two reports, emit markdown diff and JSON delta
-      - name: Compare new vs baseline
+      - name: Download previous stabilization report (best effort)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PREV_RUN_ID="$(gh run list \
+            --workflow "${GITHUB_WORKFLOW}" \
+            --branch "${GITHUB_REF_NAME}" \
+            --limit 20 \
+            --json databaseId,status,conclusion \
+            | jq -r --arg cur "${GITHUB_RUN_ID}" '
+                .[]
+                | select(.status == "completed" and (.databaseId | tostring) != $cur)
+                | .databaseId
+              ' \
+            | head -n 1)"
+
+          if [ -z "${PREV_RUN_ID}" ]; then
+            echo "No previous completed stabilization-watch run found."
+            exit 0
+          fi
+
+          mkdir -p ci-artifacts/previous
+          if ! gh run download "${PREV_RUN_ID}" --dir ci-artifacts/previous; then
+            echo "Unable to download artifacts from run ${PREV_RUN_ID}; continuing without --previous."
+            exit 0
+          fi
+
+          PREV_STATUS_PATH="$(find ci-artifacts/previous -type f -name stabilization-v121.json | head -n 1 || true)"
+          if [ -n "${PREV_STATUS_PATH}" ]; then
+            cp "${PREV_STATUS_PATH}" ci-artifacts/previous-v121.json
+            echo "Loaded previous v1.2.1 report: ${PREV_STATUS_PATH}"
+          else
+            echo "Previous run ${PREV_RUN_ID} had no stabilization-v121.json artifact; continuing without --previous."
+          fi
+
+      # ── Triage (COD-045) ────────────────────────────────────────────────────
+      # Classifies checks as NEW_FAIL / NEW_SKIP / RECOVERED / UNCHANGED.
+      # Human report → stderr (triage-human.txt); machine JSON → stdout (triage.json).
+      # || true: let the Assert step own the exit code so artifacts are always uploaded.
+
+      - name: Run stabilization triage
+        run: |
+          PREVIOUS_ARGS=()
+          if [ -f ci-artifacts/previous-v121.json ]; then
+            PREVIOUS_ARGS=(--previous ci-artifacts/previous-v121.json)
+          fi
+
+          bash scripts/automation/stabilization-triage.sh \
+            --current  ci-artifacts/stabilization-v121.json \
+            --baseline ci-artifacts/stabilization-v120.json \
+            "${PREVIOUS_ARGS[@]}" \
+            --output   both \
+            2>ci-artifacts/triage-human.txt \
+          | tee ci-artifacts/triage.json || true
+          echo "--- Triage Summary ---"
+          cat ci-artifacts/triage-human.txt
+
+      # ── Detailed diff (supplementary) ───────────────────────────────────────
+
+      - name: Compare new vs baseline (detailed diff)
         run: |
           bash scripts/automation/compare-release-status.sh \
             --new      ci-artifacts/stabilization-v121.json \
@@ -99,67 +163,183 @@ jobs:
             --output   both \
           > ci-artifacts/stabilization-diff.md 2>ci-artifacts/compare-human.txt || true
 
-          # Also emit pure JSON delta
           bash scripts/automation/compare-release-status.sh \
             --new      ci-artifacts/stabilization-v121.json \
             --baseline ci-artifacts/stabilization-v120.json \
             --output   json \
           > ci-artifacts/stabilization-diff.json 2>/dev/null || true
 
-          echo "--- Diff Summary ---"
-          cat ci-artifacts/compare-human.txt
-          echo ""
-          cat ci-artifacts/stabilization-diff.md
+      # ── Regression assertion ─────────────────────────────────────────────────
 
-      # Assert: no new FAILs in new version vs baseline
       - name: Assert regression-free
         run: |
-          # v1.2.1 must itself have no FAILs
-          new_overall="$(jq -r '.overall_status' ci-artifacts/stabilization-v121.json)"
-          new_fail="$(   jq -r '.totals.fail'    ci-artifacts/stabilization-v121.json)"
-
-          if [ "$new_overall" != "PASS" ]; then
-            failing="$(jq -r '[.checks[] | select(.status == "fail") | "\(.id):\(.name)"] | join(", ")' \
-              ci-artifacts/stabilization-v121.json)"
-            echo "::error::${NEW_VERSION} release-status FAILED: ${new_fail} check(s): ${failing}"
+          if [ ! -f ci-artifacts/triage.json ]; then
+            echo "::error::triage.json not produced — triage step failed"
             exit 1
           fi
 
-          # Delta must show regression_free=true
-          if [ -f ci-artifacts/stabilization-diff.json ]; then
-            regression_free="$(jq -r '.regression_free' ci-artifacts/stabilization-diff.json)"
-            new_fails_list="$( jq -r '.new_fails | join(", ")' ci-artifacts/stabilization-diff.json)"
-            if [ "$regression_free" != "true" ]; then
-              echo "::error::Regression detected in ${NEW_VERSION} vs ${BASELINE_VERSION}: ${new_fails_list}"
-              exit 1
-            fi
+          regression_free="$(jq -r '.regression_free' ci-artifacts/triage.json)"
+          new_fail_count="$( jq -r '.totals.new_fail' ci-artifacts/triage.json)"
+          missing_count="$(  jq -r '.totals.missing_from_current // 0' ci-artifacts/triage.json)"
+          new_skip_count="$( jq -r '.totals.new_skip' ci-artifacts/triage.json)"
+          recovered="$(      jq -r '.totals.recovered' ci-artifacts/triage.json)"
+          unchanged="$(      jq -r '.unchanged_count'  ci-artifacts/triage.json)"
+
+          if [ "${new_skip_count}" -gt 0 ]; then
+            new_skips="$(jq -r '.new_skips | join(", ")' ci-artifacts/triage.json)"
+            echo "::warning::NEW_SKIP detected (env drift, not a failure): ${new_skips}"
           fi
 
-          pass="$(   jq -r '.totals.pass'  ci-artifacts/stabilization-v121.json)"
-          fail="$(   jq -r '.totals.fail'  ci-artifacts/stabilization-v121.json)"
-          skip="$(   jq -r '.totals.skip'  ci-artifacts/stabilization-v121.json)"
-          echo "overall=${new_overall}  pass=${pass}  fail=${fail}  skip=${skip}  regression_free=true"
+          if [ "${regression_free}" != "true" ]; then
+            regression_ids="$(jq -r '((.new_fails // []) + (.missing_from_current // [])) | join(", ")' ci-artifacts/triage.json)"
+            echo "::error::Regression detected in ${NEW_VERSION}: NEW_FAIL=${new_fail_count}, MISSING_FROM_CURRENT=${missing_count}; ids=${regression_ids}"
+            exit 1
+          fi
 
-      # Write GitHub Actions job summary
+          echo "regression_free=true  new_fail=${new_fail_count}  missing=${missing_count}  new_skip=${new_skip_count}  recovered=${recovered}  unchanged=${unchanged}"
+
+      # ── Escalation (COD-046) ─────────────────────────────────────────────────
+      # Runs only when a previous step failed (i.e. regressions were detected).
+      # Creates a new GitHub Issue or adds a comment to an existing open regression issue.
+
+      - name: Escalate regression to GitHub Issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -f ci-artifacts/triage.json ]; then
+            echo "triage.json missing — skipping issue escalation"
+            exit 0
+          fi
+
+          regression_free="$(jq -r '.regression_free' ci-artifacts/triage.json)"
+          if [ "${regression_free}" = "true" ]; then
+            echo "No regression — skipping issue escalation"
+            exit 0
+          fi
+
+          regression_ids="$( jq -r '((.new_fails // []) + (.missing_from_current // [])) | join(", ")' ci-artifacts/triage.json)"
+          cur_ver="$(        jq -r '.current_version'          ci-artifacts/triage.json)"
+          new_fail_count="$( jq -r '.totals.new_fail'          ci-artifacts/triage.json)"
+          missing_count="$(  jq -r '.totals.missing_from_current // 0' ci-artifacts/triage.json)"
+          triage_at="$(      jq -r '.triage_at'                ci-artifacts/triage.json)"
+
+          RUNBOOK_URL="https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/runbooks/v1.2.1-stabilization-watch.md"
+          RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          FAILING_TABLE="$(jq -r '
+            .changes[]
+            | select(.category == "NEW_FAIL" or .category == "MISSING_FROM_CURRENT")
+            | "| \(.id) | \(.group) | \(.name) | \(.baseline_status) | \(.current_status) | \(if .persistent then "yes" else "no" end) |"
+          ' ci-artifacts/triage.json)"
+
+          ISSUE_BODY="$(cat <<EOF
+          ## ${cur_ver} Stabilization Regression Detected
+
+          **First seen:** ${triage_at}
+          **Run:** [${GITHUB_RUN_ID}](${RUN_URL})
+          **Trigger:** \`${GITHUB_EVENT_NAME}\`
+          **NEW_FAILs:** ${new_fail_count}
+          **MISSING_FROM_CURRENT:** ${missing_count}
+          **Regression IDs:** ${regression_ids}
+
+          ### Regression Checks
+
+          | ID | Group | Name | Baseline | Current | Persistent |
+          |---|---|---|---|---|---|
+          ${FAILING_TABLE}
+
+          ### Next steps
+
+          1. Review the [workflow run](${RUN_URL}) artifacts (\`triage.json\`, \`triage-human.txt\`).
+          2. Consult the [stabilization runbook](${RUNBOOK_URL}) for backout criteria.
+          3. If two consecutive runs show the same NEW_FAIL/MISSING_FROM_CURRENT — execute rollback.
+
+          > Auto-opened by stabilization-watch run \`${GITHUB_RUN_ID}\`.
+          EOF
+          )"
+
+          ISSUE_TITLE="${cur_ver} Stabilization Regression"
+
+          # Find existing open regression issue for this version
+          EXISTING="$(gh issue list \
+            --repo "${GITHUB_REPOSITORY}" \
+            --state open \
+            --search "${ISSUE_TITLE}" \
+            --json number \
+            --jq '.[0].number // empty')"
+
+          if [ -n "${EXISTING}" ]; then
+            echo "Adding comment to existing issue #${EXISTING}"
+            gh issue comment "${EXISTING}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --body "${ISSUE_BODY}"
+          else
+            echo "Creating new regression issue"
+            gh issue create \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "${ISSUE_TITLE}" \
+              --body "${ISSUE_BODY}"
+          fi
+
+      # ── Job summary (COD-046) ───────────────────────────────────────────────
+
       - name: Write job summary
         if: always()
         run: |
           {
             echo "# v1.2.1 Stabilization Watch"
             echo ""
-            echo "**Run:** \`${GITHUB_RUN_ID}\`  **Trigger:** \`${{ github.event_name }}\`"
+            echo "**Run:** \`${GITHUB_RUN_ID}\`  **Trigger:** \`${{ github.event_name }}\`  **Version:** \`${NEW_VERSION}\`"
             echo ""
-            if [ -f ci-artifacts/stabilization-diff.json ]; then
-              rf="$(  jq -r '.regression_free'  ci-artifacts/stabilization-diff.json)"
-              nf="$(  jq -r '.new_fails | length' ci-artifacts/stabilization-diff.json)"
-              chg="$( jq -r '.changed_count'    ci-artifacts/stabilization-diff.json)"
-              echo "**Regression-free:** ${rf}  **New fails:** ${nf}  **Status changes:** ${chg}"
+
+            if [ -f ci-artifacts/triage.json ]; then
+              rf="$(        jq -r '.regression_free'  ci-artifacts/triage.json)"
+              new_fail="$(  jq -r '.totals.new_fail'  ci-artifacts/triage.json)"
+              missing="$(   jq -r '.totals.missing_from_current // 0' ci-artifacts/triage.json)"
+              new_skip="$(  jq -r '.totals.new_skip'  ci-artifacts/triage.json)"
+              recovered="$( jq -r '.totals.recovered' ci-artifacts/triage.json)"
+              unchanged="$( jq -r '.unchanged_count'  ci-artifacts/triage.json)"
+
+              if [ "${rf}" = "true" ]; then
+                echo "## Triage Result: REGRESSION-FREE"
+              else
+                echo "## Triage Result: REGRESSION DETECTED"
+              fi
               echo ""
-              cat ci-artifacts/stabilization-diff.md
+              echo "| Category  | Count |"
+              echo "|---|---:|"
+              echo "| NEW_FAIL  | ${new_fail} |"
+              echo "| MISSING_FROM_CURRENT | ${missing} |"
+              echo "| NEW_SKIP  | ${new_skip} |"
+              echo "| RECOVERED | ${recovered} |"
+              echo "| UNCHANGED | ${unchanged} |"
+              echo ""
+
+              if [ "${new_fail}" -gt 0 ] || [ "${missing}" -gt 0 ]; then
+                echo "### Regression Checks"
+                echo ""
+                echo "| ID | Group | Name | Category | Persistent |"
+                echo "|---|---|---|---|---|"
+                jq -r '.changes[] | select(.category == "NEW_FAIL" or .category == "MISSING_FROM_CURRENT") | "| \(.id) | \(.group) | \(.name) | \(.category) | \(if .persistent then "yes" else "no" end) |"' \
+                  ci-artifacts/triage.json
+                echo ""
+                echo "> See runbook: \`docs/runbooks/v1.2.1-stabilization-watch.md\`"
+              fi
+
+              if [ "${new_skip}" -gt 0 ]; then
+                echo ""
+                echo "### New Skips (warnings)"
+                echo ""
+                jq -r '.changes[] | select(.category == "NEW_SKIP") | "- \(.id) (\(.group)/\(.name))"' \
+                  ci-artifacts/triage.json
+              fi
             else
-              echo "Diff not produced — compare step may have failed."
+              echo "Triage output not available — triage step may have failed."
             fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      # ── Artifact upload ─────────────────────────────────────────────────────
 
       - name: Upload stabilization artifacts
         if: always()
@@ -171,6 +351,8 @@ jobs:
             ci-artifacts/stabilization-v121-human.txt
             ci-artifacts/stabilization-v120.json
             ci-artifacts/stabilization-v120-human.txt
+            ci-artifacts/triage.json
+            ci-artifacts/triage-human.txt
             ci-artifacts/stabilization-diff.md
             ci-artifacts/stabilization-diff.json
           retention-days: 7
