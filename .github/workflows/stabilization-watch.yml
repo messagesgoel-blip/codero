@@ -37,6 +37,7 @@ on:
         default: "v1.2.0"
 
 permissions:
+  actions:  read
   contents: read
   issues:   write
 
@@ -95,6 +96,41 @@ jobs:
           echo "--- Human Summary (baseline) ---"
           cat ci-artifacts/stabilization-v120-human.txt
 
+      - name: Download previous stabilization report (best effort)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PREV_RUN_ID="$(gh run list \
+            --workflow "${GITHUB_WORKFLOW}" \
+            --branch "${GITHUB_REF_NAME}" \
+            --limit 20 \
+            --json databaseId,status,conclusion \
+            | jq -r --arg cur "${GITHUB_RUN_ID}" '
+                .[]
+                | select(.status == "completed" and .conclusion == "success" and (.databaseId | tostring) != $cur)
+                | .databaseId
+              ' \
+            | head -n 1)"
+
+          if [ -z "${PREV_RUN_ID}" ]; then
+            echo "No previous successful stabilization-watch run found."
+            exit 0
+          fi
+
+          mkdir -p ci-artifacts/previous
+          if ! gh run download "${PREV_RUN_ID}" --dir ci-artifacts/previous; then
+            echo "Unable to download artifacts from run ${PREV_RUN_ID}; continuing without --previous."
+            exit 0
+          fi
+
+          PREV_STATUS_PATH="$(find ci-artifacts/previous -type f -name stabilization-v121.json | head -n 1 || true)"
+          if [ -n "${PREV_STATUS_PATH}" ]; then
+            cp "${PREV_STATUS_PATH}" ci-artifacts/previous-v121.json
+            echo "Loaded previous v1.2.1 report: ${PREV_STATUS_PATH}"
+          else
+            echo "Previous run ${PREV_RUN_ID} had no stabilization-v121.json artifact; continuing without --previous."
+          fi
+
       # ── Triage (COD-045) ────────────────────────────────────────────────────
       # Classifies checks as NEW_FAIL / NEW_SKIP / RECOVERED / UNCHANGED.
       # Human report → stderr (triage-human.txt); machine JSON → stdout (triage.json).
@@ -102,9 +138,15 @@ jobs:
 
       - name: Run stabilization triage
         run: |
+          PREVIOUS_ARGS=()
+          if [ -f ci-artifacts/previous-v121.json ]; then
+            PREVIOUS_ARGS=(--previous ci-artifacts/previous-v121.json)
+          fi
+
           bash scripts/automation/stabilization-triage.sh \
             --current  ci-artifacts/stabilization-v121.json \
             --baseline ci-artifacts/stabilization-v120.json \
+            "${PREVIOUS_ARGS[@]}" \
             --output   both \
             2>ci-artifacts/triage-human.txt \
           | tee ci-artifacts/triage.json || true
@@ -189,7 +231,8 @@ jobs:
             | "| \(.id) | \(.group) | \(.name) | \(.baseline_status) | \(.current_status) | \(if .persistent then "yes" else "no" end) |"
           ' ci-artifacts/triage.json)"
 
-          ISSUE_BODY="## ${cur_ver} Stabilization Regression Detected
+          ISSUE_BODY="$(cat <<EOF
+## ${cur_ver} Stabilization Regression Detected
 
 **First seen:** ${triage_at}
 **Run:** [${GITHUB_RUN_ID}](${RUN_URL})
@@ -208,7 +251,9 @@ ${FAILING_TABLE}
 2. Consult the [stabilization runbook](${RUNBOOK_URL}) for backout criteria.
 3. If two consecutive runs show the same NEW_FAIL — execute rollback.
 
-> Auto-opened by stabilization-watch run \`${GITHUB_RUN_ID}\`."
+> Auto-opened by stabilization-watch run \`${GITHUB_RUN_ID}\`.
+EOF
+)"
 
           ISSUE_TITLE="${cur_ver} Stabilization Regression"
 

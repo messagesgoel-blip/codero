@@ -252,16 +252,11 @@ for c in d['changes']:
 
 # ── emit output ───────────────────────────────────────────────────────────────
 case "${OUTPUT_FORMAT}" in
-    md)   emit_md ;;
+    md)   emit_md >&2 ;;
     json) echo "${TRIAGE_JSON}" ;;
     both)
-        emit_md
-        echo ""
-        echo "## Raw Triage JSON"
-        echo ""
-        echo '```json'
+        emit_md >&2
         echo "${TRIAGE_JSON}"
-        echo '```'
         ;;
     *) echo "[ERROR] Unknown --output format: ${OUTPUT_FORMAT} (use md|json|both)" >&2; exit 2 ;;
 esac
