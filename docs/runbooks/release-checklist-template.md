@@ -34,6 +34,10 @@ go test -count=1 ./...
 # Race test pass
 go test -race ./...
 
+# E2E release gate — must pass before tagging (see docs/ops/e2e-release-gate.md)
+go test -tags=e2e -count=1 ./tests/e2e/ -v -timeout 60s
+go test -tags=e2e -race   ./tests/e2e/ -v -timeout 60s
+
 # Vet
 go vet ./...
 
@@ -47,12 +51,14 @@ go build ./...
 | 1.2 | On correct branch | feat/COD-XXX or release/vX.Y.Z | ☐ PASS / ☐ FAIL | |
 | 1.3 | `go test -count=1 ./...` | All packages PASS | ☐ PASS / ☐ FAIL | |
 | 1.4 | `go test -race ./...` | 0 races detected | ☐ PASS / ☐ FAIL | |
-| 1.5 | `go vet ./...` | 0 findings | ☐ PASS / ☐ FAIL | |
-| 1.6 | `go build ./...` | Exit 0 | ☐ PASS / ☐ FAIL | |
-| 1.7 | `semgrep` clean | 0 blocking findings | ☐ PASS / ☐ FAIL | |
-| 1.8 | `gitleaks` scan | 0 secrets found | ☐ PASS / ☐ FAIL | |
-| 1.9 | Changelog / PR description written | Linked issue, scope, rollback | ☐ DONE | |
-| 1.10 | Docs updated (runbooks, user manual) | Version refs accurate | ☐ DONE | |
+| 1.5 | E2E gate: `go test -tags=e2e -count=1 ./tests/e2e/ -v` | All 4 tests PASS | ☐ PASS / ☐ FAIL | |
+| 1.6 | E2E gate (race): `go test -tags=e2e -race ./tests/e2e/ -v` | All 4 tests PASS, 0 races | ☐ PASS / ☐ FAIL | |
+| 1.7 | `go vet ./...` | 0 findings | ☐ PASS / ☐ FAIL | |
+| 1.8 | `go build ./...` | Exit 0 | ☐ PASS / ☐ FAIL | |
+| 1.9 | `semgrep` clean | 0 blocking findings | ☐ PASS / ☐ FAIL | |
+| 1.10 | `gitleaks` scan | 0 secrets found | ☐ PASS / ☐ FAIL | |
+| 1.11 | Changelog / PR description written | Linked issue, scope, rollback | ☐ DONE | |
+| 1.12 | Docs updated (runbooks, user manual) | Version refs accurate | ☐ DONE | |
 
 ---
 
