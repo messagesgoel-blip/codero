@@ -45,6 +45,9 @@ jobs:
   stabilization-watch:
     name: Stabilization Watch (${{ github.event.inputs.new_version || 'v1.2.1' }} vs ${{ github.event.inputs.baseline_version || 'v1.2.0' }})
     runs-on: ubuntu-latest
+    concurrency:
+      group: stabilization-watch-${{ github.ref_name }}-${{ github.event.inputs.new_version || 'v1.2.1' }}
+      cancel-in-progress: false
 
     env:
       NEW_VERSION:      ${{ github.event.inputs.new_version      || 'v1.2.1' }}
@@ -374,6 +377,47 @@ jobs:
               --repo "${GITHUB_REPOSITORY}" \
               --body "${COMMENT_BODY}"
           else
+            EXISTING="$(gh issue list \
+              --repo "${GITHUB_REPOSITORY}" \
+              --state open \
+              --search "\"${ISSUE_TITLE}\" in:title" \
+              --json number \
+              --jq '.[0].number // empty')"
+
+            if [ -n "${EXISTING}" ]; then
+              echo "Another run already opened issue #${EXISTING}; adding regression update comment instead"
+              COMMENT_BODY="$(cat <<-COMMENT
+              	## ${cur_ver} Stabilization Regression -- Update
+
+              	**Detected at:** ${triage_at}
+              	**Run:** [${GITHUB_RUN_ID}](${RUN_URL})
+              	**Trigger:** \`${GITHUB_EVENT_NAME}\`
+              	**NEW_FAILs:** ${new_fail_count}
+              	**MISSING_FROM_CURRENT:** ${missing_count}
+              	**Regression IDs:** ${regression_ids}
+
+              	### Regression Checks
+
+              	| ID | Group | Name | Category | Baseline | Current | Persistent |
+              	|---|---|---|---|---|---|---|
+              	${FAILING_TABLE}
+
+              	### Next steps
+
+              	1. Review the [workflow run](${RUN_URL}) artifacts (\`triage.json\`, \`triage-human.txt\`).
+              	2. Consult the [stabilization runbook](${RUNBOOK_URL}) for backout criteria.
+              	3. If two consecutive runs show the same NEW_FAIL/MISSING_FROM_CURRENT -- execute rollback.
+
+              	<!-- regression-sig: ${regression_sig} -->
+              	> Auto-updated by stabilization-watch run \`${GITHUB_RUN_ID}\`.
+              COMMENT
+              )"
+              gh issue comment "${EXISTING}" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --body "${COMMENT_BODY}"
+              exit 0
+            fi
+
             ISSUE_BODY="$(cat <<-ISSUE
           	## ${cur_ver} Stabilization Regression Detected
 
