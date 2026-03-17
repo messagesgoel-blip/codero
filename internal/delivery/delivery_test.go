@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/codero/codero/internal/delivery"
@@ -254,5 +255,60 @@ func TestStream_CurrentSeq(t *testing.T) {
 	}
 	if seq1 != 1 {
 		t.Errorf("after 1 append: got seq %d, want 1", seq1)
+	}
+}
+
+// TestStream_Replay_ToleratesSeqGap proves Appendix G G-011: a crash between Redis
+// INCR and SQLite INSERT leaves a harmless seq gap. Replay must return all persisted
+// events in seq order without error, skipping the missing seq number.
+//
+// Scenario: seq 1 and 2 are appended normally; seq 3 is "claimed" by Redis INCR but
+// the SQLite INSERT never completes (crash). seq 4 is then appended normally.
+// Replay must yield events at seq {1, 2, 4} — the gap at 3 is silent and tolerated.
+func TestStream_Replay_ToleratesSeqGap(t *testing.T) {
+	stream, db, _ := setupStream(t)
+	ctx := context.Background()
+
+	// Insert events directly at seq 1, 2, 4 — bypassing Redis to simulate the
+	// post-crash state where seq 3 was claimed but never written to SQLite.
+	for _, seq := range []int64{1, 2, 4} {
+		ev := state.DeliveryEvent{
+			Seq:       seq,
+			Repo:      testRepo,
+			Branch:    testBranch,
+			HeadHash:  testHead,
+			EventType: "test",
+			Payload:   `{}`,
+			CreatedAt: time.Now().UTC(),
+		}
+		if err := state.AppendDeliveryEvent(db, ev); err != nil {
+			t.Fatalf("insert seq %d: %v", seq, err)
+		}
+	}
+
+	// Full replay must return exactly the 3 persisted events.
+	events, err := stream.Replay(ctx, testRepo, testBranch, 0)
+	if err != nil {
+		t.Fatalf("replay with gap: %v", err)
+	}
+	if len(events) != 3 {
+		t.Fatalf("expected 3 events (seq 1,2,4), got %d", len(events))
+	}
+	for i, want := range []int64{1, 2, 4} {
+		if events[i].Seq != want {
+			t.Errorf("event[%d] seq: got %d, want %d", i, events[i].Seq, want)
+		}
+	}
+
+	// Incremental replay: since seq=2 must return only seq=4 (gap at 3 does not cause error).
+	since2, err := stream.Replay(ctx, testRepo, testBranch, 2)
+	if err != nil {
+		t.Fatalf("replay since 2 with gap: %v", err)
+	}
+	if len(since2) != 1 {
+		t.Fatalf("replay since 2: expected 1 event, got %d", len(since2))
+	}
+	if since2[0].Seq != 4 {
+		t.Errorf("replay since 2: got seq %d, want 4", since2[0].Seq)
 	}
 }

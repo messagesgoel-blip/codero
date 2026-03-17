@@ -134,12 +134,13 @@ func TestBuildProveChecks_ContainsRequiredIDs(t *testing.T) {
 	}
 }
 
-// --- TODO checks must never silently PASS ---
+// --- Formerly-TODO drills must now be PASS (COD-032) ---
 
-// TestProveChecks_TODOsNeverPass asserts that all TODO-scaffolded checks carry status TODO,
-// not PASS.  This prevents coverage gaps from being accidentally marked green.
-func TestProveChecks_TODOsNeverPass(t *testing.T) {
-	todoIDs := []string{"C-019", "C-020", "C-021", "C-022"}
+// TestProveChecks_FormerTODODrillsNowPass verifies that C-019..C-022, which were
+// TODO scaffolds in COD-031, are now PASS after COD-032 implemented their drill
+// coverage. This prevents regression back to TODO status.
+func TestProveChecks_FormerTODODrillsNowPass(t *testing.T) {
+	nowPassIDs := []string{"C-019", "C-020", "C-021", "C-022"}
 	opts := proveOpts{
 		repoPath:    t.TempDir(),
 		fast:        true,
@@ -151,17 +152,17 @@ func TestProveChecks_TODOsNeverPass(t *testing.T) {
 	for _, c := range checks {
 		idx[c.ID] = c
 	}
-	for _, id := range todoIDs {
+	for _, id := range nowPassIDs {
 		c, ok := idx[id]
 		if !ok {
-			t.Errorf("TODO check %s missing from buildProveChecks", id)
+			t.Errorf("check %s missing from buildProveChecks", id)
 			continue
 		}
-		if c.Status != string(proveTODO) {
-			t.Errorf("check %s (%s) has status %q; want TODO", id, c.Name, c.Status)
+		if c.Status != string(provePass) {
+			t.Errorf("check %s (%s) has status %q; want PASS (COD-032 closed these drills)", id, c.Name, c.Status)
 		}
-		if !strings.Contains(c.Detail, "TODO(COD-031)") {
-			t.Errorf("check %s detail does not contain TODO(COD-031) marker: %q", id, c.Detail)
+		if strings.Contains(c.Detail, "TODO(COD-031)") {
+			t.Errorf("check %s still contains TODO(COD-031) marker after COD-032: %q", id, c.Detail)
 		}
 	}
 }
@@ -169,7 +170,11 @@ func TestProveChecks_TODOsNeverPass(t *testing.T) {
 // --- drill references must be PASS and reference C-003 ---
 
 func TestProveChecks_DrillRefsPassAndReferenceC003(t *testing.T) {
-	drillIDs := []string{"C-011", "C-012", "C-013", "C-014", "C-015", "C-016", "C-017", "C-018"}
+	// C-011..C-018 are G-001..G-008 drill refs; C-019..C-022 are now closed G-009..G-012 drill refs.
+	drillIDs := []string{
+		"C-011", "C-012", "C-013", "C-014", "C-015", "C-016", "C-017", "C-018",
+		"C-019", "C-020", "C-021", "C-022",
+	}
 	opts := proveOpts{
 		repoPath:    t.TempDir(),
 		fast:        true,

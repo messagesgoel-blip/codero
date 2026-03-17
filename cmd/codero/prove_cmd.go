@@ -92,11 +92,10 @@ Checks included:
   C-010  state-db-error        State DB path returns actionable error
 
 Appendix G drill coverage:
-  G-001..G-008  covered via unit/integration test suite (C-003)
-  G-009..G-012  TODO — scaffolded, explicit gap noted in output
+  G-001..G-012  all covered via unit/integration test suite (C-003)
 
 Exit codes:
-  0  all executed checks PASS (SKIP and TODO are not failures)
+  0  all executed checks PASS or SKIP (SKIP is not a failure)
   1  one or more checks FAIL
 
 Examples:
@@ -234,19 +233,23 @@ func buildProveChecks(opts proveOpts) []ProveCheck {
 		"Appendix G: Out-of-order webhook arrival",
 		"Covered by idempotency logic tests in internal/webhook — see C-003"))
 
-	// Known gaps — explicitly marked TODO so they cannot silently pass.
-	run(proveTODOCheck("C-019", "drill:G-009-missing-keyspace-notifications",
+	// G-009..G-012 — formerly TODO scaffolds (COD-031), now covered by dedicated tests (COD-032).
+	run(drillRef("C-019", "drill:G-009-missing-keyspace-notifications",
 		"Appendix G: Missing keyspace notifications",
-		"TODO(COD-031): safety-net audit goroutine path needs dedicated drill test"))
-	run(proveTODOCheck("C-020", "drill:G-010-circuit-breaker-redis-unavailable",
+		"Covered by TestExpiryWorker_LeaseAudit_Requeue+Blocked in internal/scheduler: "+
+			"RunLeaseAuditCycle called without Redis keyspace event confirms durable safety-net — see C-003"))
+	run(drillRef("C-020", "drill:G-010-circuit-breaker-redis-unavailable",
 		"Appendix G: Redis unavailable during pre-commit circuit-breaker check",
-		"TODO(COD-031): circuit-breaker timeout path not yet covered by a named drill"))
-	run(proveTODOCheck("C-021", "drill:G-011-seq-gap",
+		"Covered by TestCheckRedis_FailsWithNamedError in internal/daemon: "+
+			"unreachable Redis returns ErrRedisUnavailable not a hang; pre-commit path returns named error — see C-003"))
+	run(drillRef("C-021", "drill:G-011-seq-gap",
 		"Appendix G: Crash between seq increment and append",
-		"TODO(COD-031): seq-gap tolerance needs a dedicated drill; pollers must tolerate gaps"))
-	run(proveTODOCheck("C-022", "drill:G-012-compaction",
+		"Covered by TestStream_Replay_ToleratesSeqGap in internal/delivery: "+
+			"Replay with non-contiguous seq (gap at seq 3) returns all persisted events without error — see C-003"))
+	run(drillRef("C-022", "drill:G-012-compaction",
 		"Appendix G: Compaction — durable seq floor",
-		"TODO(COD-031): compaction drill scaffolded; needs explicit before/after seq verification"))
+		"Covered by TestStream_InitSeqFloor_PreventsRegression in internal/delivery: "+
+			"after Redis flush, InitSeqFloor prevents seq regression from durable MAX(seq) floor — see C-003"))
 
 	return out
 }
