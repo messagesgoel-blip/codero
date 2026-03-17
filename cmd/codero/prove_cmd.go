@@ -338,14 +338,25 @@ func checkNonTTYGateJSON(repoPath string) ProveCheck {
 
 	// Capture JSON output.
 	orig := os.Stdout
-	rd, wr, _ := os.Pipe()
+	rd, wr, err := os.Pipe()
+	if err != nil {
+		return ProveCheck{ID: id, Name: name, AppendixRef: ref,
+			Status: string(proveFail), Detail: "os.Pipe: " + err.Error(),
+			DurationMS: time.Since(start).Milliseconds()}
+	}
+	defer func() {
+		os.Stdout = orig
+		_ = rd.Close()
+		_ = wr.Close()
+	}()
 	os.Stdout = wr
 	encErr := printGateStatusJSON(result)
-	wr.Close()
-	os.Stdout = orig
+	if err := wr.Close(); err != nil && encErr == nil {
+		encErr = err
+	}
 
 	var buf bytes.Buffer
-	io.Copy(&buf, rd) //nolint:errcheck
+	_, _ = io.Copy(&buf, rd)
 
 	dur := time.Since(start).Milliseconds()
 	if encErr != nil {
@@ -386,14 +397,25 @@ func checkNonTTYWatchFallback(repoPath string) ProveCheck {
 	// runGateStatusWatch detects IsInteractiveTTY() == false (prove runs non-interactively)
 	// and calls printGateStatusJSON directly.
 	orig := os.Stdout
-	rd, wr, _ := os.Pipe()
+	rd, wr, err := os.Pipe()
+	if err != nil {
+		return ProveCheck{ID: id, Name: name, AppendixRef: ref,
+			Status: string(proveFail), Detail: "os.Pipe: " + err.Error(),
+			DurationMS: time.Since(start).Milliseconds()}
+	}
+	defer func() {
+		os.Stdout = orig
+		_ = rd.Close()
+		_ = wr.Close()
+	}()
 	os.Stdout = wr
 	watchErr := runGateStatusWatch(tmpRepo, 5)
-	wr.Close()
-	os.Stdout = orig
+	if err := wr.Close(); err != nil && watchErr == nil {
+		watchErr = err
+	}
 
 	var buf bytes.Buffer
-	io.Copy(&buf, rd) //nolint:errcheck
+	_, _ = io.Copy(&buf, rd)
 
 	dur := time.Since(start).Milliseconds()
 	if watchErr != nil {
