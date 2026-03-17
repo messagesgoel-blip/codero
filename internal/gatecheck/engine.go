@@ -37,12 +37,19 @@ func (e *Engine) Run(ctx context.Context) Report {
 	runners := e.buildRunners()
 	for _, r := range runners {
 		result := r(ctx, e.cfg, staged)
-		if result.Status == StatusInfraBypass {
+		if isInfraReason(result.ReasonCode) {
 			infraCount++
 			if infraCount > e.cfg.MaxInfraBypass {
 				result.Status = StatusFail
+				result.ReasonCode = ReasonInfraBypass
 				result.Reason = fmt.Sprintf("infra bypass budget exceeded (%d/%d): %s",
 					infraCount, e.cfg.MaxInfraBypass, result.Reason)
+			}
+		}
+		if (result.Status == StatusSkip || result.Status == StatusDisabled) && result.ReasonCode == "" {
+			result.ReasonCode = ReasonNotApplicable
+			if result.Reason == "" {
+				result.Reason = "not applicable"
 			}
 		}
 		checks = append(checks, result)
@@ -345,7 +352,7 @@ func runForbiddenPathsCheck(_ context.Context, cfg EngineConfig, staged []string
 	const id, name = "forbidden-paths", "Forbidden path blocker"
 	t := start()
 	if !cfg.EnforceForbiddenPaths || cfg.ForbiddenPathRegex == "" {
-		r := disabledResult(id, name, GroupConfig, true, ReasonNotApplicable, "CODERO_ENFORCE_FORBIDDEN_PATHS not set")
+		r := disabledResult(id, name, GroupConfig, true, ReasonUserDisabled, "CODERO_ENFORCE_FORBIDDEN_PATHS not set")
 		r.DurationMS = elapsedMS(t)
 		return r
 	}
@@ -605,8 +612,8 @@ func runGitleaksCheck(ctx context.Context, cfg EngineConfig, _ []string) CheckRe
 	result.DurationMS = elapsedMS(t)
 	if err != nil {
 		if isContextError(err) {
-			result.Status = StatusInfraBypass
-			result.ReasonCode = ReasonInfraTimeout
+			result.Status = StatusSkip
+			result.ReasonCode = ReasonTimeout
 			result.Reason = "gitleaks timed out"
 			return result
 		}
@@ -652,27 +659,27 @@ func runSemgrepCheck(ctx context.Context, cfg EngineConfig, staged []string) Che
 	result.DurationMS = elapsedMS(t)
 	if err != nil {
 		if isContextError(err) {
-			result.Status = StatusInfraBypass
-			result.ReasonCode = ReasonInfraTimeout
+			result.Status = StatusSkip
+			result.ReasonCode = ReasonTimeout
 			result.Reason = "semgrep timed out"
 			return result
 		}
 		outStr := strings.TrimSpace(string(out))
 		lc := strings.ToLower(outStr)
 		if strings.Contains(lc, "401") || strings.Contains(lc, "unauthorized") || strings.Contains(lc, "authentication") {
-			result.Status = StatusInfraBypass
+			result.Status = StatusSkip
 			result.ReasonCode = ReasonInfraAuth
 			result.Reason = "semgrep authentication failure"
 			return result
 		}
 		if strings.Contains(lc, "rate limit") || strings.Contains(lc, "429") {
-			result.Status = StatusInfraBypass
+			result.Status = StatusSkip
 			result.ReasonCode = ReasonInfraRateLimit
 			result.Reason = "semgrep rate limited"
 			return result
 		}
 		if strings.Contains(lc, "connection refused") || strings.Contains(lc, "network") || strings.Contains(lc, "timeout") {
-			result.Status = StatusInfraBypass
+			result.Status = StatusSkip
 			result.ReasonCode = ReasonInfraNetwork
 			result.Reason = "semgrep network failure"
 			return result
@@ -719,8 +726,8 @@ func runRuffLintCheck(ctx context.Context, cfg EngineConfig, staged []string) Ch
 	result.DurationMS = elapsedMS(t)
 	if err != nil {
 		if isContextError(err) {
-			result.Status = StatusInfraBypass
-			result.ReasonCode = ReasonInfraTimeout
+			result.Status = StatusSkip
+			result.ReasonCode = ReasonTimeout
 			result.Reason = "ruff timed out"
 			return result
 		}

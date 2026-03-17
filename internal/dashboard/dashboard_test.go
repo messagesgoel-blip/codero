@@ -590,10 +590,10 @@ func TestGateChecks_WithReport(t *testing.T) {
 	dir := t.TempDir()
 	reportPath := filepath.Join(dir, "last-report.json")
 	sampleReport := `{
-"summary": {"overall_status":"PASS","passed":1,"failed":0,"skipped":2,"infra_bypassed":0,"disabled":3,"total":6,"required_failed":0,"required_disabled":0,"profile":"portable","schema_version":"1"},
+"summary": {"overall_status":"pass","passed":1,"failed":0,"skipped":2,"infra_bypassed":0,"disabled":3,"total":6,"required_failed":0,"required_disabled":0,"profile":"portable","schema_version":"1"},
 "checks": [
-{"id":"file-size","name":"File size limit","group":"format","required":true,"enabled":true,"status":"SKIP","reason":"no staged files","duration_ms":0},
-{"id":"ai-gate","name":"AI review gate","group":"ai","required":false,"enabled":false,"status":"DISABLED","reason_code":"NOT_IN_SCOPE","reason":"AI gate runs separately","duration_ms":0}
+{"id":"file-size","name":"File size limit","group":"format","required":true,"enabled":true,"status":"skip","reason":"no staged files","reason_code":"not_in_scope","duration_ms":0},
+{"id":"ai-gate","name":"AI review gate","group":"ai","required":false,"enabled":false,"status":"disabled","reason_code":"not_in_scope","reason":"AI gate runs separately","duration_ms":0}
 ],
 "run_at":"2025-01-01T00:00:00Z"
 }`

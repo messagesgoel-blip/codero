@@ -111,7 +111,7 @@ func TestGateCheckCommandExists(t *testing.T) {
 func TestGateCheckJSONFlag(t *testing.T) {
 	root := repoRoot(t)
 	// Run gate-check --json --profile off so it finishes fast with no real checks.
-	// profile=off skips most checks and always returns PASS.
+	// profile=off skips most checks and always returns pass.
 	cmd := exec.Command("go", "run", "./cmd/codero", "gate-check", "--json", "--profile", "off")
 	cmd.Dir = root
 	out, err := cmd.CombinedOutput()
@@ -136,11 +136,24 @@ func TestGateCheckJSONDisabledChecksPresent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("gate-check --json --profile off failed: %v\noutput: %s", err, string(out))
 	}
-	// ai-gate is always DISABLED with NOT_IN_SCOPE — must be present
+	// ai-gate is always disabled with not_in_scope — must be present
 	if !strings.Contains(string(out), `"ai-gate"`) {
 		t.Errorf("gate-check JSON output must include ai-gate (disabled check)\noutput: %s", string(out))
 	}
-	if !strings.Contains(string(out), `"DISABLED"`) {
-		t.Errorf("gate-check JSON output must include at least one DISABLED check\noutput: %s", string(out))
+	if !strings.Contains(string(out), `"disabled"`) {
+		t.Errorf("gate-check JSON output must include at least one disabled check\noutput: %s", string(out))
+	}
+}
+
+func TestGateCheckFastProfileAlias(t *testing.T) {
+	root := repoRoot(t)
+	cmd := exec.Command("go", "run", "./cmd/codero", "gate-check", "--json", "--profile", "fast")
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("gate-check --json --profile fast failed: %v\noutput: %s", err, string(out))
+	}
+	if !strings.Contains(string(out), `"profile": "portable"`) {
+		t.Fatalf("gate-check fast profile alias should resolve to portable profile\noutput: %s", string(out))
 	}
 }

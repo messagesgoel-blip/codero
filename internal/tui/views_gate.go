@@ -154,7 +154,7 @@ func (p ChecksPane) View() string {
 	s := p.vm.Summary
 	counters := fmt.Sprintf("  pass=%d  fail=%d  skip=%d  infra=%d  disabled=%d  [%s]",
 		s.Passed, s.Failed, s.Skipped, s.InfraBypassed, s.Disabled, s.Profile)
-	if s.Overall == "FAIL" {
+	if s.Overall == "fail" {
 		lines = append(lines, p.theme.Fail.Render(counters))
 	} else {
 		lines = append(lines, p.theme.Pass.Render(counters))
@@ -178,11 +178,9 @@ func (p ChecksPane) View() string {
 			line = p.theme.ListSelected.Width(w).Render(label)
 		} else {
 			switch c.Status {
-			case "FAIL":
+			case "fail":
 				line = p.theme.Fail.Render(label)
-			case "INFRA_BYPASS":
-				line = p.theme.GatePipeline.Render(label)
-			case "DISABLED", "SKIP":
+			case "disabled", "skip":
 				line = p.theme.Muted.Render(label)
 			default:
 				line = p.theme.Pass.Render(label)

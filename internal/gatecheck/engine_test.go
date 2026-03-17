@@ -20,7 +20,7 @@ func TestComputeSummary_AllPass(t *testing.T) {
 	}
 	s := gatecheck.ComputeSummary(checks, gatecheck.ProfilePortable, false)
 	if s.OverallStatus != gatecheck.StatusPass {
-		t.Errorf("overall: got %q, want PASS", s.OverallStatus)
+		t.Errorf("overall: got %q, want pass", s.OverallStatus)
 	}
 	if s.Passed != 2 {
 		t.Errorf("passed: got %d, want 2", s.Passed)
@@ -43,7 +43,7 @@ func TestComputeSummary_RequiredFail(t *testing.T) {
 	}
 	s := gatecheck.ComputeSummary(checks, gatecheck.ProfilePortable, false)
 	if s.OverallStatus != gatecheck.StatusFail {
-		t.Errorf("overall: got %q, want FAIL", s.OverallStatus)
+		t.Errorf("overall: got %q, want fail", s.OverallStatus)
 	}
 	if s.RequiredFailed != 1 {
 		t.Errorf("required_failed: got %d, want 1", s.RequiredFailed)
@@ -57,7 +57,7 @@ func TestComputeSummary_DisabledRequiredStrict(t *testing.T) {
 	}
 	s := gatecheck.ComputeSummary(checks, gatecheck.ProfileStrict, false)
 	if s.OverallStatus != gatecheck.StatusFail {
-		t.Errorf("strict profile disabled required: got %q, want FAIL", s.OverallStatus)
+		t.Errorf("strict profile disabled required: got %q, want fail", s.OverallStatus)
 	}
 	if s.RequiredDisabled != 1 {
 		t.Errorf("required_disabled: got %d, want 1", s.RequiredDisabled)
@@ -71,7 +71,7 @@ func TestComputeSummary_DisabledRequiredPortable(t *testing.T) {
 	}
 	s := gatecheck.ComputeSummary(checks, gatecheck.ProfilePortable, false)
 	if s.OverallStatus != gatecheck.StatusPass {
-		t.Errorf("portable profile disabled required: got %q, want PASS", s.OverallStatus)
+		t.Errorf("portable profile disabled required: got %q, want pass", s.OverallStatus)
 	}
 }
 
@@ -82,7 +82,7 @@ func TestComputeSummary_AllowRequiredSkip(t *testing.T) {
 	}
 	s := gatecheck.ComputeSummary(checks, gatecheck.ProfileStrict, true)
 	if s.OverallStatus != gatecheck.StatusPass {
-		t.Errorf("allowRequiredSkip=true: got %q, want PASS", s.OverallStatus)
+		t.Errorf("allowRequiredSkip=true: got %q, want pass", s.OverallStatus)
 	}
 	if s.RequiredDisabled != 0 {
 		t.Errorf("required_disabled should be 0 when allowed")
@@ -91,7 +91,7 @@ func TestComputeSummary_AllowRequiredSkip(t *testing.T) {
 
 func TestComputeSummary_InfraBypassed(t *testing.T) {
 	checks := []gatecheck.CheckResult{
-		{ID: "a", Status: gatecheck.StatusInfraBypass},
+		{ID: "a", Status: gatecheck.StatusSkip, ReasonCode: gatecheck.ReasonInfraBypass},
 		{ID: "b", Status: gatecheck.StatusPass},
 	}
 	s := gatecheck.ComputeSummary(checks, gatecheck.ProfilePortable, false)
@@ -108,7 +108,7 @@ func TestComputeSummary_AllStatusTypes(t *testing.T) {
 		{ID: "p", Status: gatecheck.StatusPass},
 		{ID: "f", Status: gatecheck.StatusFail, Required: false},
 		{ID: "sk", Status: gatecheck.StatusSkip},
-		{ID: "ib", Status: gatecheck.StatusInfraBypass},
+		{ID: "ib", Status: gatecheck.StatusSkip, ReasonCode: gatecheck.ReasonInfraBypass},
 		{ID: "di", Status: gatecheck.StatusDisabled},
 	}
 	s := gatecheck.ComputeSummary(checks, gatecheck.ProfilePortable, false)
@@ -118,7 +118,7 @@ func TestComputeSummary_AllStatusTypes(t *testing.T) {
 	if s.Failed != 1 {
 		t.Errorf("failed: %d", s.Failed)
 	}
-	if s.Skipped != 1 {
+	if s.Skipped != 2 {
 		t.Errorf("skipped: %d", s.Skipped)
 	}
 	if s.InfraBypassed != 1 {
@@ -179,7 +179,7 @@ func TestEngine_ProfileOff_MinimalChecks(t *testing.T) {
 	engine := gatecheck.NewEngine(cfg)
 	report := engine.Run(context.Background())
 
-	// profile=off: trailing-whitespace, final-newline, gofmt, semgrep, ruff must be SKIP/DISABLED
+	// profile=off: trailing-whitespace, final-newline, gofmt, semgrep, ruff must be skip/disabled
 	offChecks := map[string]bool{
 		"trailing-whitespace": false,
 		"final-newline":       false,
@@ -190,7 +190,7 @@ func TestEngine_ProfileOff_MinimalChecks(t *testing.T) {
 	for _, c := range report.Checks {
 		if _, ok := offChecks[c.ID]; ok {
 			if c.Status != gatecheck.StatusSkip && c.Status != gatecheck.StatusDisabled {
-				t.Errorf("profile=off check %q: got status %q, want SKIP or DISABLED", c.ID, c.Status)
+				t.Errorf("profile=off check %q: got status %q, want skip or disabled", c.ID, c.Status)
 			}
 		}
 	}
@@ -212,10 +212,10 @@ func TestEngine_MissingTool_GitleaksDisabled(t *testing.T) {
 	for _, c := range report.Checks {
 		if c.ID == "gitleaks-staged" {
 			if c.Status != gatecheck.StatusDisabled {
-				t.Errorf("gitleaks with missing tool: got %q, want DISABLED", c.Status)
+				t.Errorf("gitleaks with missing tool: got %q, want disabled", c.Status)
 			}
 			if c.ReasonCode != gatecheck.ReasonMissingTool {
-				t.Errorf("gitleaks reason_code: got %q, want MISSING_TOOL", c.ReasonCode)
+				t.Errorf("gitleaks reason_code: got %q, want missing_tool", c.ReasonCode)
 			}
 			return
 		}
@@ -270,7 +270,7 @@ func TestEngine_FileSizeCheck_Fail(t *testing.T) {
 	for _, c := range report.Checks {
 		if c.ID == "file-size" {
 			if c.Status != gatecheck.StatusFail {
-				t.Errorf("file-size: got %q, want FAIL", c.Status)
+				t.Errorf("file-size: got %q, want fail", c.Status)
 			}
 			return
 		}
@@ -293,7 +293,7 @@ func TestEngine_MergeMarkersCheck_Fail(t *testing.T) {
 	for _, c := range report.Checks {
 		if c.ID == "merge-markers" {
 			if c.Status != gatecheck.StatusFail {
-				t.Errorf("merge-markers: got %q, want FAIL", c.Status)
+				t.Errorf("merge-markers: got %q, want fail", c.Status)
 			}
 			return
 		}
@@ -317,7 +317,7 @@ func TestEngine_ForbiddenPaths_Disabled(t *testing.T) {
 	for _, c := range report.Checks {
 		if c.ID == "forbidden-paths" {
 			if c.Status != gatecheck.StatusDisabled {
-				t.Errorf("forbidden-paths disabled: got %q, want DISABLED", c.Status)
+				t.Errorf("forbidden-paths disabled: got %q, want disabled", c.Status)
 			}
 			return
 		}
@@ -340,7 +340,7 @@ func TestEngine_ConfigValidation_InvalidJSON(t *testing.T) {
 	for _, c := range report.Checks {
 		if c.ID == "config-validation" {
 			if c.Status != gatecheck.StatusFail {
-				t.Errorf("config-validation bad JSON: got %q, want FAIL", c.Status)
+				t.Errorf("config-validation bad JSON: got %q, want fail", c.Status)
 			}
 			return
 		}
@@ -363,10 +363,10 @@ func TestEngine_AIGate_AlwaysDisabled(t *testing.T) {
 	for _, c := range report.Checks {
 		if c.ID == "ai-gate" {
 			if c.Status != gatecheck.StatusDisabled {
-				t.Errorf("ai-gate: got %q, want DISABLED", c.Status)
+				t.Errorf("ai-gate: got %q, want disabled", c.Status)
 			}
 			if c.ReasonCode != gatecheck.ReasonNotInScope {
-				t.Errorf("ai-gate reason_code: got %q, want NOT_IN_SCOPE", c.ReasonCode)
+				t.Errorf("ai-gate reason_code: got %q, want not_in_scope", c.ReasonCode)
 			}
 			return
 		}
@@ -376,8 +376,8 @@ func TestEngine_AIGate_AlwaysDisabled(t *testing.T) {
 
 func TestEngine_InfraBudget(t *testing.T) {
 	checks := []gatecheck.CheckResult{
-		{ID: "s1", Status: gatecheck.StatusInfraBypass, Required: false},
-		{ID: "s2", Status: gatecheck.StatusInfraBypass, Required: false},
+		{ID: "s1", Status: gatecheck.StatusSkip, ReasonCode: gatecheck.ReasonInfraBypass, Required: false},
+		{ID: "s2", Status: gatecheck.StatusSkip, ReasonCode: gatecheck.ReasonInfraBypass, Required: false},
 		{ID: "s3", Status: gatecheck.StatusPass, Required: false},
 	}
 	s := gatecheck.ComputeSummary(checks, gatecheck.ProfilePortable, false)
@@ -386,7 +386,7 @@ func TestEngine_InfraBudget(t *testing.T) {
 	}
 	// ComputeSummary itself doesn't fail on infra bypass (that's engine policy)
 	if s.OverallStatus != gatecheck.StatusPass {
-		t.Errorf("summary with infra bypass should PASS: got %q", s.OverallStatus)
+		t.Errorf("summary with infra bypass should pass: got %q", s.OverallStatus)
 	}
 }
 
