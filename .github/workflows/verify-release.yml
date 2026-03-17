@@ -1,0 +1,84 @@
+name: Release Verification
+
+# Runs the post-release verification script on every PR to main and every push to main.
+# This is a non-destructive, read-only workflow — it does not install or deploy anything.
+# Checks:
+#   V-001..V-006  binary, version, gate-status JSON, ports, status, proving gate
+#   V-007..V-009  endpoint smoke (SKIP — daemon not running in CI)
+#   V-010         checksum file (SKIP — releases dir not present in CI checkout)
+#
+# All SKIP results are acceptable. The workflow fails only on FAIL results.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  verify-release:
+    name: Post-Release Verification
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.2"
+          cache: true
+
+      # Build the codero binary — same flags as a release build, minus the version ldflags
+      # (version is not asserted in CI; only binary functionality is checked).
+      - name: Build codero binary
+        run: go build -trimpath -o ./bin/codero ./cmd/codero
+
+      # Run the automated release verification script.
+      # --no-fast is used here to enable the full race test pass (C-004).
+      # JSON goes to stdout → tee to artifact file.
+      # Human summary goes to stderr → file (echoed for log visibility).
+      - name: Run release verification
+        run: |
+          mkdir -p ci-artifacts
+          CODERO_BIN=./bin/codero \
+            bash scripts/automation/verify-release.sh \
+              --repo-path . \
+              --no-fast \
+              --json \
+              2>ci-artifacts/verify-human.txt \
+            | tee ci-artifacts/verify-result.json
+          echo "--- Human Summary ---"
+          cat ci-artifacts/verify-human.txt
+
+      # Parse JSON and assert no FAIL checks.
+      # SKIP checks are acceptable (daemon absent, releases dir absent).
+      - name: Validate verification JSON
+        run: |
+          schema_ver=$(jq -r '.schema_version' ci-artifacts/verify-result.json)
+          if [ "$schema_ver" != "1" ]; then
+            echo "::error::verify-release schema_version mismatch: expected '1', got '$schema_ver'"
+            exit 1
+          fi
+
+          fail_count=$(jq '[.checks[] | select(.status == "fail")] | length' ci-artifacts/verify-result.json)
+          if [ "$fail_count" -gt 0 ]; then
+            failing=$(jq -r '[.checks[] | select(.status == "fail") | .id] | join(", ")' ci-artifacts/verify-result.json)
+            echo "::error::verify-release: $fail_count check(s) FAILED: $failing"
+            exit 1
+          fi
+
+          overall=$(jq -r '.overall_status' ci-artifacts/verify-result.json)
+          passed=$(jq -r '.passed' ci-artifacts/verify-result.json)
+          skipped=$(jq -r '.skipped' ci-artifacts/verify-result.json)
+          echo "schema_version=$schema_ver  overall=$overall  passed=$passed  skipped=$skipped"
+
+      # Always upload so failures are debuggable from any run.
+      - name: Upload verification artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-release-${{ github.run_id }}
+          path: |
+            ci-artifacts/verify-human.txt
+            ci-artifacts/verify-result.json
+          retention-days: 30
