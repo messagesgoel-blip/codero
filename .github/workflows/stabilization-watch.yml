@@ -233,7 +233,7 @@ jobs:
           EXISTING="$(gh issue list \
             --repo "${GITHUB_REPOSITORY}" \
             --state open \
-            --search "${ISSUE_TITLE}" \
+            --search "in:title ${ISSUE_TITLE}" \
             --json number \
             --jq '.[0].number // empty')"
 
@@ -314,7 +314,7 @@ jobs:
           EXISTING="$(gh issue list \
             --repo "${GITHUB_REPOSITORY}" \
             --state open \
-            --search "${ISSUE_TITLE}" \
+            --search "in:title ${ISSUE_TITLE}" \
             --json number \
             --jq '.[0].number // empty')"
 
