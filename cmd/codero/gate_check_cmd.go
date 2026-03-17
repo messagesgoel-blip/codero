@@ -29,7 +29,7 @@ func gateCheckCmd() *cobra.Command {
 		Short: "Run local pre-commit gate checks",
 		Long: `Run the local pre-commit gate check engine (v2).
 
-Reports the status of every check — PASS, FAIL, SKIP, INFRA_BYPASS, or DISABLED —
+Reports the status of every check — pass, fail, skip, or disabled —
 using the canonical check model. Disabled/skipped checks are always included in
 output so engineers can see what is and is not running.
 
@@ -51,6 +51,7 @@ Environment variables (override flags):
   CODERO_TOOL_GITLEAKS              Path to gitleaks binary
   CODERO_TOOL_SEMGREP               Path to semgrep binary
   CODERO_TOOL_RUFF                  Path to ruff binary
+  CODERO_GATE_CHECK_REPORT_PATH     Persist report path (default: .codero/gate-check/last-report.json)
 
 Exit codes:
   0  Overall PASS
@@ -63,37 +64,39 @@ Exit codes:
 				cfg.RepoPath = repoPath
 			}
 			if profile != "" {
-				switch gatecheck.Profile(profile) {
-				case gatecheck.ProfileStrict, gatecheck.ProfilePortable, gatecheck.ProfileOff:
-					cfg.Profile = gatecheck.Profile(profile)
-				default:
-					return fmt.Errorf("gate-check: unknown profile %q (want strict|portable|off)", profile)
+				parsed, ok := parseGateCheckProfile(profile)
+				if !ok {
+					return fmt.Errorf("gate-check: unknown profile %q (want strict|portable|off; fast aliases portable)", profile)
 				}
+				cfg.Profile = parsed
 			}
 			if timeout > 0 {
 				cfg.GateTimeout = time.Duration(timeout) * time.Second
 			}
 
-			ctx, cancel := context.WithTimeout(cmd.Context(), cfg.GateTimeout)
+			ctx := cmd.Context()
+			cancel := func() {}
+			if cfg.GateTimeout > 0 {
+				ctx, cancel = context.WithTimeout(ctx, cfg.GateTimeout)
+			} else {
+				ctx, cancel = context.WithCancel(ctx)
+			}
 			defer cancel()
 
 			engine := gatecheck.NewEngine(cfg)
 			report := engine.Run(ctx)
 
+			reportPath = resolveGateCheckReportPath(reportPath)
+			if err := saveGateCheckReport(report, reportPath); err != nil {
+				fmt.Fprintf(os.Stderr, "gate-check: warning: could not save report to %s: %v\n", reportPath, err)
+			}
+
 			if outputJSON {
-				return writeGateCheckJSON(report)
-			}
-
-			printGateCheckTable(report)
-
-			// Save report to file if requested or env-configured
-			if reportPath == "" {
-				reportPath = os.Getenv("CODERO_GATE_CHECK_REPORT_PATH")
-			}
-			if reportPath != "" {
-				if err := saveGateCheckReport(report, reportPath); err != nil {
-					fmt.Fprintf(os.Stderr, "gate-check: warning: could not save report to %s: %v\n", reportPath, err)
+				if err := writeGateCheckJSON(report); err != nil {
+					return err
 				}
+			} else {
+				printGateCheckTable(report)
 			}
 
 			if report.Summary.OverallStatus == gatecheck.StatusFail {
@@ -104,7 +107,7 @@ Exit codes:
 	}
 
 	cmd.Flags().StringVarP(&repoPath, "repo-path", "r", "", "path to repository root (default: cwd)")
-	cmd.Flags().StringVarP(&profile, "profile", "p", "", "gate profile: strict|portable|off (default: from env or portable)")
+	cmd.Flags().StringVarP(&profile, "profile", "p", "", "gate profile: strict|portable|off (fast aliases portable; default: from env or portable)")
 	cmd.Flags().BoolVar(&outputJSON, "json", false, "emit canonical JSON report to stdout")
 	cmd.Flags().StringVar(&reportPath, "report-path", "", "write JSON report to this file (also: CODERO_GATE_CHECK_REPORT_PATH)")
 	cmd.Flags().IntVar(&timeout, "timeout", 0, "engine timeout in seconds (0 = use env/default)")
@@ -152,6 +155,31 @@ func printGateCheckTable(report gatecheck.Report) {
 		verdict = "❌ FAIL"
 	}
 	fmt.Printf("gate-check: %s\n", verdict)
+}
+
+func resolveGateCheckReportPath(explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	if env, ok := os.LookupEnv("CODERO_GATE_CHECK_REPORT_PATH"); ok && env != "" {
+		return env
+	}
+	return gatecheck.DefaultReportPath
+}
+
+func parseGateCheckProfile(raw string) (gatecheck.Profile, bool) {
+	switch gatecheck.Profile(raw) {
+	case gatecheck.ProfileStrict:
+		return gatecheck.ProfileStrict, true
+	case gatecheck.ProfilePortable:
+		return gatecheck.ProfilePortable, true
+	case gatecheck.ProfileOff:
+		return gatecheck.ProfileOff, true
+	case gatecheck.Profile("fast"):
+		return gatecheck.ProfilePortable, true
+	default:
+		return "", false
+	}
 }
 
 // saveGateCheckReport writes report as JSON to path, creating parent dirs as needed.

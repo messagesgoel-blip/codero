@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/codero/codero/internal/gatecheck"
 	loglib "github.com/codero/codero/internal/log"
 )
 
@@ -203,7 +204,7 @@ func (h *Handler) handleGateChecks(w http.ResponseWriter, r *http.Request) {
 
 	reportPath := os.Getenv("CODERO_GATE_CHECK_REPORT_PATH")
 	if reportPath == "" {
-		reportPath = filepath.Join(".codero", "gate-check", "last-report.json")
+		reportPath = gatecheck.DefaultReportPath
 	}
 
 	data, err := os.ReadFile(reportPath) //nolint:gosec

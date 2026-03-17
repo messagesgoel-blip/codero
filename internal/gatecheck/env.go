@@ -43,37 +43,32 @@ type EngineConfig struct {
 
 // LoadEngineConfig reads all CODERO_* env vars and returns an EngineConfig.
 func LoadEngineConfig() EngineConfig {
-	profile := Profile(envDefault("CODERO_GATES_PROFILE", string(ProfilePortable)))
-	switch profile {
-	case ProfileStrict, ProfilePortable, ProfileOff:
-	default:
-		profile = ProfilePortable
-	}
+	profile := parseProfile(envString("CODERO_GATES_PROFILE", string(ProfilePortable)))
 
 	cfg := EngineConfig{
 		Profile:            profile,
-		RepoPath:           envDefault("CODERO_REPO_PATH", ""),
-		MaxInfraBypass:     envInt("CODERO_MAX_INFRA_BYPASS_GATES", 2),
+		RepoPath:           envString("CODERO_REPO_PATH", ""),
+		MaxInfraBypass:     envInt("CODERO_MAX_INFRA_BYPASS_GATES", 2, 0),
 		AllowRequiredSkip:  envBool("CODERO_ALLOW_REQUIRED_SKIP"),
-		GateTimeout:        time.Duration(envInt("CODERO_GATE_TIMEOUT", 120)) * time.Second,
-		MaxStagedFileBytes: int64(envInt("CODERO_MAX_STAGED_FILE_BYTES", 1048576)), // 1 MiB default
+		GateTimeout:        time.Duration(envInt("CODERO_GATE_TIMEOUT", 120, 0)) * time.Second,
+		MaxStagedFileBytes: int64(envInt("CODERO_MAX_STAGED_FILE_BYTES", 1048576, 0)), // 1 MiB default
 
 		EnableFastTests:         envBool("CODERO_ENABLE_FAST_TESTS"),
 		EnableNPMAudit:          envBool("CODERO_ENABLE_NPM_AUDIT"),
 		EnableDependencyDrift:   envBool("CODERO_ENABLE_DEPENDENCY_DRIFT_REPORT"),
 		EnforceForbiddenPaths:   envBool("CODERO_ENFORCE_FORBIDDEN_PATHS"),
-		ForbiddenPathRegex:      envDefault("CODERO_FORBIDDEN_PATH_REGEX", ""),
+		ForbiddenPathRegex:      envString("CODERO_FORBIDDEN_PATH_REGEX", ""),
 		EnforceLockfileSync:     envBool("CODERO_ENFORCE_LOCKFILE_SYNC"),
 		EnforceExecutablePolicy: envBool("CODERO_ENFORCE_EXECUTABLE_POLICY"),
 		EnforceJSONDupKeys:      envBool("CODERO_ENFORCE_JSON_DUPLICATE_KEYS"),
 		EnforceSPDXForNewFiles:  envBool("CODERO_ENFORCE_SPDX_FOR_NEW_FILES"),
 		EnforceLicenseOnRelease: envBool("CODERO_ENFORCE_LICENSE_ON_RELEASE"),
 
-		ShellcheckPath: envDefault("CODERO_TOOL_SHELLCHECK", "shellcheck"),
-		SemgrepPath:    envDefault("CODERO_TOOL_SEMGREP", "semgrep"),
-		GitleaksPath:   envDefault("CODERO_TOOL_GITLEAKS", "gitleaks"),
-		RuffPath:       envDefault("CODERO_TOOL_RUFF", "ruff"),
-		YamllintPath:   envDefault("CODERO_TOOL_YAMLLINT", "yamllint"),
+		ShellcheckPath: envString("CODERO_TOOL_SHELLCHECK", "shellcheck"),
+		SemgrepPath:    envString("CODERO_TOOL_SEMGREP", "semgrep"),
+		GitleaksPath:   envString("CODERO_TOOL_GITLEAKS", "gitleaks"),
+		RuffPath:       envString("CODERO_TOOL_RUFF", "ruff"),
+		YamllintPath:   envString("CODERO_TOOL_YAMLLINT", "yamllint"),
 	}
 
 	if raw := os.Getenv("CODERO_REQUIRED_CHECKS"); raw != "" {
@@ -86,25 +81,54 @@ func LoadEngineConfig() EngineConfig {
 	return cfg
 }
 
-func envDefault(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
+func parseProfile(raw string) Profile {
+	switch Profile(raw) {
+	case ProfileStrict, ProfilePortable, ProfileOff:
+		return Profile(raw)
+	case Profile("fast"):
+		return ProfilePortable
+	default:
+		return ProfilePortable
 	}
-	return def
 }
 
-func envInt(key string, def int) int {
-	if v := os.Getenv(key); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			return n
-		}
+func envString(key, def string) string {
+	v, ok := os.LookupEnv(key)
+	if !ok {
+		return def
 	}
-	return def
+	return v
+}
+
+func envInt(key string, def int, min int) int {
+	v, ok := os.LookupEnv(key)
+	if !ok {
+		return def
+	}
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < min {
+		return def
+	}
+	return n
 }
 
 func envBool(key string) bool {
-	v := os.Getenv(key)
-	return v == "1" || strings.ToLower(v) == "true"
+	v, ok := os.LookupEnv(key)
+	if !ok {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true":
+		return true
+	case "0", "false":
+		return false
+	default:
+		return false
+	}
 }
 
 func splitCSV(s string) []string {

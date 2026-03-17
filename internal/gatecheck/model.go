@@ -2,35 +2,38 @@ package gatecheck
 
 import "time"
 
-const SchemaVersion = "1"
+const (
+	SchemaVersion     = "1"
+	DefaultReportPath = ".codero/gate-check/last-report.json"
+)
 
 type CheckStatus string
 
 const (
-	StatusPass        CheckStatus = "PASS"
-	StatusFail        CheckStatus = "FAIL"
-	StatusSkip        CheckStatus = "SKIP"
-	StatusInfraBypass CheckStatus = "INFRA_BYPASS"
-	StatusDisabled    CheckStatus = "DISABLED"
+	StatusPass     CheckStatus = "pass"
+	StatusFail     CheckStatus = "fail"
+	StatusSkip     CheckStatus = "skip"
+	StatusDisabled CheckStatus = "disabled"
 )
 
 func (s CheckStatus) IsTerminalPass() bool {
-	return s == StatusPass || s == StatusSkip || s == StatusInfraBypass || s == StatusDisabled
+	return s == StatusPass || s == StatusSkip || s == StatusDisabled
 }
 func (s CheckStatus) IsFailure() bool { return s == StatusFail }
 
 type ReasonCode string
 
 const (
-	ReasonUserDisabled   ReasonCode = "USER_DISABLED"
-	ReasonMissingTool    ReasonCode = "MISSING_TOOL"
-	ReasonNotApplicable  ReasonCode = "NOT_APPLICABLE"
-	ReasonNotInScope     ReasonCode = "NOT_IN_SCOPE"
-	ReasonInfraTimeout   ReasonCode = "INFRA_TIMEOUT"
-	ReasonInfraAuth      ReasonCode = "INFRA_AUTH"
-	ReasonInfraRateLimit ReasonCode = "INFRA_RATE_LIMIT"
-	ReasonInfraNetwork   ReasonCode = "INFRA_NETWORK"
-	ReasonExecError      ReasonCode = "EXEC_ERROR"
+	ReasonUserDisabled   ReasonCode = "user_disabled"
+	ReasonMissingTool    ReasonCode = "missing_tool"
+	ReasonNotApplicable  ReasonCode = "not_applicable"
+	ReasonNotInScope     ReasonCode = "not_in_scope"
+	ReasonTimeout        ReasonCode = "timeout"
+	ReasonInfraBypass    ReasonCode = "infra_bypass"
+	ReasonInfraAuth      ReasonCode = "infra_auth"
+	ReasonInfraRateLimit ReasonCode = "infra_rate_limit"
+	ReasonInfraNetwork   ReasonCode = "infra_network"
+	ReasonExecError      ReasonCode = "exec_error"
 )
 
 type Group string
@@ -106,13 +109,16 @@ func ComputeSummary(checks []CheckResult, profile Profile, allowRequiredSkip boo
 			}
 		case StatusSkip:
 			s.Skipped++
-		case StatusInfraBypass:
-			s.InfraBypassed++
 		case StatusDisabled:
 			s.Disabled++
 			if c.Required && !allowRequiredSkip {
 				s.RequiredDisabled++
 			}
+		default:
+			continue
+		}
+		if isInfraReason(c.ReasonCode) {
+			s.InfraBypassed++
 		}
 	}
 	if s.Failed > 0 || s.RequiredFailed > 0 {
@@ -123,4 +129,13 @@ func ComputeSummary(checks []CheckResult, profile Profile, allowRequiredSkip boo
 		s.OverallStatus = StatusPass
 	}
 	return s
+}
+
+func isInfraReason(code ReasonCode) bool {
+	switch code {
+	case ReasonInfraBypass, ReasonInfraAuth, ReasonInfraRateLimit, ReasonInfraNetwork, ReasonTimeout:
+		return true
+	default:
+		return false
+	}
 }

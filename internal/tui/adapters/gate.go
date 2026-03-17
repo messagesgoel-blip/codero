@@ -194,15 +194,13 @@ type CheckReportViewModel struct {
 // StatusIcon returns an icon character for a check status string.
 func StatusIcon(status string) string {
 	switch status {
-	case "PASS":
+	case "pass":
 		return "✓"
-	case "FAIL":
+	case "fail":
 		return "✗"
-	case "SKIP":
+	case "skip":
 		return "○"
-	case "INFRA_BYPASS":
-		return "⚡"
-	case "DISABLED":
+	case "disabled":
 		return "–"
 	default:
 		return "?"
@@ -216,6 +214,9 @@ func FromCheckReport(r gatecheck.Report) CheckReportViewModel {
 		reason := c.Reason
 		if reason == "" && c.ReasonCode != "" {
 			reason = string(c.ReasonCode)
+		}
+		if reason == "" && (c.Status == gatecheck.StatusSkip || c.Status == gatecheck.StatusDisabled) {
+			reason = "not_applicable"
 		}
 		tool := c.ToolName
 		checks = append(checks, CheckViewModel{
