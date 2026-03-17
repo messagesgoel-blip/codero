@@ -102,6 +102,7 @@ all_ids = sorted(set(list(cur_idx.keys()) + list(base_idx.keys())))
 new_fails  = []
 new_skips  = []
 recovered  = []
+missing_from_current = []
 unchanged  = []
 changes    = []
 
@@ -110,7 +111,10 @@ for cid in all_ids:
     bs = base_idx.get(cid)  # baseline status
     ps = prev_idx.get(cid)  # previous run status (may be None)
 
-    if bs is None:
+    if bs is not None and cs is None:
+        category = "MISSING_FROM_CURRENT"
+        missing_from_current.append(cid)
+    elif bs is None:
         # Check absent from baseline (new check added after baseline cut).
         # Only escalate if it's actively failing.
         if cs == "fail":
@@ -155,6 +159,7 @@ for cid in all_ids:
 
 totals = {
     "new_fail":  len(new_fails),
+    "missing_from_current": len(missing_from_current),
     "new_skip":  len(new_skips),
     "recovered": len(recovered),
     "unchanged": len(unchanged),
@@ -166,8 +171,9 @@ result = {
     "current_version":   cur_ver,
     "baseline_version":  base_ver,
     "previous_version":  prev_ver,
-    "regression_free":   len(new_fails) == 0,
+    "regression_free":   len(new_fails) == 0 and len(missing_from_current) == 0,
     "new_fails":         new_fails,
+    "missing_from_current": missing_from_current,
     "new_skips":         new_skips,
     "recovered":         recovered,
     "unchanged_count":   len(unchanged),
@@ -184,12 +190,13 @@ BASE_VER="$(       echo "${TRIAGE_JSON}" | jq -r '.baseline_version')"
 PREV_VER="$(       echo "${TRIAGE_JSON}" | jq -r '.previous_version // "none"')"
 REGRESSION_FREE="$(echo "${TRIAGE_JSON}" | jq -r '.regression_free')"
 NEW_FAIL_COUNT="$( echo "${TRIAGE_JSON}" | jq    '.totals.new_fail')"
+MISSING_COUNT="$(  echo "${TRIAGE_JSON}" | jq    '.totals.missing_from_current // 0')"
 NEW_SKIP_COUNT="$( echo "${TRIAGE_JSON}" | jq    '.totals.new_skip')"
 RECOVERED_COUNT="$(echo "${TRIAGE_JSON}" | jq    '.totals.recovered')"
 UNCHANGED_COUNT="$(echo "${TRIAGE_JSON}" | jq    '.unchanged_count')"
 
 log "current=${CUR_VER}  baseline=${BASE_VER}  previous=${PREV_VER}"
-log "regression_free=${REGRESSION_FREE}  new_fail=${NEW_FAIL_COUNT}  new_skip=${NEW_SKIP_COUNT}  recovered=${RECOVERED_COUNT}  unchanged=${UNCHANGED_COUNT}"
+log "regression_free=${REGRESSION_FREE}  new_fail=${NEW_FAIL_COUNT}  missing=${MISSING_COUNT}  new_skip=${NEW_SKIP_COUNT}  recovered=${RECOVERED_COUNT}  unchanged=${UNCHANGED_COUNT}"
 
 # ── markdown output ───────────────────────────────────────────────────────────
 emit_md() {
@@ -200,6 +207,7 @@ emit_md() {
     echo "| Category     | Count |"
     echo "|---|---:|"
     echo "| NEW_FAIL     | ${NEW_FAIL_COUNT} |"
+    echo "| MISSING_FROM_CURRENT | ${MISSING_COUNT} |"
     echo "| NEW_SKIP     | ${NEW_SKIP_COUNT} |"
     echo "| RECOVERED    | ${RECOVERED_COUNT} |"
     echo "| UNCHANGED    | ${UNCHANGED_COUNT} |"
@@ -231,6 +239,17 @@ for c in d['changes']:
         echo "${TRIAGE_JSON}" | jq -r '.changes[] | select(.category == "NEW_FAIL") | "- \(.id) (\(.group)/\(.name))\(if .persistent then " [PERSISTENT — also failed in previous run]" else "" end): \(.details)"'
         echo ""
         echo "> **Backout criteria may be triggered.** See \`docs/runbooks/v1.2.1-stabilization-watch.md\`."
+    fi
+
+    if [[ "${MISSING_COUNT}" -gt 0 ]]; then
+        echo ""
+        echo "## Regressions (MISSING_FROM_CURRENT)"
+        echo ""
+        echo "The following baseline checks are missing in ${CUR_VER} output:"
+        echo ""
+        echo "${TRIAGE_JSON}" | jq -r '.changes[] | select(.category == "MISSING_FROM_CURRENT") | "- \(.id) (\(.group)/\(.name)): baseline=\(.baseline_status), current missing"'
+        echo ""
+        echo "> **Backout criteria may be triggered.** Missing checks are treated as regressions."
     fi
 
     if [[ "${NEW_SKIP_COUNT}" -gt 0 ]]; then

@@ -107,13 +107,13 @@ jobs:
             --json databaseId,status,conclusion \
             | jq -r --arg cur "${GITHUB_RUN_ID}" '
                 .[]
-                | select(.status == "completed" and .conclusion == "success" and (.databaseId | tostring) != $cur)
+                | select(.status == "completed" and (.databaseId | tostring) != $cur)
                 | .databaseId
               ' \
             | head -n 1)"
 
           if [ -z "${PREV_RUN_ID}" ]; then
-            echo "No previous successful stabilization-watch run found."
+            echo "No previous completed stabilization-watch run found."
             exit 0
           fi
 
@@ -180,6 +180,7 @@ jobs:
 
           regression_free="$(jq -r '.regression_free' ci-artifacts/triage.json)"
           new_fail_count="$( jq -r '.totals.new_fail' ci-artifacts/triage.json)"
+          missing_count="$(  jq -r '.totals.missing_from_current // 0' ci-artifacts/triage.json)"
           new_skip_count="$( jq -r '.totals.new_skip' ci-artifacts/triage.json)"
           recovered="$(      jq -r '.totals.recovered' ci-artifacts/triage.json)"
           unchanged="$(      jq -r '.unchanged_count'  ci-artifacts/triage.json)"
@@ -190,12 +191,12 @@ jobs:
           fi
 
           if [ "${regression_free}" != "true" ]; then
-            new_fails="$(jq -r '.new_fails | join(", ")' ci-artifacts/triage.json)"
-            echo "::error::Regression detected in ${NEW_VERSION}: ${new_fail_count} NEW_FAIL(s): ${new_fails}"
+            regression_ids="$(jq -r '((.new_fails // []) + (.missing_from_current // [])) | join(", ")' ci-artifacts/triage.json)"
+            echo "::error::Regression detected in ${NEW_VERSION}: NEW_FAIL=${new_fail_count}, MISSING_FROM_CURRENT=${missing_count}; ids=${regression_ids}"
             exit 1
           fi
 
-          echo "regression_free=true  new_fail=${new_fail_count}  new_skip=${new_skip_count}  recovered=${recovered}  unchanged=${unchanged}"
+          echo "regression_free=true  new_fail=${new_fail_count}  missing=${missing_count}  new_skip=${new_skip_count}  recovered=${recovered}  unchanged=${unchanged}"
 
       # ── Escalation (COD-046) ─────────────────────────────────────────────────
       # Runs only when a previous step failed (i.e. regressions were detected).
@@ -217,9 +218,10 @@ jobs:
             exit 0
           fi
 
-          new_fails="$(      jq -r '.new_fails | join(", ")'  ci-artifacts/triage.json)"
+          regression_ids="$( jq -r '((.new_fails // []) + (.missing_from_current // [])) | join(", ")' ci-artifacts/triage.json)"
           cur_ver="$(        jq -r '.current_version'          ci-artifacts/triage.json)"
           new_fail_count="$( jq -r '.totals.new_fail'          ci-artifacts/triage.json)"
+          missing_count="$(  jq -r '.totals.missing_from_current // 0' ci-artifacts/triage.json)"
           triage_at="$(      jq -r '.triage_at'                ci-artifacts/triage.json)"
 
           RUNBOOK_URL="https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/runbooks/v1.2.1-stabilization-watch.md"
@@ -227,33 +229,35 @@ jobs:
 
           FAILING_TABLE="$(jq -r '
             .changes[]
-            | select(.category == "NEW_FAIL")
+            | select(.category == "NEW_FAIL" or .category == "MISSING_FROM_CURRENT")
             | "| \(.id) | \(.group) | \(.name) | \(.baseline_status) | \(.current_status) | \(if .persistent then "yes" else "no" end) |"
           ' ci-artifacts/triage.json)"
 
           ISSUE_BODY="$(cat <<EOF
-## ${cur_ver} Stabilization Regression Detected
+          ## ${cur_ver} Stabilization Regression Detected
 
-**First seen:** ${triage_at}
-**Run:** [${GITHUB_RUN_ID}](${RUN_URL})
-**Trigger:** \`${GITHUB_EVENT_NAME}\`
-**NEW_FAILs:** ${new_fail_count} (${new_fails})
+          **First seen:** ${triage_at}
+          **Run:** [${GITHUB_RUN_ID}](${RUN_URL})
+          **Trigger:** \`${GITHUB_EVENT_NAME}\`
+          **NEW_FAILs:** ${new_fail_count}
+          **MISSING_FROM_CURRENT:** ${missing_count}
+          **Regression IDs:** ${regression_ids}
 
-### Failing Checks
+          ### Regression Checks
 
-| ID | Group | Name | Baseline | Current | Persistent |
-|---|---|---|---|---|---|
-${FAILING_TABLE}
+          | ID | Group | Name | Baseline | Current | Persistent |
+          |---|---|---|---|---|---|
+          ${FAILING_TABLE}
 
-### Next steps
+          ### Next steps
 
-1. Review the [workflow run](${RUN_URL}) artifacts (\`triage.json\`, \`triage-human.txt\`).
-2. Consult the [stabilization runbook](${RUNBOOK_URL}) for backout criteria.
-3. If two consecutive runs show the same NEW_FAIL — execute rollback.
+          1. Review the [workflow run](${RUN_URL}) artifacts (\`triage.json\`, \`triage-human.txt\`).
+          2. Consult the [stabilization runbook](${RUNBOOK_URL}) for backout criteria.
+          3. If two consecutive runs show the same NEW_FAIL/MISSING_FROM_CURRENT — execute rollback.
 
-> Auto-opened by stabilization-watch run \`${GITHUB_RUN_ID}\`.
-EOF
-)"
+          > Auto-opened by stabilization-watch run \`${GITHUB_RUN_ID}\`.
+          EOF
+          )"
 
           ISSUE_TITLE="${cur_ver} Stabilization Regression"
 
@@ -292,6 +296,7 @@ EOF
             if [ -f ci-artifacts/triage.json ]; then
               rf="$(        jq -r '.regression_free'  ci-artifacts/triage.json)"
               new_fail="$(  jq -r '.totals.new_fail'  ci-artifacts/triage.json)"
+              missing="$(   jq -r '.totals.missing_from_current // 0' ci-artifacts/triage.json)"
               new_skip="$(  jq -r '.totals.new_skip'  ci-artifacts/triage.json)"
               recovered="$( jq -r '.totals.recovered' ci-artifacts/triage.json)"
               unchanged="$( jq -r '.unchanged_count'  ci-artifacts/triage.json)"
@@ -305,17 +310,18 @@ EOF
               echo "| Category  | Count |"
               echo "|---|---:|"
               echo "| NEW_FAIL  | ${new_fail} |"
+              echo "| MISSING_FROM_CURRENT | ${missing} |"
               echo "| NEW_SKIP  | ${new_skip} |"
               echo "| RECOVERED | ${recovered} |"
               echo "| UNCHANGED | ${unchanged} |"
               echo ""
 
-              if [ "${new_fail}" -gt 0 ]; then
-                echo "### Failing Checks"
+              if [ "${new_fail}" -gt 0 ] || [ "${missing}" -gt 0 ]; then
+                echo "### Regression Checks"
                 echo ""
-                echo "| ID | Group | Name | Persistent |"
-                echo "|---|---|---|---|"
-                jq -r '.changes[] | select(.category == "NEW_FAIL") | "| \(.id) | \(.group) | \(.name) | \(if .persistent then "yes" else "no" end) |"' \
+                echo "| ID | Group | Name | Category | Persistent |"
+                echo "|---|---|---|---|---|"
+                jq -r '.changes[] | select(.category == "NEW_FAIL" or .category == "MISSING_FROM_CURRENT") | "| \(.id) | \(.group) | \(.name) | \(.category) | \(if .persistent then "yes" else "no" end) |"' \
                   ci-artifacts/triage.json
                 echo ""
                 echo "> See runbook: \`docs/runbooks/v1.2.1-stabilization-watch.md\`"
