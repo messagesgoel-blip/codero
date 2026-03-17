@@ -109,7 +109,16 @@ func daemonCmd(configPath *string) *cobra.Command {
 				"version", version,
 			)
 
-			if err := config.ValidateTokenScopes(cmd.Context(), cfg.GitHubToken, nil); err != nil {
+			// CODERO_SKIP_GITHUB_SCOPE_CHECK=true bypasses the live GitHub API
+			// call that validates token scopes. Intended for E2E tests and
+			// isolated environments where a real token is unavailable. Never
+			// set this in production.
+			if os.Getenv("CODERO_SKIP_GITHUB_SCOPE_CHECK") == "true" {
+				loglib.Info("codero: github scope check skipped (E2E/test mode)",
+					loglib.FieldEventType, loglib.EventStartup,
+					loglib.FieldComponent, "daemon",
+				)
+			} else if err := config.ValidateTokenScopes(cmd.Context(), cfg.GitHubToken, nil); err != nil {
 				loglib.Error("codero: github scope check failed",
 					loglib.FieldEventType, loglib.EventStartup,
 					loglib.FieldComponent, "daemon",
@@ -143,6 +152,18 @@ func daemonCmd(configPath *string) *cobra.Command {
 				)
 				return fmt.Errorf("codero: %w", err)
 			}
+			// Remove PID file on exit (clean shutdown or error return).
+			// HandleSignals waits for all goroutines before returning, so the
+			// PID file outlives every subsystem cleanup defer below.
+			defer func() {
+				if err := daemon.RemovePID(cfg.PIDFile); err != nil {
+					loglib.Warn("codero: failed to remove PID file on exit",
+						loglib.FieldComponent, "daemon",
+						"pid_file", cfg.PIDFile,
+						"error", err,
+					)
+				}
+			}()
 
 			// Open SQLite state store and run pending migrations.
 			db, err := state.Open(cfg.DBPath)
