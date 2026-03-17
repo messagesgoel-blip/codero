@@ -12,17 +12,19 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/codero/codero/internal/gatecheck"
+	"github.com/codero/codero/internal/tui"
 )
 
 // gateCheckCmd implements the `gate-check` subcommand: runs the local gate
 // engine and reports all check statuses using the canonical model.
 func gateCheckCmd() *cobra.Command {
 	var (
-		repoPath   string
-		profile    string
-		outputJSON bool
-		reportPath string
-		timeout    int
+		repoPath    string
+		profile     string
+		outputJSON  bool
+		tuiSnapshot bool
+		reportPath  string
+		timeout     int
 	)
 
 	cmd := &cobra.Command{
@@ -56,7 +58,11 @@ Environment variables (override flags):
 
 Exit codes:
   0  Overall PASS
-  1  Overall FAIL or runtime error`,
+  1  Overall FAIL or runtime error
+
+Additional output modes:
+  --json          Emit the canonical JSON report to stdout
+  --tui-snapshot  Emit a deterministic plain-text TUI-style snapshot to stdout`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := gatecheck.LoadEngineConfig()
 
@@ -92,10 +98,16 @@ Exit codes:
 				fmt.Fprintf(os.Stderr, "gate-check: warning: could not save report to %s: %v\n", reportPath, err)
 			}
 
+			if outputJSON && tuiSnapshot {
+				return fmt.Errorf("gate-check: --json cannot be combined with --tui-snapshot")
+			}
+
 			if outputJSON {
 				if err := writeGateCheckJSON(report); err != nil {
 					return err
 				}
+			} else if tuiSnapshot {
+				fmt.Print(tui.RenderCheckReportSnapshot(report))
 			} else {
 				printGateCheckTable(report)
 			}
@@ -110,6 +122,7 @@ Exit codes:
 	cmd.Flags().StringVarP(&repoPath, "repo-path", "r", "", "path to repository root (default: cwd)")
 	cmd.Flags().StringVarP(&profile, "profile", "p", "", "gate profile: strict|portable|off (fast aliases portable; default: from env or portable)")
 	cmd.Flags().BoolVar(&outputJSON, "json", false, "emit canonical JSON report to stdout")
+	cmd.Flags().BoolVar(&tuiSnapshot, "tui-snapshot", false, "emit deterministic plain-text TUI-style snapshot to stdout")
 	cmd.Flags().StringVar(&reportPath, "report-path", "", "write JSON report to this file (also: CODERO_GATE_CHECK_REPORT_PATH)")
 	cmd.Flags().IntVar(&timeout, "timeout", 0, "engine timeout in seconds (0 = use env/default)")
 
@@ -137,10 +150,7 @@ func printGateCheckTable(report gatecheck.Report) {
 		if c.Required {
 			req = "req"
 		}
-		reason := c.Reason
-		if reason == "" && c.ReasonCode != "" {
-			reason = string(c.ReasonCode)
-		}
+		reason := gatecheck.DisplayReason(c.ReasonCode, c.Reason)
 		tool := c.ToolName
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
 			c.ID, string(c.Group), string(c.Status), req, tool, reason)

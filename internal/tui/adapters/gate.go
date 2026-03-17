@@ -162,15 +162,16 @@ func staticPipelineRows() []PipelineRow {
 
 // CheckViewModel is the display-ready model for a single gate check row.
 type CheckViewModel struct {
-	ID       string
-	Name     string
-	Group    string
-	Status   string
-	Required bool
-	Enabled  bool
-	Reason   string
-	Tool     string
-	DurMS    int64
+	ID         string
+	Name       string
+	Group      string
+	Status     string
+	Required   bool
+	Enabled    bool
+	ReasonCode string
+	Reason     string
+	Tool       string
+	DurMS      int64
 }
 
 // CheckSummaryViewModel holds the aggregated counters from a gate-check run.
@@ -211,24 +212,26 @@ func StatusIcon(status string) string {
 func FromCheckReport(r gatecheck.Report) CheckReportViewModel {
 	checks := make([]CheckViewModel, 0, len(r.Checks))
 	for _, c := range r.Checks {
-		reason := c.Reason
-		if reason == "" && c.ReasonCode != "" {
-			reason = string(c.ReasonCode)
+		reasonCode := c.ReasonCode
+		if reasonCode == "" && (c.Status == gatecheck.StatusSkip || c.Status == gatecheck.StatusDisabled) {
+			reasonCode = gatecheck.ReasonNotApplicable
 		}
-		if reason == "" && (c.Status == gatecheck.StatusSkip || c.Status == gatecheck.StatusDisabled) {
-			reason = string(gatecheck.ReasonNotApplicable)
+		reason := c.Reason
+		if reason == "" && reasonCode != "" {
+			reason = string(reasonCode)
 		}
 		tool := c.ToolName
 		checks = append(checks, CheckViewModel{
-			ID:       c.ID,
-			Name:     c.Name,
-			Group:    string(c.Group),
-			Status:   string(c.Status),
-			Required: c.Required,
-			Enabled:  c.Enabled,
-			Reason:   reason,
-			Tool:     tool,
-			DurMS:    c.DurationMS,
+			ID:         c.ID,
+			Name:       c.Name,
+			Group:      string(c.Group),
+			Status:     string(c.Status),
+			Required:   c.Required,
+			Enabled:    c.Enabled,
+			ReasonCode: string(reasonCode),
+			Reason:     reason,
+			Tool:       tool,
+			DurMS:      c.DurationMS,
 		})
 	}
 	s := r.Summary

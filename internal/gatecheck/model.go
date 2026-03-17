@@ -1,6 +1,9 @@
 package gatecheck
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 const (
 	SchemaVersion     = "1"
@@ -137,5 +140,20 @@ func isInfraReason(code ReasonCode) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// DisplayReason renders a stable non-pass reason string that preserves both the
+// canonical reason code and the human-readable reason when both are available.
+func DisplayReason(code ReasonCode, reason string) string {
+	switch {
+	case code == "" && reason == "":
+		return ""
+	case code == "":
+		return reason
+	case reason == "" || reason == string(code):
+		return string(code)
+	default:
+		return fmt.Sprintf("%s - %s", code, reason)
 	}
 }

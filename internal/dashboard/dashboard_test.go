@@ -618,9 +618,19 @@ func TestGateChecks_WithReport(t *testing.T) {
 	if _, ok := resp["generated_at"]; !ok {
 		t.Error("expected 'generated_at' field in response")
 	}
+	if _, ok := resp["report_path"]; !ok {
+		t.Error("expected 'report_path' field in response")
+	}
 	// Report should not be null
 	if string(resp["report"]) == "null" {
 		t.Error("report should not be null when file exists")
+	}
+	var reportPathOut string
+	if err := json.Unmarshal(resp["report_path"], &reportPathOut); err != nil {
+		t.Fatalf("unmarshal report_path: %v", err)
+	}
+	if reportPathOut != reportPath {
+		t.Fatalf("report_path = %q, want %q", reportPathOut, reportPath)
 	}
 
 	var report gatecheck.Report

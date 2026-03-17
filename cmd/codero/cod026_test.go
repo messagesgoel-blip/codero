@@ -273,7 +273,7 @@ func TestRunDashboardCheck_AllHealthy(t *testing.T) {
 	if !strings.Contains(buf.String(), "All endpoints healthy") {
 		t.Errorf("expected 'All endpoints healthy' in output, got: %s", buf.String())
 	}
-	wantPaths := []string{"/dashboard/", "/dashboard/api/v1/dashboard/overview", "/gate"}
+	wantPaths := []string{"/dashboard/", "/api/v1/dashboard/overview", "/api/v1/dashboard/gate-checks", "/gate"}
 	if !reflect.DeepEqual(requestedPaths, wantPaths) {
 		t.Errorf("requested paths: got %v, want %v", requestedPaths, wantPaths)
 	}
@@ -322,6 +322,55 @@ func TestRunDashboardCheck_PartialFailure(t *testing.T) {
 	if err == nil {
 		t.Error("expected error when overview API returns 404")
 	}
+}
+
+func TestRunDashboardCheck_GateChecksCanRequirePayload(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "gate-checks") {
+			_, _ = w.Write([]byte(`{"report":null}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	err := runDashboardCheckWithOptions(ts.URL, "/dashboard", true)
+	if err == nil {
+		t.Fatal("expected error when gate-checks payload is missing")
+	}
+	if !strings.Contains(err.Error(), "gate-checks API") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunDashboardFixture_CheckMode(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := filepath.Join(dir, "last-report.json")
+	if err := os.WriteFile(reportPath, []byte(`{
+  "summary":{"overall_status":"pass","passed":0,"failed":0,"skipped":1,"infra_bypassed":0,"disabled":1,"total":2,"required_failed":0,"required_disabled":0,"profile":"portable","schema_version":"1"},
+  "checks":[
+    {"id":"file-size","name":"File size limit","group":"format","required":true,"enabled":true,"status":"skip","reason_code":"not_in_scope","reason":"no staged files","duration_ms":0},
+    {"id":"ai-gate","name":"AI review gate","group":"ai","required":false,"enabled":false,"status":"disabled","reason_code":"not_in_scope","reason":"AI gate is run separately","duration_ms":0}
+  ],
+  "run_at":"2026-03-17T00:00:00Z"
+}`), 0o644); err != nil {
+		t.Fatalf("write report: %v", err)
+	}
+
+	port := freeTCPPort(t)
+	if err := runDashboardFixture("127.0.0.1", port, "/dashboard", dir, reportPath, true, true); err != nil {
+		t.Fatalf("runDashboardFixture(check): %v", err)
+	}
+}
+
+func freeTCPPort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve port: %v", err)
+	}
+	defer ln.Close()
+	return ln.Addr().(*net.TCPAddr).Port
 }
 
 func TestGateStatusCmd_JSONConflictsWithWatchAndLogs(t *testing.T) {
