@@ -1,0 +1,356 @@
+name: Post-Release Reliability Gate
+
+# Scheduled reliability gate for the current stable release (default: v1.2.0).
+# Runs daily to detect regression, drift, or infrastructure rot.
+# Also dispatchable on-demand with optional overrides.
+#
+# Checks performed:
+#   R-001  codero prove --fast        (22-check proving gate)
+#   R-002  verify-release.sh          (V-001..V-010 post-release checks)
+#   R-003  validate-release-record.sh (release record field schema)
+#   R-004  drift: version field       (record version matches expected)
+#   R-005  drift: artifact SHA-256    (checksum cross-check; SKIP if artifact absent)
+#
+# Failure policy:
+#   FAIL   — real regression detected; workflow exits non-zero
+#   SKIP   — expected environmental gap (daemon absent, artifact not on runner)
+#   PASS   — check passed
+#
+# strict_mode=true converts artifact-absent SKIP to FAIL.
+
+on:
+  schedule:
+    # Daily at 06:00 UTC — after nightly infrastructure tasks, before business hours.
+    - cron: "0 6 * * *"
+
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: "Release version to validate (e.g. v1.2.0)"
+        required: false
+        default: "v1.2.0"
+      expected_checksum:
+        description: "Expected artifact SHA-256 (overrides release record value)"
+        required: false
+        default: ""
+      artifact_path:
+        description: "Path to release binary (overrides release record artifact_path)"
+        required: false
+        default: ""
+      strict_mode:
+        description: "Treat artifact-absent SKIP as FAIL (true|false)"
+        required: false
+        default: "false"
+
+jobs:
+  reliability-gate:
+    name: Post-Release Reliability Gate (${{ github.event.inputs.release_version || 'v1.2.0' }})
+    runs-on: ubuntu-latest
+
+    env:
+      RELEASE_VERSION: ${{ github.event.inputs.release_version || 'v1.2.0' }}
+      STRICT_MODE: ${{ github.event.inputs.strict_mode || 'false' }}
+      EXPECTED_CHECKSUM_OVERRIDE: ${{ github.event.inputs.expected_checksum || '' }}
+      ARTIFACT_PATH_OVERRIDE: ${{ github.event.inputs.artifact_path || '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.2"
+          cache: true
+
+      # Build from source so the version under test is always deterministic.
+      - name: Build codero binary
+        run: |
+          go build -trimpath -o ./bin/codero ./cmd/codero
+          echo "Built: $(./bin/codero version)"
+
+      # ── Run all checks and generate structured report ─────────────────────
+      # All command results are captured; the step always exits 0.
+      # The "Assert no failures" step below reads the report and fails if needed.
+      - name: Run reliability checks and generate report
+        run: |
+          set -uo pipefail
+          mkdir -p ci-artifacts
+
+          TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          PASS_COUNT=0
+          FAIL_COUNT=0
+          SKIP_COUNT=0
+          CHECKS_JSON="[]"
+
+          # ── helper functions ────────────────────────────────────────────────
+          add_check() {
+            local id="$1" name="$2" status="$3" details="$4"
+            CHECKS_JSON="$(jq -c \
+              --arg id    "$id"     \
+              --arg name  "$name"   \
+              --arg st    "$status" \
+              --arg det   "$details" \
+              '. + [{id:$id,name:$name,status:$st,details:$det}]' \
+              <<<"$CHECKS_JSON")"
+            case "$status" in
+              PASS) PASS_COUNT=$(( PASS_COUNT + 1 )) ;;
+              FAIL) FAIL_COUNT=$(( FAIL_COUNT + 1 )) ;;
+              SKIP) SKIP_COUNT=$(( SKIP_COUNT + 1 )) ;;
+            esac
+          }
+
+          log() { echo "[reliability] $*" ; }
+
+          # ── R-001: codero prove --fast ──────────────────────────────────────
+          log "R-001  codero prove --fast"
+          PROVE_EXIT=0
+          CODERO_BIN=./bin/codero \
+            ./bin/codero prove --fast --repo-path . \
+            2>ci-artifacts/prove-human.txt \
+            | tee ci-artifacts/prove-result.json \
+            || PROVE_EXIT=$?
+
+          if [[ $PROVE_EXIT -eq 0 && -s ci-artifacts/prove-result.json ]]; then
+            PROVE_OVERALL="$(jq -r '.overall_status // "unknown"' ci-artifacts/prove-result.json 2>/dev/null || echo "unknown")"
+            PROVE_PASSED="$(jq -r '.passed // 0'  ci-artifacts/prove-result.json 2>/dev/null || echo 0)"
+            PROVE_FAILED="$(jq -r '.failed // 0'  ci-artifacts/prove-result.json 2>/dev/null || echo 0)"
+            PROVE_SKIPPED="$(jq -r '.skipped // 0' ci-artifacts/prove-result.json 2>/dev/null || echo 0)"
+            if [[ "$PROVE_OVERALL" == "PASS" ]]; then
+              add_check "R-001" "prove-gate" "PASS" \
+                "overall=${PROVE_OVERALL} passed=${PROVE_PASSED} skipped=${PROVE_SKIPPED} failed=${PROVE_FAILED}"
+              log "R-001 PASS"
+            else
+              add_check "R-001" "prove-gate" "FAIL" \
+                "overall=${PROVE_OVERALL} passed=${PROVE_PASSED} skipped=${PROVE_SKIPPED} failed=${PROVE_FAILED}"
+              log "R-001 FAIL — prove overall=${PROVE_OVERALL}"
+            fi
+          else
+            add_check "R-001" "prove-gate" "FAIL" "codero prove exited ${PROVE_EXIT} or produced no output"
+            log "R-001 FAIL — exit=${PROVE_EXIT}"
+          fi
+
+          # ── R-002: verify-release.sh ────────────────────────────────────────
+          log "R-002  verify-release.sh"
+          VERIFY_EXIT=0
+          CODERO_BIN=./bin/codero \
+            bash scripts/automation/verify-release.sh \
+              --repo-path . \
+              --version "${RELEASE_VERSION}" \
+              --fast \
+              --json \
+              2>ci-artifacts/verify-human.txt \
+            | tee ci-artifacts/verify-result.json \
+            || VERIFY_EXIT=$?
+
+          if [[ $VERIFY_EXIT -eq 0 && -s ci-artifacts/verify-result.json ]]; then
+            VER_OVERALL="$(jq -r '.overall_status // "unknown"' ci-artifacts/verify-result.json 2>/dev/null || echo "unknown")"
+            VER_PASSED="$(jq  -r '.passed  // 0' ci-artifacts/verify-result.json 2>/dev/null || echo 0)"
+            VER_FAILED="$(jq  -r '.failed  // 0' ci-artifacts/verify-result.json 2>/dev/null || echo 0)"
+            VER_SKIPPED="$(jq -r '.skipped // 0' ci-artifacts/verify-result.json 2>/dev/null || echo 0)"
+            if [[ "$VER_OVERALL" == "PASS" ]]; then
+              add_check "R-002" "verify-release" "PASS" \
+                "overall=${VER_OVERALL} passed=${VER_PASSED} skipped=${VER_SKIPPED} failed=${VER_FAILED}"
+              log "R-002 PASS"
+            else
+              add_check "R-002" "verify-release" "FAIL" \
+                "overall=${VER_OVERALL} passed=${VER_PASSED} skipped=${VER_SKIPPED} failed=${VER_FAILED}"
+              log "R-002 FAIL — verify-release overall=${VER_OVERALL}"
+            fi
+          else
+            add_check "R-002" "verify-release" "FAIL" "verify-release.sh exited ${VERIFY_EXIT} or produced no output"
+            log "R-002 FAIL — exit=${VERIFY_EXIT}"
+          fi
+
+          # ── R-003: validate-release-record.sh ──────────────────────────────
+          log "R-003  validate-release-record"
+          RECORD_FILE="docs/runbooks/releases/${RELEASE_VERSION}.yaml"
+          VALIDATE_EXIT=0
+          VALIDATE_OUT=""
+
+          if [[ ! -f "$RECORD_FILE" ]]; then
+            add_check "R-003" "release-record-valid" "FAIL" "record file not found: ${RECORD_FILE}"
+            log "R-003 FAIL — record not found"
+          else
+            VALIDATE_OUT="$(bash scripts/automation/validate-release-record.sh "$RECORD_FILE" 2>&1)" \
+              || VALIDATE_EXIT=$?
+            if [[ $VALIDATE_EXIT -eq 0 ]]; then
+              add_check "R-003" "release-record-valid" "PASS" "$RECORD_FILE"
+              log "R-003 PASS"
+            else
+              add_check "R-003" "release-record-valid" "FAIL" "${VALIDATE_OUT}"
+              log "R-003 FAIL — ${VALIDATE_OUT}"
+            fi
+          fi
+
+          # ── R-004/R-005: drift detection ────────────────────────────────────
+          log "R-004/R-005  drift detection"
+          DRIFT_RECORD_OK=false
+          DRIFT_ARTIFACT_PRESENT=false
+          DRIFT_CHECKSUM_MATCH="null"
+          DRIFT_NOTES=""
+
+          if [[ -f "$RECORD_FILE" ]]; then
+            RECORD_VERSION="$(grep -E "^version:"          "$RECORD_FILE" | sed 's/version:[[:space:]]*//' | tr -d '"' | xargs)"
+            RECORD_COMMIT="$( grep -E "^promoted_commit:"  "$RECORD_FILE" | sed 's/promoted_commit:[[:space:]]*//' | tr -d '"' | xargs)"
+            RECORD_SHA256="$( grep -E "^artifact_sha256:"  "$RECORD_FILE" | sed 's/artifact_sha256:[[:space:]]*//' | tr -d '"' | xargs)"
+            RECORD_ARTIFACT="$(grep -E "^artifact_path:"   "$RECORD_FILE" | sed 's/artifact_path:[[:space:]]*//' | tr -d '"' | xargs)"
+
+            # R-004: version field consistency
+            if [[ "$RECORD_VERSION" == "$RELEASE_VERSION" ]]; then
+              add_check "R-004" "drift-version" "PASS" \
+                "record version=${RECORD_VERSION} matches expected=${RELEASE_VERSION}"
+              log "R-004 PASS"
+              DRIFT_RECORD_OK=true
+            else
+              add_check "R-004" "drift-version" "FAIL" \
+                "record version=${RECORD_VERSION} != expected=${RELEASE_VERSION}"
+              log "R-004 FAIL — version mismatch"
+            fi
+
+            # R-005: artifact SHA-256 cross-check
+            EFFECTIVE_SHA="${EXPECTED_CHECKSUM_OVERRIDE:-$RECORD_SHA256}"
+            EFFECTIVE_ARTIFACT="${ARTIFACT_PATH_OVERRIDE:-$RECORD_ARTIFACT}"
+
+            if [[ -f "$EFFECTIVE_ARTIFACT" ]]; then
+              DRIFT_ARTIFACT_PRESENT=true
+              ACTUAL_SHA="$(sha256sum "$EFFECTIVE_ARTIFACT" | awk '{print $1}')"
+              if [[ "$ACTUAL_SHA" == "$EFFECTIVE_SHA" ]]; then
+                DRIFT_CHECKSUM_MATCH="true"
+                add_check "R-005" "drift-artifact-sha" "PASS" \
+                  "sha256 match: ${ACTUAL_SHA:0:16}…"
+                log "R-005 PASS"
+              else
+                DRIFT_CHECKSUM_MATCH="false"
+                add_check "R-005" "drift-artifact-sha" "FAIL" \
+                  "expected=${EFFECTIVE_SHA:0:16}… got=${ACTUAL_SHA:0:16}…"
+                log "R-005 FAIL — checksum mismatch"
+              fi
+              DRIFT_NOTES="Artifact found at ${EFFECTIVE_ARTIFACT}"
+            else
+              DRIFT_ARTIFACT_PRESENT=false
+              if [[ "${STRICT_MODE}" == "true" ]]; then
+                add_check "R-005" "drift-artifact-sha" "FAIL" \
+                  "strict_mode=true: artifact absent at ${EFFECTIVE_ARTIFACT}"
+                log "R-005 FAIL (strict) — artifact absent"
+                DRIFT_NOTES="strict_mode=true: artifact absent at ${EFFECTIVE_ARTIFACT}"
+              else
+                add_check "R-005" "drift-artifact-sha" "SKIP" \
+                  "artifact not available on runner (${EFFECTIVE_ARTIFACT}); cross-check requires local /srv/storage/ mount"
+                log "R-005 SKIP — artifact absent (expected on GitHub runner)"
+                DRIFT_NOTES="Artifact path ${EFFECTIVE_ARTIFACT} not available on GitHub runner; SHA cross-check is performed locally during promotion drills"
+              fi
+            fi
+          else
+            # Record absent — R-003 already recorded FAIL; mark drift as N/A
+            add_check "R-004" "drift-version"      "FAIL" "release record absent — cannot check version drift"
+            add_check "R-005" "drift-artifact-sha" "FAIL" "release record absent — cannot determine artifact path"
+            log "R-004/R-005 FAIL — release record absent"
+            DRIFT_NOTES="Release record not found at ${RECORD_FILE}"
+          fi
+
+          # ── Compute overall ─────────────────────────────────────────────────
+          OVERALL="PASS"
+          [[ $FAIL_COUNT -gt 0 ]] && OVERALL="FAIL"
+          TOTAL=$(( PASS_COUNT + FAIL_COUNT + SKIP_COUNT ))
+
+          # ── Write post-release-report.json ──────────────────────────────────
+          jq -n \
+            --arg schema_version "1"                    \
+            --arg release_version "${RELEASE_VERSION}"  \
+            --arg timestamp_utc   "${TIMESTAMP}"        \
+            --arg overall         "${OVERALL}"          \
+            --argjson pass        "${PASS_COUNT}"       \
+            --argjson fail        "${FAIL_COUNT}"       \
+            --argjson skip        "${SKIP_COUNT}"       \
+            --argjson total       "${TOTAL}"            \
+            --argjson checks      "${CHECKS_JSON}"      \
+            --argjson record_ok   "${DRIFT_RECORD_OK}"  \
+            --argjson art_present "${DRIFT_ARTIFACT_PRESENT}" \
+            --argjson chk_match   "${DRIFT_CHECKSUM_MATCH}"   \
+            --arg     drift_notes "${DRIFT_NOTES}"      \
+            '{
+              schema_version:   $schema_version,
+              release_version:  $release_version,
+              timestamp_utc:    $timestamp_utc,
+              overall:          $overall,
+              totals: {
+                pass:  $pass,
+                fail:  $fail,
+                skip:  $skip,
+                total: $total
+              },
+              checks: $checks,
+              drift: {
+                release_record_ok: $record_ok,
+                artifact_present:  $art_present,
+                checksum_match:    $chk_match,
+                notes:             $drift_notes
+              }
+            }' > ci-artifacts/post-release-report.json
+
+          log "Report written: ci-artifacts/post-release-report.json"
+          cat ci-artifacts/post-release-report.json
+
+          # ── Write post-release-summary.md ───────────────────────────────────
+          {
+            echo "# Post-Release Reliability Gate — ${RELEASE_VERSION}"
+            echo ""
+            echo "**Run:** \`${GITHUB_RUN_ID:-local}\`  **Timestamp:** ${TIMESTAMP}  **Overall:** ${OVERALL}"
+            echo ""
+            echo "## Checks"
+            echo ""
+            echo "| ID | Name | Status | Details |"
+            echo "|---|---|---|---|"
+            jq -r '.checks[] | "| \(.id) | \(.name) | \(.status) | \(.details) |"' \
+              ci-artifacts/post-release-report.json
+            echo ""
+            echo "## Totals"
+            echo ""
+            echo "| Pass | Fail | Skip | Total |"
+            echo "|---|---|---|---|"
+            jq -r '.totals | "| \(.pass) | \(.fail) | \(.skip) | \(.total) |"' \
+              ci-artifacts/post-release-report.json
+            echo ""
+            echo "## Drift"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---|"
+            jq -r '.drift | to_entries[] | "| \(.key) | \(.value) |"' \
+              ci-artifacts/post-release-report.json
+            echo ""
+            echo "## Raw Outputs"
+            echo ""
+            echo "See attached artifacts for prove-result.json, verify-result.json,"
+            echo "prove-human.txt, and verify-human.txt."
+          } > ci-artifacts/post-release-summary.md
+
+          log "Summary written: ci-artifacts/post-release-summary.md"
+          cat ci-artifacts/post-release-summary.md >&2
+
+      # ── Assert no FAILs ────────────────────────────────────────────────────
+      - name: Assert no failures
+        run: |
+          overall="$(jq -r '.overall' ci-artifacts/post-release-report.json)"
+          fail_count="$(jq -r '.totals.fail' ci-artifacts/post-release-report.json)"
+          if [ "$overall" != "PASS" ]; then
+            failing="$(jq -r '[.checks[] | select(.status == "FAIL") | "\(.id):\(.name)"] | join(", ")' ci-artifacts/post-release-report.json)"
+            echo "::error::Post-release reliability gate FAILED: ${fail_count} check(s): ${failing}"
+            exit 1
+          fi
+          pass="$(jq -r '.totals.pass' ci-artifacts/post-release-report.json)"
+          skip="$(jq -r '.totals.skip' ci-artifacts/post-release-report.json)"
+          echo "Overall=${overall}  pass=${pass}  fail=${fail_count}  skip=${skip}"
+
+      # ── Upload artifacts ────────────────────────────────────────────────────
+      - name: Upload reliability gate artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: post-release-reliability-${{ github.run_id }}
+          path: |
+            ci-artifacts/post-release-report.json
+            ci-artifacts/post-release-summary.md
+            ci-artifacts/prove-result.json
+            ci-artifacts/prove-human.txt
+            ci-artifacts/verify-result.json
+            ci-artifacts/verify-human.txt
+          retention-days: 30
