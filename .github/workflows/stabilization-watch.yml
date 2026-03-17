@@ -198,9 +198,82 @@ jobs:
 
           echo "regression_free=true  new_fail=${new_fail_count}  missing=${missing_count}  new_skip=${new_skip_count}  recovered=${recovered}  unchanged=${unchanged}"
 
-      # ── Escalation (COD-046) ─────────────────────────────────────────────────
+      # ── Auto-resolve regression issue on recovery (COD-047) ──────────────────
+      # Runs only when Assert regression-free passes (regression_free=true).
+      # Finds any open regression issue for this version, posts a recovery comment,
+      # and closes the issue automatically.
+
+      - name: Auto-resolve regression issue on recovery
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -f ci-artifacts/triage.json ]; then
+            echo "triage.json missing — skipping recovery resolution"
+            exit 0
+          fi
+
+          regression_free="$(jq -r '.regression_free' ci-artifacts/triage.json)"
+          if [ "${regression_free}" != "true" ]; then
+            echo "Not regression-free — skipping recovery resolution"
+            exit 0
+          fi
+
+          cur_ver="$(        jq -r '.current_version'                  ci-artifacts/triage.json)"
+          new_fail_count="$( jq -r '.totals.new_fail'                  ci-artifacts/triage.json)"
+          missing_count="$(  jq -r '.totals.missing_from_current // 0' ci-artifacts/triage.json)"
+          new_skip_count="$( jq -r '.totals.new_skip'                  ci-artifacts/triage.json)"
+          recovered_count="$(jq -r '.totals.recovered'                 ci-artifacts/triage.json)"
+          unchanged_count="$(jq -r '.unchanged_count'                  ci-artifacts/triage.json)"
+          triage_at="$(      jq -r '.triage_at'                        ci-artifacts/triage.json)"
+
+          RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          ISSUE_TITLE="${cur_ver} Stabilization Regression"
+
+          EXISTING="$(gh issue list \
+            --repo "${GITHUB_REPOSITORY}" \
+            --state open \
+            --search "${ISSUE_TITLE}" \
+            --json number \
+            --jq '.[0].number // empty')"
+
+          if [ -z "${EXISTING}" ]; then
+            echo "No open regression issue found for \"${ISSUE_TITLE}\" — nothing to close"
+            exit 0
+          fi
+
+          echo "Recovery confirmed: posting resolution comment and closing issue #${EXISTING}"
+
+          RECOVERY_BODY="$(cat <<RECOVERY
+          ## Stabilization Recovered
+
+          **Resolved at:** ${triage_at}
+          **Run:** [${GITHUB_RUN_ID}](${RUN_URL})
+          **Trigger:** \`${GITHUB_EVENT_NAME}\`
+
+          | Category | Count |
+          |---|---:|
+          | NEW_FAIL | ${new_fail_count} |
+          | MISSING_FROM_CURRENT | ${missing_count} |
+          | NEW_SKIP | ${new_skip_count} |
+          | RECOVERED | ${recovered_count} |
+          | UNCHANGED | ${unchanged_count} |
+
+          > Auto-closed by stabilization-watch run \`${GITHUB_RUN_ID}\` — \`${cur_ver}\` is now regression-free.
+          RECOVERY
+          )"
+
+          gh issue comment "${EXISTING}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --body "${RECOVERY_BODY}"
+
+          gh issue close "${EXISTING}" \
+            --repo "${GITHUB_REPOSITORY}"
+
+      # ── Escalation (COD-046 / COD-047) ──────────────────────────────────────
       # Runs only when a previous step failed (i.e. regressions were detected).
       # Creates a new GitHub Issue or adds a comment to an existing open regression issue.
+      # Anti-noise guard: skips duplicate comments when the regression signature is unchanged.
 
       - name: Escalate regression to GitHub Issue
         if: failure()
@@ -218,11 +291,13 @@ jobs:
             exit 0
           fi
 
-          regression_ids="$( jq -r '((.new_fails // []) + (.missing_from_current // [])) | join(", ")' ci-artifacts/triage.json)"
-          cur_ver="$(        jq -r '.current_version'          ci-artifacts/triage.json)"
-          new_fail_count="$( jq -r '.totals.new_fail'          ci-artifacts/triage.json)"
+          # Deterministic regression signature: sorted union of new_fails + missing_from_current
+          regression_sig="$(jq -r '((.new_fails // []) + (.missing_from_current // [])) | sort | join(",")' ci-artifacts/triage.json)"
+          regression_ids="$(jq -r '((.new_fails // []) + (.missing_from_current // [])) | join(", ")' ci-artifacts/triage.json)"
+          cur_ver="$(        jq -r '.current_version'                  ci-artifacts/triage.json)"
+          new_fail_count="$( jq -r '.totals.new_fail'                  ci-artifacts/triage.json)"
           missing_count="$(  jq -r '.totals.missing_from_current // 0' ci-artifacts/triage.json)"
-          triage_at="$(      jq -r '.triage_at'                ci-artifacts/triage.json)"
+          triage_at="$(      jq -r '.triage_at'                        ci-artifacts/triage.json)"
 
           RUNBOOK_URL="https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/runbooks/v1.2.1-stabilization-watch.md"
           RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
@@ -230,34 +305,8 @@ jobs:
           FAILING_TABLE="$(jq -r '
             .changes[]
             | select(.category == "NEW_FAIL" or .category == "MISSING_FROM_CURRENT")
-            | "| \(.id) | \(.group) | \(.name) | \(.baseline_status) | \(.current_status) | \(if .persistent then "yes" else "no" end) |"
+            | "| \(.id) | \(.group) | \(.name) | \(.category) | \(.baseline_status) | \(.current_status) | \(if .persistent then "yes" else "no" end) |"
           ' ci-artifacts/triage.json)"
-
-          ISSUE_BODY="$(cat <<EOF
-          ## ${cur_ver} Stabilization Regression Detected
-
-          **First seen:** ${triage_at}
-          **Run:** [${GITHUB_RUN_ID}](${RUN_URL})
-          **Trigger:** \`${GITHUB_EVENT_NAME}\`
-          **NEW_FAILs:** ${new_fail_count}
-          **MISSING_FROM_CURRENT:** ${missing_count}
-          **Regression IDs:** ${regression_ids}
-
-          ### Regression Checks
-
-          | ID | Group | Name | Baseline | Current | Persistent |
-          |---|---|---|---|---|---|
-          ${FAILING_TABLE}
-
-          ### Next steps
-
-          1. Review the [workflow run](${RUN_URL}) artifacts (\`triage.json\`, \`triage-human.txt\`).
-          2. Consult the [stabilization runbook](${RUNBOOK_URL}) for backout criteria.
-          3. If two consecutive runs show the same NEW_FAIL/MISSING_FROM_CURRENT — execute rollback.
-
-          > Auto-opened by stabilization-watch run \`${GITHUB_RUN_ID}\`.
-          EOF
-          )"
 
           ISSUE_TITLE="${cur_ver} Stabilization Regression"
 
@@ -270,12 +319,83 @@ jobs:
             --jq '.[0].number // empty')"
 
           if [ -n "${EXISTING}" ]; then
-            echo "Adding comment to existing issue #${EXISTING}"
+            # Anti-noise guard: skip comment if the most recent escalation already carries
+            # the same regression signature (issue body checked when no comments exist yet).
+            LAST_SIG="$(gh issue view "${EXISTING}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --json body,comments \
+              | jq -r '
+                  ((.comments // []) | length) as $n |
+                  if $n > 0 then ((.comments // []) | last | .body // "")
+                  else (.body // "")
+                  end
+                ' 2>/dev/null \
+              | sed -n 's/.*<!-- regression-sig: \([^ >]*\) -->.*/\1/p' \
+              | head -n 1 || echo "")"
+
+            if [ "${LAST_SIG}" = "${regression_sig}" ]; then
+              echo "Anti-noise guard: last escalation already has signature (${regression_sig}) — skipping duplicate comment"
+              exit 0
+            fi
+
+            COMMENT_BODY="$(cat <<COMMENT
+          ## ${cur_ver} Stabilization Regression -- Update
+
+          **Detected at:** ${triage_at}
+          **Run:** [${GITHUB_RUN_ID}](${RUN_URL})
+          **Trigger:** \`${GITHUB_EVENT_NAME}\`
+          **NEW_FAILs:** ${new_fail_count}
+          **MISSING_FROM_CURRENT:** ${missing_count}
+          **Regression IDs:** ${regression_ids}
+
+          ### Regression Checks
+
+          | ID | Group | Name | Category | Baseline | Current | Persistent |
+          |---|---|---|---|---|---|---|
+          ${FAILING_TABLE}
+
+          ### Next steps
+
+          1. Review the [workflow run](${RUN_URL}) artifacts (\`triage.json\`, \`triage-human.txt\`).
+          2. Consult the [stabilization runbook](${RUNBOOK_URL}) for backout criteria.
+          3. If two consecutive runs show the same NEW_FAIL/MISSING_FROM_CURRENT -- execute rollback.
+
+          <!-- regression-sig: ${regression_sig} -->
+          > Auto-updated by stabilization-watch run \`${GITHUB_RUN_ID}\`.
+          COMMENT
+            )"
+            echo "Adding comment to existing issue #${EXISTING} (sig: ${regression_sig})"
             gh issue comment "${EXISTING}" \
               --repo "${GITHUB_REPOSITORY}" \
-              --body "${ISSUE_BODY}"
+              --body "${COMMENT_BODY}"
           else
-            echo "Creating new regression issue"
+            ISSUE_BODY="$(cat <<ISSUE
+          ## ${cur_ver} Stabilization Regression Detected
+
+          **First seen:** ${triage_at}
+          **Run:** [${GITHUB_RUN_ID}](${RUN_URL})
+          **Trigger:** \`${GITHUB_EVENT_NAME}\`
+          **NEW_FAILs:** ${new_fail_count}
+          **MISSING_FROM_CURRENT:** ${missing_count}
+          **Regression IDs:** ${regression_ids}
+
+          ### Regression Checks
+
+          | ID | Group | Name | Category | Baseline | Current | Persistent |
+          |---|---|---|---|---|---|---|
+          ${FAILING_TABLE}
+
+          ### Next steps
+
+          1. Review the [workflow run](${RUN_URL}) artifacts (\`triage.json\`, \`triage-human.txt\`).
+          2. Consult the [stabilization runbook](${RUNBOOK_URL}) for backout criteria.
+          3. If two consecutive runs show the same NEW_FAIL/MISSING_FROM_CURRENT -- execute rollback.
+
+          <!-- regression-sig: ${regression_sig} -->
+          > Auto-opened by stabilization-watch run \`${GITHUB_RUN_ID}\`.
+          ISSUE
+            )"
+            echo "Creating new regression issue (sig: ${regression_sig})"
             gh issue create \
               --repo "${GITHUB_REPOSITORY}" \
               --title "${ISSUE_TITLE}" \
