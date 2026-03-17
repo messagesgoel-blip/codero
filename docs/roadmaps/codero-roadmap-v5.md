@@ -624,6 +624,57 @@ Program-level criteria (reviewed at phase gates):
 
 After Sprint 6, the work shifts from implementation breadth to proving behavior under daily use.
 
+### Sprint 7 (COD-030) — Close the review loop
+
+**Goal:** Replace every stub integration point with real implementations so the automation loop (agent → commit → codero → CodeRabbit → agent) completes end-to-end without manual steps.
+
+Four gaps closed in this sprint:
+
+#### 7A. Real GitHub client (`internal/github`)
+
+- New package `internal/github` with `Client` implementing `webhook.GitHubClient`.
+- Methods: `GetPRState`, `FindOpenPR`, `ListPRReviews`, `ListPRReviewComments`, `ListCheckRuns`.
+- Same `net/http` + Bearer token pattern as `internal/config/scopes.go` — no SDK dependency.
+- Replaces `webhook.StubGitHubClient{}` in `daemonCmd`.
+
+#### 7B. Real CodeRabbit review provider (`internal/runner`)
+
+- New `GitHubProvider` in `internal/runner/github_provider.go` implementing `runner.Provider`.
+- Fetches CodeRabbit inline review comments and review-body summaries from the open PR.
+- Maps comment bodies to `normalizer.RawFinding` via heuristic severity inference.
+- Replaces `runner.NewStubProvider(0)` in `daemonCmd`.
+
+#### 7C. Real webhook event processor (`internal/webhook`)
+
+- New `EventProcessor` in `internal/webhook/processor.go` implementing `webhook.Processor`.
+- Handles `pull_request` (closed → T18, synchronize → T12), `pull_request_review` (approved/changes_requested), and `check_run` (completed) events.
+- Updates merge-readiness fields and appends system events to the delivery stream.
+- Replaces `&webhook.NopProcessor{}` in `daemonCmd`.
+
+#### 7D. `codero poll` and `codero why` CLI commands (`cmd/codero`)
+
+- `codero poll [--repo] [--branch]`: on-demand GitHub reconciliation for one branch.
+  Forces the same cycle the background reconciler runs every 60 s, outputs what changed.
+- `codero why [--repo] [--branch] [--limit N] [--json]`: explains current branch state.
+  Shows merge-readiness fields, latest findings, and recent delivery events.
+- Also adds `RunOnce(ctx)` to `Reconciler` (used by `poll` and tests).
+
+#### 7E. Auto-merge (`internal/webhook`, `internal/github`, `internal/config`)
+
+- Closes the final step of the automation loop: "branch becomes `merge_ready` → repo auto-merge completes the cycle" (roadmap 3.3).
+- New `AutoMerger` interface in `internal/webhook`: `MergePR(ctx, repo string, prNumber int, sha, mergeMethod string) error`.
+- `github.Client.MergePR` implements `AutoMerger` via `PUT /repos/{repo}/pulls/{number}/merge`.
+- `webhook.GitHubState` gains `PRNumber int` so the reconciler has the PR number without an extra API call.
+- `Reconciler.WithAutoMerge(merger, method)` enables auto-merge (functional option, existing `NewReconciler` signature unchanged).
+- On `→ merge_ready` (T10) and on each subsequent reconcile of a branch already in `merge_ready`, the reconciler calls `MergePR`. On success: `merge_ready → closed` (T18). On failure (conflict, SHA mismatch): error is logged and branch stays in `merge_ready` so the next cycle retries.
+- `Config.AutoMerge` (`auto_merge.enabled`, `auto_merge.method`) with env overrides `CODERO_AUTO_MERGE_ENABLED` and `CODERO_AUTO_MERGE_METHOD`. Default: disabled; method defaults to `squash`. Invalid methods are rejected at startup.
+
+**Invariants preserved:**
+- All state transitions still go through `state.TransitionBranch` — no raw SQL in new code.
+- Polling-only mode remains fully functional; real GitHub client is used by the reconciler in both modes.
+- Webhook processor uses the same delivery stream and state DB as the runner.
+- Auto-merge is opt-in (default disabled); setting `auto_merge.enabled: false` keeps the previous behaviour exactly.
+
 ---
 
 ## Appendix A — Canonical state machine (binding)

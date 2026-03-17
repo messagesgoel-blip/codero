@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/codero/codero/internal/state"
 	"github.com/codero/codero/internal/tui/adapters"
 )
 
@@ -66,11 +67,16 @@ func (p *QueuePane) refreshViewport() {
 		sb.WriteString(p.theme.ListHeader.Render(header) + "\n")
 		for i, item := range p.items {
 			elapsed := adapters.ElapsedLabel(item.WaitingSec)
-			line := fmt.Sprintf("  %-24s  %-14s  %-8s  %s", truncStr(item.Branch, 24), item.State, elapsed, item.HeadHash)
 			if i == p.selected {
+				line := fmt.Sprintf("  %-24s  %-14s  %-8s  %s", truncStr(item.Branch, 24), item.State, elapsed, item.HeadHash)
 				sb.WriteString(p.theme.ListSelected.Width(p.width-2).Render(line) + "\n")
 			} else {
-				sb.WriteString(p.theme.ListNormal.Render(line) + "\n")
+				// Color-code the state chip; render the rest in normal style.
+				stateStyle := p.theme.StateStyle(state.State(item.State))
+				branch := p.theme.ListNormal.Render(fmt.Sprintf("  %-24s  ", truncStr(item.Branch, 24)))
+				st := stateStyle.Render(fmt.Sprintf("%-14s", item.State))
+				rest := p.theme.Muted.Render(fmt.Sprintf("  %-8s  %s", elapsed, item.HeadHash))
+				sb.WriteString(branch + st + rest + "\n")
 			}
 		}
 	}
@@ -104,6 +110,9 @@ func (p *QueuePane) SetItems(items []adapters.QueueItem) {
 }
 
 func truncStr(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
 	if len(s) <= max {
 		return s
 	}

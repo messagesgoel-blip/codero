@@ -46,12 +46,25 @@ var (
 
 	// ErrInvalidDashboardBasePath is returned when dashboard_base_path does not start with '/'.
 	ErrInvalidDashboardBasePath = errors.New("dashboard_base_path must start with '/'")
+
+	// ErrInvalidMergeMethod is returned when auto_merge.method is not a valid GitHub merge strategy.
+	ErrInvalidMergeMethod = errors.New("auto_merge.method must be 'merge', 'squash', or 'rebase'")
 )
 
 // RedisConfig holds Redis connection settings.
 type RedisConfig struct {
 	Addr     string `yaml:"addr"`
 	Password string `yaml:"password"`
+}
+
+// AutoMergeConfig controls automatic PR merging once merge_ready conditions are met.
+type AutoMergeConfig struct {
+	// Enabled activates automatic PR merging when a branch reaches merge_ready.
+	// Default: false. Requires a GitHub token with write access to the repo.
+	Enabled bool `yaml:"enabled"`
+	// Method is the GitHub merge strategy: "merge", "squash", or "rebase".
+	// Default: "squash".
+	Method string `yaml:"method"`
 }
 
 // WebhookConfig holds webhook receiver settings.
@@ -87,7 +100,8 @@ type Config struct {
 	// and returned by "codero ports". Useful when deployed behind a reverse proxy
 	// where the external URL differs from the bind address.
 	// Example: "https://ops.example.com/codero"
-	DashboardPublicBaseURL string `yaml:"dashboard_public_base_url"`
+	DashboardPublicBaseURL string          `yaml:"dashboard_public_base_url"`
+	AutoMerge              AutoMergeConfig `yaml:"auto_merge"`
 }
 
 // Load reads config from a YAML file at path and applies env overrides.
@@ -163,6 +177,10 @@ func defaults() *Config {
 		ObservabilityPort: 8080,
 		ObservabilityHost: "",
 		DashboardBasePath: "/dashboard",
+		AutoMerge: AutoMergeConfig{
+			Enabled: false,
+			Method:  "squash",
+		},
 	}
 }
 
@@ -216,6 +234,17 @@ func applyEnvOverrides(c *Config) {
 	if v := os.Getenv("CODERO_DASHBOARD_PUBLIC_BASE_URL"); v != "" {
 		c.DashboardPublicBaseURL = v
 	}
+	// CODERO_AUTO_MERGE_ENABLED overrides auto-merge in either direction so
+	// operators can disable it via env even when the YAML has enabled: true.
+	if v := os.Getenv("CODERO_AUTO_MERGE_ENABLED"); v != "" {
+		if enabled, err := strconv.ParseBool(v); err == nil {
+			c.AutoMerge.Enabled = enabled
+		}
+	}
+	// CODERO_AUTO_MERGE_METHOD overrides the GitHub merge strategy ("merge", "squash", "rebase").
+	if v := os.Getenv("CODERO_AUTO_MERGE_METHOD"); v != "" {
+		c.AutoMerge.Method = v
+	}
 }
 
 // Validate checks that required fields are present and non-empty.
@@ -239,6 +268,12 @@ func (c *Config) Validate() error {
 	}
 	if c.DashboardBasePath != "" && !strings.HasPrefix(c.DashboardBasePath, "/") {
 		return ErrInvalidDashboardBasePath
+	}
+	switch c.AutoMerge.Method {
+	case "merge", "squash", "rebase":
+		// valid
+	default:
+		return ErrInvalidMergeMethod
 	}
 	return nil
 }

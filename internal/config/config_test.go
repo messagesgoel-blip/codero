@@ -134,24 +134,44 @@ foo: bar
 }
 
 func TestValidate_MissingRequired(t *testing.T) {
-	c := &Config{GitHubToken: " ", Repos: []string{"org/repo"}, ObservabilityPort: 8080}
+	c := &Config{
+		GitHubToken:       " ",
+		Repos:             []string{"org/repo"},
+		ObservabilityPort: 8080,
+		AutoMerge:         AutoMergeConfig{Method: "squash"},
+	}
 	if !errors.Is(c.Validate(), ErrMissingToken) {
 		t.Fatalf("expected ErrMissingToken")
 	}
-	c = &Config{GitHubToken: "ghp", Repos: []string{"   "}, ObservabilityPort: 8080}
+	c = &Config{
+		GitHubToken:       "ghp",
+		Repos:             []string{"   "},
+		ObservabilityPort: 8080,
+		AutoMerge:         AutoMergeConfig{Method: "squash"},
+	}
 	if !errors.Is(c.Validate(), ErrMissingRepos) {
 		t.Fatalf("expected ErrMissingRepos")
 	}
 }
 
 func TestValidate_ObservabilityPort(t *testing.T) {
-	valid := &Config{GitHubToken: "ghp_test", Repos: []string{"org/repo"}, ObservabilityPort: 8080}
+	valid := &Config{
+		GitHubToken:       "ghp_test",
+		Repos:             []string{"org/repo"},
+		ObservabilityPort: 8080,
+		AutoMerge:         AutoMergeConfig{Method: "squash"},
+	}
 	if err := valid.Validate(); err != nil {
 		t.Errorf("expected valid port to pass, got: %v", err)
 	}
 
 	for _, bad := range []int{0, -1, 65536, 99999} {
-		c := &Config{GitHubToken: "ghp_test", Repos: []string{"org/repo"}, ObservabilityPort: bad}
+		c := &Config{
+			GitHubToken:       "ghp_test",
+			Repos:             []string{"org/repo"},
+			ObservabilityPort: bad,
+			AutoMerge:         AutoMergeConfig{Method: "squash"},
+		}
 		err := c.Validate()
 		if !errors.Is(err, ErrInvalidObservabilityPort) {
 			t.Errorf("port %d: expected ErrInvalidObservabilityPort, got: %v", bad, err)
@@ -179,6 +199,7 @@ func TestValidate_DashboardBasePath(t *testing.T) {
 		Repos:             []string{"org/repo"},
 		ObservabilityPort: 8080,
 		DashboardBasePath: "/my-dashboard",
+		AutoMerge:         AutoMergeConfig{Method: "squash"},
 	}
 	if err := good.Validate(); err != nil {
 		t.Errorf("valid base path should pass: %v", err)
@@ -189,6 +210,7 @@ func TestValidate_DashboardBasePath(t *testing.T) {
 		Repos:             []string{"org/repo"},
 		ObservabilityPort: 8080,
 		DashboardBasePath: "",
+		AutoMerge:         AutoMergeConfig{Method: "squash"},
 	}
 	if err := emptyPath.Validate(); err != nil {
 		t.Errorf("empty base path should pass: %v", err)
@@ -199,9 +221,38 @@ func TestValidate_DashboardBasePath(t *testing.T) {
 		Repos:             []string{"org/repo"},
 		ObservabilityPort: 8080,
 		DashboardBasePath: "no-leading-slash",
+		AutoMerge:         AutoMergeConfig{Method: "squash"},
 	}
 	if err := bad.Validate(); !errors.Is(err, ErrInvalidDashboardBasePath) {
 		t.Errorf("no-leading-slash: expected ErrInvalidDashboardBasePath, got %v", err)
+	}
+}
+
+func TestValidate_AutoMergeMethodAlwaysValidated(t *testing.T) {
+	invalidWhenDisabled := &Config{
+		GitHubToken:       "ghp_test",
+		Repos:             []string{"org/repo"},
+		ObservabilityPort: 8080,
+		AutoMerge: AutoMergeConfig{
+			Enabled: false,
+			Method:  "invalid",
+		},
+	}
+	if err := invalidWhenDisabled.Validate(); !errors.Is(err, ErrInvalidMergeMethod) {
+		t.Fatalf("disabled with invalid method: expected ErrInvalidMergeMethod, got %v", err)
+	}
+
+	validWhenDisabled := &Config{
+		GitHubToken:       "ghp_test",
+		Repos:             []string{"org/repo"},
+		ObservabilityPort: 8080,
+		AutoMerge: AutoMergeConfig{
+			Enabled: false,
+			Method:  "squash",
+		},
+	}
+	if err := validWhenDisabled.Validate(); err != nil {
+		t.Fatalf("disabled with valid method should pass, got %v", err)
 	}
 }
 
