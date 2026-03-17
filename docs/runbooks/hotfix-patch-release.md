@@ -219,7 +219,7 @@ A SKIP is **not** a failure. CI (`proving-gate.yml`) treats SKIP as acceptable b
 | Version | Date | Issue | Summary |
 |---|---|---|---|
 | v1.2.0 | 2026-03-17 | COD-031..034 | Initial v1.2.0 minor release (not a patch) |
-| *(next patch)* | | | |
+| v1.2.1 | 2026-03-17 | COD-040..043 | Patch release tooling: dry-run simulation, release-status consolidation, RC cut + final promotion |
 
 ---
 

@@ -1,0 +1,50 @@
+# Codero v1.2.1 — Canonical Release Record
+#
+# This file is the single source of truth for the v1.2.1 promotion.
+# It is validated by CI (verify-release.yml: Validate release records) to ensure
+# all required fields are present.
+#
+# Promoted from: docs/runbooks/releases/v1.2.1-rc.1.yaml (COD-042)
+# Promoted by:   COD-043 (feat/COD-043-v121-final-promotion)
+#
+# SHA cross-check note:
+#   The artifact_sha256 field cannot be verified against the artifact binary in
+#   GitHub Actions runners because /srv/storage/ is not available in that
+#   environment. Cross-check is performed locally during the promotion drill
+#   (see docs/runbooks/v1.2.1-patch-readiness.md) and on the operator host
+#   with: sha256sum /srv/storage/shared/tools/releases/codero-v1.2.1/codero
+
+# --- Identity ---
+version: "v1.2.1"
+promoted_commit: "34c6b7550f4e1e7db0f7ed9d4ddc05680334470a"
+tag: "v1.2.1"
+date: "2026-03-17"
+timestamp_utc: "2026-03-17T11:54:00Z"
+
+# --- Artifact ---
+artifact_path: "/srv/storage/shared/tools/releases/codero-v1.2.1/codero"
+artifact_sha256: "b0ec2ac236889bae71f7c6489672865b02eb05e1b26eeacb4cde6923330ee45c"
+checksum_file: "/srv/storage/shared/tools/releases/codero-v1.2.1/codero.sha256"
+
+# --- Build ---
+go_toolchain: "go1.24.2"
+build_flags: "-trimpath -ldflags '-s -w -X main.version=v1.2.1'"
+
+# --- Verification ---
+verification_status: "PASS"
+pre_promotion_checks: >
+  go test -count=1 ./... PASS (20 packages);
+  go test -race ./... PASS (20 packages);
+  go test -tags=e2e -count=1 ./tests/e2e/ PASS;
+  go test -tags=e2e -race ./tests/e2e/ PASS;
+  codero prove --fast: PASS (passed=18 skipped=4 failed=0);
+  verify-release.sh --version v1.2.0: PASS (passed=7 skipped=3 failed=0);
+  release-status.sh --version v1.2.1-rc.1: PASS (pass=28 fail=0 skip=7 total=35);
+  dry-run-patch-release.sh --target-version v1.2.1: PASS (passed=9 failed=0 skipped=0)
+install_drill: "PASS — version=v1.2.1 sha256=b0ec2ac236889bae… (drill path cleaned up)"
+rollback_drill: "PASS — v1.2.0 binary executes, SHA matches record"
+
+# --- Rollback ---
+rollback_version: "v1.2.0"
+rollback_artifact: "/srv/storage/shared/tools/releases/codero-v1.2.0/codero"
+rollback_sha256: "f24253cd39b549985ef315ecfff948512444dfcb95ab4447bc90b6f7b608fe16"
