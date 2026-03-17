@@ -362,7 +362,26 @@ func TestDaemonLifecycle_E2E(t *testing.T) {
 		}
 	})
 
-	// ── 12. SIGTERM — clean shutdown ──────────────────────────────────────────
+	// ── 12. Observability /gate ───────────────────────────────────────────────
+	// /gate must remain available and return HTTP 200 while daemon is running.
+	t.Run("observability_gate", func(t *testing.T) {
+		gateURL := fmt.Sprintf("http://127.0.0.1:%d/gate", obsPort)
+		gateOK := pollUntil(t, startupTimeout, func() bool {
+			resp, err := http.Get(gateURL) //nolint:noctx
+			if err != nil {
+				return false
+			}
+			defer resp.Body.Close()
+			_, _ = io.ReadAll(resp.Body)
+			return resp.StatusCode == http.StatusOK
+		})
+		if !gateOK {
+			t.Errorf("GET /gate: want HTTP 200 within %s\ndaemon output:\n%s",
+				startupTimeout, daemonOut)
+		}
+	})
+
+	// ── 13. SIGTERM — clean shutdown ──────────────────────────────────────────
 	if err := daemonCmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatalf("SIGTERM: %v", err)
 	}
@@ -387,14 +406,14 @@ func TestDaemonLifecycle_E2E(t *testing.T) {
 			shutdownTimeout, daemonOut)
 	}
 
-	// ── 13. PID file must be removed on clean shutdown ────────────────────────
+	// ── 14. PID file must be removed on clean shutdown ────────────────────────
 	t.Run("pid_file_removed", func(t *testing.T) {
 		if _, err := os.Stat(pidFile); !os.IsNotExist(err) {
 			t.Errorf("PID file still present after clean shutdown: %v", err)
 		}
 	})
 
-	// ── 14. `codero status` after shutdown — must report not-running again ────
+	// ── 15. `codero status` after shutdown — must report not-running again ────
 	t.Run("status_after_shutdown", func(t *testing.T) {
 		out, code := runStatus(t, bin, env)
 		if code != 0 {
@@ -422,11 +441,9 @@ func TestDaemonRestart_E2E(t *testing.T) {
 	tmpDir := t.TempDir()
 	pidFile := filepath.Join(tmpDir, "codero.pid")
 	dbFile := filepath.Join(tmpDir, "codero.db")
-	obsPort := freePort(t)
-	env := buildTestEnv(mr.Addr(), pidFile, dbFile, obsPort)
 
-	// startDaemon launches a new daemon process with shared env and log buffer.
-	startDaemon := func(t *testing.T, logBuf *strings.Builder) *exec.Cmd {
+	// startDaemon launches a new daemon process with env and log buffer.
+	startDaemon := func(t *testing.T, env []string, logBuf *strings.Builder) *exec.Cmd {
 		t.Helper()
 		cmd := exec.Command(bin, "daemon") // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 		cmd.Env = env
@@ -465,8 +482,10 @@ func TestDaemonRestart_E2E(t *testing.T) {
 	}
 
 	// ── First run ─────────────────────────────────────────────────────────────
+	obsPort1 := freePort(t)
+	env1 := buildTestEnv(mr.Addr(), pidFile, dbFile, obsPort1)
 	log1 := &strings.Builder{}
-	daemon1 := startDaemon(t, log1)
+	daemon1 := startDaemon(t, env1, log1)
 	t.Cleanup(func() {
 		if daemon1.Process != nil {
 			_ = daemon1.Process.Signal(syscall.SIGKILL)
@@ -483,13 +502,13 @@ func TestDaemonRestart_E2E(t *testing.T) {
 
 	t.Run("run1_ready", func(t *testing.T) {
 		ok := pollUntil(t, startupTimeout, func() bool {
-			out, code := runStatus(t, bin, env)
+			out, code := runStatus(t, bin, env1)
 			return code == 0 &&
 				strings.Contains(out, "running") &&
 				strings.Contains(out, "redis: ok")
 		})
 		if !ok {
-			out, code := runStatus(t, bin, env)
+			out, code := runStatus(t, bin, env1)
 			t.Errorf("run1: status never became running+redis:ok (exit %d, output: %q)\n%s",
 				code, out, log1)
 		}
@@ -503,8 +522,10 @@ func TestDaemonRestart_E2E(t *testing.T) {
 	}
 
 	// ── Second run ────────────────────────────────────────────────────────────
+	obsPort2 := freePort(t)
+	env2 := buildTestEnv(mr.Addr(), pidFile, dbFile, obsPort2)
 	log2 := &strings.Builder{}
-	daemon2 := startDaemon(t, log2)
+	daemon2 := startDaemon(t, env2, log2)
 	t.Cleanup(func() {
 		if daemon2.Process != nil {
 			_ = daemon2.Process.Signal(syscall.SIGKILL)
@@ -521,13 +542,13 @@ func TestDaemonRestart_E2E(t *testing.T) {
 
 	t.Run("run2_ready", func(t *testing.T) {
 		ok := pollUntil(t, startupTimeout, func() bool {
-			out, code := runStatus(t, bin, env)
+			out, code := runStatus(t, bin, env2)
 			return code == 0 &&
 				strings.Contains(out, "running") &&
 				strings.Contains(out, "redis: ok")
 		})
 		if !ok {
-			out, code := runStatus(t, bin, env)
+			out, code := runStatus(t, bin, env2)
 			t.Errorf("run2: status never became running+redis:ok (exit %d, output: %q)\n%s",
 				code, out, log2)
 		}
