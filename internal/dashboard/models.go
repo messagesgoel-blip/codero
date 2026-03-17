@@ -121,3 +121,47 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 	Code  string `json:"code,omitempty"`
 }
+
+// GateCheckStatus mirrors gatecheck.CheckStatus for dashboard JSON.
+type GateCheckStatus = string
+
+// GateCheckResult is the dashboard representation of a single gate-check result.
+// It mirrors gatecheck.CheckResult to avoid an import cycle in the dashboard layer.
+type GateCheckResult struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Group       string `json:"group"`
+	Required    bool   `json:"required"`
+	Enabled     bool   `json:"enabled"`
+	Status      string `json:"status"`
+	ReasonCode  string `json:"reason_code,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+	ToolName    string `json:"tool_name,omitempty"`
+	ToolPath    string `json:"tool_path,omitempty"`
+	ToolVersion string `json:"tool_version,omitempty"`
+	DurationMS  int64  `json:"duration_ms"`
+	Details     string `json:"details,omitempty"`
+}
+
+// GateCheckSummary mirrors gatecheck.Summary for the dashboard.
+type GateCheckSummary struct {
+	OverallStatus    string `json:"overall_status"`
+	Passed           int    `json:"passed"`
+	Failed           int    `json:"failed"`
+	Skipped          int    `json:"skipped"`
+	InfraBypassed    int    `json:"infra_bypassed"`
+	Disabled         int    `json:"disabled"`
+	Total            int    `json:"total"`
+	RequiredFailed   int    `json:"required_failed"`
+	RequiredDisabled int    `json:"required_disabled"`
+	Profile          string `json:"profile"`
+	SchemaVersion    string `json:"schema_version"`
+}
+
+// GateCheckReport is the top-level dashboard payload for GET /api/v1/dashboard/gate-checks.
+type GateCheckReport struct {
+	Summary     GateCheckSummary  `json:"summary"`
+	Checks      []GateCheckResult `json:"checks"`
+	RunAt       time.Time         `json:"run_at"`
+	GeneratedAt time.Time         `json:"generated_at"`
+}

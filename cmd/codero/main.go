@@ -47,6 +47,7 @@ func main() {
 		versionCmd(),
 		commitGateCmd(),
 		gateStatusCmd(),
+		gateCheckCmd(),
 		registerCmd(),
 		queueCmd(&configPath),
 		branchCmd(&configPath),
