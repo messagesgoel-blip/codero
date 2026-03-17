@@ -51,7 +51,19 @@ REQUIRED_FIELDS=(
 failed=0
 for field in "${REQUIRED_FIELDS[@]}"; do
     # Match "field: <value>" — value must not be empty after the colon/space.
-    # Handles both quoted ("value") and unquoted (value) YAML scalars.
+    #
+    # Supported YAML scalar styles:
+    #   - Single-line unquoted:  field: value
+    #   - Single-line quoted:    field: "value"
+    #   - Block scalar markers:  field: >   or   field: |
+    #     (the '>' / '|' character itself satisfies [^"[:space:]], so folded and
+    #     literal block scalars are accepted as non-empty — only the presence of
+    #     the marker line is checked, not the indented body that follows).
+    #
+    # Limitation: multi-line folded/literal values where the marker line alone
+    # contains only whitespace are not validated. All current release record
+    # fields use single-line scalars or the '>' marker, so this is sufficient
+    # for the current schema. Use a YAML parser if richer validation is needed.
     if ! grep -qE "^${field}:[[:space:]]+\".+\"|^${field}:[[:space:]]+[^\"[:space:]]" "${RECORD}"; then
         echo "ERROR: required field missing or empty: ${field}" >&2
         failed=1
