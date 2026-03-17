@@ -259,7 +259,7 @@ func daemonCmd(configPath *string) *cobra.Command {
 			// Polling-only mode remains fully functional without it.
 			if cfg.Webhook.Enabled {
 				dedup := webhook.NewDeduplicator(db, client)
-				proc := webhook.NewEventProcessor(db, stream)
+				proc := webhook.NewEventProcessor(db, stream).WithGitHubClient(gh)
 				handler := webhook.NewHandler(cfg.Webhook.Secret, dedup, proc)
 				addr := fmt.Sprintf(":%d", cfg.Webhook.Port)
 				srv := webhook.NewServer(addr, handler)

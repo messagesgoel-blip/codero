@@ -110,6 +110,9 @@ func (p *QueuePane) SetItems(items []adapters.QueueItem) {
 }
 
 func truncStr(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
 	if len(s) <= max {
 		return s
 	}

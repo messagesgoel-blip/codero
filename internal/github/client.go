@@ -40,7 +40,11 @@ func NewClient(token string) *Client {
 
 // WithHTTPClient returns a copy of Client using the given *http.Client.
 // Intended for tests that need a custom transport (e.g. httptest server).
+// A nil hc is a no-op; the original client is returned unchanged.
 func (c *Client) WithHTTPClient(hc *http.Client) *Client {
+	if hc == nil {
+		return c
+	}
 	cp := *c
 	cp.http = hc
 	return &cp

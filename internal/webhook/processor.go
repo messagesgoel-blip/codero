@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/codero/codero/internal/delivery"
@@ -20,14 +21,28 @@ import (
 //
 // Unknown event types are silently dropped — the reconciler provides the
 // correctness backstop so EventProcessor only needs to handle the fast path.
+//
+// When a GitHubClient is injected via WithGitHubClient, the review and
+// check_run handlers re-fetch the full aggregated PR state from GitHub
+// instead of treating the single webhook event as authoritative. This
+// prevents multi-reviewer overwrites and multi-check false positives.
 type EventProcessor struct {
 	db     *state.DB
 	stream *delivery.Stream
+	github GitHubClient // optional; enables aggregated state on review/check events
 }
 
 // NewEventProcessor creates an EventProcessor with the given dependencies.
 func NewEventProcessor(db *state.DB, stream *delivery.Stream) *EventProcessor {
 	return &EventProcessor{db: db, stream: stream}
+}
+
+// WithGitHubClient attaches a GitHub client used to fetch aggregated PR state
+// on pull_request_review and check_run events, ensuring multi-reviewer and
+// multi-check scenarios are handled correctly.
+func (p *EventProcessor) WithGitHubClient(gh GitHubClient) *EventProcessor {
+	p.github = gh
+	return p
 }
 
 // ProcessEvent implements Processor.
@@ -66,7 +81,10 @@ func (p *EventProcessor) handlePullRequest(ctx context.Context, ev GitHubEvent) 
 
 	rec, err := state.GetBranch(p.db, ev.Repo, branch)
 	if err != nil {
-		return nil // branch not tracked — nothing to do
+		if errors.Is(err, state.ErrBranchNotFound) {
+			return nil // branch not tracked — nothing to do
+		}
+		return fmt.Errorf("get branch %s/%s: %w", ev.Repo, branch, err)
 	}
 
 	switch action {
@@ -121,10 +139,18 @@ func (p *EventProcessor) handlePullRequest(ctx context.Context, ev GitHubEvent) 
 	return nil
 }
 
-// handlePullRequestReview processes pull_request_review events.
-// Updates merge-readiness fields when an APPROVED or CHANGES_REQUESTED review
-// is submitted, then checks if merge_ready conditions are now met or revoked.
+// handlePullRequestReview processes pull_request_review submitted events.
+// When a GitHubClient is available it re-fetches the full aggregated PR state
+// (all reviewers via resolveApprovalStatus) to avoid multi-reviewer overwrites.
+// Without a client it falls back to applying the single-event delta.
 func (p *EventProcessor) handlePullRequestReview(ctx context.Context, ev GitHubEvent) error {
+	// Only process review submissions; ignore edits and dismissals here —
+	// the reconciler backstop will catch those within its polling interval.
+	action, _ := ev.Payload["action"].(string)
+	if action != "submitted" {
+		return nil
+	}
+
 	reviewState, _ := ev.Payload["review"].(map[string]any)
 	if reviewState == nil {
 		return nil
@@ -133,30 +159,52 @@ func (p *EventProcessor) handlePullRequestReview(ctx context.Context, ev GitHubE
 
 	branch := prBranch(ev.Payload)
 	headHash := prHeadSHA(ev.Payload)
-
 	if branch == "" {
 		return nil
 	}
 
 	rec, err := state.GetBranch(p.db, ev.Repo, branch)
 	if err != nil {
-		return nil
+		if errors.Is(err, state.ErrBranchNotFound) {
+			return nil
+		}
+		return fmt.Errorf("get branch %s/%s: %w", ev.Repo, branch, err)
 	}
 
-	// Re-fetch full state to get current approved/ci_green values.
-	approved := rec.Approved
-	switch stateStr {
-	case "approved":
-		approved = true
-	case "changes_requested":
-		approved = false
-	default:
-		return nil // COMMENTED — nothing to update
+	var approved bool
+	var unresolvedThreads int
+
+	if p.github != nil {
+		// Re-fetch full state to aggregate all reviewers correctly.
+		ghState, err := p.github.GetPRState(ctx, ev.Repo, branch)
+		if err != nil || ghState == nil {
+			// Best-effort: skip — reconciler will correct within its interval.
+			loglib.Info("webhook: review handler skipping (GetPRState unavailable)",
+				loglib.FieldComponent, "webhook",
+				loglib.FieldRepo, ev.Repo,
+				loglib.FieldBranch, branch,
+			)
+			return nil
+		}
+		approved = ghState.Approved
+		unresolvedThreads = ghState.UnresolvedThreads
+	} else {
+		// Fallback: apply single-event delta. Correct for single-reviewer PRs;
+		// the reconciler corrects multi-reviewer edge cases within its interval.
+		switch stateStr {
+		case "approved":
+			approved = true
+		case "changes_requested":
+			approved = false
+			unresolvedThreads = 1
+		default:
+			return nil // COMMENTED — nothing to update
+		}
 	}
 
 	if err := state.UpdateMergeReadiness(p.db, rec.ID,
 		approved, rec.CIGreen,
-		rec.PendingEvents, rec.UnresolvedThreads,
+		rec.PendingEvents, unresolvedThreads,
 	); err != nil {
 		loglib.Error("webhook: update merge readiness failed",
 			loglib.FieldComponent, "webhook",
@@ -201,9 +249,49 @@ func (p *EventProcessor) handleCheckRun(ctx context.Context, ev GitHubEvent) err
 
 	rec, err := state.GetBranch(p.db, ev.Repo, branch)
 	if err != nil {
+		if errors.Is(err, state.ErrBranchNotFound) {
+			return nil
+		}
+		return fmt.Errorf("get branch %s/%s: %w", ev.Repo, branch, err)
+	}
+
+	if p.github != nil {
+		// Re-fetch full state so all sibling check-runs are considered, not
+		// just this single event. A single "success" check does not mean CI
+		// is green when other checks are still failing or in progress.
+		ghState, err := p.github.GetPRState(ctx, ev.Repo, branch)
+		if err != nil || ghState == nil {
+			loglib.Info("webhook: check_run handler skipping (GetPRState unavailable)",
+				loglib.FieldComponent, "webhook",
+				loglib.FieldRepo, ev.Repo,
+				loglib.FieldBranch, branch,
+			)
+			return nil
+		}
+		if err := state.UpdateMergeReadiness(p.db, rec.ID,
+			ghState.Approved, ghState.CIGreen,
+			ghState.PendingEvents, ghState.UnresolvedThreads,
+		); err != nil {
+			loglib.Error("webhook: update merge readiness failed",
+				loglib.FieldComponent, "webhook",
+				loglib.FieldRepo, ev.Repo,
+				loglib.FieldBranch, branch,
+				"error", err,
+			)
+			return nil
+		}
+		_, _ = p.stream.AppendSystem(ctx, ev.Repo, branch, headHash,
+			"check_run_"+conclusion, "check_run webhook")
+		loglib.Info("webhook: ci status updated",
+			loglib.FieldComponent, "webhook",
+			loglib.FieldRepo, ev.Repo,
+			loglib.FieldBranch, branch,
+			"ci_green", ghState.CIGreen,
+		)
 		return nil
 	}
 
+	// Fallback: single-event delta (no GitHub client).
 	ciGreen := false
 	switch conclusion {
 	case "success", "neutral", "skipped":

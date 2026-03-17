@@ -115,6 +115,7 @@ func TestEventProcessor_PRReview_Approved(t *testing.T) {
 	proc := NewEventProcessor(db, stream)
 
 	payload := map[string]any{
+		"action": "submitted",
 		"review": map[string]any{
 			"state": "approved",
 		},
