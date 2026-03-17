@@ -148,10 +148,11 @@ func TestIsCIGreen_Empty(t *testing.T) {
 func TestListPRReviews(t *testing.T) {
 	payload := []map[string]any{
 		{
-			"id":    float64(1),
-			"user":  map[string]any{"login": "coderabbitai"},
-			"state": "CHANGES_REQUESTED",
-			"body":  "Please fix the bug.",
+			"id":        float64(1),
+			"user":      map[string]any{"login": "coderabbitai"},
+			"state":     "CHANGES_REQUESTED",
+			"body":      "Please fix the bug.",
+			"commit_id": "deadbeef",
 		},
 	}
 	srv, client := newTestServer(t, map[string]http.HandlerFunc{
@@ -168,6 +169,9 @@ func TestListPRReviews(t *testing.T) {
 	}
 	if reviews[0].User != "coderabbitai" {
 		t.Errorf("user: want coderabbitai, got %s", reviews[0].User)
+	}
+	if reviews[0].CommitID != "deadbeef" {
+		t.Errorf("commit_id: want deadbeef, got %s", reviews[0].CommitID)
 	}
 }
 

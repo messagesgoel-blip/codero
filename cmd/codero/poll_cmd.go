@@ -209,7 +209,7 @@ Examples:
 				events = nil // best effort
 			}
 			// Trim to most recent N events.
-			if len(events) > limit {
+			if limit > 0 && len(events) > limit {
 				events = events[len(events)-limit:]
 			}
 

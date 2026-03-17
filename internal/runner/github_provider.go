@@ -81,6 +81,9 @@ func (p *GitHubProvider) Review(ctx context.Context, req ReviewRequest) (*Review
 	if err != nil {
 		return nil, fmt.Errorf("list reviews: %w", err)
 	}
+	latestSummary := normalizer.RawFinding{}
+	latestSummaryID := int64(0)
+	addedHeadMatchedSummary := false
 	for _, r := range reviews {
 		if !strings.EqualFold(r.User, codeRabbitUser) {
 			continue
@@ -89,6 +92,21 @@ func (p *GitHubProvider) Review(ctx context.Context, req ReviewRequest) (*Review
 		if body == "" {
 			continue
 		}
+		if r.ID > latestSummaryID {
+			latestSummaryID = r.ID
+			latestSummary = normalizer.RawFinding{
+				Severity: inferSeverity(body),
+				Category: "review_summary",
+				File:     "",
+				Line:     0,
+				Message:  body,
+				Source:   codeRabbitUser,
+			}
+		}
+		if req.HeadHash != "" && r.CommitID != "" && r.CommitID != req.HeadHash {
+			continue
+		}
+		addedHeadMatchedSummary = true
 		findings = append(findings, normalizer.RawFinding{
 			Severity: inferSeverity(body),
 			Category: "review_summary",
@@ -97,6 +115,9 @@ func (p *GitHubProvider) Review(ctx context.Context, req ReviewRequest) (*Review
 			Message:  body,
 			Source:   codeRabbitUser,
 		})
+	}
+	if req.HeadHash != "" && !addedHeadMatchedSummary && latestSummaryID != 0 {
+		findings = append(findings, latestSummary)
 	}
 
 	return &ReviewResponse{Findings: findings}, nil

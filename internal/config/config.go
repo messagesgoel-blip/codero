@@ -269,13 +269,11 @@ func (c *Config) Validate() error {
 	if c.DashboardBasePath != "" && !strings.HasPrefix(c.DashboardBasePath, "/") {
 		return ErrInvalidDashboardBasePath
 	}
-	if c.AutoMerge.Enabled {
-		switch c.AutoMerge.Method {
-		case "merge", "squash", "rebase":
-			// valid
-		default:
-			return ErrInvalidMergeMethod
-		}
+	switch c.AutoMerge.Method {
+	case "merge", "squash", "rebase":
+		// valid
+	default:
+		return ErrInvalidMergeMethod
 	}
 	return nil
 }

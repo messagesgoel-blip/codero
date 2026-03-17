@@ -86,6 +86,52 @@ func TestGitHubProvider_ReviewBodyIncluded(t *testing.T) {
 	}
 }
 
+func TestGitHubProvider_ReviewBodyFilteredByHeadCommit(t *testing.T) {
+	stub := &stubReviewClient{
+		pr: &ghclient.PRInfo{Number: 2, HeadSHA: "headsha"},
+		reviews: []ghclient.Review{
+			{ID: 10, User: "coderabbitai", State: "COMMENTED", Body: "old summary", CommitID: "oldsha"},
+			{ID: 11, User: "coderabbitai", State: "COMMENTED", Body: "new summary", CommitID: "headsha"},
+		},
+	}
+	p := &GitHubProvider{github: stub}
+	resp, err := p.Review(context.Background(), ReviewRequest{
+		Repo: "owner/repo", Branch: "feat", HeadHash: "headsha",
+	})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if len(resp.Findings) != 1 {
+		t.Fatalf("expected 1 finding from current head review body, got %d", len(resp.Findings))
+	}
+	if resp.Findings[0].Message != "new summary" {
+		t.Fatalf("message: want new summary, got %q", resp.Findings[0].Message)
+	}
+}
+
+func TestGitHubProvider_ReviewBodyFallbackToLatestWhenNoHeadMatch(t *testing.T) {
+	stub := &stubReviewClient{
+		pr: &ghclient.PRInfo{Number: 2, HeadSHA: "headsha"},
+		reviews: []ghclient.Review{
+			{ID: 10, User: "coderabbitai", State: "COMMENTED", Body: "older summary", CommitID: "oldsha"},
+			{ID: 11, User: "coderabbitai", State: "COMMENTED", Body: "latest summary", CommitID: "oldsha2"},
+		},
+	}
+	p := &GitHubProvider{github: stub}
+	resp, err := p.Review(context.Background(), ReviewRequest{
+		Repo: "owner/repo", Branch: "feat", HeadHash: "headsha",
+	})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if len(resp.Findings) != 1 {
+		t.Fatalf("expected latest fallback finding, got %d", len(resp.Findings))
+	}
+	if resp.Findings[0].Message != "latest summary" {
+		t.Fatalf("message: want latest summary, got %q", resp.Findings[0].Message)
+	}
+}
+
 func TestInferSeverity(t *testing.T) {
 	cases := []struct {
 		body string

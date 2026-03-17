@@ -59,10 +59,11 @@ type PRInfo struct {
 
 // Review represents a single GitHub pull request review.
 type Review struct {
-	ID    int64
-	User  string
-	State string // "APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED"
-	Body  string
+	ID       int64
+	User     string
+	State    string // "APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED"
+	Body     string
+	CommitID string
 }
 
 // ReviewComment is an inline pull request review comment.
@@ -171,15 +172,22 @@ func (c *Client) ListPRReviews(ctx context.Context, repo string, prNumber int) (
 			User struct {
 				Login string `json:"login"`
 			} `json:"user"`
-			State string `json:"state"`
-			Body  string `json:"body"`
+			State    string `json:"state"`
+			Body     string `json:"body"`
+			CommitID string `json:"commit_id"`
 		}
 		headers, err := c.getJSONPage(ctx, nextURL, &raw)
 		if err != nil {
 			return nil, fmt.Errorf("list PR reviews: %w", err)
 		}
 		for _, r := range raw {
-			all = append(all, Review{ID: r.ID, User: r.User.Login, State: r.State, Body: r.Body})
+			all = append(all, Review{
+				ID:       r.ID,
+				User:     r.User.Login,
+				State:    r.State,
+				Body:     r.Body,
+				CommitID: r.CommitID,
+			})
 		}
 		nextURL = parseLinkNext(headers.Get("Link"))
 	}
