@@ -1,0 +1,176 @@
+name: v1.2.1 Stabilization Watch
+
+# 48-hour operational watch for v1.2.1 post-promotion.
+# Runs release-status on both v1.2.1 (new) and v1.2.0 (baseline) every 6 hours,
+# computes a status delta, and fails only on new FAILs in v1.2.1.
+#
+# Checks aggregated per run:
+#   v1.2.1  prove (C-001..C-022) + verify (V-001..V-010) + validate (RR-001) + drift
+#   v1.2.0  same set — used as regression baseline
+#
+# Failure policy:
+#   NEW_FAIL  — check is FAIL in v1.2.1 but was PASS/SKIP in v1.2.0 → workflow fails
+#   DEGRADED  — check is SKIP in v1.2.1, was PASS in v1.2.0 → recorded, not a failure
+#   STABLE    — no change → workflow passes
+#
+# Artifacts uploaded per run:
+#   stabilization-v121.json   — v1.2.1 release-status JSON
+#   stabilization-v120.json   — v1.2.0 baseline release-status JSON
+#   stabilization-diff.md     — human-readable comparison
+#   stabilization-diff.json   — machine-readable delta
+
+on:
+  schedule:
+    # Every 6 hours during the 48h stabilization window (2026-03-17 → 2026-03-19).
+    # Disable or update after stabilization window closes.
+    - cron: "0 */6 * * *"
+
+  workflow_dispatch:
+    inputs:
+      new_version:
+        description: "Version under watch (e.g. v1.2.1)"
+        required: false
+        default: "v1.2.1"
+      baseline_version:
+        description: "Comparison baseline version (e.g. v1.2.0)"
+        required: false
+        default: "v1.2.0"
+
+jobs:
+  stabilization-watch:
+    name: Stabilization Watch (${{ github.event.inputs.new_version || 'v1.2.1' }} vs ${{ github.event.inputs.baseline_version || 'v1.2.0' }})
+    runs-on: ubuntu-latest
+
+    env:
+      NEW_VERSION:      ${{ github.event.inputs.new_version      || 'v1.2.1' }}
+      BASELINE_VERSION: ${{ github.event.inputs.baseline_version || 'v1.2.0' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.2"
+          cache: true
+
+      - name: Build codero binary
+        run: |
+          go build -trimpath -o ./bin/codero ./cmd/codero
+          echo "Built: $(./bin/codero version)"
+
+      - name: Make scripts executable
+        run: |
+          chmod +x scripts/automation/release-status.sh
+          chmod +x scripts/automation/compare-release-status.sh
+
+      # Run v1.2.1 (new) release-status
+      - name: Run release-status for new version (${{ env.NEW_VERSION }})
+        run: |
+          mkdir -p ci-artifacts
+          CODERO_BIN=./bin/codero \
+            bash scripts/automation/release-status.sh \
+              --version "${NEW_VERSION}" \
+              --repo-path . \
+              --json \
+              2>ci-artifacts/stabilization-v121-human.txt \
+          | tee ci-artifacts/stabilization-v121.json
+          echo "--- Human Summary (new) ---"
+          cat ci-artifacts/stabilization-v121-human.txt
+
+      # Run v1.2.0 (baseline) release-status
+      - name: Run release-status for baseline (${{ env.BASELINE_VERSION }})
+        run: |
+          CODERO_BIN=./bin/codero \
+            bash scripts/automation/release-status.sh \
+              --version "${BASELINE_VERSION}" \
+              --repo-path . \
+              --json \
+              2>ci-artifacts/stabilization-v120-human.txt \
+          | tee ci-artifacts/stabilization-v120.json || true
+          echo "--- Human Summary (baseline) ---"
+          cat ci-artifacts/stabilization-v120-human.txt
+
+      # Compare the two reports, emit markdown diff and JSON delta
+      - name: Compare new vs baseline
+        run: |
+          bash scripts/automation/compare-release-status.sh \
+            --new      ci-artifacts/stabilization-v121.json \
+            --baseline ci-artifacts/stabilization-v120.json \
+            --output   both \
+          > ci-artifacts/stabilization-diff.md 2>ci-artifacts/compare-human.txt || true
+
+          # Also emit pure JSON delta
+          bash scripts/automation/compare-release-status.sh \
+            --new      ci-artifacts/stabilization-v121.json \
+            --baseline ci-artifacts/stabilization-v120.json \
+            --output   json \
+          > ci-artifacts/stabilization-diff.json 2>/dev/null || true
+
+          echo "--- Diff Summary ---"
+          cat ci-artifacts/compare-human.txt
+          echo ""
+          cat ci-artifacts/stabilization-diff.md
+
+      # Assert: no new FAILs in new version vs baseline
+      - name: Assert regression-free
+        run: |
+          # v1.2.1 must itself have no FAILs
+          new_overall="$(jq -r '.overall_status' ci-artifacts/stabilization-v121.json)"
+          new_fail="$(   jq -r '.totals.fail'    ci-artifacts/stabilization-v121.json)"
+
+          if [ "$new_overall" != "PASS" ]; then
+            failing="$(jq -r '[.checks[] | select(.status == "fail") | "\(.id):\(.name)"] | join(", ")' \
+              ci-artifacts/stabilization-v121.json)"
+            echo "::error::${NEW_VERSION} release-status FAILED: ${new_fail} check(s): ${failing}"
+            exit 1
+          fi
+
+          # Delta must show regression_free=true
+          if [ -f ci-artifacts/stabilization-diff.json ]; then
+            regression_free="$(jq -r '.regression_free' ci-artifacts/stabilization-diff.json)"
+            new_fails_list="$( jq -r '.new_fails | join(", ")' ci-artifacts/stabilization-diff.json)"
+            if [ "$regression_free" != "true" ]; then
+              echo "::error::Regression detected in ${NEW_VERSION} vs ${BASELINE_VERSION}: ${new_fails_list}"
+              exit 1
+            fi
+          fi
+
+          pass="$(   jq -r '.totals.pass'  ci-artifacts/stabilization-v121.json)"
+          fail="$(   jq -r '.totals.fail'  ci-artifacts/stabilization-v121.json)"
+          skip="$(   jq -r '.totals.skip'  ci-artifacts/stabilization-v121.json)"
+          echo "overall=${new_overall}  pass=${pass}  fail=${fail}  skip=${skip}  regression_free=true"
+
+      # Write GitHub Actions job summary
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "# v1.2.1 Stabilization Watch"
+            echo ""
+            echo "**Run:** \`${GITHUB_RUN_ID}\`  **Trigger:** \`${{ github.event_name }}\`"
+            echo ""
+            if [ -f ci-artifacts/stabilization-diff.json ]; then
+              rf="$(  jq -r '.regression_free'  ci-artifacts/stabilization-diff.json)"
+              nf="$(  jq -r '.new_fails | length' ci-artifacts/stabilization-diff.json)"
+              chg="$( jq -r '.changed_count'    ci-artifacts/stabilization-diff.json)"
+              echo "**Regression-free:** ${rf}  **New fails:** ${nf}  **Status changes:** ${chg}"
+              echo ""
+              cat ci-artifacts/stabilization-diff.md
+            else
+              echo "Diff not produced — compare step may have failed."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload stabilization artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stabilization-watch-${{ github.run_id }}
+          path: |
+            ci-artifacts/stabilization-v121.json
+            ci-artifacts/stabilization-v121-human.txt
+            ci-artifacts/stabilization-v120.json
+            ci-artifacts/stabilization-v120-human.txt
+            ci-artifacts/stabilization-diff.md
+            ci-artifacts/stabilization-diff.json
+          retention-days: 7
