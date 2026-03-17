@@ -1,0 +1,67 @@
+# Codero v1.2.1-rc.1 — Release Candidate Record
+#
+# This is the release candidate record for v1.2.1-rc.1.
+# It serves as promotion evidence for the final v1.2.1 release.
+#
+# To promote to final v1.2.1:
+#   1. All go/no-go gates in docs/runbooks/v1.2.1-patch-readiness.md must be PASS.
+#   2. Create docs/runbooks/releases/v1.2.1.yaml with the same artifact and SHA.
+#   3. Tag: git tag v1.2.1 -m "v1.2.1 — <summary>" && git push origin v1.2.1
+#   4. Run: scripts/automation/release-status.sh --version v1.2.1 --json --strict
+#
+# SHA cross-check note:
+#   The artifact_sha256 field is verified against the binary on the operator host.
+#   GitHub Actions runners cannot access /srv/storage/; SHA cross-check (drift DR-V02)
+#   is performed locally by release-status.sh and the daily reliability gate.
+
+# --- Identity ---
+version: "v1.2.1-rc.1"
+release_type: "rc"
+promoted_commit: "1a015a85b83346304288ae04a783cc3d6087df30"
+tag: "v1.2.1-rc.1"
+date: "2026-03-17"
+timestamp_utc: "2026-03-17T11:39:38Z"
+
+# --- Artifact ---
+artifact_path: "/srv/storage/shared/tools/releases/codero-v1.2.1-rc.1/codero"
+artifact_sha256: "ff9392e6c98dc49b906d6e7aa0c04de7110729d94b994f9ba2836aaec8d028c7"
+checksum_file: "/srv/storage/shared/tools/releases/codero-v1.2.1-rc.1/codero.sha256"
+
+# --- Build ---
+go_toolchain: "go1.24.2"
+build_flags: "-trimpath -ldflags '-s -w -X main.version=v1.2.1-rc.1'"
+
+# --- Verification ---
+verification_status: "PASS"
+pre_cut_checks: >
+  go test -count=1 ./... PASS (20 packages);
+  go test -race ./... PASS (20 packages);
+  go test -tags=e2e -count=1 ./tests/e2e/ PASS;
+  go test -tags=e2e -race ./tests/e2e/ PASS;
+  codero prove --fast: PASS (passed=18 skipped=4 failed=0);
+  verify-release.sh --version v1.2.0: PASS (passed=7 skipped=3 failed=0);
+  release-status.sh --version v1.2.0: PASS (pass=28 skip=7 total=35)
+install_drill: "PASS — version=v1.2.1-rc.1 sha256=ff9392e6c98dc49b… (drill path cleaned up)"
+rollback_drill: "PASS — v1.2.0 binary executes at artifact_path, SHA matches record"
+
+# --- Rollback ---
+rollback_version: "v1.2.0"
+rollback_artifact: "/srv/storage/shared/tools/releases/codero-v1.2.0/codero"
+rollback_sha256: "f24253cd39b549985ef315ecfff948512444dfcb95ab4447bc90b6f7b608fe16"
+
+# --- Promotion gate ---
+# These must all be PASS before promoting to final v1.2.1.
+# See docs/runbooks/v1.2.1-patch-readiness.md for full criteria.
+promotion_gates:
+  G-01_build:           "PASS"
+  G-02_sha256:          "PASS"
+  G-03_unit_tests:      "PASS"
+  G-04_race_tests:      "PASS"
+  G-05_e2e_tests:       "PASS"
+  G-06_prove_gate:      "PASS"
+  G-07_verify_release:  "PASS"
+  G-08_install_drill:   "PASS"
+  G-09_rollback_drill:  "PASS"
+  G-10_ci_workflow:     "PENDING — awaiting PR CI green on feat/COD-042-v121-rc-cut"
+  G-11_no_blocking_comments: "PENDING — awaiting PR review"
+  G-12_release_record:  "PASS — this file"
