@@ -1,0 +1,148 @@
+name: Release Status
+
+# Unified release health report — consolidates prove, verify-release,
+# validate-release-record into one JSON report and human summary.
+#
+# Checks aggregated:
+#   prove    C-001..C-022  codero prove --fast
+#   verify   V-001..V-010  verify-release.sh (V-007..V-010 SKIP in CI)
+#   validate RR-001        validate-release-record.sh
+#   drift    DR-V01..V02   release record version + artifact SHA (DR-V02 SKIP in CI)
+#
+# Triggers:
+#   workflow_dispatch  — on-demand with optional version override
+#   schedule           — nightly at 06:30 UTC (after post-release-reliability at 06:00)
+#
+# Artifacts uploaded:
+#   release-status.json   — canonical JSON report
+#   release-status.txt    — human summary
+
+on:
+  schedule:
+    - cron: "30 6 * * *"
+
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: "Release version to report on (e.g. v1.2.0)"
+        required: false
+        default: "v1.2.0"
+      strict_mode:
+        description: "Treat SKIP as FAIL for validate/drift groups (true|false)"
+        required: false
+        default: "false"
+
+jobs:
+  release-status:
+    name: Release Status (${{ github.event.inputs.release_version || 'v1.2.0' }})
+    runs-on: ubuntu-latest
+
+    env:
+      RELEASE_VERSION: ${{ github.event.inputs.release_version || 'v1.2.0' }}
+      STRICT_FLAG: ${{ github.event.inputs.strict_mode == 'true' && '--strict' || '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.2"
+          cache: true
+
+      - name: Build codero binary
+        run: |
+          go build -trimpath -o ./bin/codero ./cmd/codero
+          echo "Built: $(./bin/codero version)"
+
+      - name: Make release-status script executable
+        run: chmod +x scripts/automation/release-status.sh
+
+      # Run unified release status report.
+      # JSON → stdout → tee to artifact.
+      # Human log → stderr → artifact.
+      # Script exits non-zero on FAIL → step fails.
+      - name: Run release-status report
+        run: |
+          mkdir -p ci-artifacts
+          CODERO_BIN=./bin/codero \
+            bash scripts/automation/release-status.sh \
+              --version "${RELEASE_VERSION}" \
+              --repo-path . \
+              ${STRICT_FLAG} \
+              --json \
+              2>ci-artifacts/release-status.txt \
+          | tee ci-artifacts/release-status.json
+          echo "--- Human Summary ---"
+          cat ci-artifacts/release-status.txt
+
+      # Assert overall_status=PASS even if the previous step exits 0.
+      - name: Assert no failures
+        run: |
+          overall="$(jq -r '.overall_status' ci-artifacts/release-status.json)"
+          fail_count="$(jq -r '.totals.fail' ci-artifacts/release-status.json)"
+          if [ "$overall" != "PASS" ]; then
+            failing="$(jq -r '[.checks[] | select(.status == "fail") | "\(.id):\(.name)"] | join(", ")' ci-artifacts/release-status.json)"
+            echo "::error::Release status FAILED: ${fail_count} check(s): ${failing}"
+            exit 1
+          fi
+          pass_count="$(jq -r '.totals.pass'  ci-artifacts/release-status.json)"
+          skip_count="$(jq -r '.totals.skip'  ci-artifacts/release-status.json)"
+          total="$(     jq -r '.totals.total' ci-artifacts/release-status.json)"
+          echo "overall=${overall}  pass=${pass_count}  fail=${fail_count}  skip=${skip_count}  total=${total}"
+
+      # Write GitHub Actions job summary
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "# Release Status — ${RELEASE_VERSION}"
+            echo ""
+            if [ -f ci-artifacts/release-status.json ]; then
+              overall="$(   jq -r '.overall_status   // "unknown"' ci-artifacts/release-status.json)"
+              pass_count="$(jq -r '.totals.pass  // 0' ci-artifacts/release-status.json)"
+              fail_count="$(jq -r '.totals.fail  // 0' ci-artifacts/release-status.json)"
+              skip_count="$(jq -r '.totals.skip  // 0' ci-artifacts/release-status.json)"
+              total="$(     jq -r '.totals.total // 0' ci-artifacts/release-status.json)"
+              echo "**Overall:** ${overall}  **Pass:** ${pass_count}  **Fail:** ${fail_count}  **Skip:** ${skip_count}  **Total:** ${total}"
+              echo ""
+              echo "## Checks by source"
+              echo ""
+              for src in prove verify validate drift; do
+                echo "### ${src}"
+                echo ""
+                echo "| ID | Name | Status | Details |"
+                echo "|---|---|---|---|"
+                jq -r --arg s "${src}" \
+                  '[.checks[] | select(.source == $s)] | .[] | "| \(.id) | \(.name) | \(.status) | \(.details) |"' \
+                  ci-artifacts/release-status.json
+                echo ""
+              done
+              echo "## Sources"
+              echo ""
+              echo "| Source | Overall | Pass | Fail | Skip |"
+              echo "|---|---|---|---|---|"
+              for src in prove verify validate; do
+                jq -r --arg s "${src}" \
+                  '.sources[$s] | "| \($s) | \(.overall_status) | \(.passed // "-") | \(.failed // "-") | \(.skipped // "-") |"' \
+                  ci-artifacts/release-status.json
+              done
+              echo ""
+              echo "## Drift"
+              echo ""
+              echo "| Field | Value |"
+              echo "|---|---|"
+              jq -r '.drift | to_entries[] | "| \(.key) | \(.value) |"' ci-artifacts/release-status.json
+            else
+              echo "release-status.json not produced — script may have failed before emitting JSON."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload release-status artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-status-${{ github.run_id }}
+          path: |
+            ci-artifacts/release-status.json
+            ci-artifacts/release-status.txt
+          retention-days: 30
