@@ -211,9 +211,9 @@ func (h *Handler) handleGateChecks(w http.ResponseWriter, r *http.Request) {
 		// No report yet — return an empty envelope so the dashboard can
 		// distinguish "not yet run" from an actual error.
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"report":      nil,
-			"message":     "no gate-check report available; run `codero gate-check` to generate one",
-			"report_path": reportPath,
+			"report":       nil,
+			"message":      "no gate-check report available; run `codero gate-check` to generate one",
+			"report_path":  reportPath,
 			"generated_at": time.Now().UTC(),
 		})
 		return
