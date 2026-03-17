@@ -184,7 +184,7 @@ func parseGateCheckProfile(raw string) (gatecheck.Profile, bool) {
 }
 
 // saveGateCheckReport writes report as JSON to path, creating parent dirs as needed.
-func saveGateCheckReport(report gatecheck.Report, path string) error {
+func saveGateCheckReport(report gatecheck.Report, path string) (err error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create report directory: %w", err)
 	}
@@ -193,11 +193,13 @@ func saveGateCheckReport(report gatecheck.Report, path string) error {
 		return fmt.Errorf("create report file: %w", err)
 	}
 	defer func() {
-		_ = f.Close()
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("close report file: %w", cerr)
+		}
 	}()
 	enc := json.NewEncoder(f)
 	enc.SetIndent("", "  ")
-	if err := enc.Encode(report); err != nil {
+	if err = enc.Encode(report); err != nil {
 		return fmt.Errorf("encode report: %w", err)
 	}
 	return nil
