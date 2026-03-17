@@ -1,0 +1,155 @@
+name: Patch Dry-Run Release Simulation
+
+# Validates that a v1.2.1 patch release can be cut safely.
+# Runs the full dry-run simulation (DR-001..DR-009) and uploads evidence artifacts.
+#
+# Triggers:
+#   - workflow_dispatch: manual on-demand run
+#   - pull_request (path-filtered): changes to release tooling only
+#
+# Checks performed (via scripts/release/dry-run-patch-release.sh):
+#   DR-001  Build binary from source
+#   DR-002  Compute SHA-256
+#   DR-003  go test -count=1 ./...
+#   DR-004  go test -race ./...
+#   DR-005  go test -tags=e2e ./tests/e2e/  [SKIP if env unavailable]
+#   DR-006  codero prove --fast --json
+#   DR-007  verify-release.sh
+#   DR-008  Install drill (non-destructive)
+#   DR-009  Rollback drill                  [SKIP if base artifact absent]
+#
+# Failure policy:
+#   FAIL — workflow exits non-zero; promotion blocked
+#   SKIP — recorded with explicit reason; not a failure
+#   PASS — check succeeded
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_version:
+        description: "Target version label (e.g. v1.2.1-rc.dryrun)"
+        required: false
+        default: "v1.2.1-rc.dryrun"
+      base_version:
+        description: "Base version for rollback drill (e.g. v1.2.0)"
+        required: false
+        default: "v1.2.0"
+
+  push:
+    branches: [main]
+    paths:
+      - "scripts/release/**"
+      - "scripts/automation/verify-release.sh"
+      - ".github/workflows/patch-dry-run.yml"
+      - "docs/runbooks/v1.2.1-patch-readiness.md"
+
+  pull_request:
+    branches: [main]
+    paths:
+      - "scripts/release/**"
+      - "scripts/automation/verify-release.sh"
+      - ".github/workflows/patch-dry-run.yml"
+      - "docs/runbooks/v1.2.1-patch-readiness.md"
+
+jobs:
+  patch-dry-run:
+    name: Patch Dry-Run (${{ github.event.inputs.target_version || 'v1.2.1-rc.dryrun' }})
+    runs-on: ubuntu-latest
+
+    env:
+      TARGET_VERSION: ${{ github.event.inputs.target_version || 'v1.2.1-rc.dryrun' }}
+      BASE_VERSION: ${{ github.event.inputs.base_version || 'v1.2.0' }}
+      # E2E tests require a live daemon; skip in CI where daemon is unavailable.
+      CODERO_E2E_SKIP: "true"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.2"
+          cache: true
+
+      - name: Make dry-run script executable
+        run: chmod +x scripts/release/dry-run-patch-release.sh
+
+      # Run the full dry-run simulation.
+      # Human log goes to stderr → ci-artifacts/dry-run-human.log
+      # JSON summary goes to stdout → ci-artifacts/dry-run-result.json
+      # Script exits non-zero on any FAIL; step exits non-zero on any FAIL.
+      - name: Run dry-run simulation
+        run: |
+          mkdir -p ci-artifacts
+          bash scripts/release/dry-run-patch-release.sh \
+            --target-version "${TARGET_VERSION}" \
+            --base-version   "${BASE_VERSION}" \
+            --artifact-dir   ci-artifacts/dryrun-artifacts \
+            --json \
+            2>ci-artifacts/dry-run-human.log \
+          | tee ci-artifacts/dry-run-result.json
+          echo "--- Human Summary ---"
+          cat ci-artifacts/dry-run-human.log
+
+      # Assert overall_status=PASS even if the previous step exited 0
+      # (defence-in-depth in case jq/json produced unexpected output).
+      - name: Assert dry-run PASS
+        run: |
+          overall="$(jq -r '.overall_status' ci-artifacts/dry-run-result.json)"
+          fail_count="$(jq -r '.failed' ci-artifacts/dry-run-result.json)"
+          skip_count="$(jq -r '.skipped' ci-artifacts/dry-run-result.json)"
+          pass_count="$(jq -r '.passed'  ci-artifacts/dry-run-result.json)"
+          sha256="$(jq -r '.sha256' ci-artifacts/dry-run-result.json)"
+          if [ "$overall" != "PASS" ]; then
+            failing="$(jq -r '[.checks[] | select(.status == "fail") | "\(.id):\(.name)"] | join(", ")' ci-artifacts/dry-run-result.json)"
+            echo "::error::Patch dry-run FAILED: ${fail_count} check(s): ${failing}"
+            exit 1
+          fi
+          echo "overall=${overall}  pass=${pass_count}  fail=${fail_count}  skip=${skip_count}"
+          echo "sha256=${sha256}"
+
+      # Generate a markdown summary for GitHub Actions job summary.
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "# Patch Dry-Run Release Simulation"
+            echo ""
+            echo "**Version:** \`${TARGET_VERSION}\`  **Base:** \`${BASE_VERSION}\`  **Run:** \`${GITHUB_RUN_ID}\`"
+            echo ""
+            if [ -f ci-artifacts/dry-run-result.json ]; then
+              overall="$(jq -r '.overall_status // "unknown"' ci-artifacts/dry-run-result.json)"
+              pass_count="$(jq -r '.passed  // 0' ci-artifacts/dry-run-result.json)"
+              fail_count="$(jq -r '.failed  // 0' ci-artifacts/dry-run-result.json)"
+              skip_count="$(jq -r '.skipped // 0' ci-artifacts/dry-run-result.json)"
+              sha256="$(jq -r '.sha256 // ""' ci-artifacts/dry-run-result.json)"
+              echo "**Overall:** ${overall}  **Pass:** ${pass_count}  **Fail:** ${fail_count}  **Skip:** ${skip_count}"
+              echo ""
+              echo "**SHA-256:** \`${sha256}\`"
+              echo ""
+              echo "## Checks"
+              echo ""
+              echo "| ID | Name | Status | Detail |"
+              echo "|---|---|---|---|"
+              jq -r '.checks[] | "| \(.id) | \(.name) | \(.status) | \(.detail) |"' \
+                ci-artifacts/dry-run-result.json
+            else
+              echo "**dry-run-result.json not found** — script may have failed before producing output."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Always upload artifacts so failures can be debugged from any run.
+      - name: Upload dry-run artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patch-dry-run-${{ github.run_id }}
+          path: |
+            ci-artifacts/dry-run-result.json
+            ci-artifacts/dry-run-human.log
+            ci-artifacts/dryrun-artifacts/prove-result.json
+            ci-artifacts/dryrun-artifacts/verify-result.json
+            ci-artifacts/dryrun-artifacts/unit-tests.log
+            ci-artifacts/dryrun-artifacts/race-tests.log
+            ci-artifacts/dryrun-artifacts/e2e-tests.log
+            ci-artifacts/dryrun-artifacts/codero.sha256
+          retention-days: 30
