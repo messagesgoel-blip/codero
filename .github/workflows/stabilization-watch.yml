@@ -233,7 +233,7 @@ jobs:
           EXISTING="$(gh issue list \
             --repo "${GITHUB_REPOSITORY}" \
             --state open \
-            --search "in:title ${ISSUE_TITLE}" \
+            --search "\"${ISSUE_TITLE}\" in:title" \
             --json number \
             --jq '.[0].number // empty')"
 
@@ -280,6 +280,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
+
           if [ ! -f ci-artifacts/triage.json ]; then
             echo "triage.json missing — skipping issue escalation"
             exit 0
@@ -314,7 +316,7 @@ jobs:
           EXISTING="$(gh issue list \
             --repo "${GITHUB_REPOSITORY}" \
             --state open \
-            --search "in:title ${ISSUE_TITLE}" \
+            --search "\"${ISSUE_TITLE}\" in:title" \
             --json number \
             --jq '.[0].number // empty')"
 
@@ -334,7 +336,7 @@ jobs:
                   | .[0] // ""
                 ' 2>/dev/null \
               | sed -n 's/.*<!-- regression-sig: \([^ >]*\) -->.*/\1/p' \
-              | head -n 1 || echo "")"
+              | head -n 1)"
 
             if [ "${LAST_SIG}" = "${regression_sig}" ]; then
               echo "Anti-noise guard: last escalation already has signature (${regression_sig}) — skipping duplicate comment"
