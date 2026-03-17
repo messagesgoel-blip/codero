@@ -35,6 +35,14 @@ on:
         required: false
         default: "v1.2.0"
 
+  push:
+    branches: [main]
+    paths:
+      - "scripts/release/**"
+      - "scripts/automation/verify-release.sh"
+      - ".github/workflows/patch-dry-run.yml"
+      - "docs/runbooks/v1.2.1-patch-readiness.md"
+
   pull_request:
     branches: [main]
     paths:
@@ -142,5 +150,6 @@ jobs:
             ci-artifacts/dryrun-artifacts/verify-result.json
             ci-artifacts/dryrun-artifacts/unit-tests.log
             ci-artifacts/dryrun-artifacts/race-tests.log
+            ci-artifacts/dryrun-artifacts/e2e-tests.log
             ci-artifacts/dryrun-artifacts/codero.sha256
           retention-days: 30

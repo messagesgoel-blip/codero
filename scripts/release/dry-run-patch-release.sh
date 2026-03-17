@@ -186,19 +186,18 @@ else
     E2E_EXIT=0
     (cd "${REPO_ROOT}" && go test -tags=e2e -count=1 -v ./tests/e2e/ 2>&1) \
         | tee "${E2E_LOG}" >/dev/null || E2E_EXIT=$?
-    if [[ ${E2E_EXIT} -eq 0 ]]; then
+    # Check for "no test files" regardless of exit code — on zero exit it means
+    # nothing actually ran, which is a SKIP not a PASS.
+    if grep -q "no test files" "${E2E_LOG}" 2>/dev/null || \
+       grep -q "\[no test files\]" "${E2E_LOG}" 2>/dev/null; then
+        skip "DR-005 e2e: SKIP — no test files found under tests/e2e/"
+        record "DR-005" "SKIP" "e2e-tests" "no test files in tests/e2e/"
+    elif [[ ${E2E_EXIT} -eq 0 ]]; then
         pass "DR-005 e2e tests: PASS"
         record "DR-005" "PASS" "e2e-tests" "exit=0"
     else
-        # E2E may SKIP/fail due to missing daemon — check if all were skipped
-        if grep -q "no test files" "${E2E_LOG}" 2>/dev/null || \
-           grep -q "\[no test files\]" "${E2E_LOG}" 2>/dev/null; then
-            skip "DR-005 e2e: SKIP — no test files found under tests/e2e/"
-            record "DR-005" "SKIP" "e2e-tests" "no test files in tests/e2e/"
-        else
-            fail "DR-005 e2e tests: FAIL (exit ${E2E_EXIT}) — daemon or env unavailable"
-            record "DR-005" "FAIL" "e2e-tests" "exit=${E2E_EXIT}; daemon or env unavailable; see ${E2E_LOG}"
-        fi
+        fail "DR-005 e2e tests: FAIL (exit ${E2E_EXIT}) — daemon or env unavailable"
+        record "DR-005" "FAIL" "e2e-tests" "exit=${E2E_EXIT}; daemon or env unavailable; see ${E2E_LOG}"
     fi
 fi
 
@@ -296,15 +295,26 @@ if [[ "${INSTALL_DRILL_OK}" == "true" ]]; then
     else
         note "  drill binary version: ${DRILL_VERSION_OUT}"
 
-        # Validate checksum
-        DRILL_SHA256="$(sha256sum "${DRYRUN_INSTALL_PATH}" | awk '{print $1}')"
-        if [[ "${DRILL_SHA256}" != "${SHA256}" ]]; then
-            fail "DR-008 install drill: checksum mismatch after copy"
-            record "DR-008" "FAIL" "install-drill" "checksum mismatch: expected=${SHA256:0:16}… got=${DRILL_SHA256:0:16}…"
+        # Assert version string matches TARGET_VERSION
+        DRILL_VERSION_TRIMMED="$(echo "${DRILL_VERSION_OUT}" | tr -d '[:space:]')"
+        TARGET_VERSION_TRIMMED="$(echo "${TARGET_VERSION}" | tr -d '[:space:]')"
+        if [[ "${DRILL_VERSION_TRIMMED}" != "${TARGET_VERSION_TRIMMED}" ]]; then
+            fail "DR-008 install drill: version mismatch expected=${TARGET_VERSION} got=${DRILL_VERSION_OUT}"
+            record "DR-008" "FAIL" "install-drill" "version mismatch: expected=${TARGET_VERSION} got=${DRILL_VERSION_OUT}"
             INSTALL_DRILL_OK=false
-        else
-            pass "DR-008 install drill: copy+version+checksum OK (version=${DRILL_VERSION_OUT})"
-            record "DR-008" "PASS" "install-drill" "version=${DRILL_VERSION_OUT} sha256=${SHA256:0:16}…"
+        fi
+
+        # Validate checksum
+        if [[ "${INSTALL_DRILL_OK}" == "true" ]]; then
+            DRILL_SHA256="$(sha256sum "${DRYRUN_INSTALL_PATH}" | awk '{print $1}')"
+            if [[ "${DRILL_SHA256}" != "${SHA256}" ]]; then
+                fail "DR-008 install drill: checksum mismatch after copy"
+                record "DR-008" "FAIL" "install-drill" "checksum mismatch: expected=${SHA256:0:16}… got=${DRILL_SHA256:0:16}…"
+                INSTALL_DRILL_OK=false
+            else
+                pass "DR-008 install drill: copy+version+checksum OK (version=${DRILL_VERSION_OUT})"
+                record "DR-008" "PASS" "install-drill" "version=${DRILL_VERSION_OUT} sha256=${SHA256:0:16}…"
+            fi
         fi
     fi
 fi
