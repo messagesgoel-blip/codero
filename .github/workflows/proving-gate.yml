@@ -1,0 +1,75 @@
+name: Proving Gate
+
+# Runs `codero prove --fast` on every PR to main and every push to main.
+# Enforces that all 22 v1.2 proving checks pass (SKIP is not a failure).
+# Uploads human summary and JSON evidence as reviewable workflow artifacts.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  prove:
+    name: v1.2 Proving Gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.2"
+          cache: true
+
+      # Build the codero binary from source so the prove command is available.
+      # The installed binary in CI may be an older release that lacks `prove`.
+      - name: Build codero binary
+        run: go build -o ./bin/codero ./cmd/codero
+
+      # Run the proving gate in fast mode (skips race tests; daemon not required).
+      # JSON goes to stdout → tee to file + CI log.
+      # Human table goes to stderr → file (echoed below for log visibility).
+      # GitHub Actions default shell has pipefail; codero prove failure propagates.
+      - name: Run proving gate
+        run: |
+          mkdir -p ci-artifacts
+          ./bin/codero prove --fast \
+            2>ci-artifacts/prove-human.txt \
+            | tee ci-artifacts/prove-result.json
+          echo "--- Human Summary ---"
+          cat ci-artifacts/prove-human.txt
+
+      # Strict JSON sanity check: verify schema_version and no FAIL checks.
+      # Runs even if the previous step succeeded to catch schema drift.
+      - name: Validate JSON output
+        run: |
+          schema_ver=$(jq -r '.schema_version' ci-artifacts/prove-result.json)
+          if [ "$schema_ver" != "1" ]; then
+            echo "::error::proving gate schema_version mismatch: expected '1', got '$schema_ver'"
+            exit 1
+          fi
+
+          fail_count=$(jq '[.checks[] | select(.status == "FAIL")] | length' ci-artifacts/prove-result.json)
+          if [ "$fail_count" -gt 0 ]; then
+            failing=$(jq -r '[.checks[] | select(.status == "FAIL") | .id] | join(", ")' ci-artifacts/prove-result.json)
+            echo "::error::proving gate: $fail_count check(s) FAILED: $failing"
+            exit 1
+          fi
+
+          overall=$(jq -r '.overall_status' ci-artifacts/prove-result.json)
+          passed=$(jq -r '.passed' ci-artifacts/prove-result.json)
+          skipped=$(jq -r '.skipped' ci-artifacts/prove-result.json)
+          echo "schema_version=$schema_ver  overall=$overall  passed=$passed  skipped=$skipped"
+
+      # Always upload artifacts so failures can be debugged from any run.
+      - name: Upload proving gate artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: proving-gate-${{ github.run_id }}
+          path: |
+            ci-artifacts/prove-human.txt
+            ci-artifacts/prove-result.json
+          retention-days: 30
