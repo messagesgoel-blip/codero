@@ -62,6 +62,7 @@ func main() {
 		portsCmd(&configPath),
 		pollCmd(&configPath),
 		whyCmd(&configPath),
+		proveCmd(&configPath),
 	)
 
 	if err := root.Execute(); err != nil {
