@@ -52,9 +52,15 @@ EMIT_JSON=false
 # ── parse args ────────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --version)   EXPECTED_VERSION="$2"; shift 2 ;;
-        --repo-path) REPO_PATH="$2";        shift 2 ;;
-        --endpoint-url) ENDPOINT_URL="$2";  shift 2 ;;
+        --version)
+            [[ $# -lt 2 || "${2:-}" == --* ]] && { echo "[ERROR] --version requires a value" >&2; exit 2; }
+            EXPECTED_VERSION="$2"; shift 2 ;;
+        --repo-path)
+            [[ $# -lt 2 || "${2:-}" == --* ]] && { echo "[ERROR] --repo-path requires a value" >&2; exit 2; }
+            REPO_PATH="$2"; shift 2 ;;
+        --endpoint-url)
+            [[ $# -lt 2 || "${2:-}" == --* ]] && { echo "[ERROR] --endpoint-url requires a value" >&2; exit 2; }
+            ENDPOINT_URL="$2"; shift 2 ;;
         --fast)      FAST_FLAG="--fast";    shift ;;
         --no-fast)   FAST_FLAG="";          shift ;;
         --json)      EMIT_JSON=true;        shift ;;
@@ -260,17 +266,28 @@ log "═════════════════════════
 
 # ── JSON output ───────────────────────────────────────────────────────────────
 if [[ "${EMIT_JSON}" == "true" ]]; then
-    CHECKS_JSON=""
+    CHECKS_JSON="[]"
     for row in "${RESULTS[@]}"; do
         IFS='|' read -r id status name detail <<< "$row"
         # lowercase status for JSON consistency with codero prove
         STATUS_LC="$(echo "${status}" | tr '[:upper:]' '[:lower:]')"
-        DETAIL_ESCAPED="${detail//\"/\\\"}"
-        CHECKS_JSON="${CHECKS_JSON}{\"id\":\"${id}\",\"status\":\"${STATUS_LC}\",\"name\":\"${name}\",\"detail\":\"${DETAIL_ESCAPED}\"},"
+        CHECKS_JSON="$(jq -c \
+            --arg id "${id}" \
+            --arg status "${STATUS_LC}" \
+            --arg name "${name}" \
+            --arg detail "${detail}" \
+            '. + [{id:$id,status:$status,name:$name,detail:$detail}]' <<<"${CHECKS_JSON}")"
     done
-    CHECKS_JSON="[${CHECKS_JSON%,}]"
-    printf '{"schema_version":"1","timestamp":"%s","version":"%s","overall_status":"%s","passed":%d,"failed":%d,"skipped":%d,"total":%d,"checks":%s}\n' \
-        "${START_TS}" "${ACTUAL_VERSION}" "${OVERALL}" "${PASS_COUNT}" "${FAIL_COUNT}" "${SKIP_COUNT}" "${TOTAL}" "${CHECKS_JSON}"
+    jq -nc \
+        --arg timestamp "${START_TS}" \
+        --arg version "${ACTUAL_VERSION}" \
+        --arg overall "${OVERALL}" \
+        --argjson passed "${PASS_COUNT}" \
+        --argjson failed "${FAIL_COUNT}" \
+        --argjson skipped "${SKIP_COUNT}" \
+        --argjson total "${TOTAL}" \
+        --argjson checks "${CHECKS_JSON}" \
+        '{schema_version:"1",timestamp:$timestamp,version:$version,overall_status:$overall,passed:$passed,failed:$failed,skipped:$skipped,total:$total,checks:$checks}'
 fi
 
 # ── exit ──────────────────────────────────────────────────────────────────────
