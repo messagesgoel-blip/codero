@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -49,6 +50,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/dashboard/activity", h.handleActivity)
 	mux.HandleFunc("/api/v1/dashboard/block-reasons", h.handleBlockReasons)
 	mux.HandleFunc("/api/v1/dashboard/gate-health", h.handleGateHealth)
+	mux.HandleFunc("/api/v1/dashboard/gate-checks", h.handleGateChecks)
 	mux.HandleFunc("/api/v1/dashboard/settings", h.handleSettings)
 	mux.HandleFunc("/api/v1/dashboard/manual-review-upload", h.handleUpload)
 	mux.HandleFunc("/api/v1/dashboard/events", h.handleSSE)
@@ -184,6 +186,54 @@ func (h *Handler) handleBlockReasons(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"reasons":      reasons,
+		"generated_at": time.Now().UTC(),
+	})
+}
+
+// handleGateChecks serves GET /api/v1/dashboard/gate-checks.
+// It reads the last gate-check report written by the `gate-check` CLI command.
+// The report path is read from CODERO_GATE_CHECK_REPORT_PATH or the default
+// .codero/gate-check/last-report.json relative to cwd.
+func (h *Handler) handleGateChecks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "")
+		return
+	}
+	setCORSHeaders(w)
+
+	reportPath := os.Getenv("CODERO_GATE_CHECK_REPORT_PATH")
+	if reportPath == "" {
+		reportPath = filepath.Join(".codero", "gate-check", "last-report.json")
+	}
+
+	data, err := os.ReadFile(reportPath) //nolint:gosec
+	if err != nil {
+		// No report yet — return an empty envelope so the dashboard can
+		// distinguish "not yet run" from an actual error.
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"report":      nil,
+			"message":     "no gate-check report available; run `codero gate-check` to generate one",
+			"report_path": reportPath,
+			"generated_at": time.Now().UTC(),
+		})
+		return
+	}
+
+	// Parse the raw report into the dashboard model. We unmarshal into a generic
+	// map and re-marshal to GateCheckReport so the dashboard model stays decoupled
+	// from the gatecheck package (avoids a direct import dependency).
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		loglib.Warn("dashboard: gate-check report parse failed",
+			loglib.FieldComponent, "dashboard", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to parse gate-check report", "parse_error")
+		return
+	}
+
+	// Pass through the raw JSON with a generated_at wrapper so consumers get
+	// the full canonical report plus a freshness timestamp.
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"report":       json.RawMessage(data),
 		"generated_at": time.Now().UTC(),
 	})
 }
