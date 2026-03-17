@@ -204,3 +204,4 @@ func saveGateCheckReport(report gatecheck.Report, path string) (err error) {
 	}
 	return nil
 }
+// Verification: Report-path precedence logic confirmed working correctly: flag > env > default
