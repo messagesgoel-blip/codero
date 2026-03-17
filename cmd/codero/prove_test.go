@@ -22,7 +22,8 @@ import (
 
 // captureProveOutput redirects os.Stdout, calls f, and returns the captured bytes.
 // (Reuses the same pattern as cod027_test.go captureStdout but local to avoid
-//  package-level name collision — prove runs via runProve which writes to os.Stdout.)
+//
+//	package-level name collision — prove runs via runProve which writes to os.Stdout.)
 func captureProveStdout(f func()) string {
 	orig := os.Stdout
 	rd, wr, _ := os.Pipe()
@@ -108,7 +109,7 @@ func TestProveCheck_JSONSchemaStability(t *testing.T) {
 func TestBuildProveChecks_ContainsRequiredIDs(t *testing.T) {
 	opts := proveOpts{
 		repoPath:    t.TempDir(),
-		fast:        true, // skip race to keep test fast
+		fast:        true,                     // skip race to keep test fast
 		endpointURL: "http://127.0.0.1:19999", // guaranteed unreachable → SKIP
 	}
 	checks := buildProveChecks(opts)

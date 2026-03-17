@@ -355,8 +355,8 @@ func checkNonTTYGateJSON(repoPath string) ProveCheck {
 
 	if missing := missingJSONKeys(buf.String(), proveJSONSchema()); len(missing) > 0 {
 		return ProveCheck{ID: id, Name: name, AppendixRef: ref,
-			Status: string(proveFail),
-			Detail:      "missing JSON keys: " + strings.Join(missing, ", "),
+			Status:     string(proveFail),
+			Detail:     "missing JSON keys: " + strings.Join(missing, ", "),
 			DurationMS: dur}
 	}
 	return ProveCheck{ID: id, Name: name, AppendixRef: ref,
@@ -403,8 +403,8 @@ func checkNonTTYWatchFallback(repoPath string) ProveCheck {
 
 	if missing := missingJSONKeys(buf.String(), proveJSONSchema()); len(missing) > 0 {
 		return ProveCheck{ID: id, Name: name, AppendixRef: ref,
-			Status: string(proveFail),
-			Detail:      "missing JSON keys: " + strings.Join(missing, ", "),
+			Status:     string(proveFail),
+			Detail:     "missing JSON keys: " + strings.Join(missing, ", "),
 			DurationMS: dur}
 	}
 	return ProveCheck{ID: id, Name: name, AppendixRef: ref,
@@ -420,20 +420,20 @@ func checkObsEndpoint(id, name, ref, url string) ProveCheck {
 	dur := time.Since(start).Milliseconds()
 	if err != nil {
 		return ProveCheck{ID: id, Name: name, AppendixRef: ref,
-			Status: string(proveSkip),
-			Detail:      "daemon not reachable (expected when not running): " + err.Error(),
+			Status:     string(proveSkip),
+			Detail:     "daemon not reachable (expected when not running): " + err.Error(),
 			DurationMS: dur}
 	}
 	resp.Body.Close()
 	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
 		return ProveCheck{ID: id, Name: name, AppendixRef: ref,
-			Status: string(provePass),
-			Detail:      fmt.Sprintf("HTTP %d", resp.StatusCode),
+			Status:     string(provePass),
+			Detail:     fmt.Sprintf("HTTP %d", resp.StatusCode),
 			DurationMS: dur}
 	}
 	return ProveCheck{ID: id, Name: name, AppendixRef: ref,
-		Status: string(proveFail),
-		Detail:      fmt.Sprintf("HTTP %d — unexpected status", resp.StatusCode),
+		Status:     string(proveFail),
+		Detail:     fmt.Sprintf("HTTP %d — unexpected status", resp.StatusCode),
 		DurationMS: dur}
 }
 
@@ -466,8 +466,8 @@ func checkStateDBError(repoPath string) ProveCheck {
 	if dirErr == nil {
 		// Unexpectedly succeeded — this is an environment anomaly, not a product failure.
 		return ProveCheck{ID: id, Name: name, AppendixRef: ref,
-			Status: string(proveSkip),
-			Detail:      "path manipulation not applicable in this environment (skipped)",
+			Status:     string(proveSkip),
+			Detail:     "path manipulation not applicable in this environment (skipped)",
 			DurationMS: dur}
 	}
 
@@ -477,14 +477,14 @@ func checkStateDBError(repoPath string) ProveCheck {
 	if strings.Contains(errMsg, marker.Name()) || strings.Contains(errMsg, "not a directory") ||
 		strings.Contains(errMsg, badPath) {
 		return ProveCheck{ID: id, Name: name, AppendixRef: ref,
-			Status: string(provePass),
-			Detail:      "OS returns actionable error for non-writable DB path: " + errMsg,
+			Status:     string(provePass),
+			Detail:     "OS returns actionable error for non-writable DB path: " + errMsg,
 			DurationMS: dur}
 	}
 
 	return ProveCheck{ID: id, Name: name, AppendixRef: ref,
-		Status: string(proveFail),
-		Detail:      "error message is not actionable: " + errMsg,
+		Status:     string(proveFail),
+		Detail:     "error message is not actionable: " + errMsg,
 		DurationMS: dur}
 }
 
