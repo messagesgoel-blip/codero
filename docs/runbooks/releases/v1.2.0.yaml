@@ -1,0 +1,54 @@
+# Codero v1.2.0 — Canonical Release Record
+#
+# This file is the single source of truth for the v1.2.0 promotion.
+# It is validated by CI (verify-release.yml: Validate release record) to ensure
+# all required fields are present.
+#
+# SHA cross-check note:
+#   The artifact_sha256 field cannot be verified against the artifact binary in
+#   GitHub Actions runners because /srv/storage/ is not available in that
+#   environment. Cross-check is performed locally during the promotion drill
+#   (see docs/runbooks/v1.2.0-test-release-drill.md) and on the operator host
+#   with: sha256sum /srv/storage/shared/tools/releases/codero-v1.2.0/codero
+
+# --- Identity ---
+version: "v1.2.0"
+promoted_commit: "feec1e0b6164dd72b53a5e743e34adafc3189ef0"
+tag: "v1.2.0"
+date: "2026-03-17"
+
+# --- Artifact ---
+artifact_path: "/srv/storage/shared/tools/releases/codero-v1.2.0/codero"
+artifact_sha256: "f24253cd39b549985ef315ecfff948512444dfcb95ab4447bc90b6f7b608fe16"
+checksum_file: "/srv/storage/shared/tools/releases/codero-v1.2.0/codero.sha256"
+go_toolchain: "go1.24.2"
+build_flags: '-trimpath -ldflags "-s -w -X main.version=v1.2.0"'
+
+# --- Verification summary ---
+# Result of verify-release.sh run during promotion drill (COD-037/COD-038).
+verification_status: "PASS"
+verification_passed: 7
+verification_failed: 0
+verification_skipped: 3
+verification_skip_reason: "daemon not running; endpoint checks require --endpoint-url"
+
+# --- Rollback ---
+rollback_version: "v1.1.0"
+rollback_artifact: "/srv/storage/shared/tools/releases/codero-v1.1.0/codero"
+rollback_command: >
+  cp /srv/storage/shared/tools/releases/codero-v1.1.0/codero
+  /srv/storage/shared/tools/bin/codero && codero version
+
+# --- Scope (commits since v1.1.0) ---
+# COD-031: v1.2 proving gate automation — codero prove command
+# COD-032: close proving gate TODO drills C-019..C-022
+# COD-033: wire proving gate into CI
+# COD-034: v1.2 release packaging and report
+# COD-035: post-release hardening (verify-release script, checklist, hotfix runbook)
+# COD-036: E2E release gate (lifecycle tests, PID cleanup fix, scope-check bypass)
+# COD-037: v1.2.0 test-release promotion drill evidence
+# COD-038: v1.2.0 promotion finalization and tag hygiene
+
+# --- Known non-blocking risks ---
+# R-1: Observability endpoint checks skipped during drill (daemon absent); verified via E2E gate.
+# R-2: GitHub scope validation not exercised in E2E (placeholder token used); tested in staging.

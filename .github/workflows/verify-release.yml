@@ -72,6 +72,30 @@ jobs:
           skipped=$(jq -r '.skipped' ci-artifacts/verify-result.json)
           echo "schema_version=$schema_ver  overall=$overall  passed=$passed  skipped=$skipped"
 
+      # Validate release record schema for every release record under
+      # docs/runbooks/releases/. Checks required fields are present and
+      # non-empty. Does NOT cross-check artifact SHA because /srv/storage/
+      # artifact paths are not available in GitHub runners; the SHA cross-check
+      # is performed locally during the promotion drill.
+      - name: Validate release records
+        run: |
+          shopt -s nullglob
+          records=(docs/runbooks/releases/*.yaml)
+          if [ ${#records[@]} -eq 0 ]; then
+            echo "No release records found — skipping"
+            exit 0
+          fi
+          fail=0
+          for record in "${records[@]}"; do
+            if ! bash scripts/automation/validate-release-record.sh "$record"; then
+              fail=1
+            fi
+          done
+          if [ $fail -ne 0 ]; then
+            echo "::error::One or more release records failed schema validation"
+            exit 1
+          fi
+
       # Always upload so failures are debuggable from any run.
       - name: Upload verification artifacts
         if: always()
