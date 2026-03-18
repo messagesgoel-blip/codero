@@ -117,10 +117,11 @@ func TestFinishLoopCRBodyIsFinalHelperLogic(t *testing.T) {
 	helperScript := filepath.Join(t.TempDir(), "cr_helper_test.sh")
 	fnWork := filepath.Join(t.TempDir(), "cr_fn_work.sh")
 	extractAndTest := `#!/usr/bin/env bash
-set -uo pipefail
+set -euo pipefail
 FINISH_SCRIPT="` + script + `"
 FN_WORK="` + fnWork + `"
 start_line=$(grep -n "^_cr_body_is_final()" "$FINISH_SCRIPT" | cut -d: -f1)
+[[ -z "$start_line" ]] && { echo "ERROR: _cr_body_is_final not found" >&2; exit 2; }
 awk -v start="$start_line" '
   NR >= start {
     print
@@ -155,14 +156,11 @@ _cr_body_is_final "$BODY"
 					t.Fatalf("run helper: %v", err)
 				}
 			}
-			result := strings.TrimSpace(string(out))
-			if exitCode != 0 && result == "" {
-				result = "1"
-			}
-			gotFinal := result == "0"
+			stdout := strings.TrimSpace(string(out))
+			gotFinal := exitCode == 0
 			if gotFinal != tc.wantFinal {
-				t.Errorf("_cr_body_is_final(%q) = %q (final=%v), want final=%v",
-					tc.name, result, gotFinal, tc.wantFinal)
+				t.Errorf("_cr_body_is_final(%q) exitCode=%d stdout=%q (final=%v), want final=%v",
+					tc.name, exitCode, stdout, gotFinal, tc.wantFinal)
 			}
 		})
 	}
