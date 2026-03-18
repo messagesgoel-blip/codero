@@ -336,7 +336,7 @@ Evidence: pilot rerun batch 2 evidence directory (local CI run artifacts, not tr
 ---
 
 ### v1.2.3 — Functional Hardening / Non-UI Release (COD-052)
-**Status:** Release candidate  
+**Status:** ✅ Released — tag v1.2.3 @ e08ab66 (2026-03-18)  
 **Scope:** Non-UI functional release only
 
 **Included:**
