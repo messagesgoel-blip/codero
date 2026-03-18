@@ -15,6 +15,17 @@ import (
 	"github.com/codero/codero/internal/tui"
 )
 
+// UsageError signals a command-line misconfiguration (invalid flag combination,
+// unknown profile name, etc.) that prevents the gate engine from running.
+// It maps to exit code 2, which is distinct from the gate-failure exit code 1.
+type UsageError struct{ msg string }
+
+func (e *UsageError) Error() string { return e.msg }
+
+func usageErrorf(format string, args ...any) *UsageError {
+	return &UsageError{msg: fmt.Sprintf(format, args...)}
+}
+
 // gateCheckCmd implements the `gate-check` subcommand: runs the local gate
 // engine and reports all check statuses using the canonical model.
 func gateCheckCmd() *cobra.Command {
@@ -58,7 +69,8 @@ Environment variables (override flags):
 
 Exit codes:
   0  Overall PASS
-  1  Overall FAIL or runtime error
+  1  Gate failure (one or more checks failed)
+  2  Usage/config error (invalid flag combination, unknown profile)
 
 Additional output modes:
   --json          Emit the canonical JSON report to stdout
@@ -73,7 +85,7 @@ Additional output modes:
 			if profile != "" {
 				parsed, ok := parseGateCheckProfile(profile)
 				if !ok {
-					return fmt.Errorf("gate-check: unknown profile %q (want strict|portable|off; fast aliases portable)", profile)
+					return usageErrorf("gate-check: unknown profile %q (want strict|portable|off; fast aliases portable)", profile)
 				}
 				cfg.Profile = parsed
 			}
@@ -81,7 +93,7 @@ Additional output modes:
 				cfg.GateTimeout = time.Duration(timeout) * time.Second
 			}
 			if outputJSON && tuiSnapshot {
-				return fmt.Errorf("gate-check: --json cannot be combined with --tui-snapshot")
+				return usageErrorf("gate-check: --json cannot be combined with --tui-snapshot")
 			}
 
 			ctx := cmd.Context()

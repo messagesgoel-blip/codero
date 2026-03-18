@@ -68,3 +68,13 @@ Open Questions: (agent fills this before calling)
 Summary: Merged PR55 after checks clear; restored main protection and lock
 Pending: (agent fills this before calling)
 Open Questions: (agent fills this before calling)
+
+## Handoff — 2026-03-18T03:34:49Z
+Summary: CODERO-RT-001 complete: implemented ReasonCheckFailed normalisation for fail-status checks (COD-054), 5 files changed, all local gates pass, PR #57 merged to main at 880eae5b, binary rebuilt as v1.2.4-rc.1 and promoted to /srv/storage/shared/tools/bin/codero (SHA256: aea3fdf68080415548c78f11701c996b16943b1394cfd521d1f82331fed65a48), branch protection restored, live verification matrix 5/5 pass
+Pending: (agent fills this before calling)
+Open Questions: (agent fills this before calling)
+
+## Handoff — 2026-03-18T04:00:00Z
+Summary: COD-055: Implementing invalid-flag exit semantics hardening — UsageError type added, exit code 2 for usage errors, exit code 1 for gate failures. Tests pass, pushing PR.
+Pending: PR merge
+Open Questions: None.
