@@ -1,3 +1,6 @@
+# VERSION can be overridden at build time: make build VERSION=v1.2.4
+VERSION ?= dev
+
 .PHONY: fmtcheck lint unit contract ci help build run format integration
 
 fmtcheck:
@@ -34,7 +37,7 @@ integration:
 	fi
 
 build:
-	go build -o codero ./cmd/codero
+	go build -trimpath -ldflags "-X main.version=$(VERSION)" -o codero ./cmd/codero
 
 run:
 	@echo "Starting codero daemon in development mode..."
@@ -54,7 +57,7 @@ help:
 	@echo "  unit           - Run unit tests"
 	@echo "  contract       - Run contract tests"
 	@echo "  integration    - Run integration tests"
-	@echo "  build          - Build codero binary"
+	@echo "  build          - Build codero binary (VERSION=x.y.z to stamp release version)"
 	@echo "  run            - Run codero daemon"
 	@echo "  ci             - Run full CI pipeline"
 	@echo "  help           - Show this help message"
