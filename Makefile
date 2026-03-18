@@ -1,3 +1,6 @@
+# VERSION can be overridden at build time: make build VERSION=v1.2.4
+VERSION ?= dev
+
 .PHONY: fmtcheck lint unit contract ci help build run format integration
 
 fmtcheck:
@@ -34,7 +37,11 @@ integration:
 	fi
 
 build:
-	go build -o codero ./cmd/codero
+	@if [ "$(VERSION)" != "dev" ] && ! printf '%s' "$(VERSION)" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$$'; then \
+		echo "ERROR: VERSION must match vX.Y.Z (optionally with pre-release/build metadata)"; \
+		exit 1; \
+	fi
+	go build -trimpath -ldflags "-X main.version=$(VERSION)" -o codero ./cmd/codero
 
 run:
 	@echo "Starting codero daemon in development mode..."
@@ -54,7 +61,7 @@ help:
 	@echo "  unit           - Run unit tests"
 	@echo "  contract       - Run contract tests"
 	@echo "  integration    - Run integration tests"
-	@echo "  build          - Build codero binary"
+	@echo "  build          - Build codero binary (VERSION=vX.Y.Z to stamp release version)"
 	@echo "  run            - Run codero daemon"
 	@echo "  ci             - Run full CI pipeline"
 	@echo "  help           - Show this help message"
