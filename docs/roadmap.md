@@ -308,3 +308,56 @@ A roadmap is accepted only if:
 - next 2-4 sprints are immediately executable
 
 This v5 satisfies those conditions.
+
+---
+
+## 9) Release Tracking (v1.2.x)
+
+### v1.2.2 — Surface Parity Harness (COD-050, PR #54)
+**Status:** ✅ Merged + promoted  
+**Commit:** `6f6be45734f07438d1bd2d7bb9fc23a8573df379`
+
+- `gate-check --tui-snapshot`: deterministic headless TUI surface
+- `dashboard --serve-fixture`: local dashboard fixture server
+- Surface parity contract tests: CLI / JSON / TUI / dashboard all verified identical
+
+**Pilot rerun batch 2 results (2026-03-18):**
+
+| Pilot | Verdict |
+|---|---|
+| P1 Contract Rerun | ✅ PASS |
+| P2 Hardblock Rerun | ✅ PASS |
+| P3 Surface Parity Rerun | ✅ PASS |
+| P4 Strict Policy Rerun | ✅ PASS |
+| P5 Surface Parity (dashboard+TUI) | ✅ PASS |
+
+Evidence: pilot rerun batch 2 evidence directory (local CI run artifacts, not tracked in repo)
+
+---
+
+### v1.2.3 — Functional Hardening / Non-UI Release (COD-052)
+**Status:** Release candidate  
+**Scope:** Non-UI functional release only
+
+**Included:**
+- BUG-001 fix: forbidden-paths disabled reason message distinguishes missing enforce flag vs missing regex
+- Pilot rerun batch 2 validation (all 5 pilots pass)
+- Release notes: `docs/runbooks/v1.2.3-release-notes.md`
+- Env contract doc update: two-var requirement for forbidden-paths
+
+**Not included (deferred to v1.2.4):**
+- TUI visual design refresh
+- Dashboard UI component refresh
+
+---
+
+### v1.2.4 — UI Modernization (deferred)
+**Status:** Backlog  
+**Scope:** TUI and dashboard visual refresh  
+**Spec:** `docs/roadmaps/v1.2.4-backlog.md`
+
+Key items:
+- UI-001: TUI layout and visual design modernization (Bubble Tea)
+- UI-002: Dashboard UI component refresh
+- INFRA-001: Clarify `/gate` vs `/gate-check` endpoint naming in docs
+- DOC-001: Gate-check activation guide
