@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Portable hook wrapper for local and CI environments.
-# Prefer shared agent-toolkit hook when present; fallback to repo-local gate.
+# Portable hook wrapper — delegates to shared agent-toolkit when present.
+# This file is a regular executable in the repo so CI can verify it exists.
 SHARED_HOOK="/srv/storage/shared/agent-toolkit/hooks/pre-commit"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOCAL_GATE="$REPO_ROOT/scripts/review/two-pass-review.sh"
