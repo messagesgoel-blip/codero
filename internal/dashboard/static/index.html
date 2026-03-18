@@ -400,7 +400,7 @@ function renderSessions(sessions) {
       '<div class="agent-icon">' + agentIcon(s.owner_agent) + '</div>' +
       '<div class="agent-main">' +
         '<div class="agent-header">' +
-          '<span class="agent-name">' + esc(s.owner_agent || 'codero') + '</span>' +
+          '<span class="agent-name">' + esc(s.owner_agent || 'unknown') + '</span>' +
           (phase ? '<span class="agent-sep">&mdash;</span><span class="agent-phase">' + phase + '</span>' : '') +
         '</div>' +
         '<div class="agent-sub">' + title + tid + '</div>' +

@@ -213,30 +213,47 @@ state from freeform log text.
 
 Returns the currently active review sessions for the GUI. A session appears here only
 while its heartbeat is fresh; expired or inactive sessions MUST be excluded.
+Deduplication by `session_id` is applied **before** the page-size limit so callers
+always receive the first N *unique* sessions, not the first N rows.
 
-Current task context is optional. When available, the backend SHOULD populate it from the
-orchestration/task ledger so the GUI can show what the session is working on.
+Task context is resolved from the branch name using the `feat/PROJ-NNN-description`
+pattern (e.g. `feat/COD-056-fix-auth`). When the branch does not match this pattern,
+the `task` field is **omitted entirely** — callers must render missing task context
+gracefully (e.g. show the branch name instead of a task title).
+
+`owner_agent` is always `"unknown"` — there is no per-session agent registration in the
+current implementation. Clients must not present this as a meaningful agent identity.
 
 ### Response `200 OK`
 
 ```json
 {
-  "active_count": 4,
+  "active_count": 2,
   "sessions": [
     {
       "session_id": "sess-123",
       "repo": "acme/api",
-      "branch": "feat/rate-limit",
-      "owner_agent": "Codex",
-      "activity_state": "active",
+      "branch": "feat/COD-055-fix-finish-loop",
+      "owner_agent": "unknown",
+      "activity_state": "waiting",
       "task": {
         "id": "COD-055",
-        "title": "Fix finish-loop polling",
-        "phase": "coderabbit-review"
+        "title": "fix finish loop",
+        "phase": "review in progress"
       },
       "started_at": "2026-03-18T14:10:00Z",
       "last_heartbeat_at": "2026-03-18T14:40:30Z",
       "elapsed_sec": 1830
+    },
+    {
+      "session_id": "sess-456",
+      "repo": "acme/web",
+      "branch": "hotfix",
+      "owner_agent": "unknown",
+      "activity_state": "active",
+      "started_at": "2026-03-18T14:30:00Z",
+      "last_heartbeat_at": "2026-03-18T14:40:28Z",
+      "elapsed_sec": 628
     }
   ],
   "generated_at": "2026-03-18T14:40:34Z"
@@ -247,12 +264,12 @@ orchestration/task ledger so the GUI can show what the session is working on.
 
 **Session rules:**
 - Only fresh sessions are returned; stale sessions are filtered out.
-- `task` MAY be omitted when the backend cannot resolve it.
-- `owner_agent` SHOULD identify the current agent or human operator where known; use
-  `unknown` when no agent label can be resolved.
+- Dedupe by `session_id` is applied **before** the page-size limit.
+- `task` is **omitted** (null) when the branch does not match `feat/PROJ-NNN-description`.
+  Clients MUST render null `task` gracefully — typically by showing `branch` instead.
+- `owner_agent` is always `"unknown"` in the current implementation; there is no
+  session-level agent registration. Clients MUST NOT fabricate an agent label from it.
 - The response MUST NOT expose secrets, tokens, raw prompts, or file contents.
-- The backend should derive active sessions from durable session/branch heartbeat data
-  and enrich them with task-ledger context only when that context is available.
 
 ---
 
@@ -262,6 +279,10 @@ Returns dashboard-level health signals: database connectivity, freshness of the
 active-sessions and gate-checks data feeds, the count of live agent sessions, and
 a generation timestamp. Use this endpoint to populate the "System Health" bar in the
 Processes tab.
+
+The gate-checks report path uses the **same resolution logic** as
+`GET /api/v1/dashboard/gate-checks`: honours `CODERO_GATE_CHECK_REPORT_PATH` and
+falls back to the compiled-in default path when the variable is unset.
 
 ### Response `200 OK`
 
@@ -297,7 +318,8 @@ Processes tab.
 - `feeds.active_sessions.freshness_sec` is derived from the most recent
   `owner_session_last_seen` heartbeat across all tracked branches.
 - `feeds.gate_checks.freshness_sec` is derived from the mod-time of the last
-  gate-check report file.
+  gate-check report file, resolved via `CODERO_GATE_CHECK_REPORT_PATH` (same as
+  the gate-checks endpoint).
 - The response MUST NOT expose secrets, tokens, raw prompts, or file contents.
 - This endpoint is read-only and idempotent.
 

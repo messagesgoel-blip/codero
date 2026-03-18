@@ -5,12 +5,23 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/codero/codero/internal/gatecheck"
 	"github.com/codero/codero/internal/scheduler"
 )
+
+// gateCheckReportPath returns the path to the last gate-check report file.
+// It honours CODERO_GATE_CHECK_REPORT_PATH and falls back to
+// gatecheck.DefaultReportPath when the variable is unset.
+func gateCheckReportPath() string {
+	if p := os.Getenv("CODERO_GATE_CHECK_REPORT_PATH"); p != "" {
+		return p
+	}
+	return gatecheck.DefaultReportPath
+}
 
 // queryOverview returns today's aggregate run stats.
 func queryOverview(ctx context.Context, db *sql.DB) (runsToday, passedToday int, blockedCount int, avgGateSec float64, err error) {
@@ -256,11 +267,15 @@ func queryGateHealth(ctx context.Context, db *sql.DB) ([]GateHealth, error) {
 }
 
 // queryActiveSessions returns the current fresh session list for the GUI.
+// Deduplication by session ID is performed in Go before the page-size limit
+// is applied, so callers receive the first `limit` *unique* sessions.
 func queryActiveSessions(ctx context.Context, db *sql.DB, limit int) ([]ActiveSession, error) {
 	// Fresh heartbeats only: stale sessions are filtered out so the panel mirrors
 	// live activity rather than historical branch ownership.
 	threshold := time.Now().Add(-scheduler.SessionHeartbeatTTL)
 
+	// No SQL LIMIT here — limit is applied after dedup below so we never
+	// discard the only row for a session that appears multiple times early.
 	rows, err := db.QueryContext(ctx, `
 		SELECT owner_session_id, repo, branch, state,
 		       owner_session_last_seen, submission_time, created_at, updated_at
@@ -268,8 +283,7 @@ func queryActiveSessions(ctx context.Context, db *sql.DB, limit int) ([]ActiveSe
 		WHERE owner_session_id <> ''
 		  AND owner_session_last_seen IS NOT NULL
 		  AND state IN ('coding', 'local_review', 'queued_cli', 'cli_reviewing', 'reviewed', 'merge_ready', 'blocked', 'paused')
-		ORDER BY owner_session_last_seen DESC, updated_at DESC
-		LIMIT ?`, limit)
+		ORDER BY owner_session_last_seen DESC, updated_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("queryActiveSessions: query failed: %w", err)
 	}
@@ -311,6 +325,12 @@ func queryActiveSessions(ctx context.Context, db *sql.DB, limit int) ([]ActiveSe
 			LastHeartbeatAt: lastSeen.Time,
 			ElapsedSec:      int64(elapsed.Seconds()),
 		})
+
+		// Apply the page-size limit only after dedup so callers get the first
+		// N unique sessions, not the first N rows that may share session IDs.
+		if limit > 0 && len(out) >= limit {
+			break
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("queryActiveSessions: rows error: %w", err)
@@ -427,43 +447,38 @@ func insertManualReviewRun(ctx context.Context, db *sql.DB, id, repo, branch, he
 	return err
 }
 
-// resolveTaskFromBranch derives best-effort task context from a branch name.
-// It parses the common branch pattern feat/{PROJ}-{id}-{short-desc} and maps the
-// branch lifecycle state to a human-readable phase label. When the pattern does
-// not match, it returns a non-nil task with id/title="unknown".
+// resolveTaskFromBranch derives task context from a branch name.
+// Returns nil when the branch does not match the PROJ-NNN-description pattern
+// (e.g. feat/COD-056-fix-auth). Callers must render nil task gracefully.
 func resolveTaskFromBranch(branch, state string) *ActiveTask {
 	b := branch
 	// Strip the type prefix (feat/, fix/, chore/, etc.)
 	if idx := strings.LastIndex(b, "/"); idx >= 0 {
 		b = b[idx+1:]
 	}
-	// Expect PROJ-ID-description, e.g. COD-056-dashboard-activity-health
+	// Must be PROJ-NNN-description where the second segment is numeric,
+	// e.g. COD-056-dashboard-activity-health → taskID="COD-056".
 	parts := strings.SplitN(b, "-", 3)
-	if len(parts) >= 3 {
-		taskID := parts[0] + "-" + parts[1]
-		title := strings.ReplaceAll(parts[2], "-", " ")
-		return &ActiveTask{
-			ID:    taskID,
-			Title: title,
-			Phase: sessionPhaseLabel(state),
-		}
+	if len(parts) < 3 {
+		return nil
 	}
-	if len(b) > 0 {
-		return &ActiveTask{
-			ID:    "unknown",
-			Title: strings.ReplaceAll(b, "-", " "),
-			Phase: sessionPhaseLabel(state),
-		}
+	if _, err := strconv.Atoi(parts[1]); err != nil {
+		return nil // second segment is not a numeric ID — not a real task branch
 	}
-	return &ActiveTask{ID: "unknown", Title: "unknown", Phase: sessionPhaseLabel(state)}
+	taskID := parts[0] + "-" + parts[1]
+	title := strings.ReplaceAll(parts[2], "-", " ")
+	return &ActiveTask{
+		ID:    taskID,
+		Title: title,
+		Phase: sessionPhaseLabel(state),
+	}
 }
 
-// resolveOwnerAgent derives a best-effort agent label from the branch name.
-// For now this returns "codero" as the canonical agent for this daemon's own
-// sessions; a richer resolver would require explicit agent registration.
-func resolveOwnerAgent(branch string) string {
-	_ = branch
-	return "codero"
+// resolveOwnerAgent returns the agent label for a session.
+// There is no reliable in-DB source for agent identity, so this always returns
+// "unknown". A richer resolver would require explicit agent registration.
+func resolveOwnerAgent(_ string) string {
+	return "unknown"
 }
 
 // sessionPhaseLabel maps a raw branch state to a human-readable phase label.
@@ -529,7 +544,7 @@ func queryDashboardHealth(ctx context.Context, db *sql.DB) DashboardHealth {
 	}
 
 	// Gate-checks feed freshness: mod time of the last report file.
-	reportPath := gatecheck.DefaultReportPath
+	reportPath := gateCheckReportPath()
 	if info, err := os.Stat(reportPath); err == nil {
 		age := time.Since(info.ModTime())
 		status := "ok"

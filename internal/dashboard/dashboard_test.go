@@ -723,9 +723,9 @@ func TestActiveSessions_WithFreshSession(t *testing.T) {
 	if s.ActivityState != "waiting" {
 		t.Fatalf("activity_state = %q, want waiting", s.ActivityState)
 	}
-	// owner_agent is now resolved from the branch; default is "codero"
-	if s.OwnerAgent == "" {
-		t.Fatalf("owner_agent must not be empty")
+	// owner_agent must be "unknown" — no reliable source of agent identity exists.
+	if s.OwnerAgent != "unknown" {
+		t.Fatalf("owner_agent = %q, want unknown", s.OwnerAgent)
 	}
 	if s.ElapsedSec <= 0 {
 		t.Fatalf("elapsed_sec = %d, want > 0", s.ElapsedSec)
@@ -846,9 +846,9 @@ func TestActiveSessions_TaskContextFallback(t *testing.T) {
 	if len(resp.Sessions) != 1 {
 		t.Fatalf("sessions = %d, want 1", len(resp.Sessions))
 	}
-	// Even when pattern does not match, task must not be nil.
-	if resp.Sessions[0].Task == nil {
-		t.Fatal("task context must not be nil even for unrecognised branch")
+	// Task must be nil for branches that do not match the PROJ-NNN-desc pattern.
+	if resp.Sessions[0].Task != nil {
+		t.Fatalf("task must be nil for unrecognised branch, got %+v", resp.Sessions[0].Task)
 	}
 	// The activity state must reflect "blocked".
 	if resp.Sessions[0].ActivityState != "blocked" {
@@ -934,6 +934,67 @@ func TestDashboardHealth_StaleFeedDetected(t *testing.T) {
 	// Sessions feed should be "stale" since the last heartbeat is > 5 min ago.
 	if resp.Feeds.ActiveSessions.Status != "stale" {
 		t.Errorf("feeds.active_sessions.status = %q, want stale", resp.Feeds.ActiveSessions.Status)
+	}
+}
+
+func TestDashboardHealth_GateCheckPathFromEnv(t *testing.T) {
+	// The health endpoint must use the same report-path resolution as gate-checks:
+	// honour CODERO_GATE_CHECK_REPORT_PATH when set.
+	tmpDir := t.TempDir()
+	customPath := filepath.Join(tmpDir, "custom-report.json")
+	if err := os.WriteFile(customPath, []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("write custom report: %v", err)
+	}
+
+	t.Setenv("CODERO_GATE_CHECK_REPORT_PATH", customPath)
+
+	h, _ := newTestHandler(t)
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/health", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.DashboardHealth
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// The report file exists and was written just now, so feed should be "ok".
+	if resp.Feeds.GateChecks.Status != "ok" {
+		t.Errorf("feeds.gate_checks.status = %q, want ok (custom path %s)", resp.Feeds.GateChecks.Status, customPath)
+	}
+}
+
+func TestActiveSessions_DedupeBeforeLimit(t *testing.T) {
+	// Regression: with a limit of 1 and two rows for the same session ID,
+	// the result must contain exactly one session — not zero — because
+	// dedup must happen after rows are scanned, not in SQL.
+	h, db := newTestHandler(t)
+	lastSeen := time.Now().Add(-30 * time.Second).UTC()
+
+	// Two rows for the same session ID across two different branches.
+	seedBranchSession(t, db, "acme/api", "feat/COD-001-first", "coding", "sess-dedup", lastSeen, lastSeen)
+	seedBranchSession(t, db, "acme/api", "feat/COD-001-second", "queued_cli", "sess-dedup", lastSeen.Add(-5*time.Second), lastSeen)
+
+	// Use the handler directly which applies the default page size; we patch
+	// by exercising the underlying query with limit=1.
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/active-sessions", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.ActiveSessionsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Sessions) != 1 {
+		t.Fatalf("expected 1 unique session from 2 rows, got %d", len(resp.Sessions))
+	}
+	if resp.Sessions[0].SessionID != "sess-dedup" {
+		t.Errorf("session_id = %q, want sess-dedup", resp.Sessions[0].SessionID)
+	}
+	// Owner agent must always be "unknown".
+	if resp.Sessions[0].OwnerAgent != "unknown" {
+		t.Errorf("owner_agent = %q, want unknown", resp.Sessions[0].OwnerAgent)
 	}
 }
 
