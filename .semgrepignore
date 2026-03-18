@@ -5,3 +5,6 @@ internal/daemon/observability.go
 # Ignore pre-existing docker-compose security findings (not introduced by this PR)
 infra/docker-compose.yml
 services/prompy/docker-compose.yml
+
+# Ignore .githooks/ — contains symlinks to agent-toolkit; semgrep cannot scan symlinks
+.githooks/
