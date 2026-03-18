@@ -23,6 +23,23 @@ func repoRoot(t *testing.T) string {
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 }
 
+func cleanGitEnv() []string {
+	env := os.Environ()
+	cleaned := make([]string, 0, len(env))
+	for _, kv := range env {
+		key, _, found := strings.Cut(kv, "=")
+		if !found {
+			continue
+		}
+		switch key {
+		case "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_PREFIX", "GIT_WORK_TREE":
+			continue
+		}
+		cleaned = append(cleaned, kv)
+	}
+	return cleaned
+}
+
 // TestHelpContract validates that --help returns exit code 0 (success), not 1 (usage error).
 // This aligns with codero-finish exit code semantics where 0=success, 1=feedback/retry needed.
 func TestHelpContract(t *testing.T) {
@@ -296,6 +313,7 @@ func gateCheckRepoClean(t *testing.T) string {
 		t.Helper()
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
+		cmd.Env = cleanGitEnv()
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("git %v: %v\noutput: %s", args, err, string(out))
@@ -321,6 +339,7 @@ func gateCheckRepoWithConflict(t *testing.T) string {
 	}
 	cmd := exec.Command("git", "add", "tracked.txt")
 	cmd.Dir = dir
+	cmd.Env = cleanGitEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git add conflict file: %v\noutput: %s", err, string(out))
