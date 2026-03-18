@@ -539,6 +539,7 @@ function renderFindings(data) {
     // Use display_state if present (LOG-001); fall back to raw status mapping.
     // Mapping: pass→passing, fail→failing, skip/disabled→disabled.
     var ds = c.display_state || toDisplayState(st);
+    if (['passing', 'failing', 'disabled'].indexOf(ds) < 0) ds = toDisplayState(st);
     var tool = c.tool_name || c.group || '\u2014';
     var dur  = c.duration_ms > 0 ? (c.duration_ms / 1000).toFixed(2) + 's' : '\u2014';
     return '<div class="gate-table-row">' +
@@ -651,9 +652,10 @@ async function refresh() {
       eventsUnavailable = false;
       allEvents = act.events;
       if (activeTab === 'eventlogs') renderEvents();
-    } else if (activeTab === 'eventlogs' && !allEvents.length) {
+    } else {
       eventsUnavailable = true;
-      renderEvents(null);
+      allEvents = [];
+      if (activeTab === 'eventlogs') renderEvents(null);
     }
   } catch (err) { console.error('refresh error:', err); }
 }
