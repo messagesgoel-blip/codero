@@ -446,10 +446,10 @@ function renderSessions(sessions) {
           '<div class="am-item"><span class="key">branch</span>&nbsp;' + esc(s.branch || '—') + '</div>' +
           '<div class="am-item"><span class="key">elapsed</span>&nbsp;' + fmtElapsed(s.elapsed_sec || 0) + '</div>' +
           '<div class="am-item"><span class="key">heartbeat</span>&nbsp;' + (s.last_heartbeat_at ? fmtRelative(s.last_heartbeat_at) : '&mdash;') + '</div>' +
-          '<span class="am-badge ' + esc(state) + '">' + esc(state) + '</span>' +
+          '<span class="am-badge ' + attrEsc(state) + '">' + esc(state) + '</span>' +
         '</div>' +
       '</div>' +
-      '<div class="agent-right"><div class="agent-state-dot ' + esc(state) + '"></div></div>' +
+      '<div class="agent-right"><div class="agent-state-dot ' + attrEsc(state) + '"></div></div>' +
     '</div>';
   }).join('');
 }
@@ -544,9 +544,9 @@ function renderFindings(data) {
     return '<div class="gate-table-row">' +
       '<span class="gtr-id">' + String(i+1).padStart(3,'0') + '</span>' +
       '<span>' + esc(c.name || '\u2014') + '</span>' +
-      '<span class="gtr-file" title="' + esc(c.tool_path || '') + '">' + esc(tool) + '</span>' +
-      '<span class="gtr-res ' + ds + '">' + ds.toUpperCase() + '</span>' +
-      '<span class="gtr-status ' + st + '">' + esc(c.status || '\u2014') + '</span>' +
+      '<span class="gtr-file" title="' + attrEsc(c.tool_path || '') + '">' + esc(tool) + '</span>' +
+      '<span class="gtr-res ' + attrEsc(ds) + '">' + ds.toUpperCase() + '</span>' +
+      '<span class="gtr-status ' + attrEsc(st) + '">' + esc(c.status || '\u2014') + '</span>' +
       '<span class="gtr-dur">' + dur + '</span>' +
     '</div>';
   }).join('');
