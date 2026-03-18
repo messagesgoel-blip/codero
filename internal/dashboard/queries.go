@@ -4,8 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
+	"github.com/codero/codero/internal/gatecheck"
 	"github.com/codero/codero/internal/scheduler"
 )
 
@@ -301,8 +304,9 @@ func queryActiveSessions(ctx context.Context, db *sql.DB, limit int) ([]ActiveSe
 			SessionID:       sessionID,
 			Repo:            repo,
 			Branch:          branch,
-			OwnerAgent:      "unknown",
+			OwnerAgent:      resolveOwnerAgent(branch),
 			ActivityState:   sessionActivityState(state),
+			Task:            resolveTaskFromBranch(branch, state),
 			StartedAt:       startedAt,
 			LastHeartbeatAt: lastSeen.Time,
 			ElapsedSec:      int64(elapsed.Seconds()),
@@ -421,4 +425,137 @@ func insertManualReviewRun(ctx context.Context, db *sql.DB, id, repo, branch, he
 		VALUES (?, ?, ?, ?, 'manual', 'pending', ?, '', ?)`,
 		id, repo, branch, headHash, now, now)
 	return err
+}
+
+// resolveTaskFromBranch derives best-effort task context from a branch name.
+// It parses the common branch pattern feat/{PROJ}-{id}-{short-desc} and maps the
+// branch lifecycle state to a human-readable phase label. When the pattern does
+// not match, it returns a non-nil task with id/title="unknown".
+func resolveTaskFromBranch(branch, state string) *ActiveTask {
+	b := branch
+	// Strip the type prefix (feat/, fix/, chore/, etc.)
+	if idx := strings.LastIndex(b, "/"); idx >= 0 {
+		b = b[idx+1:]
+	}
+	// Expect PROJ-ID-description, e.g. COD-056-dashboard-activity-health
+	parts := strings.SplitN(b, "-", 3)
+	if len(parts) >= 3 {
+		taskID := parts[0] + "-" + parts[1]
+		title := strings.ReplaceAll(parts[2], "-", " ")
+		return &ActiveTask{
+			ID:    taskID,
+			Title: title,
+			Phase: sessionPhaseLabel(state),
+		}
+	}
+	if len(b) > 0 {
+		return &ActiveTask{
+			ID:    "unknown",
+			Title: strings.ReplaceAll(b, "-", " "),
+			Phase: sessionPhaseLabel(state),
+		}
+	}
+	return &ActiveTask{ID: "unknown", Title: "unknown", Phase: sessionPhaseLabel(state)}
+}
+
+// resolveOwnerAgent derives a best-effort agent label from the branch name.
+// For now this returns "codero" as the canonical agent for this daemon's own
+// sessions; a richer resolver would require explicit agent registration.
+func resolveOwnerAgent(branch string) string {
+	_ = branch
+	return "codero"
+}
+
+// sessionPhaseLabel maps a raw branch state to a human-readable phase label.
+func sessionPhaseLabel(state string) string {
+	switch state {
+	case "coding":
+		return "coding"
+	case "local_review":
+		return "local review"
+	case "queued_cli":
+		return "queued for review"
+	case "cli_reviewing":
+		return "review in progress"
+	case "reviewed":
+		return "reviewed"
+	case "merge_ready":
+		return "merge ready"
+	case "blocked":
+		return "blocked"
+	case "paused":
+		return "paused"
+	default:
+		return "unknown"
+	}
+}
+
+// staleFeedThreshold is the age after which a feed is considered stale.
+const staleFeedThreshold = 5 * time.Minute
+
+// queryDashboardHealth probes database connectivity, per-feed freshness, and
+// the live active-agent count. It is the backend for GET /api/v1/dashboard/health.
+func queryDashboardHealth(ctx context.Context, db *sql.DB) DashboardHealth {
+	h := DashboardHealth{GeneratedAt: time.Now().UTC()}
+
+	// Database health: a lightweight ping.
+	if err := db.PingContext(ctx); err != nil {
+		h.Database = ServiceStatus{Status: "down", Message: err.Error()}
+	} else {
+		h.Database = ServiceStatus{Status: "ok"}
+	}
+
+	// Active-sessions feed freshness: age of the most recent heartbeat.
+	var lastHeartbeat sql.NullTime
+	_ = db.QueryRowContext(ctx,
+		`SELECT owner_session_last_seen FROM branch_states
+		 WHERE owner_session_id <> '' AND owner_session_last_seen IS NOT NULL
+		 ORDER BY owner_session_last_seen DESC LIMIT 1`,
+	).Scan(&lastHeartbeat)
+
+	if lastHeartbeat.Valid {
+		age := time.Since(lastHeartbeat.Time)
+		status := "ok"
+		if age > staleFeedThreshold {
+			status = "stale"
+		}
+		h.Feeds.ActiveSessions = FeedStatus{
+			Status:       status,
+			LastRefresh:  lastHeartbeat.Time.UTC(),
+			FreshnessSec: int64(age.Seconds()),
+		}
+	} else {
+		h.Feeds.ActiveSessions = FeedStatus{Status: "unavailable"}
+	}
+
+	// Gate-checks feed freshness: mod time of the last report file.
+	reportPath := gatecheck.DefaultReportPath
+	if info, err := os.Stat(reportPath); err == nil {
+		age := time.Since(info.ModTime())
+		status := "ok"
+		if age > staleFeedThreshold {
+			status = "stale"
+		}
+		h.Feeds.GateChecks = FeedStatus{
+			Status:       status,
+			LastRefresh:  info.ModTime().UTC(),
+			FreshnessSec: int64(age.Seconds()),
+		}
+	} else {
+		h.Feeds.GateChecks = FeedStatus{Status: "unavailable"}
+	}
+
+	// Count currently active (non-stale) agent sessions.
+	threshold := time.Now().Add(-scheduler.SessionHeartbeatTTL)
+	var count int
+	_ = db.QueryRowContext(ctx,
+		`SELECT COUNT(DISTINCT owner_session_id) FROM branch_states
+		 WHERE owner_session_id <> ''
+		   AND owner_session_last_seen IS NOT NULL
+		   AND owner_session_last_seen >= ?`,
+		threshold,
+	).Scan(&count)
+	h.ActiveAgentCount = count
+
+	return h
 }

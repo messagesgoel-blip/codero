@@ -256,6 +256,53 @@ orchestration/task ledger so the GUI can show what the session is working on.
 
 ---
 
+## GET /api/v1/dashboard/health
+
+Returns dashboard-level health signals: database connectivity, freshness of the
+active-sessions and gate-checks data feeds, the count of live agent sessions, and
+a generation timestamp. Use this endpoint to populate the "System Health" bar in the
+Processes tab.
+
+### Response `200 OK`
+
+```json
+{
+  "database": { "status": "ok", "message": "" },
+  "feeds": {
+    "active_sessions": {
+      "status": "ok",
+      "last_refresh": "2026-03-18T14:40:30Z",
+      "freshness_sec": 4
+    },
+    "gate_checks": {
+      "status": "stale",
+      "last_refresh": "2026-03-18T14:10:00Z",
+      "freshness_sec": 1830
+    }
+  },
+  "active_agent_count": 3,
+  "generated_at": "2026-03-18T14:40:34Z"
+}
+```
+
+**`database.status` values:** `ok`, `down`
+
+**`feeds.*.status` values:**
+- `ok` — last refresh within 5 minutes
+- `stale` — last refresh older than 5 minutes
+- `unavailable` — no data found (empty DB or missing report file)
+
+**Rules:**
+- Database health is determined by a lightweight `PING` against the configured store.
+- `feeds.active_sessions.freshness_sec` is derived from the most recent
+  `owner_session_last_seen` heartbeat across all tracked branches.
+- `feeds.gate_checks.freshness_sec` is derived from the mod-time of the last
+  gate-check report file.
+- The response MUST NOT expose secrets, tokens, raw prompts, or file contents.
+- This endpoint is read-only and idempotent.
+
+---
+
 ## GET /api/v1/dashboard/settings
 
 Returns current integration connection status and gate pipeline configuration.

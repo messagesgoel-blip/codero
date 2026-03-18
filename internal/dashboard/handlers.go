@@ -54,6 +54,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/dashboard/gate-health", h.handleGateHealth)
 	mux.HandleFunc("/api/v1/dashboard/active-sessions", h.handleActiveSessions)
 	mux.HandleFunc("/api/v1/dashboard/gate-checks", h.handleGateChecks)
+	mux.HandleFunc("/api/v1/dashboard/health", h.handleDashboardHealth)
 	mux.HandleFunc("/api/v1/dashboard/settings", h.handleSettings)
 	mux.HandleFunc("/api/v1/dashboard/manual-review-upload", h.handleUpload)
 	mux.HandleFunc("/api/v1/dashboard/events", h.handleSSE)
@@ -289,6 +290,20 @@ func (h *Handler) handleActiveSessions(w http.ResponseWriter, r *http.Request) {
 		Sessions:    sessions,
 		GeneratedAt: time.Now().UTC(),
 	})
+}
+
+// handleDashboardHealth serves GET /api/v1/dashboard/health.
+// It reports database connectivity, per-feed freshness, and active agent count
+// without requiring access to the daemon's redis client or slot counter.
+// For full service health (uptime, redis) see the /health endpoint.
+func (h *Handler) handleDashboardHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "")
+		return
+	}
+	setCORSHeaders(w)
+	health := queryDashboardHealth(r.Context(), h.db)
+	writeJSON(w, http.StatusOK, health)
 }
 
 // handleSettings serves GET and PUT /api/v1/dashboard/settings.
