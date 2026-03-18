@@ -37,6 +37,10 @@ integration:
 	fi
 
 build:
+	@if [ "$(VERSION)" != "dev" ] && ! printf '%s' "$(VERSION)" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$$'; then \
+		echo "ERROR: VERSION must match vX.Y.Z (optionally with pre-release/build metadata)"; \
+		exit 1; \
+	fi
 	go build -trimpath -ldflags "-X main.version=$(VERSION)" -o codero ./cmd/codero
 
 run:
