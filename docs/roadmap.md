@@ -353,7 +353,7 @@ Evidence: pilot rerun batch 2 evidence directory (local CI run artifacts, not tr
 
 ### v1.2.4 — UI Modernization + Feedback Loop Hardening
 **Status:** In progress
-**Scope:** TUI/dashboard visual refresh + infra/docs clarity; feedback-loop hardening shipped
+**Scope:** TUI/dashboard visual refresh + infra/docs/log/session clarity; feedback-loop hardening shipped
 **Spec:** `docs/roadmaps/v1.2.4-backlog.md`
 
 Key items:
@@ -362,5 +362,7 @@ Key items:
 - ✅ COD-NEW-C: Autonomous finish-loop (`codero-finish.sh`) — completed (PR #62)
 - UI-001: TUI layout and visual design modernization (Bubble Tea)
 - UI-002: Dashboard UI component refresh
+- UI-003: Current activity session panel for the GUI
 - INFRA-001: Clarify `/gate` vs `/gate-check` endpoint naming in docs
+- LOG-001: Define structured heartbeat/log states for the full pre-commit step matrix
 - DOC-001: Gate-check activation guide
