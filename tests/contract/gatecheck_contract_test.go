@@ -263,6 +263,9 @@ func TestContract_CheckFailedReasonCode(t *testing.T) {
 	if dashMMCheck == nil {
 		t.Fatal("merge-markers check not found in dashboard response")
 	}
+	if dashMMCheck.Status != gatecheck.StatusFail {
+		t.Errorf("dashboard: merge-markers status = %q, want fail", dashMMCheck.Status)
+	}
 	if dashMMCheck.ReasonCode != gatecheck.ReasonCheckFailed {
 		t.Errorf("dashboard: merge-markers reason_code = %q, want %q", dashMMCheck.ReasonCode, gatecheck.ReasonCheckFailed)
 	}
