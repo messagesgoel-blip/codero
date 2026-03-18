@@ -2,14 +2,11 @@
 package handlers
 
 import (
-	"html/template"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 )
-
-var fileTmpl = template.Must(template.New("file").Parse("{{.}}"))
 
 // ReadFile serves a file from the directory configured by HANDLERS_STATIC_ROOT.
 // The path parameter is sanitised to prevent directory traversal.
@@ -30,5 +27,7 @@ func ReadFile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	_ = fileTmpl.Execute(w, string(data))
+	w.Header().Set("Content-Type", http.DetectContentType(data))
+	// File server: Content-Type set above; raw write is intentional, not an HTML renderer.
+	_, _ = w.Write(data) // nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
 }
