@@ -235,6 +235,7 @@ func (h *Handler) handleGateChecks(w http.ResponseWriter, r *http.Request) {
 	// the full canonical report plus a freshness timestamp.
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"report":       json.RawMessage(data),
+		"report_path":  reportPath,
 		"generated_at": time.Now().UTC(),
 	})
 }

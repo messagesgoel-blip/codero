@@ -273,7 +273,7 @@ func TestRunDashboardCheck_AllHealthy(t *testing.T) {
 	if !strings.Contains(buf.String(), "All endpoints healthy") {
 		t.Errorf("expected 'All endpoints healthy' in output, got: %s", buf.String())
 	}
-	wantPaths := []string{"/dashboard/", "/dashboard/api/v1/dashboard/overview", "/gate"}
+	wantPaths := []string{"/dashboard/", "/api/v1/dashboard/overview", "/api/v1/dashboard/gate-checks", "/gate"}
 	if !reflect.DeepEqual(requestedPaths, wantPaths) {
 		t.Errorf("requested paths: got %v, want %v", requestedPaths, wantPaths)
 	}
@@ -321,6 +321,98 @@ func TestRunDashboardCheck_PartialFailure(t *testing.T) {
 
 	if err == nil {
 		t.Error("expected error when overview API returns 404")
+	}
+}
+
+func TestRunDashboardCheck_GateChecksCanRequirePayload(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "gate-checks") {
+			_, _ = w.Write([]byte(`{"report":null}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	err := runDashboardCheckWithOptions(ts.URL, "/dashboard", true)
+	if err == nil {
+		t.Fatal("expected error when gate-checks payload is missing")
+	}
+	if !strings.Contains(err.Error(), "gate-checks API") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunDashboardFixture_CheckMode(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := filepath.Join(dir, "last-report.json")
+	if err := os.WriteFile(reportPath, []byte(`{
+  "summary":{"overall_status":"pass","passed":0,"failed":0,"skipped":1,"infra_bypassed":0,"disabled":1,"total":2,"required_failed":0,"required_disabled":0,"profile":"portable","schema_version":"1"},
+  "checks":[
+    {"id":"file-size","name":"File size limit","group":"format","required":true,"enabled":true,"status":"skip","reason_code":"not_in_scope","reason":"no staged files","duration_ms":0},
+    {"id":"ai-gate","name":"AI review gate","group":"ai","required":false,"enabled":false,"status":"disabled","reason_code":"not_in_scope","reason":"AI gate is run separately","duration_ms":0}
+  ],
+  "run_at":"2026-03-17T00:00:00Z"
+}`), 0o644); err != nil {
+		t.Fatalf("write report: %v", err)
+	}
+
+	if err := runDashboardFixture("127.0.0.1", 0, "/dashboard", dir, reportPath, true, true); err != nil {
+		t.Fatalf("runDashboardFixture(check): %v", err)
+	}
+}
+
+func TestNormalizeDashboardBasePath(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"", "/dashboard"},
+		{"/dashboard", "/dashboard"},
+		{"dashboard", "/dashboard"},
+		{"/dashboard/", "/dashboard"},
+		{"/", "/dashboard"},
+	}
+
+	for _, tc := range cases {
+		if got := normalizeDashboardBasePath(tc.in); got != tc.want {
+			t.Fatalf("normalizeDashboardBasePath(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestWaitForDashboard_WaitsForSuccessStatus(t *testing.T) {
+	var hits int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		if hits < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+
+	if err := waitForDashboard(ts.URL); err != nil {
+		t.Fatalf("waitForDashboard: %v", err)
+	}
+	if hits < 3 {
+		t.Fatalf("expected retries before success, got %d probes", hits)
+	}
+}
+
+func TestWaitForDashboard_FailsOnPersistentNonSuccess(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer ts.Close()
+
+	err := waitForDashboard(ts.URL)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !strings.Contains(err.Error(), "returned 503") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

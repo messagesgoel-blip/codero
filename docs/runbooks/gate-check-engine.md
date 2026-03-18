@@ -21,8 +21,17 @@ codero gate-check
 # Emit canonical JSON to stdout
 codero gate-check --json
 
+# Emit deterministic TUI snapshot text for headless parity checks
+codero gate-check --tui-snapshot
+
 # Write JSON report for dashboard consumption
 codero gate-check --json --report-path .codero/gate-check/last-report.json
+
+# Start a local dashboard fixture that exposes the gate-check payload
+codero dashboard --serve-fixture --report-path .codero/gate-check/last-report.json
+
+# Start the fixture and validate dashboard endpoints in one command
+codero dashboard --serve-fixture --report-path .codero/gate-check/last-report.json --check
 
 # Strict profile: missing required tools fail the gate
 codero gate-check --profile strict
@@ -41,6 +50,12 @@ When using `--json` flag:
 - The report is also persisted to file when `--report-path` or `CODERO_GATE_CHECK_REPORT_PATH` is set
 - Exit code is 0 for pass, 1 for fail (same as non-JSON mode)
 - Report-path precedence: `--report-path` > `CODERO_GATE_CHECK_REPORT_PATH` > default path
+
+### Headless surface parity behavior
+
+- `--tui-snapshot` emits a deterministic plain-text rendering of the TUI gate-check pane.
+- Non-pass rows preserve `reason_code` and the human-readable `reason` together when both exist.
+- `codero dashboard --serve-fixture` boots a local dashboard/observability server backed by an empty temp state DB and the current gate-check report so pilots can collect dashboard artifacts without a live daemon.
 
 ---
 

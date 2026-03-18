@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/codero/codero/internal/gate"
+	"github.com/codero/codero/internal/gatecheck"
 	"github.com/codero/codero/internal/tui/adapters"
 )
 
@@ -169,8 +170,8 @@ func (p ChecksPane) View() string {
 			req = " *"
 		}
 		label := fmt.Sprintf("  %s %-22s  %-12s  %-6s%s", icon, c.ID, c.Group, c.Status, req)
-		if c.Reason != "" {
-			label += "  " + c.Reason
+		if reason := gatecheck.DisplayReason(gatecheck.ReasonCode(c.ReasonCode), c.Reason); reason != "" {
+			label += "  " + reason
 		}
 
 		var line string
