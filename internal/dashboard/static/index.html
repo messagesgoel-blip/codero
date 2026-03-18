@@ -308,6 +308,7 @@ let allEvents     = [];
 let eventsUnavailable = false;
 let eventFilter   = 'ALL';
 let findingsCache = null;
+let integrationGridBound = false;
 
 /* THEME */
 const mq = window.matchMedia('(prefers-color-scheme: dark)');
@@ -561,16 +562,17 @@ function renderSettings() {
       '<div class="int-top"><div class="int-icon">' + intIcon(c.id) + '</div>' +
       '<div class="int-info"><div class="int-name">' + esc(c.name) + '</div><div class="int-desc">' + esc(c.desc) + '</div></div></div>' +
       '<div class="int-status ' + (c.connected ? 'conn' : 'disc') + '">' + (c.connected ? '&#x25CF; connected' : '&#x25CB; not connected') + '</div>' +
-      '<button class="int-btn ' + (c.connected ? 'disconnect' : '') + '" onclick="toggleInt(\'' + esc(c.id) + '\')">' + (c.connected ? 'disconnect' : 'connect') + '</button>' +
+      '<button class="int-btn ' + (c.connected ? 'disconnect' : '') + '" type="button" data-int-id="' + attrEsc(c.id) + '">' + (c.connected ? 'disconnect' : 'connect') + '</button>' +
     '</div>';
   }).join('');
   el('gate-config-body').innerHTML = (settingsLocal.gate_pipeline || []).map(function(g, i) {
     return '<tr><td>' + esc(g.name) + '</td>' +
-      '<td><div class="toggle-wrap"><button type="button" class="toggle ' + (g.enabled ? 'on' : '') + '" aria-pressed="' + (g.enabled ? 'true' : 'false') + '" aria-label="Toggle enabled for ' + esc(g.name) + '" onclick="toggleGate(' + i + ',\'enabled\')"><div class="toggle-knob"></div></button></div></td>' +
-      '<td><div class="toggle-wrap"><button type="button" class="toggle ' + (g.blocks_commit ? 'on' : '') + '" aria-pressed="' + (g.blocks_commit ? 'true' : 'false') + '" aria-label="Toggle blocks commit for ' + esc(g.name) + '" onclick="toggleGate(' + i + ',\'blocks_commit\')"><div class="toggle-knob"></div></button></div></td>' +
+      '<td><div class="toggle-wrap"><button type="button" class="toggle ' + (g.enabled ? 'on' : '') + '" aria-pressed="' + (g.enabled ? 'true' : 'false') + '" aria-label="Toggle enabled for ' + attrEsc(g.name) + '" onclick="toggleGate(' + i + ',\'enabled\')"><div class="toggle-knob"></div></button></div></td>' +
+      '<td><div class="toggle-wrap"><button type="button" class="toggle ' + (g.blocks_commit ? 'on' : '') + '" aria-pressed="' + (g.blocks_commit ? 'true' : 'false') + '" aria-label="Toggle blocks commit for ' + attrEsc(g.name) + '" onclick="toggleGate(' + i + ',\'blocks_commit\')"><div class="toggle-knob"></div></button></div></td>' +
       '<td><span style="color:var(--muted)">' + g.timeout_sec + 's</span></td>' +
       '<td><span style="color:var(--muted)">' + esc(g.provider) + '</span></td></tr>';
   }).join('');
+  bindIntegrationGrid();
   el('save-btn').disabled = !settingsDirty;
 }
 async function loadSettings(force) {
@@ -586,6 +588,15 @@ async function loadSettings(force) {
     el('int-grid').innerHTML = '<div class="state-msg error">failed to load settings: ' + esc(err.message) + '</div>';
   }
 }
+function bindIntegrationGrid() {
+  if (integrationGridBound) return;
+  integrationGridBound = true;
+  document.addEventListener('click', function(ev) {
+    var btn = ev.target && ev.target.closest ? ev.target.closest('.int-btn[data-int-id]') : null;
+    if (!btn) return;
+    toggleInt(btn.getAttribute('data-int-id'));
+  });
+}
 function markSettingsDirty() {
   if (!settingsDirty) {
     var st = el('save-status');
@@ -593,8 +604,20 @@ function markSettingsDirty() {
   }
   settingsDirty = true;
 }
-function toggleInt(id) { var c = (settingsLocal.integrations || []).find(function(x) { return x.id === id; }); if (c) { c.connected = !c.connected; markSettingsDirty(); renderSettings(); } }
-function toggleGate(i, f) { settingsLocal.gate_pipeline[i][f] = !settingsLocal.gate_pipeline[i][f]; markSettingsDirty(); renderSettings(); }
+function toggleInt(id) {
+  var c = (settingsLocal && settingsLocal.integrations || []).find(function(x) { return x.id === id; });
+  if (!c) return;
+  c.connected = !c.connected;
+  markSettingsDirty();
+  renderSettings();
+}
+function toggleGate(i, f) {
+  var g = settingsLocal && settingsLocal.gate_pipeline && settingsLocal.gate_pipeline[i];
+  if (!g || !Object.prototype.hasOwnProperty.call(g, f)) return;
+  g[f] = !g[f];
+  markSettingsDirty();
+  renderSettings();
+}
 async function saveSettings() {
   var btn = el('save-btn'), st = el('save-status');
   btn.disabled = true; st.textContent = 'saving\u2026'; st.className = 'save-status';
@@ -640,7 +663,7 @@ function startSSE() {
   if (sseSource) sseSource.close();
   sseSource = new EventSource(API + '/events');
   sseSource.addEventListener('activity', function(e) {
-    try { var ev = JSON.parse(e.data); allEvents.unshift(ev); if (allEvents.length > 100) allEvents.length = 100; if (activeTab === 'eventlogs') renderEvents(); } catch (_e) {}
+    try { var ev = JSON.parse(e.data); allEvents.unshift(ev); if (allEvents.length > 100) allEvents.length = 100; if (activeTab === 'eventlogs') renderEvents(); } catch (err) { console.warn('SSE activity parse error:', err, e.data); }
   });
   sseSource.onerror = function() { sseSource.close(); sseSource = null; schedulePoll(); };
 }
@@ -652,6 +675,14 @@ function schedulePoll() {
 /* UTILS */
 function el(id)  { return document.getElementById(id); }
 function esc(s)  { var d = document.createElement('div'); d.textContent = String(s == null ? '' : s); return d.innerHTML; }
+function attrEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 // toDisplayState maps raw gate-check status values to the LOG-001 normalized
 // display state: pass→passing, fail→failing, skip/disabled→disabled.
 function toDisplayState(status) {
