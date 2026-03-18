@@ -57,6 +57,22 @@ func seedBranch(t *testing.T, db *sql.DB, repo, branch, st string) {
 	}
 }
 
+// seedBranchSession inserts one branch_states row with a fresh owner session.
+func seedBranchSession(t *testing.T, db *sql.DB, repo, branch, st, sessionID string, lastSeen, submittedAt time.Time) {
+	t.Helper()
+	// nosemgrep: go.lang.security.audit.sqli.gosql-sqli.gosql-sqli
+	_, err := db.Exec(`INSERT INTO branch_states
+		(id, repo, branch, head_hash, state, retry_count, max_retries, approved, ci_green,
+		 pending_events, unresolved_threads, owner_session_id, owner_session_last_seen,
+		 queue_priority, submission_time, created_at, updated_at)
+		VALUES (?,?,?,?,?,0,3,0,0,0,0,?,?,?,?,?,?)`,
+		fmt.Sprintf("id-%s-%s", repo, branch), repo, branch, "abc123", st,
+		sessionID, lastSeen, 0, submittedAt, submittedAt, submittedAt)
+	if err != nil {
+		t.Fatalf("seedBranchSession: %v", err)
+	}
+}
+
 // seedRun inserts one review_runs row.
 func seedRun(t *testing.T, db *sql.DB, id, repo, branch, provider, status string, dur time.Duration) {
 	t.Helper()
@@ -654,6 +670,96 @@ func TestGateChecks_WithReport(t *testing.T) {
 func TestGateChecks_MethodNotAllowed(t *testing.T) {
 	h, _ := newTestHandler(t)
 	rec := doRequest(t, h, http.MethodPost, "/api/v1/dashboard/gate-checks", nil)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("want 405, got %d", rec.Code)
+	}
+}
+
+/* ═══════════════════ ACTIVE SESSIONS ════════════════════════ */
+
+func TestActiveSessions_Empty(t *testing.T) {
+	h, _ := newTestHandler(t)
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/active-sessions", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp dashboard.ActiveSessionsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.ActiveCount != 0 {
+		t.Fatalf("active_count = %d, want 0", resp.ActiveCount)
+	}
+	if len(resp.Sessions) != 0 {
+		t.Fatalf("sessions length = %d, want 0", len(resp.Sessions))
+	}
+}
+
+func TestActiveSessions_WithFreshSession(t *testing.T) {
+	h, db := newTestHandler(t)
+	startedAt := time.Now().Add(-45 * time.Minute).UTC()
+	lastSeen := time.Now().Add(-2 * time.Minute).UTC()
+	seedBranchSession(t, db, "acme/api", "feat/live", "cli_reviewing", "sess-123", lastSeen, startedAt)
+
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/active-sessions", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.ActiveSessionsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.ActiveCount != 1 {
+		t.Fatalf("active_count = %d, want 1", resp.ActiveCount)
+	}
+	if len(resp.Sessions) != 1 {
+		t.Fatalf("sessions length = %d, want 1", len(resp.Sessions))
+	}
+	s := resp.Sessions[0]
+	if s.SessionID != "sess-123" || s.Repo != "acme/api" || s.Branch != "feat/live" {
+		t.Fatalf("unexpected session row: %+v", s)
+	}
+	if s.ActivityState != "waiting" {
+		t.Fatalf("activity_state = %q, want waiting", s.ActivityState)
+	}
+	if s.OwnerAgent != "unknown" {
+		t.Fatalf("owner_agent = %q, want unknown", s.OwnerAgent)
+	}
+	if s.ElapsedSec <= 0 {
+		t.Fatalf("elapsed_sec = %d, want > 0", s.ElapsedSec)
+	}
+	if s.LastHeartbeatAt.IsZero() {
+		t.Fatalf("last_heartbeat_at must be set")
+	}
+}
+
+func TestActiveSessions_FiltersStale(t *testing.T) {
+	h, db := newTestHandler(t)
+	startedAt := time.Now().Add(-2 * time.Hour).UTC()
+	lastSeen := time.Now().Add(-31 * time.Minute).UTC()
+	seedBranchSession(t, db, "acme/api", "feat/stale", "coding", "sess-old", lastSeen, startedAt)
+
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/active-sessions", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.ActiveSessionsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.ActiveCount != 0 {
+		t.Fatalf("active_count = %d, want 0", resp.ActiveCount)
+	}
+	if len(resp.Sessions) != 0 {
+		t.Fatalf("sessions length = %d, want 0", len(resp.Sessions))
+	}
+}
+
+func TestActiveSessions_MethodNotAllowed(t *testing.T) {
+	h, _ := newTestHandler(t)
+	rec := doRequest(t, h, http.MethodPost, "/api/v1/dashboard/active-sessions", nil)
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("want 405, got %d", rec.Code)
 	}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"time"
+
+	"github.com/codero/codero/internal/scheduler"
 )
 
 // queryOverview returns today's aggregate run stats.
@@ -247,6 +249,84 @@ func queryGateHealth(ctx context.Context, db *sql.DB) ([]GateHealth, error) {
 		out = append(out, g)
 	}
 	return out, rows.Err()
+}
+
+// queryActiveSessions returns the current fresh session list for the GUI.
+func queryActiveSessions(ctx context.Context, db *sql.DB, limit int) ([]ActiveSession, error) {
+	// Fresh heartbeats only: stale sessions are filtered out so the panel mirrors
+	// live activity rather than historical branch ownership.
+	threshold := time.Now().Add(-scheduler.SessionHeartbeatTTL)
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT owner_session_id, repo, branch, state,
+		       owner_session_last_seen, submission_time, created_at, updated_at
+		FROM branch_states
+		WHERE owner_session_id <> ''
+		  AND owner_session_last_seen IS NOT NULL
+		  AND state IN ('coding', 'local_review', 'queued_cli', 'cli_reviewing', 'reviewed', 'merge_ready', 'blocked', 'paused')
+		ORDER BY owner_session_last_seen DESC, updated_at DESC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []ActiveSession
+	for rows.Next() {
+		var sessionID, repo, branch, state string
+		var lastSeen, submissionTime, createdAt, updatedAt sql.NullTime
+		if err := rows.Scan(&sessionID, &repo, &branch, &state, &lastSeen, &submissionTime, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		if !lastSeen.Valid {
+			continue
+		}
+		if lastSeen.Time.Before(threshold) {
+			continue
+		}
+
+		startedAt := startedAtForSession(submissionTime, createdAt, lastSeen)
+		elapsed := time.Since(startedAt)
+		if elapsed < 0 {
+			elapsed = 0
+		}
+
+		out = append(out, ActiveSession{
+			SessionID:       sessionID,
+			Repo:            repo,
+			Branch:          branch,
+			OwnerAgent:      "unknown",
+			ActivityState:   sessionActivityState(state),
+			StartedAt:       startedAt,
+			LastHeartbeatAt: lastSeen.Time,
+			ElapsedSec:      int64(elapsed.Seconds()),
+		})
+	}
+	return out, rows.Err()
+}
+
+func startedAtForSession(submissionTime, createdAt, lastSeen sql.NullTime) time.Time {
+	switch {
+	case submissionTime.Valid:
+		return submissionTime.Time
+	case createdAt.Valid:
+		return createdAt.Time
+	case lastSeen.Valid:
+		return lastSeen.Time
+	default:
+		return time.Now().UTC()
+	}
+}
+
+func sessionActivityState(state string) string {
+	switch state {
+	case "blocked":
+		return "blocked"
+	case "queued_cli", "cli_reviewing", "paused":
+		return "waiting"
+	default:
+		return "active"
+	}
 }
 
 // queryRuns returns the most recent review runs.

@@ -157,67 +157,55 @@ Returns per-provider pass rates across all runs.
 
 ---
 
-## GET /api/v1/dashboard/gate-steps
+## GET /api/v1/dashboard/gate-checks
 
-Returns the ordered step matrix for the current pre-commit review run. This is the
-UI-facing feed for the 12-21 step review pipeline used by the v1.2.4 mockups.
-
-The response MUST include every configured step in execution order. A step MUST NOT
-be omitted because it is disabled, not yet started, or blocked by a previous failure.
+Returns the latest canonical gate-check report envelope used to render the per-step
+status matrix in the UI. The embedded `report` payload follows
+`docs/contracts/gate-check-schema-v1.md`.
 
 ### Response `200 OK`
 
 ```json
 {
-  "run_id": "20260318-104009",
-  "repo": "acme/api",
-  "branch": "feat/rate-limit",
-  "overall_status": "running",
-  "current_step_id": "coderabbit-second-pass",
-  "current_step_index": 6,
-  "total_steps": 14,
-  "steps": [
-    {
-      "ordinal": 1,
-      "id": "gitleaks",
-      "name": "Secret scan",
-      "status": "passing",
-      "reason_code": "",
-      "reason": "",
-      "duration_ms": 980,
-      "started_at": "2026-03-18T14:40:09Z",
-      "finished_at": "2026-03-18T14:40:10Z"
+  "report_path": ".codero/gate-check/last-report.json",
+  "report": {
+    "summary": {
+      "overall_status": "pass",
+      "passed": 4,
+      "failed": 0,
+      "skipped": 5,
+      "infra_bypassed": 0,
+      "disabled": 4,
+      "total": 13,
+      "required_failed": 0,
+      "required_disabled": 0,
+      "profile": "portable",
+      "schema_version": "1"
     },
-    {
-      "ordinal": 2,
-      "id": "path-guard",
-      "name": "Path guard",
-      "status": "disabled",
-      "reason_code": "not_applicable",
-      "reason": "repo has no protected-path rules",
-      "duration_ms": 0,
-      "started_at": null,
-      "finished_at": null
-    }
-  ],
+    "checks": [
+      {
+        "id": "file-size",
+        "name": "File size limit",
+        "group": "format",
+        "required": true,
+        "enabled": true,
+        "status": "skip",
+        "reason_code": "not_in_scope",
+        "reason": "no staged files",
+        "duration_ms": 0
+      }
+    ],
+    "run_at": "2026-03-18T14:40:34Z"
+  },
   "generated_at": "2026-03-18T14:40:34Z"
 }
 ```
 
-**`overall_status` values:** `pending`, `running`, `passing`, `failing`, `disabled`
-
-**`steps[].status` values:** `pending`, `running`, `passing`, `failing`, `disabled`
-
-**Step rules:**
-- `passing` means the step completed successfully.
-- `running` means the step is actively executing.
-- `failing` means the step produced a blocking error or finding.
-- `disabled` means the step is not applicable, explicitly disabled, or was not reached
-  because an earlier hard failure stopped the run.
-- `reason_code` is required whenever `status` is `failing` or `disabled`.
-- `steps[]` order is stable and mirrors the execution order shown in the UI.
-- The backend should derive this feed from structured step telemetry, not from freeform
-  log text.
+**`report`** may be `null` until the first gate-check run completes.
+When `report` is `null`, the response also includes a human-readable `message` and the
+resolved `report_path` so the UI can explain the missing data.
+**UI rule:** render the ordered `report.checks[]` list directly; do not infer per-step
+state from freeform log text.
 
 ---
 
@@ -260,7 +248,8 @@ orchestration/task ledger so the GUI can show what the session is working on.
 **Session rules:**
 - Only fresh sessions are returned; stale sessions are filtered out.
 - `task` MAY be omitted when the backend cannot resolve it.
-- `owner_agent` SHOULD identify the current agent or human operator where known.
+- `owner_agent` SHOULD identify the current agent or human operator where known; use
+  `unknown` when no agent label can be resolved.
 - The response MUST NOT expose secrets, tokens, raw prompts, or file contents.
 - The backend should derive active sessions from durable session/branch heartbeat data
   and enrich them with task-ledger context only when that context is available.
