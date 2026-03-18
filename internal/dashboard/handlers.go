@@ -20,9 +20,10 @@ import (
 )
 
 const (
-	maxUploadSize    = 10 << 20 // 10 MiB
-	activityPageSize = 50
-	runsPageSize     = 50
+	maxUploadSize          = 10 << 20 // 10 MiB
+	activityPageSize       = 50
+	activeSessionsPageSize = 50
+	runsPageSize           = 50
 )
 
 // allowedUploadExts contains the permitted file extensions for manual review upload.
@@ -51,6 +52,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/dashboard/activity", h.handleActivity)
 	mux.HandleFunc("/api/v1/dashboard/block-reasons", h.handleBlockReasons)
 	mux.HandleFunc("/api/v1/dashboard/gate-health", h.handleGateHealth)
+	mux.HandleFunc("/api/v1/dashboard/active-sessions", h.handleActiveSessions)
 	mux.HandleFunc("/api/v1/dashboard/gate-checks", h.handleGateChecks)
 	mux.HandleFunc("/api/v1/dashboard/settings", h.handleSettings)
 	mux.HandleFunc("/api/v1/dashboard/manual-review-upload", h.handleUpload)
@@ -261,6 +263,31 @@ func (h *Handler) handleGateHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"gates":        health,
 		"generated_at": time.Now().UTC(),
+	})
+}
+
+// handleActiveSessions serves GET /api/v1/dashboard/active-sessions.
+func (h *Handler) handleActiveSessions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "")
+		return
+	}
+	setCORSHeaders(w)
+
+	sessions, err := queryActiveSessions(r.Context(), h.db, activeSessionsPageSize)
+	if err != nil {
+		loglib.Error("dashboard: active-sessions query failed",
+			loglib.FieldComponent, "dashboard", "error", err)
+		writeError(w, http.StatusInternalServerError, "active-sessions query failed", "db_error")
+		return
+	}
+	if sessions == nil {
+		sessions = []ActiveSession{}
+	}
+	writeJSON(w, http.StatusOK, ActiveSessionsResponse{
+		ActiveCount: len(sessions),
+		Sessions:    sessions,
+		GeneratedAt: time.Now().UTC(),
 	})
 }
 

@@ -62,6 +62,33 @@ type GateHealth struct {
 	PassRate float64 `json:"pass_rate"` // 0–100, -1 if no data
 }
 
+// ActiveTask is the optional best-effort task context shown alongside a session.
+type ActiveTask struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Phase string `json:"phase"`
+}
+
+// ActiveSession is one row in the active-sessions panel.
+type ActiveSession struct {
+	SessionID       string      `json:"session_id"`
+	Repo            string      `json:"repo"`
+	Branch          string      `json:"branch"`
+	OwnerAgent      string      `json:"owner_agent"`
+	ActivityState   string      `json:"activity_state"`
+	Task            *ActiveTask `json:"task,omitempty"`
+	StartedAt       time.Time   `json:"started_at"`
+	LastHeartbeatAt time.Time   `json:"last_heartbeat_at"`
+	ElapsedSec      int64       `json:"elapsed_sec"`
+}
+
+// ActiveSessionsResponse is the response for GET /api/v1/dashboard/active-sessions.
+type ActiveSessionsResponse struct {
+	ActiveCount int             `json:"active_count"`
+	Sessions    []ActiveSession `json:"sessions"`
+	GeneratedAt time.Time       `json:"generated_at"`
+}
+
 // RunRow is one row in the runs table.
 type RunRow struct {
 	ID         string     `json:"id"`

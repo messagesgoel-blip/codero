@@ -78,3 +78,8 @@ Open Questions: (agent fills this before calling)
 Summary: COD-055: Implementing invalid-flag exit semantics hardening — UsageError type added, exit code 2 for usage errors, exit code 1 for gate failures. Tests pass, pushing PR.
 Pending: PR merge
 Open Questions: None.
+
+## Handoff — 2026-03-18T13:41:46Z
+Summary: Committed and pushed roadmap/docs status sync for v1.2.4 and validated test readiness.
+Pending: (agent fills this before calling)
+Open Questions: (agent fills this before calling)

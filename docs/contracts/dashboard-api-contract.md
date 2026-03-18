@@ -157,6 +157,105 @@ Returns per-provider pass rates across all runs.
 
 ---
 
+## GET /api/v1/dashboard/gate-checks
+
+Returns the latest canonical gate-check report envelope used to render the per-step
+status matrix in the UI. The embedded `report` payload follows
+`docs/contracts/gate-check-schema-v1.md`.
+
+### Response `200 OK`
+
+```json
+{
+  "report_path": ".codero/gate-check/last-report.json",
+  "report": {
+    "summary": {
+      "overall_status": "pass",
+      "passed": 4,
+      "failed": 0,
+      "skipped": 5,
+      "infra_bypassed": 0,
+      "disabled": 4,
+      "total": 13,
+      "required_failed": 0,
+      "required_disabled": 0,
+      "profile": "portable",
+      "schema_version": "1"
+    },
+    "checks": [
+      {
+        "id": "file-size",
+        "name": "File size limit",
+        "group": "format",
+        "required": true,
+        "enabled": true,
+        "status": "skip",
+        "reason_code": "not_in_scope",
+        "reason": "no staged files",
+        "duration_ms": 0
+      }
+    ],
+    "run_at": "2026-03-18T14:40:34Z"
+  },
+  "generated_at": "2026-03-18T14:40:34Z"
+}
+```
+
+**`report`** may be `null` until the first gate-check run completes.
+When `report` is `null`, the response also includes a human-readable `message` and the
+resolved `report_path` so the UI can explain the missing data.
+**UI rule:** render the ordered `report.checks[]` list directly; do not infer per-step
+state from freeform log text.
+
+---
+
+## GET /api/v1/dashboard/active-sessions
+
+Returns the currently active review sessions for the GUI. A session appears here only
+while its heartbeat is fresh; expired or inactive sessions MUST be excluded.
+
+Current task context is optional. When available, the backend SHOULD populate it from the
+orchestration/task ledger so the GUI can show what the session is working on.
+
+### Response `200 OK`
+
+```json
+{
+  "active_count": 4,
+  "sessions": [
+    {
+      "session_id": "sess-123",
+      "repo": "acme/api",
+      "branch": "feat/rate-limit",
+      "owner_agent": "Codex",
+      "activity_state": "active",
+      "task": {
+        "id": "COD-055",
+        "title": "Fix finish-loop polling",
+        "phase": "coderabbit-review"
+      },
+      "started_at": "2026-03-18T14:10:00Z",
+      "last_heartbeat_at": "2026-03-18T14:40:30Z",
+      "elapsed_sec": 1830
+    }
+  ],
+  "generated_at": "2026-03-18T14:40:34Z"
+}
+```
+
+**`activity_state` values:** `active`, `waiting`, `blocked`
+
+**Session rules:**
+- Only fresh sessions are returned; stale sessions are filtered out.
+- `task` MAY be omitted when the backend cannot resolve it.
+- `owner_agent` SHOULD identify the current agent or human operator where known; use
+  `unknown` when no agent label can be resolved.
+- The response MUST NOT expose secrets, tokens, raw prompts, or file contents.
+- The backend should derive active sessions from durable session/branch heartbeat data
+  and enrich them with task-ledger context only when that context is available.
+
+---
+
 ## GET /api/v1/dashboard/settings
 
 Returns current integration connection status and gate pipeline configuration.

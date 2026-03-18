@@ -23,6 +23,8 @@ func repoRoot(t *testing.T) string {
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 }
 
+// TestHelpContract validates that --help returns exit code 0 (success), not 1 (usage error).
+// This aligns with codero-finish exit code semantics where 0=success, 1=feedback/retry needed.
 func TestHelpContract(t *testing.T) {
 	root := repoRoot(t)
 	cmd := exec.Command("go", "run", "./cmd/codero", "--help")
