@@ -357,6 +357,7 @@ Evidence: pilot rerun batch 2 evidence directory (local CI run artifacts, not tr
 **Spec:** `docs/roadmaps/v1.2.4-backlog.md`
 
 Key items:
+- COD-NEW-C: Autonomous finish-loop (`codero-finish.sh`) — agent hands off; Codero drives commit→push→PR→CI→CodeRabbit→feedback loop until merge-ready
 - COD-NEW-A: Post-push CI watcher (`ci-watch.sh`) — surfaces CI failures back to agent after push
 - COD-NEW-B: Pre-push test gate (`pre-push` hook) — runs `go test ./...` before push, blocks on failure
 - UI-001: TUI layout and visual design modernization (Bubble Tea)
