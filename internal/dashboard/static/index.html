@@ -305,6 +305,7 @@ let settingsDirty = false;
 let sseSource     = null;
 let pollTimer     = null;
 let allEvents     = [];
+let eventsUnavailable = false;
 let eventFilter   = 'ALL';
 let findingsCache = null;
 
@@ -332,7 +333,7 @@ function showTab(id, tab) {
     t.setAttribute('aria-selected', t === tab ? 'true' : 'false');
   });
   activeTab = id;
-  if (id === 'settings')     loadSettings();
+  if (id === 'settings' && !settingsDirty) loadSettings();
   if (id === 'findings')     renderFindings(findingsCache);
   if (id === 'eventlogs')    renderEvents();
 }
@@ -371,6 +372,16 @@ async function apiFetch(path, opts) {
 /* MERGE STATUS */
 function updateMergeBar(health, sessions) {
   const mbS = el('mb-status'), mbD = el('mb-detail');
+  if (!health || health.unavailable || (health.database && health.database.status === 'unavailable')) {
+    mbS.textContent = 'UNAVAILABLE'; mbS.className = 'mb-status unknown';
+    mbD.textContent = 'system health unavailable';
+    return;
+  }
+  if (sessions === null) {
+    mbS.textContent = 'UNAVAILABLE'; mbS.className = 'mb-status unknown';
+    mbD.textContent = 'active sessions feed unavailable';
+    return;
+  }
   const blocked = (sessions || []).filter(s => s.activity_state === 'blocked').length;
   if (blocked > 0) {
     mbS.textContent = 'BLOCKED'; mbS.className = 'mb-status blocked';
@@ -390,21 +401,22 @@ function updateMergeBar(health, sessions) {
 
 /* HEALTH BAR */
 function renderHealthBar(h) {
-  if (!h) return;
-  const db    = h.database || {};
-  const sessF = (h.feeds || {}).active_sessions || {};
-  const gateF = (h.feeds || {}).gate_checks     || {};
+  const unavailable = !h || h.unavailable;
+  const db    = unavailable ? { status: 'unavailable' } : (h.database || {});
+  const sessF = unavailable ? { status: 'unavailable' } : (h.feeds || {}).active_sessions || {};
+  const gateF = unavailable ? { status: 'unavailable' } : (h.feeds || {}).gate_checks     || {};
   elSet('hb-db', db.status || 'unknown', 'hb-val ' + (db.status || 'unknown'));
   dotSet('hb-db-dot', db.status || 'unknown');
-  el('hb-agents').textContent    = h.active_agent_count != null ? h.active_agent_count : '0';
-  el('agents-count').textContent = h.active_agent_count != null ? h.active_agent_count : '0';
+  var agentCount = unavailable ? null : h.active_agent_count;
+  el('hb-agents').textContent    = agentCount != null ? agentCount : '—';
+  el('agents-count').textContent = agentCount != null ? agentCount : '—';
   elSet('hb-sessions-status', sessF.status || 'unavailable', 'hb-val ' + (sessF.status || 'unavailable'));
   dotSet('hb-sessions-dot', sessF.status || 'unavailable');
   el('hb-sessions-age').textContent = sessF.freshness_sec != null ? fmtAge(sessF.freshness_sec) : '';
   elSet('hb-gate-status', gateF.status || 'unavailable', 'hb-val ' + (gateF.status || 'unavailable'));
   dotSet('hb-gate-dot', gateF.status || 'unavailable');
   el('hb-gate-age').textContent = gateF.freshness_sec != null ? fmtAge(gateF.freshness_sec) : '';
-  el('hb-refreshed').textContent = fmtTime(h.generated_at);
+  el('hb-refreshed').textContent = unavailable ? '—' : fmtTime(h.generated_at);
 }
 function elSet(id, text, cls) { const e = el(id); if (e) { e.textContent = text; e.className = cls; } }
 function dotSet(id, st)       { const e = el(id); if (e) e.className = 'hb-dot ' + st; }
@@ -412,6 +424,7 @@ function dotSet(id, st)       { const e = el(id); if (e) e.className = 'hb-dot '
 /* ACTIVE AGENTS */
 function renderSessions(sessions) {
   const c = el('proc-content');
+  if (sessions === null) { c.innerHTML = '<div class="state-msg error">active sessions feed unavailable</div>'; return; }
   if (!sessions || !sessions.length) { c.innerHTML = '<div class="state-msg">no active sessions</div>'; return; }
   c.innerHTML = sessions.map(function(s) {
     var task  = s.task || {};
@@ -455,10 +468,14 @@ function setEvtFilter(f, btn) {
   btn.classList.add('active');
   renderEvents();
 }
-function renderEvents() {
+function renderEvents(events) {
+  var source = typeof events === 'undefined' ? allEvents : events;
   var list = el('events-list'), cnt = el('ef-count');
-  if (!allEvents.length) { list.innerHTML = '<div class="state-msg">no events yet</div>'; cnt.textContent = ''; return; }
-  var filtered = eventFilter === 'ALL' ? allEvents : allEvents.filter(function(e) { return inferSev(e) === eventFilter; });
+  if (source === null || (eventsUnavailable && source === allEvents && !source.length)) {
+    list.innerHTML = '<div class="state-msg error">activity feed unavailable</div>'; cnt.textContent = ''; return;
+  }
+  if (!source.length) { list.innerHTML = '<div class="state-msg">no events yet</div>'; cnt.textContent = ''; return; }
+  var filtered = eventFilter === 'ALL' ? source : source.filter(function(e) { return inferSev(e) === eventFilter; });
   cnt.textContent = filtered.length + ' events';
   if (!filtered.length) { list.innerHTML = '<div class="state-msg">no ' + eventFilter.toLowerCase() + ' events</div>'; return; }
   list.innerHTML = filtered.map(function(ev) {
@@ -495,6 +512,11 @@ function evMsg(ev) {
 /* FINDINGS */
 function renderFindings(data) {
   findingsCache = data;
+  if (data && data.unavailable) {
+    ['f-total','f-failed','f-overall','f-sev-fail','f-sev-skip','f-sev-bypass','f-sev-pass'].forEach(function(id) { var e = el(id); if (e) e.textContent = '\u2014'; });
+    el('gate-table-wrap').innerHTML = '<div class="state-msg error">gate-check report unavailable</div>';
+    return;
+  }
   if (!data || !data.report) {
     ['f-total','f-failed','f-overall','f-sev-fail','f-sev-skip','f-sev-bypass','f-sev-pass'].forEach(function(id) { var e = el(id); if (e) e.textContent = '\u2014'; });
     el('gate-table-wrap').innerHTML = '<div class="state-msg">no gate-check report &mdash; run <code>codero gate-check</code> to generate one</div>';
@@ -532,16 +554,6 @@ function renderFindings(data) {
 }
 
 /* SETTINGS */
-async function loadSettings() {
-  try {
-    var data = await apiFetch('/settings');
-    settingsLocal = JSON.parse(JSON.stringify(data));
-    settingsDirty = false;
-    renderSettings();
-  } catch (err) {
-    el('int-grid').innerHTML = '<div class="state-msg error">failed to load settings: ' + esc(err.message) + '</div>';
-  }
-}
 function renderSettings() {
   if (!settingsLocal) return;
   el('int-grid').innerHTML = (settingsLocal.integrations || []).map(function(c) {
@@ -560,17 +572,35 @@ function renderSettings() {
       '<td><span style="color:var(--muted)">' + esc(g.provider) + '</span></td></tr>';
   }).join('');
   el('save-btn').disabled = !settingsDirty;
-  el('save-status').textContent = '';
 }
-function toggleInt(id) { var c = (settingsLocal.integrations || []).find(function(x) { return x.id === id; }); if (c) { c.connected = !c.connected; settingsDirty = true; renderSettings(); } }
-function toggleGate(i, f) { settingsLocal.gate_pipeline[i][f] = !settingsLocal.gate_pipeline[i][f]; settingsDirty = true; renderSettings(); }
+async function loadSettings(force) {
+  if (settingsDirty && !force) return;
+  try {
+    var st = el('save-status');
+    if (st) { st.textContent = ''; st.className = 'save-status'; }
+    var data = await apiFetch('/settings');
+    settingsLocal = JSON.parse(JSON.stringify(data));
+    settingsDirty = false;
+    renderSettings();
+  } catch (err) {
+    el('int-grid').innerHTML = '<div class="state-msg error">failed to load settings: ' + esc(err.message) + '</div>';
+  }
+}
+function markSettingsDirty() {
+  if (!settingsDirty) {
+    var st = el('save-status');
+    if (st) { st.textContent = ''; st.className = 'save-status'; }
+  }
+  settingsDirty = true;
+}
+function toggleInt(id) { var c = (settingsLocal.integrations || []).find(function(x) { return x.id === id; }); if (c) { c.connected = !c.connected; markSettingsDirty(); renderSettings(); } }
+function toggleGate(i, f) { settingsLocal.gate_pipeline[i][f] = !settingsLocal.gate_pipeline[i][f]; markSettingsDirty(); renderSettings(); }
 async function saveSettings() {
   var btn = el('save-btn'), st = el('save-status');
   btn.disabled = true; st.textContent = 'saving\u2026'; st.className = 'save-status';
   try {
     var result = await apiFetch('/settings', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ integrations: settingsLocal.integrations, gate_pipeline: settingsLocal.gate_pipeline }) });
     settingsLocal = result; settingsDirty = false; st.textContent = '\u2713 saved'; st.className = 'save-status ok'; renderSettings();
-    setTimeout(function() { st.textContent = ''; }, 2500);
   } catch (err) { st.textContent = '\u2717 ' + err.message; st.className = 'save-status err'; btn.disabled = false; }
 }
 function intIcon(id) { return { coderabbit:'\uD83D\uDC30', 'pr-agent':'\uD83E\uDD16', 'gh-actions':'\u26A1', 'gitlab-ci':'\uD83E\uDD8A', 'semgrep-cloud':'\uD83D\uDD0D' }[id] || '\uD83D\uDD17'; }
@@ -584,17 +614,24 @@ async function refresh() {
       apiFetch('/gate-checks'),
       apiFetch('/activity'),
     ]);
-    var h   = results[0].status === 'fulfilled' ? results[0].value : null;
-    var sr  = results[1].status === 'fulfilled' ? results[1].value : null;
-    var gc  = results[2].status === 'fulfilled' ? results[2].value : null;
-    var act = results[3].status === 'fulfilled' ? results[3].value : null;
-    var sessions = (sr && sr.sessions) ? sr.sessions : [];
+    var h   = results[0].status === 'fulfilled' ? results[0].value : { unavailable: true, error: reasonText(results[0].reason) };
+    var sr  = results[1].status === 'fulfilled' ? results[1].value : { unavailable: true, error: reasonText(results[1].reason) };
+    var gc  = results[2].status === 'fulfilled' ? results[2].value : { unavailable: true, error: reasonText(results[2].reason) };
+    var act = results[3].status === 'fulfilled' ? results[3].value : { unavailable: true, error: reasonText(results[3].reason) };
+    var sessions = sr && sr.unavailable ? null : ((sr && sr.sessions) ? sr.sessions : []);
     renderHealthBar(h);
     renderSessions(sessions);
     updateMergeBar(h, sessions);
     findingsCache = gc;
     if (activeTab === 'findings')  renderFindings(gc);
-    if (act && act.events) { allEvents = act.events; if (activeTab === 'eventlogs') renderEvents(); }
+    if (act && act.events) {
+      eventsUnavailable = false;
+      allEvents = act.events;
+      if (activeTab === 'eventlogs') renderEvents();
+    } else if (activeTab === 'eventlogs' && !allEvents.length) {
+      eventsUnavailable = true;
+      renderEvents(null);
+    }
   } catch (err) { console.error('refresh error:', err); }
 }
 
@@ -621,6 +658,9 @@ function toDisplayState(status) {
   if (status === 'pass')  return 'passing';
   if (status === 'fail')  return 'failing';
   return 'disabled';
+}
+function reasonText(reason) {
+  return reason && reason.message ? reason.message : String(reason || 'unavailable');
 }
 function fmtTime(iso) { try { var d = new Date(iso); return d.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'}); } catch (_e) { return String(iso || ''); } }
 function fmtRelative(iso) {
