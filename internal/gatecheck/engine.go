@@ -29,7 +29,7 @@ func NewEngine(cfg EngineConfig) *Engine {
 // Checks are never omitted from the output: disabled and skipped checks appear
 // with appropriate status and reason codes.
 func (e *Engine) Run(ctx context.Context) Report {
-	staged := e.stagedFiles()
+	staged := e.stagedFiles(ctx)
 
 	var checks []CheckResult
 	var infraCount int
@@ -67,7 +67,7 @@ func (e *Engine) Run(ctx context.Context) Report {
 }
 
 // stagedFiles returns the list of staged files for this engine run.
-func (e *Engine) stagedFiles() []string {
+func (e *Engine) stagedFiles(ctx context.Context) []string {
 	if e.cfg.StagedFiles != nil {
 		return e.cfg.StagedFiles
 	}
@@ -77,7 +77,7 @@ func (e *Engine) stagedFiles() []string {
 	}
 	args := []string{"-C", repoPath, "diff", "--cached", "--name-only", "--diff-filter=ACM"}
 	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-	cmd := exec.Command("git", args...) //nolint:gosec
+	cmd := exec.CommandContext(ctx, "git", args...) //nolint:gosec
 	cmd.Env = cleanGitEnv(os.Environ())
 	out, err := cmd.Output()
 	if err != nil {
@@ -239,7 +239,7 @@ func runMergeMarkersCheck(_ context.Context, cfg EngineConfig, staged []string) 
 		result.DurationMS = elapsedMS(t)
 		return result
 	}
-	markers := []string{"<<<<<<< ", "=======", ">>>>>>> "}
+	markers := []string{strings.Repeat("<", 7) + " ", strings.Repeat("=", 7), strings.Repeat(">", 7) + " "}
 	repoPath := cfg.RepoPath
 	if repoPath == "" {
 		repoPath = "."

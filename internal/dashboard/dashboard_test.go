@@ -894,9 +894,11 @@ func TestDashboardHealth_MethodNotAllowed(t *testing.T) {
 
 func TestDashboardHealth_ActiveAgentCount(t *testing.T) {
 	h, db := newTestHandler(t)
-	// Seed one fresh session.
+	// Seed one visible fresh session and one fresh session that should not be
+	// counted because its state is not surfaced in the active-sessions panel.
 	lastSeen := time.Now().Add(-30 * time.Second).UTC()
 	seedBranchSession(t, db, "acme/api", "feat/x", "coding", "sess-health-1", lastSeen, lastSeen)
+	seedBranchSession(t, db, "acme/api", "feat/y", "completed", "sess-health-2", lastSeen, lastSeen)
 
 	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/health", nil)
 	if rec.Code != http.StatusOK {
@@ -913,6 +915,25 @@ func TestDashboardHealth_ActiveAgentCount(t *testing.T) {
 	// Sessions feed must be "ok" (fresh heartbeat within threshold).
 	if resp.Feeds.ActiveSessions.Status != "ok" {
 		t.Errorf("feeds.active_sessions.status = %q, want ok", resp.Feeds.ActiveSessions.Status)
+	}
+}
+
+func TestDashboardHealth_GateCheckDirectoryUnavailable(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("CODERO_GATE_CHECK_REPORT_PATH", tmpDir)
+
+	h, _ := newTestHandler(t)
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/health", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.DashboardHealth
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Feeds.GateChecks.Status != "unavailable" {
+		t.Errorf("feeds.gate_checks.status = %q, want unavailable for directory path", resp.Feeds.GateChecks.Status)
 	}
 }
 

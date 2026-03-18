@@ -31,8 +31,7 @@ func cleanGitEnv() []string {
 		if !found {
 			continue
 		}
-		switch key {
-		case "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_PREFIX", "GIT_WORK_TREE":
+		if strings.HasPrefix(key, "GIT_") {
 			continue
 		}
 		cleaned = append(cleaned, kv)
@@ -334,7 +333,8 @@ func gateCheckRepoClean(t *testing.T) string {
 func gateCheckRepoWithConflict(t *testing.T) string {
 	t.Helper()
 	dir := gateCheckRepoClean(t)
-	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("<<<<<<< HEAD\nbad\n=======\nworse\n>>>>>>> branch\n"), 0o644); err != nil {
+	conflict := strings.Repeat("<", 7) + " HEAD\nbad\n" + strings.Repeat("=", 7) + "\nworse\n" + strings.Repeat(">", 7) + " branch\n"
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte(conflict), 0o644); err != nil {
 		t.Fatalf("write conflict file: %v", err)
 	}
 	cmd := exec.Command("git", "add", "tracked.txt")
