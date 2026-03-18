@@ -1,9 +1,3 @@
-//go:build ignore
-// +build ignore
-
 package main
-<<<<<<< HEAD
-var x = 1
-=======
-var x = 2
->>>>>>> branch
+
+// conflict.go is a harmless placeholder fixture for the repository root.
