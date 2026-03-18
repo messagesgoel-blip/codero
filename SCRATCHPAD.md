@@ -78,3 +78,9 @@ Open Questions: (agent fills this before calling)
 Summary: COD-055: Implementing invalid-flag exit semantics hardening — UsageError type added, exit code 2 for usage errors, exit code 1 for gate failures. Tests pass, pushing PR.
 Pending: PR merge
 Open Questions: None.
+
+## Handoff — 2026-03-18T11:27:20Z (CODERO-IDLE-002)
+Task-id: CODERO-IDLE-002
+UTC-start: 2026-03-18T11:27:20Z
+observer-only after Codero handoff
+Purpose: Automation-ownership audit — Codero must perform PR creation, @coderabbitai review, @coderabbitai summary without agent intervention.
