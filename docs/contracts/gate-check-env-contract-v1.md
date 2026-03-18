@@ -47,8 +47,8 @@ Any other value (including empty string) resolves to `false`.
 | `CODERO_ENABLE_FAST_TESTS` | `false` | Feature flag. |
 | `CODERO_ENABLE_NPM_AUDIT` | `false` | Feature flag. |
 | `CODERO_ENABLE_DEPENDENCY_DRIFT_REPORT` | `false` | Feature flag. |
-| `CODERO_ENFORCE_FORBIDDEN_PATHS` | `false` | Enables forbidden-paths check. |
-| `CODERO_FORBIDDEN_PATH_REGEX` | _empty_ | Regex used by forbidden-paths check. Empty disables. |
+| `CODERO_ENFORCE_FORBIDDEN_PATHS` | `false` | Enables forbidden-paths check. **Both this and `CODERO_FORBIDDEN_PATH_REGEX` must be set to activate the check.** |
+| `CODERO_FORBIDDEN_PATH_REGEX` | _empty_ | Regex used by forbidden-paths check. **Must be non-empty when `CODERO_ENFORCE_FORBIDDEN_PATHS=1`; empty disables the check even if enforce is set.** |
 | `CODERO_ENFORCE_LOCKFILE_SYNC` | `false` | Enables lockfile-sync check. |
 | `CODERO_ENFORCE_EXECUTABLE_POLICY` | `false` | Enables exec-bit-policy check. |
 | `CODERO_ENFORCE_JSON_DUPLICATE_KEYS` | `false` | Enables duplicate-key check. |
