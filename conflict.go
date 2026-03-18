@@ -1,3 +1,6 @@
+//go:build ignore
+// +build ignore
+
 package main
 <<<<<<< HEAD
 var x = 1
