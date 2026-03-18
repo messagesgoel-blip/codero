@@ -579,3 +579,108 @@ func TestEngine_ExplicitReasonCode_NotOverwritten(t *testing.T) {
 		t.Errorf("expected reason_code=%q (set by runner), got %q", gatecheck.ReasonExecError, fpCheck.ReasonCode)
 	}
 }
+
+// --- LOG-001: DisplayState mapping tests ---
+
+func TestDisplayState_Mapping(t *testing.T) {
+	cases := []struct {
+		status gatecheck.CheckStatus
+		want   string
+	}{
+		{gatecheck.StatusPass, "passing"},
+		{gatecheck.StatusFail, "failing"},
+		{gatecheck.StatusSkip, "disabled"},
+		{gatecheck.StatusDisabled, "disabled"},
+	}
+	for _, tc := range cases {
+		got := string(tc.status.ToDisplayState())
+		if got != tc.want {
+			t.Errorf("CheckStatus(%q).ToDisplayState() = %q, want %q", tc.status, got, tc.want)
+		}
+	}
+}
+
+func TestDisplayState_UnknownFallsToDisabled(t *testing.T) {
+	// Any unrecognized status value must not produce passing or failing.
+	var unknown gatecheck.CheckStatus = "pending"
+	if got := unknown.ToDisplayState(); got != gatecheck.DisplayDisabled {
+		t.Errorf("unknown status: ToDisplayState() = %q, want %q", got, gatecheck.DisplayDisabled)
+	}
+}
+
+// --- LOG-001: Stable step ordering test ---
+
+// knownStepOrder lists the 13 canonical step IDs in their fixed runner order.
+// This test ensures the engine never silently reorders or renames them.
+var knownStepOrder = []string{
+	"file-size",
+	"merge-markers",
+	"trailing-whitespace",
+	"final-newline",
+	"forbidden-paths",
+	"config-validation",
+	"lockfile-sync",
+	"exec-bit-policy",
+	"gofmt",
+	"gitleaks-staged",
+	"semgrep",
+	"ruff-lint",
+	"ai-gate",
+}
+
+func TestEngine_StableStepOrder(t *testing.T) {
+	dir := makeRepo(t)
+	// No staged files → all checks will be skip/disabled, but all must appear.
+	report := gatecheck.NewEngine(gatecheck.EngineConfig{
+		Profile:  gatecheck.ProfilePortable,
+		RepoPath: dir,
+	}).Run(context.Background())
+
+	if len(report.Checks) != len(knownStepOrder) {
+		t.Fatalf("expected %d checks, got %d", len(knownStepOrder), len(report.Checks))
+	}
+	for i, want := range knownStepOrder {
+		if got := report.Checks[i].ID; got != want {
+			t.Errorf("checks[%d].id = %q, want %q", i, got, want)
+		}
+	}
+}
+
+func TestEngine_AllChecksPresent_EvenWhenSkipped(t *testing.T) {
+	// Verifies GC-001 rule: no check is omitted even if disabled/skipped.
+	dir := makeRepo(t)
+	report := gatecheck.NewEngine(gatecheck.EngineConfig{
+		Profile:  gatecheck.ProfilePortable,
+		RepoPath: dir,
+	}).Run(context.Background())
+
+	seen := make(map[string]bool, len(report.Checks))
+	for _, c := range report.Checks {
+		if seen[c.ID] {
+			t.Errorf("duplicate check ID %q", c.ID)
+		}
+		seen[c.ID] = true
+	}
+	for _, want := range knownStepOrder {
+		if !seen[want] {
+			t.Errorf("check %q missing from report", want)
+		}
+	}
+}
+
+func TestEngine_SkipDisabledHaveReasonCode(t *testing.T) {
+	// GC-001: skip/disabled must carry a reason_code after normalisation.
+	dir := makeRepo(t)
+	report := gatecheck.NewEngine(gatecheck.EngineConfig{
+		Profile:  gatecheck.ProfilePortable,
+		RepoPath: dir,
+	}).Run(context.Background())
+
+	for _, c := range report.Checks {
+		if c.Status == gatecheck.StatusSkip || c.Status == gatecheck.StatusDisabled {
+			if c.ReasonCode == "" {
+				t.Errorf("check %q has status=%q but empty reason_code", c.ID, c.Status)
+			}
+		}
+	}
+}

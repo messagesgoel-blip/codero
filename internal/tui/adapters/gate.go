@@ -162,16 +162,17 @@ func staticPipelineRows() []PipelineRow {
 
 // CheckViewModel is the display-ready model for a single gate check row.
 type CheckViewModel struct {
-	ID         string
-	Name       string
-	Group      string
-	Status     string
-	Required   bool
-	Enabled    bool
-	ReasonCode string
-	Reason     string
-	Tool       string
-	DurMS      int64
+	ID           string
+	Name         string
+	Group        string
+	Status       string
+	DisplayState string // normalized: "passing", "failing", or "disabled" — see LOG-001 contract
+	Required     bool
+	Enabled      bool
+	ReasonCode   string
+	Reason       string
+	Tool         string
+	DurMS        int64
 }
 
 // CheckSummaryViewModel holds the aggregated counters from a gate-check run.
@@ -222,16 +223,17 @@ func FromCheckReport(r gatecheck.Report) CheckReportViewModel {
 		}
 		tool := c.ToolName
 		checks = append(checks, CheckViewModel{
-			ID:         c.ID,
-			Name:       c.Name,
-			Group:      string(c.Group),
-			Status:     string(c.Status),
-			Required:   c.Required,
-			Enabled:    c.Enabled,
-			ReasonCode: string(reasonCode),
-			Reason:     reason,
-			Tool:       tool,
-			DurMS:      c.DurationMS,
+			ID:           c.ID,
+			Name:         c.Name,
+			Group:        string(c.Group),
+			Status:       string(c.Status),
+			DisplayState: string(c.Status.ToDisplayState()),
+			Required:     c.Required,
+			Enabled:      c.Enabled,
+			ReasonCode:   string(reasonCode),
+			Reason:       reason,
+			Tool:         tool,
+			DurMS:        c.DurationMS,
 		})
 	}
 	s := r.Summary

@@ -1,7 +1,7 @@
 # Dashboard API Contract
 
-Version: v1  
-Base path: `/api/v1/dashboard/`  
+Version: v1
+Base path: `/api/v1/dashboard/`
 Content-Type: `application/json` (all endpoints)
 
 ---
@@ -90,7 +90,7 @@ Returns the 50 most recent review runs, newest first.
 }
 ```
 
-**`status` values:** `pending`, `running`, `completed`, `failed`  
+**`status` values:** `pending`, `running`, `completed`, `failed`
 **`manual`:** `true` for uploads via the drag/drop upload flow
 
 ---
@@ -412,7 +412,7 @@ Accepts a file for manual review. Creates a `review_runs` row with
 | `file` | yes | File to review |
 | `repo` | no | Target repo slug (defaults to `manual`) |
 
-**Allowed extensions:** `.py .ts .go .js .diff .patch .rb .java`  
+**Allowed extensions:** `.py .ts .go .js .diff .patch .rb .java`
 **Max size:** 10 MiB
 
 ### Response `202 Accepted`

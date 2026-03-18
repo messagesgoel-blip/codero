@@ -239,7 +239,7 @@ func runMergeMarkersCheck(_ context.Context, cfg EngineConfig, staged []string) 
 		result.DurationMS = elapsedMS(t)
 		return result
 	}
-	markers := []string{"<<<<<<< ", "=======", ">>>>>>> "}
+	markers := []string{strings.Repeat("<", 7) + " ", strings.Repeat("=", 7), strings.Repeat(">", 7) + " "}
 	repoPath := cfg.RepoPath
 	if repoPath == "" {
 		repoPath = "."

@@ -132,7 +132,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:12
 .gate-table-row{font-size:11px;transition:background .1s}.gate-table-row:last-child{border-bottom:none}.gate-table-row:hover{background:var(--bg3)}
 .gtr-id{font-size:9px;color:var(--dim)}.gtr-file{font-size:10px;color:var(--teal);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gtr-res{font-size:9px;font-weight:500}
-.gtr-res.PASS{color:var(--teal)}.gtr-res.FAIL{color:var(--red)}.gtr-res.SKIP,.gtr-res.DISABLED{color:var(--muted)}.gtr-res.INFRA_BYPASS{color:var(--amber)}
+.gtr-res.PASS,.gtr-res.passing{color:var(--teal)}.gtr-res.FAIL,.gtr-res.failing{color:var(--red)}.gtr-res.SKIP,.gtr-res.DISABLED,.gtr-res.disabled{color:var(--muted)}.gtr-res.INFRA_BYPASS{color:var(--amber)}
 .gtr-status{font-size:9px;padding:1px 5px;border-radius:2px;display:inline-block}
 .gtr-status.pass{background:var(--teal-b);color:var(--teal)}.gtr-status.fail{background:var(--red-b);color:var(--red)}
 .gtr-status.skip,.gtr-status.disabled{background:var(--bg3);color:var(--muted)}.gtr-status.infra_bypass{background:var(--amber-b);color:var(--amber)}
@@ -305,6 +305,7 @@ let settingsDirty = false;
 let sseSource     = null;
 let pollTimer     = null;
 let allEvents     = [];
+let eventsUnavailable = false;
 let eventFilter   = 'ALL';
 let findingsCache = null;
 let integrationGridBound = false;
@@ -333,7 +334,7 @@ function showTab(id, tab) {
     t.setAttribute('aria-selected', t === tab ? 'true' : 'false');
   });
   activeTab = id;
-  if (id === 'settings')     loadSettings();
+  if (id === 'settings' && !settingsDirty) loadSettings();
   if (id === 'findings')     renderFindings(findingsCache);
   if (id === 'eventlogs')    renderEvents();
 }
@@ -372,6 +373,16 @@ async function apiFetch(path, opts) {
 /* MERGE STATUS */
 function updateMergeBar(health, sessions) {
   const mbS = el('mb-status'), mbD = el('mb-detail');
+  if (!health || health.unavailable || (health.database && health.database.status === 'unavailable')) {
+    mbS.textContent = 'UNAVAILABLE'; mbS.className = 'mb-status unknown';
+    mbD.textContent = 'system health unavailable';
+    return;
+  }
+  if (sessions === null) {
+    mbS.textContent = 'UNAVAILABLE'; mbS.className = 'mb-status unknown';
+    mbD.textContent = 'active sessions feed unavailable';
+    return;
+  }
   const blocked = (sessions || []).filter(s => s.activity_state === 'blocked').length;
   if (blocked > 0) {
     mbS.textContent = 'BLOCKED'; mbS.className = 'mb-status blocked';
@@ -391,21 +402,22 @@ function updateMergeBar(health, sessions) {
 
 /* HEALTH BAR */
 function renderHealthBar(h) {
-  if (!h) return;
-  const db    = h.database || {};
-  const sessF = (h.feeds || {}).active_sessions || {};
-  const gateF = (h.feeds || {}).gate_checks     || {};
+  const unavailable = !h || h.unavailable;
+  const db    = unavailable ? { status: 'unavailable' } : (h.database || {});
+  const sessF = unavailable ? { status: 'unavailable' } : (h.feeds || {}).active_sessions || {};
+  const gateF = unavailable ? { status: 'unavailable' } : (h.feeds || {}).gate_checks     || {};
   elSet('hb-db', db.status || 'unknown', 'hb-val ' + (db.status || 'unknown'));
   dotSet('hb-db-dot', db.status || 'unknown');
-  el('hb-agents').textContent    = h.active_agent_count != null ? h.active_agent_count : '0';
-  el('agents-count').textContent = h.active_agent_count != null ? h.active_agent_count : '0';
+  var agentCount = unavailable ? null : h.active_agent_count;
+  el('hb-agents').textContent    = agentCount != null ? agentCount : '—';
+  el('agents-count').textContent = agentCount != null ? agentCount : '—';
   elSet('hb-sessions-status', sessF.status || 'unavailable', 'hb-val ' + (sessF.status || 'unavailable'));
   dotSet('hb-sessions-dot', sessF.status || 'unavailable');
   el('hb-sessions-age').textContent = sessF.freshness_sec != null ? fmtAge(sessF.freshness_sec) : '';
   elSet('hb-gate-status', gateF.status || 'unavailable', 'hb-val ' + (gateF.status || 'unavailable'));
   dotSet('hb-gate-dot', gateF.status || 'unavailable');
   el('hb-gate-age').textContent = gateF.freshness_sec != null ? fmtAge(gateF.freshness_sec) : '';
-  el('hb-refreshed').textContent = fmtTime(h.generated_at);
+  el('hb-refreshed').textContent = unavailable ? '—' : fmtTime(h.generated_at);
 }
 function elSet(id, text, cls) { const e = el(id); if (e) { e.textContent = text; e.className = cls; } }
 function dotSet(id, st)       { const e = el(id); if (e) e.className = 'hb-dot ' + st; }
@@ -413,6 +425,7 @@ function dotSet(id, st)       { const e = el(id); if (e) e.className = 'hb-dot '
 /* ACTIVE AGENTS */
 function renderSessions(sessions) {
   const c = el('proc-content');
+  if (sessions === null) { c.innerHTML = '<div class="state-msg error">active sessions feed unavailable</div>'; return; }
   if (!sessions || !sessions.length) { c.innerHTML = '<div class="state-msg">no active sessions</div>'; return; }
   c.innerHTML = sessions.map(function(s) {
     var task  = s.task || {};
@@ -433,10 +446,10 @@ function renderSessions(sessions) {
           '<div class="am-item"><span class="key">branch</span>&nbsp;' + esc(s.branch || '—') + '</div>' +
           '<div class="am-item"><span class="key">elapsed</span>&nbsp;' + fmtElapsed(s.elapsed_sec || 0) + '</div>' +
           '<div class="am-item"><span class="key">heartbeat</span>&nbsp;' + (s.last_heartbeat_at ? fmtRelative(s.last_heartbeat_at) : '&mdash;') + '</div>' +
-          '<span class="am-badge ' + esc(state) + '">' + esc(state) + '</span>' +
+          '<span class="am-badge ' + attrEsc(state) + '">' + esc(state) + '</span>' +
         '</div>' +
       '</div>' +
-      '<div class="agent-right"><div class="agent-state-dot ' + esc(state) + '"></div></div>' +
+      '<div class="agent-right"><div class="agent-state-dot ' + attrEsc(state) + '"></div></div>' +
     '</div>';
   }).join('');
 }
@@ -456,10 +469,14 @@ function setEvtFilter(f, btn) {
   btn.classList.add('active');
   renderEvents();
 }
-function renderEvents() {
+function renderEvents(events) {
+  var source = typeof events === 'undefined' ? allEvents : events;
   var list = el('events-list'), cnt = el('ef-count');
-  if (!allEvents.length) { list.innerHTML = '<div class="state-msg">no events yet</div>'; cnt.textContent = ''; return; }
-  var filtered = eventFilter === 'ALL' ? allEvents : allEvents.filter(function(e) { return inferSev(e) === eventFilter; });
+  if (source === null || (eventsUnavailable && source === allEvents && !source.length)) {
+    list.innerHTML = '<div class="state-msg error">activity feed unavailable</div>'; cnt.textContent = ''; return;
+  }
+  if (!source.length) { list.innerHTML = '<div class="state-msg">no events yet</div>'; cnt.textContent = ''; return; }
+  var filtered = eventFilter === 'ALL' ? source : source.filter(function(e) { return inferSev(e) === eventFilter; });
   cnt.textContent = filtered.length + ' events';
   if (!filtered.length) { list.innerHTML = '<div class="state-msg">no ' + eventFilter.toLowerCase() + ' events</div>'; return; }
   list.innerHTML = filtered.map(function(ev) {
@@ -496,6 +513,11 @@ function evMsg(ev) {
 /* FINDINGS */
 function renderFindings(data) {
   findingsCache = data;
+  if (data && data.unavailable) {
+    ['f-total','f-failed','f-overall','f-sev-fail','f-sev-skip','f-sev-bypass','f-sev-pass'].forEach(function(id) { var e = el(id); if (e) e.textContent = '\u2014'; });
+    el('gate-table-wrap').innerHTML = '<div class="state-msg error">gate-check report unavailable</div>';
+    return;
+  }
   if (!data || !data.report) {
     ['f-total','f-failed','f-overall','f-sev-fail','f-sev-skip','f-sev-bypass','f-sev-pass'].forEach(function(id) { var e = el(id); if (e) e.textContent = '\u2014'; });
     el('gate-table-wrap').innerHTML = '<div class="state-msg">no gate-check report &mdash; run <code>codero gate-check</code> to generate one</div>';
@@ -514,15 +536,18 @@ function renderFindings(data) {
   if (!checks.length) { el('gate-table-wrap').innerHTML = '<div class="state-msg">no checks in report</div>'; return; }
   var rows = checks.map(function(c, i) {
     var st  = (c.status || '').toLowerCase();
-    var res = (c.status || '').toUpperCase();
+    // Use display_state if present (LOG-001); fall back to raw status mapping.
+    // Mapping: pass→passing, fail→failing, skip/disabled→disabled.
+    var ds = c.display_state || toDisplayState(st);
+    if (['passing', 'failing', 'disabled'].indexOf(ds) < 0) ds = toDisplayState(st);
     var tool = c.tool_name || c.group || '\u2014';
     var dur  = c.duration_ms > 0 ? (c.duration_ms / 1000).toFixed(2) + 's' : '\u2014';
     return '<div class="gate-table-row">' +
       '<span class="gtr-id">' + String(i+1).padStart(3,'0') + '</span>' +
       '<span>' + esc(c.name || '\u2014') + '</span>' +
-      '<span class="gtr-file" title="' + esc(c.tool_path || '') + '">' + esc(tool) + '</span>' +
-      '<span class="gtr-res ' + res + '">' + res + '</span>' +
-      '<span class="gtr-status ' + st + '">' + esc(c.status || '\u2014') + '</span>' +
+      '<span class="gtr-file" title="' + attrEsc(c.tool_path || '') + '">' + esc(tool) + '</span>' +
+      '<span class="gtr-res ' + attrEsc(ds) + '">' + ds.toUpperCase() + '</span>' +
+      '<span class="gtr-status ' + attrEsc(st) + '">' + esc(c.status || '\u2014') + '</span>' +
       '<span class="gtr-dur">' + dur + '</span>' +
     '</div>';
   }).join('');
@@ -531,8 +556,31 @@ function renderFindings(data) {
 }
 
 /* SETTINGS */
-async function loadSettings() {
+function renderSettings() {
+  if (!settingsLocal) return;
+  el('int-grid').innerHTML = (settingsLocal.integrations || []).map(function(c) {
+    return '<div class="int-card ' + (c.connected ? 'connected' : '') + '">' +
+      '<div class="int-top"><div class="int-icon">' + intIcon(c.id) + '</div>' +
+      '<div class="int-info"><div class="int-name">' + esc(c.name) + '</div><div class="int-desc">' + esc(c.desc) + '</div></div></div>' +
+      '<div class="int-status ' + (c.connected ? 'conn' : 'disc') + '">' + (c.connected ? '&#x25CF; connected' : '&#x25CB; not connected') + '</div>' +
+      '<button class="int-btn ' + (c.connected ? 'disconnect' : '') + '" type="button" data-int-id="' + attrEsc(c.id) + '">' + (c.connected ? 'disconnect' : 'connect') + '</button>' +
+    '</div>';
+  }).join('');
+  el('gate-config-body').innerHTML = (settingsLocal.gate_pipeline || []).map(function(g, i) {
+    return '<tr><td>' + esc(g.name) + '</td>' +
+      '<td><div class="toggle-wrap"><button type="button" class="toggle ' + (g.enabled ? 'on' : '') + '" aria-pressed="' + (g.enabled ? 'true' : 'false') + '" aria-label="Toggle enabled for ' + attrEsc(g.name) + '" onclick="toggleGate(' + i + ',\'enabled\')"><div class="toggle-knob"></div></button></div></td>' +
+      '<td><div class="toggle-wrap"><button type="button" class="toggle ' + (g.blocks_commit ? 'on' : '') + '" aria-pressed="' + (g.blocks_commit ? 'true' : 'false') + '" aria-label="Toggle blocks commit for ' + attrEsc(g.name) + '" onclick="toggleGate(' + i + ',\'blocks_commit\')"><div class="toggle-knob"></div></button></div></td>' +
+      '<td><span style="color:var(--muted)">' + g.timeout_sec + 's</span></td>' +
+      '<td><span style="color:var(--muted)">' + esc(g.provider) + '</span></td></tr>';
+  }).join('');
+  bindIntegrationGrid();
+  el('save-btn').disabled = !settingsDirty;
+}
+async function loadSettings(force) {
+  if (settingsDirty && !force) return;
   try {
+    var st = el('save-status');
+    if (st) { st.textContent = ''; st.className = 'save-status'; }
     var data = await apiFetch('/settings');
     settingsLocal = JSON.parse(JSON.stringify(data));
     settingsDirty = false;
@@ -541,48 +589,42 @@ async function loadSettings() {
     el('int-grid').innerHTML = '<div class="state-msg error">failed to load settings: ' + esc(err.message) + '</div>';
   }
 }
-function renderSettings() {
-  if (!settingsLocal) return;
-  bindIntegrationGrid();
-  el('int-grid').innerHTML = (settingsLocal.integrations || []).map(function(c) {
-    return '<div class="int-card ' + (c.connected ? 'connected' : '') + '">' +
-      '<div class="int-top"><div class="int-icon">' + intIcon(c.id) + '</div>' +
-      '<div class="int-info"><div class="int-name">' + esc(c.name) + '</div><div class="int-desc">' + esc(c.desc) + '</div></div></div>' +
-      '<div class="int-status ' + (c.connected ? 'conn' : 'disc') + '">' + (c.connected ? '&#x25CF; connected' : '&#x25CB; not connected') + '</div>' +
-      '<button type="button" class="int-btn ' + (c.connected ? 'disconnect' : '') + '" data-int-id="' + esc(c.id) + '">' + (c.connected ? 'disconnect' : 'connect') + '</button>' +
-    '</div>';
-  }).join('');
-  el('gate-config-body').innerHTML = (settingsLocal.gate_pipeline || []).map(function(g, i) {
-    return '<tr><td>' + esc(g.name) + '</td>' +
-      '<td><div class="toggle-wrap"><button type="button" class="toggle ' + (g.enabled ? 'on' : '') + '" aria-pressed="' + (g.enabled ? 'true' : 'false') + '" aria-label="Toggle enabled for ' + esc(g.name) + '" onclick="toggleGate(' + i + ',\'enabled\')"><div class="toggle-knob"></div></button></div></td>' +
-      '<td><div class="toggle-wrap"><button type="button" class="toggle ' + (g.blocks_commit ? 'on' : '') + '" aria-pressed="' + (g.blocks_commit ? 'true' : 'false') + '" aria-label="Toggle blocks commit for ' + esc(g.name) + '" onclick="toggleGate(' + i + ',\'blocks_commit\')"><div class="toggle-knob"></div></button></div></td>' +
-      '<td><span style="color:var(--muted)">' + g.timeout_sec + 's</span></td>' +
-      '<td><span style="color:var(--muted)">' + esc(g.provider) + '</span></td></tr>';
-  }).join('');
-  el('save-btn').disabled = !settingsDirty;
-  el('save-status').textContent = '';
-}
 function bindIntegrationGrid() {
   if (integrationGridBound) return;
-  var grid = el('int-grid');
-  if (!grid) return;
-  grid.addEventListener('click', function(ev) {
-    var btn = ev.target && ev.target.closest ? ev.target.closest('button[data-int-id]') : null;
-    if (!btn || !grid.contains(btn)) return;
-    ev.preventDefault();
+  integrationGridBound = true;
+  document.addEventListener('click', function(ev) {
+    var btn = ev.target && ev.target.closest ? ev.target.closest('.int-btn[data-int-id]') : null;
+    if (!btn) return;
     toggleInt(btn.getAttribute('data-int-id'));
   });
-  integrationGridBound = true;
 }
-function toggleInt(id) { var c = (settingsLocal.integrations || []).find(function(x) { return x.id === id; }); if (c) { c.connected = !c.connected; settingsDirty = true; renderSettings(); } }
-function toggleGate(i, f) { settingsLocal.gate_pipeline[i][f] = !settingsLocal.gate_pipeline[i][f]; settingsDirty = true; renderSettings(); }
+function markSettingsDirty() {
+  if (!settingsDirty) {
+    var st = el('save-status');
+    if (st) { st.textContent = ''; st.className = 'save-status'; }
+  }
+  settingsDirty = true;
+}
+function toggleInt(id) {
+  var c = (settingsLocal && settingsLocal.integrations || []).find(function(x) { return x.id === id; });
+  if (!c) return;
+  c.connected = !c.connected;
+  markSettingsDirty();
+  renderSettings();
+}
+function toggleGate(i, f) {
+  var g = settingsLocal && settingsLocal.gate_pipeline && settingsLocal.gate_pipeline[i];
+  if (!g || !Object.prototype.hasOwnProperty.call(g, f)) return;
+  g[f] = !g[f];
+  markSettingsDirty();
+  renderSettings();
+}
 async function saveSettings() {
   var btn = el('save-btn'), st = el('save-status');
   btn.disabled = true; st.textContent = 'saving\u2026'; st.className = 'save-status';
   try {
     var result = await apiFetch('/settings', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ integrations: settingsLocal.integrations, gate_pipeline: settingsLocal.gate_pipeline }) });
     settingsLocal = result; settingsDirty = false; st.textContent = '\u2713 saved'; st.className = 'save-status ok'; renderSettings();
-    setTimeout(function() { st.textContent = ''; }, 2500);
   } catch (err) { st.textContent = '\u2717 ' + err.message; st.className = 'save-status err'; btn.disabled = false; }
 }
 function intIcon(id) { return { coderabbit:'\uD83D\uDC30', 'pr-agent':'\uD83E\uDD16', 'gh-actions':'\u26A1', 'gitlab-ci':'\uD83E\uDD8A', 'semgrep-cloud':'\uD83D\uDD0D' }[id] || '\uD83D\uDD17'; }
@@ -596,17 +638,25 @@ async function refresh() {
       apiFetch('/gate-checks'),
       apiFetch('/activity'),
     ]);
-    var h   = results[0].status === 'fulfilled' ? results[0].value : null;
-    var sr  = results[1].status === 'fulfilled' ? results[1].value : null;
-    var gc  = results[2].status === 'fulfilled' ? results[2].value : null;
-    var act = results[3].status === 'fulfilled' ? results[3].value : null;
-    var sessions = (sr && sr.sessions) ? sr.sessions : [];
+    var h   = results[0].status === 'fulfilled' ? results[0].value : { unavailable: true, error: reasonText(results[0].reason) };
+    var sr  = results[1].status === 'fulfilled' ? results[1].value : { unavailable: true, error: reasonText(results[1].reason) };
+    var gc  = results[2].status === 'fulfilled' ? results[2].value : { unavailable: true, error: reasonText(results[2].reason) };
+    var act = results[3].status === 'fulfilled' ? results[3].value : { unavailable: true, error: reasonText(results[3].reason) };
+    var sessions = sr && sr.unavailable ? null : ((sr && sr.sessions) ? sr.sessions : []);
     renderHealthBar(h);
     renderSessions(sessions);
     updateMergeBar(h, sessions);
     findingsCache = gc;
     if (activeTab === 'findings')  renderFindings(gc);
-    if (act && act.events) { allEvents = act.events; if (activeTab === 'eventlogs') renderEvents(); }
+    if (act && act.events) {
+      eventsUnavailable = false;
+      allEvents = act.events;
+      if (activeTab === 'eventlogs') renderEvents();
+    } else {
+      eventsUnavailable = true;
+      allEvents = [];
+      if (activeTab === 'eventlogs') renderEvents(null);
+    }
   } catch (err) { console.error('refresh error:', err); }
 }
 
@@ -615,7 +665,7 @@ function startSSE() {
   if (sseSource) sseSource.close();
   sseSource = new EventSource(API + '/events');
   sseSource.addEventListener('activity', function(e) {
-    try { var ev = JSON.parse(e.data); allEvents.unshift(ev); if (allEvents.length > 100) allEvents.length = 100; if (activeTab === 'eventlogs') renderEvents(); } catch (_e) {}
+    try { var ev = JSON.parse(e.data); allEvents.unshift(ev); if (allEvents.length > 100) allEvents.length = 100; if (activeTab === 'eventlogs') renderEvents(); } catch (err) { console.warn('SSE activity parse error:', err, e.data); }
   });
   sseSource.onerror = function() { sseSource.close(); sseSource = null; schedulePoll(); };
 }
@@ -627,14 +677,32 @@ function schedulePoll() {
 /* UTILS */
 function el(id)  { return document.getElementById(id); }
 function esc(s)  { var d = document.createElement('div'); d.textContent = String(s == null ? '' : s); return d.innerHTML; }
+function attrEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+// toDisplayState maps raw gate-check status values to the LOG-001 normalized
+// display state: pass→passing, fail→failing, skip/disabled→disabled.
+function toDisplayState(status) {
+  if (status === 'pass')  return 'passing';
+  if (status === 'fail')  return 'failing';
+  return 'disabled';
+}
+function reasonText(reason) {
+  return reason && reason.message ? reason.message : String(reason || 'unavailable');
+}
 function fmtTime(iso) { try { var d = new Date(iso); return d.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'}); } catch (_e) { return String(iso || ''); } }
 function fmtRelative(iso) {
   try { var diff = Date.now() - new Date(iso).getTime(); if (diff < 60000) return Math.round(diff/1000) + 's ago'; if (diff < 3600000) return Math.round(diff/60000) + 'm ago'; return Math.round(diff/3600000) + 'h ago'; }
   catch (_e) { return String(iso || ''); }
 }
 function fmtElapsed(sec) {
-  if (!sec) return '\u2014';
-  var h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60), s = sec%60;
+  if (sec == null || sec === '') return '\u2014';
+  var total = Math.floor(sec), h = Math.floor(total/3600), m = Math.floor((total%3600)/60), s = total%60;
   if (h > 0) return h + 'h ' + m + 'm'; if (m > 0) return m + 'm ' + s + 's'; return s + 's';
 }
 function fmtAge(sec) { if (sec < 60) return sec + 's'; if (sec < 3600) return Math.round(sec/60) + 'm'; return Math.round(sec/3600) + 'h'; }

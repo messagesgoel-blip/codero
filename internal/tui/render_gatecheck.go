@@ -24,16 +24,17 @@ func renderCheckReport(vm adapters.CheckReportViewModel) string {
 		s.Overall, s.Passed, s.Failed, s.Skipped, s.InfraBypassed, s.Disabled, s.Total, s.Profile)
 
 	tw := tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tGROUP\tSTATUS\tREQ\tREASON")
-	fmt.Fprintln(tw, "----------------------\t----------\t------------\t---\t----------------------------------")
+	fmt.Fprintln(tw, "ID\tGROUP\tDISPLAY\tSTATUS\tREQ\tREASON")
+	fmt.Fprintln(tw, "----------------------\t----------\t----------\t------------\t---\t----------------------------------")
 	for _, check := range vm.Checks {
 		req := "opt"
 		if check.Required {
 			req = "req"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
 			check.ID,
 			check.Group,
+			check.DisplayState,
 			check.Status,
 			req,
 			gatecheck.DisplayReason(gatecheck.ReasonCode(check.ReasonCode), check.Reason),
