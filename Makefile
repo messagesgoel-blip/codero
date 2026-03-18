@@ -57,7 +57,7 @@ help:
 	@echo "  unit           - Run unit tests"
 	@echo "  contract       - Run contract tests"
 	@echo "  integration    - Run integration tests"
-	@echo "  build          - Build codero binary (VERSION=x.y.z to stamp release version)"
+	@echo "  build          - Build codero binary (VERSION=vX.Y.Z to stamp release version)"
 	@echo "  run            - Run codero daemon"
 	@echo "  ci             - Run full CI pipeline"
 	@echo "  help           - Show this help message"

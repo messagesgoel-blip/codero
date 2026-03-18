@@ -18,15 +18,41 @@ import (
 )
 
 // captureVersionStdout redirects os.Stdout, executes f, and returns captured output.
-func captureVersionStdout(f func()) string {
+func captureVersionStdout(t *testing.T, f func()) string {
+	t.Helper()
+
 	orig := os.Stdout
-	rd, wr, _ := os.Pipe()
+	rd, wr, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stdout capture pipe: %v", err)
+	}
 	os.Stdout = wr
+	defer func() {
+		os.Stdout = orig
+		if wr != nil {
+			_ = wr.Close()
+		}
+		if rd != nil {
+			_ = rd.Close()
+		}
+	}()
+
 	f()
-	wr.Close()
-	os.Stdout = orig
+
+	if err := wr.Close(); err != nil {
+		t.Fatalf("close stdout writer: %v", err)
+	}
+	wr = nil
+
 	var buf bytes.Buffer
-	io.Copy(&buf, rd) //nolint:errcheck
+	if _, err := io.Copy(&buf, rd); err != nil {
+		t.Fatalf("read captured stdout: %v", err)
+	}
+	if err := rd.Close(); err != nil {
+		t.Fatalf("close stdout reader: %v", err)
+	}
+	rd = nil
+
 	return buf.String()
 }
 
@@ -40,7 +66,7 @@ func TestVersionCmd_DefaultIsDev(t *testing.T) {
 	version = "dev" // explicit; mirrors the var declaration default
 
 	cmd := versionCmd()
-	out := captureVersionStdout(func() {
+	out := captureVersionStdout(t, func() {
 		cmd.Run(cmd, nil)
 	})
 	if strings.TrimSpace(out) != "dev" {
@@ -57,7 +83,7 @@ func TestVersionCmd_StampedVersion(t *testing.T) {
 	version = "v1.2.4"
 
 	cmd := versionCmd()
-	out := captureVersionStdout(func() {
+	out := captureVersionStdout(t, func() {
 		cmd.Run(cmd, nil)
 	})
 	if strings.TrimSpace(out) != "v1.2.4" {
@@ -74,7 +100,7 @@ func TestVersionCmd_SemverFormat(t *testing.T) {
 	version = "v1.2.4"
 
 	cmd := versionCmd()
-	out := strings.TrimSpace(captureVersionStdout(func() {
+	out := strings.TrimSpace(captureVersionStdout(t, func() {
 		cmd.Run(cmd, nil)
 	}))
 
