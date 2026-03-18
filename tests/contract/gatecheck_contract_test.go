@@ -50,6 +50,7 @@ func TestGateCheckSchemaContract(t *testing.T) {
 		gatecheck.ReasonInfraRateLimit: true,
 		gatecheck.ReasonInfraNetwork:   true,
 		gatecheck.ReasonExecError:      true,
+		gatecheck.ReasonCheckFailed:    true,
 		"":                             true,
 	}
 
@@ -173,5 +174,96 @@ func TestGateCheckSurfaceParity(t *testing.T) {
 	}
 	if payload.Report.RunAt.IsZero() {
 		t.Fatalf("dashboard run_at should be populated")
+	}
+}
+
+// TestContract_CheckFailedReasonCode verifies the contract guarantee that a failing
+// check without an explicit runner-set reason_code produces reason_code = "check_failed"
+// in the CLI JSON output and in the dashboard /api/v1/dashboard/gate-checks payload.
+//
+// This covers the COD-054 addition to the schema (BUG-002 from the v1.2.3 pilot).
+func TestContract_CheckFailedReasonCode(t *testing.T) {
+	root := repoRoot(t)
+
+	// Use the existing conflict fixture helper (staged merge-conflict file).
+	conflictRepo := gateCheckRepoWithConflict(t)
+	reportPath := filepath.Join(t.TempDir(), "last-report.json")
+
+	// Run gate-check in portable profile so missing tools don't block.
+	cmd := exec.Command("go", "run", "./cmd/codero",
+		"gate-check", "--json", "--profile", "portable",
+		"--repo-path", conflictRepo,
+		"--report-path", reportPath,
+	)
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	// Exit 1 is expected (merge-markers fails).
+	if err == nil {
+		t.Fatalf("gate-check expected non-zero exit for conflict fixture; output: %s", string(out))
+	}
+
+	rawJSON := extractJSONPayload(t, out)
+	var cliReport gatecheck.Report
+	if err := json.Unmarshal(rawJSON, &cliReport); err != nil {
+		t.Fatalf("decode CLI JSON: %v\noutput: %s", err, string(rawJSON))
+	}
+
+	// Verify merge-markers check has reason_code = check_failed.
+	var mmCheck *gatecheck.CheckResult
+	for i := range cliReport.Checks {
+		if cliReport.Checks[i].ID == "merge-markers" {
+			mmCheck = &cliReport.Checks[i]
+			break
+		}
+	}
+	if mmCheck == nil {
+		t.Fatal("merge-markers check not found in CLI output")
+	}
+	if mmCheck.Status != gatecheck.StatusFail {
+		t.Fatalf("merge-markers status = %q, want fail", mmCheck.Status)
+	}
+	if mmCheck.ReasonCode != gatecheck.ReasonCheckFailed {
+		t.Errorf("CLI: merge-markers reason_code = %q, want %q", mmCheck.ReasonCode, gatecheck.ReasonCheckFailed)
+	}
+
+	// Verify the same in the dashboard API response.
+	fixtureDir := t.TempDir()
+	fixtureDB, err := state.Open(filepath.Join(fixtureDir, "dashboard.db"))
+	if err != nil {
+		t.Fatalf("open dashboard db: %v", err)
+	}
+	defer fixtureDB.Close()
+
+	t.Setenv("CODERO_GATE_CHECK_REPORT_PATH", reportPath)
+	handler := dashboard.NewHandler(fixtureDB.Unwrap(), dashboard.NewSettingsStore(fixtureDir))
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/dashboard/gate-checks", nil)
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("dashboard gate-checks status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+
+	var payload struct {
+		Report gatecheck.Report `json:"report"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode dashboard payload: %v", err)
+	}
+
+	var dashMMCheck *gatecheck.CheckResult
+	for i := range payload.Report.Checks {
+		if payload.Report.Checks[i].ID == "merge-markers" {
+			dashMMCheck = &payload.Report.Checks[i]
+			break
+		}
+	}
+	if dashMMCheck == nil {
+		t.Fatal("merge-markers check not found in dashboard response")
+	}
+	if dashMMCheck.ReasonCode != gatecheck.ReasonCheckFailed {
+		t.Errorf("dashboard: merge-markers reason_code = %q, want %q", dashMMCheck.ReasonCode, gatecheck.ReasonCheckFailed)
 	}
 }

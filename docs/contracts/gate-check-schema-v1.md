@@ -39,6 +39,7 @@ Stable enum set for `reason_code` (lowercase):
 - `infra_rate_limit`
 - `infra_network`
 - `exec_error`
+- `check_failed` — set by the engine normalisation pass on any `fail`-status result that does not already carry an explicit reason code (e.g. content checks such as merge-markers, file-size, forbidden-paths)
 
 ## Canonical JSON Shape
 
@@ -103,7 +104,7 @@ Stable enum set for `reason_code` (lowercase):
 |---|---|
 | `summary.infra_bypassed` | Count of checks with infra-classified reason codes (`timeout`, `infra_*`, `infra_bypass`). |
 | `checks[].enabled` | True if the check was eligible to run (tool/config present). |
-| `checks[].reason_code` | Required for `skip`/`disabled`. Optional otherwise. |
+| `checks[].reason_code` | Required for `skip`/`disabled`. For `fail` without an explicit code, the engine sets `check_failed`. |
 | `checks[].reason` | Human-readable reason (optional). |
 | `checks[].duration_ms` | Milliseconds spent in the check runner. |
 
