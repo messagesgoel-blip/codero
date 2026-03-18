@@ -92,7 +92,8 @@ Examples:
 				baseURL = strings.TrimRight(cfg.DashboardPublicBaseURL, "/")
 			}
 
-			dashURL := baseURL + basePath + "/"
+			normalizedBasePath := normalizeDashboardBasePath(basePath)
+			dashURL := baseURL + normalizedBasePath + "/"
 			overviewURL := baseURL + "/api/v1/dashboard/overview"
 			gateChecksURL := baseURL + "/api/v1/dashboard/gate-checks"
 
@@ -105,11 +106,11 @@ Examples:
 				if openBrws {
 					return fmt.Errorf("--open cannot be combined with --serve-fixture")
 				}
-				return runDashboardFixture(effectiveHost, effectivePort, basePath, repoPath, reportPath, checkMode, reportPathSet)
+				return runDashboardFixture(effectiveHost, effectivePort, normalizedBasePath, repoPath, reportPath, checkMode, reportPathSet)
 			}
 
 			if checkMode {
-				return runDashboardCheck(baseURL, basePath)
+				return runDashboardCheck(baseURL, normalizedBasePath)
 			}
 
 			if openBrws {
@@ -213,6 +214,7 @@ func validateGateChecksBody(body []byte) error {
 }
 
 func runDashboardFixture(bindHost string, bindPort int, basePath, repoPath, reportPath string, checkMode, reportPathSet bool) error {
+	basePath = normalizeDashboardBasePath(basePath)
 	if repoPath == "" {
 		wd, err := os.Getwd()
 		if err != nil {
@@ -245,6 +247,7 @@ func runDashboardFixture(bindHost string, bindPort int, basePath, repoPath, repo
 	if bindHost == "" {
 		bindHost = "127.0.0.1"
 	}
+	allowPortRetry := bindPort == 0
 	if bindPort == 0 {
 		bindPort = 8080
 	}
@@ -269,12 +272,34 @@ func runDashboardFixture(bindHost string, bindPort int, basePath, repoPath, repo
 	redisClient := redislib.New("127.0.0.1:0", "")
 	defer redisClient.Close()
 
-	obs := daemon.NewObservabilityServer(redisClient, nil, nil, db.Unwrap(), bindHost, strconv.Itoa(bindPort), basePath, version)
-	obs.Start()
+	var (
+		obs      *daemon.ObservabilityServer
+		baseURL  string
+		startErr error
+	)
+	maxAttempts := 1
+	if allowPortRetry {
+		maxAttempts = 10
+	}
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		port := bindPort + attempt
+		obs = daemon.NewObservabilityServer(redisClient, nil, nil, db.Unwrap(), bindHost, strconv.Itoa(port), basePath, version)
+		obs.Start()
 
-	baseURL := dashboardBaseURL(bindHost, bindPort)
-	if err := waitForDashboard(baseURL + "/gate"); err != nil {
-		return fmt.Errorf("start dashboard fixture: %w", err)
+		baseURL = dashboardBaseURL(bindHost, port)
+		startErr = waitForDashboard(baseURL + "/gate")
+		if startErr == nil {
+			break
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = obs.Stop(ctx)
+		cancel()
+		if !allowPortRetry {
+			return fmt.Errorf("start dashboard fixture: %w", startErr)
+		}
+	}
+	if startErr != nil {
+		return fmt.Errorf("start dashboard fixture after %d attempts: %w", maxAttempts, startErr)
 	}
 
 	if checkMode {
@@ -306,17 +331,37 @@ func runDashboardFixture(bindHost string, bindPort int, basePath, repoPath, repo
 func waitForDashboard(url string) error {
 	client := &http.Client{Timeout: 500 * time.Millisecond}
 	deadline := time.Now().Add(5 * time.Second)
+	lastErr := fmt.Errorf("dashboard probe timed out: %s", url)
 	for {
 		resp, err := client.Get(url) //nolint:noctx // startup probe
 		if err == nil {
-			resp.Body.Close()
-			return nil
+			_ = resp.Body.Close()
+			if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+				return nil
+			}
+			lastErr = fmt.Errorf("dashboard probe returned %d: %s", resp.StatusCode, url)
+		} else {
+			lastErr = err
 		}
 		if time.Now().After(deadline) {
-			return err
+			return lastErr
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+}
+
+func normalizeDashboardBasePath(basePath string) string {
+	if basePath == "" {
+		return "/dashboard"
+	}
+	if !strings.HasPrefix(basePath, "/") {
+		basePath = "/" + basePath
+	}
+	basePath = strings.TrimRight(basePath, "/")
+	if basePath == "" {
+		return "/dashboard"
+	}
+	return basePath
 }
 
 func dashboardBaseURL(bindHost string, bindPort int) string {

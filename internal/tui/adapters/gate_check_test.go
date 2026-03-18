@@ -61,3 +61,31 @@ func TestFromCheckReport_FallsBackToCanonicalNotApplicableReason(t *testing.T) {
 		}
 	}
 }
+
+func TestFromCheckReport_PreservesHumanReasonWhenReasonCodeMissing(t *testing.T) {
+	report := gatecheck.Report{
+		Summary: gatecheck.Summary{SchemaVersion: gatecheck.SchemaVersion},
+		Checks: []gatecheck.CheckResult{
+			{ID: "skip-check", Status: gatecheck.StatusSkip, Reason: "no staged files"},
+			{ID: "disabled-check", Status: gatecheck.StatusDisabled, Reason: "tool unavailable in env"},
+		},
+		RunAt: time.Now().UTC(),
+	}
+
+	vm := adapters.FromCheckReport(report)
+	if len(vm.Checks) != 2 {
+		t.Fatalf("expected 2 checks, got %d", len(vm.Checks))
+	}
+	if vm.Checks[0].ReasonCode != "" {
+		t.Fatalf("skip check reason_code = %q, want empty", vm.Checks[0].ReasonCode)
+	}
+	if vm.Checks[0].Reason != "no staged files" {
+		t.Fatalf("skip check reason = %q", vm.Checks[0].Reason)
+	}
+	if vm.Checks[1].ReasonCode != "" {
+		t.Fatalf("disabled check reason_code = %q, want empty", vm.Checks[1].ReasonCode)
+	}
+	if vm.Checks[1].Reason != "tool unavailable in env" {
+		t.Fatalf("disabled check reason = %q", vm.Checks[1].Reason)
+	}
+}

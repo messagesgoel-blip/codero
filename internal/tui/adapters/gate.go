@@ -213,7 +213,7 @@ func FromCheckReport(r gatecheck.Report) CheckReportViewModel {
 	checks := make([]CheckViewModel, 0, len(r.Checks))
 	for _, c := range r.Checks {
 		reasonCode := c.ReasonCode
-		if reasonCode == "" && (c.Status == gatecheck.StatusSkip || c.Status == gatecheck.StatusDisabled) {
+		if reasonCode == "" && c.Reason == "" && (c.Status == gatecheck.StatusSkip || c.Status == gatecheck.StatusDisabled) {
 			reasonCode = gatecheck.ReasonNotApplicable
 		}
 		reason := c.Reason

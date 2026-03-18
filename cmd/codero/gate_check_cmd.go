@@ -80,6 +80,9 @@ Additional output modes:
 			if timeout > 0 {
 				cfg.GateTimeout = time.Duration(timeout) * time.Second
 			}
+			if outputJSON && tuiSnapshot {
+				return fmt.Errorf("gate-check: --json cannot be combined with --tui-snapshot")
+			}
 
 			ctx := cmd.Context()
 			cancel := func() {}
@@ -96,10 +99,6 @@ Additional output modes:
 			reportPath = resolveGateCheckReportPath(reportPath)
 			if err := saveGateCheckReport(report, reportPath); err != nil {
 				fmt.Fprintf(os.Stderr, "gate-check: warning: could not save report to %s: %v\n", reportPath, err)
-			}
-
-			if outputJSON && tuiSnapshot {
-				return fmt.Errorf("gate-check: --json cannot be combined with --tui-snapshot")
 			}
 
 			if outputJSON {

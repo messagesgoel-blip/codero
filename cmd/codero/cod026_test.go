@@ -357,20 +357,63 @@ func TestRunDashboardFixture_CheckMode(t *testing.T) {
 		t.Fatalf("write report: %v", err)
 	}
 
-	port := freeTCPPort(t)
-	if err := runDashboardFixture("127.0.0.1", port, "/dashboard", dir, reportPath, true, true); err != nil {
+	if err := runDashboardFixture("127.0.0.1", 0, "/dashboard", dir, reportPath, true, true); err != nil {
 		t.Fatalf("runDashboardFixture(check): %v", err)
 	}
 }
 
-func freeTCPPort(t *testing.T) int {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("reserve port: %v", err)
+func TestNormalizeDashboardBasePath(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"", "/dashboard"},
+		{"/dashboard", "/dashboard"},
+		{"dashboard", "/dashboard"},
+		{"/dashboard/", "/dashboard"},
+		{"/", "/dashboard"},
 	}
-	defer ln.Close()
-	return ln.Addr().(*net.TCPAddr).Port
+
+	for _, tc := range cases {
+		if got := normalizeDashboardBasePath(tc.in); got != tc.want {
+			t.Fatalf("normalizeDashboardBasePath(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestWaitForDashboard_WaitsForSuccessStatus(t *testing.T) {
+	var hits int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		if hits < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+
+	if err := waitForDashboard(ts.URL); err != nil {
+		t.Fatalf("waitForDashboard: %v", err)
+	}
+	if hits < 3 {
+		t.Fatalf("expected retries before success, got %d probes", hits)
+	}
+}
+
+func TestWaitForDashboard_FailsOnPersistentNonSuccess(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer ts.Close()
+
+	err := waitForDashboard(ts.URL)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !strings.Contains(err.Error(), "returned 503") {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestGateStatusCmd_JSONConflictsWithWatchAndLogs(t *testing.T) {
