@@ -77,7 +77,9 @@ func (e *Engine) stagedFiles() []string {
 	}
 	args := []string{"-C", repoPath, "diff", "--cached", "--name-only", "--diff-filter=ACM"}
 	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-	out, err := exec.Command("git", args...).Output() //nolint:gosec
+	cmd := exec.Command("git", args...) //nolint:gosec
+	cmd.Env = cleanGitEnv(os.Environ())
+	out, err := cmd.Output()
 	if err != nil {
 		return nil
 	}
@@ -88,6 +90,21 @@ func (e *Engine) stagedFiles() []string {
 		}
 	}
 	return files
+}
+
+func cleanGitEnv(env []string) []string {
+	cleaned := make([]string, 0, len(env))
+	for _, kv := range env {
+		key, _, found := strings.Cut(kv, "=")
+		if !found {
+			continue
+		}
+		if strings.HasPrefix(key, "GIT_") {
+			continue
+		}
+		cleaned = append(cleaned, kv)
+	}
+	return cleaned
 }
 
 // buildRunners returns the ordered list of check runner functions.
