@@ -15,7 +15,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/codero/codero/internal/gatecheck"
 	loglib "github.com/codero/codero/internal/log"
 )
 
@@ -54,6 +53,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/dashboard/gate-health", h.handleGateHealth)
 	mux.HandleFunc("/api/v1/dashboard/active-sessions", h.handleActiveSessions)
 	mux.HandleFunc("/api/v1/dashboard/gate-checks", h.handleGateChecks)
+	mux.HandleFunc("/api/v1/dashboard/health", h.handleDashboardHealth)
 	mux.HandleFunc("/api/v1/dashboard/settings", h.handleSettings)
 	mux.HandleFunc("/api/v1/dashboard/manual-review-upload", h.handleUpload)
 	mux.HandleFunc("/api/v1/dashboard/events", h.handleSSE)
@@ -204,10 +204,7 @@ func (h *Handler) handleGateChecks(w http.ResponseWriter, r *http.Request) {
 	}
 	setCORSHeaders(w)
 
-	reportPath := os.Getenv("CODERO_GATE_CHECK_REPORT_PATH")
-	if reportPath == "" {
-		reportPath = gatecheck.DefaultReportPath
-	}
+	reportPath := gateCheckReportPath()
 
 	data, err := os.ReadFile(reportPath) //nolint:gosec
 	if err != nil {
@@ -289,6 +286,26 @@ func (h *Handler) handleActiveSessions(w http.ResponseWriter, r *http.Request) {
 		Sessions:    sessions,
 		GeneratedAt: time.Now().UTC(),
 	})
+}
+
+// handleDashboardHealth serves GET /api/v1/dashboard/health.
+// It reports database connectivity, per-feed freshness, and active agent count
+// without requiring access to the daemon's redis client or slot counter.
+// For full service health (uptime, redis) see the /health endpoint.
+func (h *Handler) handleDashboardHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "")
+		return
+	}
+	setCORSHeaders(w)
+	health, err := queryDashboardHealth(r.Context(), h.db)
+	if err != nil {
+		loglib.Error("dashboard: health query failed",
+			loglib.FieldComponent, "dashboard", "error", err)
+		writeError(w, http.StatusInternalServerError, "health query failed", "db_error")
+		return
+	}
+	writeJSON(w, http.StatusOK, health)
 }
 
 // handleSettings serves GET and PUT /api/v1/dashboard/settings.

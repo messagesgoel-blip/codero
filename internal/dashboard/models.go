@@ -149,6 +149,36 @@ type ErrorResponse struct {
 	Code  string `json:"code,omitempty"`
 }
 
+// ServiceStatus is the health state of a single backend service.
+// Status is "ok", "degraded", or "down".
+type ServiceStatus struct {
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
+}
+
+// FeedStatus captures the freshness of a single data feed.
+// Status is "ok", "stale", or "unavailable".
+type FeedStatus struct {
+	Status       string    `json:"status"`
+	LastRefresh  time.Time `json:"last_refresh,omitempty"`
+	FreshnessSec int64     `json:"freshness_sec"`
+}
+
+// DashboardFeeds holds per-feed freshness state.
+type DashboardFeeds struct {
+	ActiveSessions FeedStatus `json:"active_sessions"`
+	GateChecks     FeedStatus `json:"gate_checks"`
+}
+
+// DashboardHealth is the response for GET /api/v1/dashboard/health.
+// It reports DB connectivity, per-feed freshness, and live agent count.
+type DashboardHealth struct {
+	Database         ServiceStatus  `json:"database"`
+	Feeds            DashboardFeeds `json:"feeds"`
+	ActiveAgentCount int            `json:"active_agent_count"`
+	GeneratedAt      time.Time      `json:"generated_at"`
+}
+
 // GateCheckStatus mirrors gatecheck.CheckStatus for dashboard JSON.
 type GateCheckStatus = string
 

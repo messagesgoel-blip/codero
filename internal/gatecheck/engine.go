@@ -29,7 +29,7 @@ func NewEngine(cfg EngineConfig) *Engine {
 // Checks are never omitted from the output: disabled and skipped checks appear
 // with appropriate status and reason codes.
 func (e *Engine) Run(ctx context.Context) Report {
-	staged := e.stagedFiles()
+	staged := e.stagedFiles(ctx)
 
 	var checks []CheckResult
 	var infraCount int
@@ -67,7 +67,7 @@ func (e *Engine) Run(ctx context.Context) Report {
 }
 
 // stagedFiles returns the list of staged files for this engine run.
-func (e *Engine) stagedFiles() []string {
+func (e *Engine) stagedFiles(ctx context.Context) []string {
 	if e.cfg.StagedFiles != nil {
 		return e.cfg.StagedFiles
 	}
@@ -77,7 +77,9 @@ func (e *Engine) stagedFiles() []string {
 	}
 	args := []string{"-C", repoPath, "diff", "--cached", "--name-only", "--diff-filter=ACM"}
 	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-	out, err := exec.Command("git", args...).Output() //nolint:gosec
+	cmd := exec.CommandContext(ctx, "git", args...) //nolint:gosec
+	cmd.Env = cleanGitEnv(os.Environ())
+	out, err := cmd.Output()
 	if err != nil {
 		return nil
 	}
@@ -88,6 +90,21 @@ func (e *Engine) stagedFiles() []string {
 		}
 	}
 	return files
+}
+
+func cleanGitEnv(env []string) []string {
+	cleaned := make([]string, 0, len(env))
+	for _, kv := range env {
+		key, _, found := strings.Cut(kv, "=")
+		if !found {
+			continue
+		}
+		if strings.HasPrefix(key, "GIT_") {
+			continue
+		}
+		cleaned = append(cleaned, kv)
+	}
+	return cleaned
 }
 
 // buildRunners returns the ordered list of check runner functions.

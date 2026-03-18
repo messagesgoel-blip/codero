@@ -3,252 +3,287 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>codero — review dashboard</title>
+<title>codero — command terminal</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
 /* ── TOKENS ─────────────────────────────────────────────── */
-/* Light-mode / shared base values */
-:root{--mono:'IBM Plex Mono',monospace;--sans:'IBM Plex Sans',sans-serif;--green:#3d8c1e;--green-b:rgba(61,140,30,.13);--red:#c03838;--red-b:rgba(192,56,56,.13);--amber:#a06010;--amber-b:rgba(160,96,16,.13);--blue:#2e78b8;--blue-b:rgba(46,120,184,.13);--radius:4px}
-/* Dark mode — brighter semantic colours so they read on near-black */
-[data-theme="dark"]{--bg:#0d0d0d;--bg1:#111;--bg2:#161616;--bg3:#1e1e1e;--border:rgba(255,255,255,.08);--border2:rgba(255,255,255,.16);--text:#dedad2;--muted:#8a8580;--dim:#504d4a;--input-bg:#1c1c1c;--green:#5ec43a;--green-b:rgba(94,196,58,.15);--red:#e06464;--red-b:rgba(224,100,100,.15);--amber:#d49830;--amber-b:rgba(212,152,48,.15);--blue:#5aa3dc;--blue-b:rgba(90,163,220,.15);color-scheme:dark}
-[data-theme="light"]{--bg:#f5f4f0;--bg1:#fafaf8;--bg2:#f0eeea;--bg3:#e8e6e2;--border:rgba(0,0,0,.08);--border2:rgba(0,0,0,.14);--text:#1a1916;--muted:#888580;--dim:#c4c2be;--input-bg:#fff;color-scheme:light}
-/* ── RESET ─────────────────────────────────────────────── */
+:root{--mono:'IBM Plex Mono',monospace;--sans:'IBM Plex Sans',sans-serif;--radius:4px}
+[data-theme="dark"]{
+  --bg:#0d0d0d;--bg1:#111;--bg2:#161616;--bg3:#1e1e1e;--bg4:#242424;
+  --border:rgba(255,255,255,.07);--border2:rgba(255,255,255,.14);
+  --text:#dedad2;--muted:#8a8580;--dim:#504d4a;--input-bg:#1c1c1c;
+  --green:#3fffa0;--green-b:rgba(63,255,160,.12);
+  --red:#e06464;--red-b:rgba(224,100,100,.14);
+  --amber:#d49830;--amber-b:rgba(212,152,48,.14);
+  --blue:#5aa3dc;--blue-b:rgba(90,163,220,.14);
+  --teal:#3fffa0;--teal-b:rgba(63,255,160,.12);
+  color-scheme:dark}
+[data-theme="light"]{
+  --bg:#f5f4f0;--bg1:#fafaf8;--bg2:#f0eeea;--bg3:#e8e6e2;--bg4:#dddbd7;
+  --border:rgba(0,0,0,.07);--border2:rgba(0,0,0,.13);
+  --text:#1a1916;--muted:#888580;--dim:#c4c2be;--input-bg:#fff;
+  --green:#1a8a50;--green-b:rgba(26,138,80,.12);
+  --red:#c03838;--red-b:rgba(192,56,56,.12);
+  --amber:#a06010;--amber-b:rgba(160,96,16,.12);
+  --blue:#2e78b8;--blue-b:rgba(46,120,184,.12);
+  --teal:#1a8a50;--teal-b:rgba(26,138,80,.12);
+  color-scheme:light}
 *{box-sizing:border-box;margin:0;padding:0}html,body{height:100%}
-body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:12px;line-height:1.5;overflow-x:hidden;transition:background .2s,color .2s}
-[data-theme="dark"] body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.012) 2px,rgba(0,0,0,.012) 4px);pointer-events:none;z-index:9999}
-/* ── NAV ────────────────────────────────────────────────── */
-nav{display:flex;align-items:center;gap:14px;padding:0 18px;height:40px;border-bottom:1px solid var(--border);background:var(--bg1);position:sticky;top:0;z-index:200;flex-shrink:0}
-.nav-logo{font-size:13px;font-weight:500;letter-spacing:.02em}.nav-logo span{color:var(--muted)}
-.nav-sep{width:1px;height:16px;background:var(--border2)}
-.nav-tabs{display:flex}
-.nav-tab{font-size:11px;color:var(--muted);padding:0 11px;height:40px;display:flex;align-items:center;cursor:pointer;border-bottom:1.5px solid transparent;transition:color .15s,border-color .15s;user-select:none}
-.nav-tab:hover{color:var(--text)}.nav-tab.active{color:var(--text);border-bottom-color:var(--text)}
-.nav-right{margin-left:auto;display:flex;align-items:center;gap:10px}
-.live-badge{display:flex;align-items:center;gap:5px;font-size:10px;padding:2px 8px;border-radius:2px}
-.live-badge.ok{color:var(--green);background:var(--green-b)}
-.live-badge.err{color:var(--red);background:var(--red-b)}
-.live-badge.deg{color:var(--amber);background:var(--amber-b)}
-.live-dot{width:5px;height:5px;background:currentColor;border-radius:50%;animation:pulse 2s ease-in-out infinite}
+body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:12px;line-height:1.5;overflow-x:hidden}
+[data-theme="dark"] body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.01) 2px,rgba(0,0,0,.01) 4px);pointer-events:none;z-index:9999}
+/* ── TOPBAR ─────────────────────────────────────────────── */
+.topbar{display:flex;align-items:center;padding:0 18px;height:42px;border-bottom:1px solid var(--border);background:var(--bg1);position:sticky;top:0;z-index:300;flex-shrink:0;gap:0}
+.tb-logo{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:500;letter-spacing:.04em;flex-shrink:0}
+.tb-logo-icon{color:var(--teal);font-size:15px;line-height:1}
+.tb-logo-subtitle{font-size:10px;color:var(--muted);font-weight:400;margin-left:4px}
+.tb-sep{width:1px;height:18px;background:var(--border2);margin:0 14px;flex-shrink:0}
+.tb-tabs{display:flex;flex:1;overflow-x:auto;scrollbar-width:none}.tb-tabs::-webkit-scrollbar{display:none}
+.tb-tab{font:inherit;font-size:11px;color:var(--muted);padding:0 13px;height:42px;display:flex;align-items:center;gap:6px;cursor:pointer;border:0;border-bottom:2px solid transparent;background:none;appearance:none;transition:color .15s,border-color .15s;white-space:nowrap;user-select:none;flex-shrink:0}
+.tb-tab:hover{color:var(--text)}.tb-tab.active{color:var(--teal);border-bottom-color:var(--teal)}.tb-tab:focus-visible{outline:2px solid var(--teal);outline-offset:-2px}
+.tb-right{display:flex;align-items:center;gap:10px;flex-shrink:0;margin-left:12px}
+.agents-badge{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--teal)}
+.agents-dot{width:6px;height:6px;border-radius:50%;background:var(--teal);animation:pulse 2s ease-in-out infinite;flex-shrink:0}
 @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.75)}}
-.nav-user{font-size:11px;color:var(--muted)}
-.theme-toggle{display:flex;align-items:center;gap:0;border:1px solid var(--border2);border-radius:3px;overflow:hidden}
-.tt-btn{font-size:10px;padding:3px 8px;cursor:pointer;color:var(--muted);background:transparent;border:none;font-family:var(--mono);transition:background .15s,color .15s}
+.review-btn{font-size:10px;font-weight:500;padding:5px 14px;border-radius:3px;border:1.5px solid var(--teal);background:transparent;color:var(--teal);font-family:var(--mono);cursor:pointer;transition:background .15s,color .15s;white-space:nowrap}
+.review-btn:hover{background:var(--teal);color:#0d0d0d}
+.theme-toggle{display:flex;border:1px solid var(--border2);border-radius:3px;overflow:hidden}
+.tt-btn{font-size:9px;padding:3px 7px;cursor:pointer;color:var(--muted);background:transparent;border:none;font-family:var(--mono);transition:background .15s,color .15s}
 .tt-btn:hover{color:var(--text)}.tt-btn.active{background:var(--bg3);color:var(--text)}
+/* ── MERGE STATUS BAR ────────────────────────────────────── */
+.merge-bar{padding:6px 18px;border-bottom:1px solid var(--border);background:var(--bg1);font-size:11px;display:flex;align-items:center;gap:6px;flex-shrink:0}
+.mb-label{color:var(--muted)}.mb-status{font-weight:500}
+.mb-status.ok{color:var(--teal)}.mb-status.blocked{color:var(--red)}.mb-status.degraded{color:var(--amber)}.mb-status.unknown{color:var(--muted)}
+.mb-sep{color:var(--dim);margin:0 4px}.mb-detail{color:var(--muted)}
 /* ── LAYOUT ─────────────────────────────────────────────── */
-.shell{display:flex;flex-direction:column;min-height:100vh}
-.page{display:none;flex:1;overflow:hidden}.page.active{display:flex;overflow:hidden}
-.grid{display:grid;grid-template-columns:210px 1fr 272px;flex:1;overflow:hidden}
-.panel{border-right:1px solid var(--border);overflow:hidden;display:flex;flex-direction:column}.panel:last-child{border-right:none}
-.panel-head{display:flex;align-items:center;justify-content:space-between;padding:7px 13px;border-bottom:1px solid var(--border);background:var(--bg1);flex-shrink:0}
-.ph-label{font-size:9px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
-.ph-meta{font-size:10px;color:var(--dim)}
-.panel-scroll{overflow-y:auto;flex:1}
-/* ── REPOS ──────────────────────────────────────────────── */
-.repo-item{padding:9px 13px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s}
-.repo-item:hover{background:var(--bg2)}.repo-item.active{background:var(--bg3);border-left:2px solid var(--text);padding-left:11px}
-.ri-name{font-size:11px;font-weight:500;margin-bottom:3px;display:flex;align-items:center;gap:6px}
-.ri-branch{font-size:10px;color:var(--muted);margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ri-gates{display:flex;gap:2px;flex-wrap:wrap}
-.gate-pill{font-size:9px;padding:1px 5px;border-radius:2px;display:flex;align-items:center;gap:3px}
-.gate-pill.pass{background:var(--green-b);color:var(--green)}.gate-pill.fail{background:var(--red-b);color:var(--red)}.gate-pill.run{background:var(--amber-b);color:var(--amber)}.gate-pill.idle{background:var(--bg3);color:var(--dim)}
-.ri-time{font-size:9px;color:var(--muted);margin-top:4px}
-/* ── METRICS ────────────────────────────────────────────── */
-.metric-strip{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid var(--border);flex-shrink:0}
-.metric{padding:9px 13px;border-right:1px solid var(--border)}.metric:last-child{border-right:none}
-.metric-val{font-size:21px;font-weight:300;line-height:1;margin-bottom:2px}
-.metric-val.green{color:var(--green)}.metric-val.red{color:var(--red)}.metric-val.amber{color:var(--amber)}
-.metric-label{font-size:9px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
-/* ── BRANCH STATE STRIP ─────────────────────────────────── */
-.state-strip{display:flex;gap:0;border-bottom:1px solid var(--border);flex-shrink:0;overflow:hidden}
-.state-chip{flex:1;display:flex;align-items:center;gap:5px;padding:5px 10px;border-right:1px solid var(--border);min-width:0}
-.state-chip:last-child{border-right:none}
-.sc-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
-.sc-label{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}
-.sc-count{font-size:12px;font-weight:500;margin-left:auto}
-.sc-coding .sc-dot{background:var(--muted)}.sc-coding .sc-count{color:var(--text)}
-.sc-reviewing .sc-dot{background:var(--amber)}.sc-reviewing .sc-count{color:var(--amber)}
-.sc-merge-ready .sc-dot{background:var(--green)}.sc-merge-ready .sc-count{color:var(--green)}
-.sc-blocked .sc-dot{background:var(--red)}.sc-blocked .sc-count{color:var(--red)}
-/* ── LIFECYCLE STATE BADGES ─────────────────────────────── */
-.ls{font-size:9px;padding:1px 5px;border-radius:2px;font-weight:500;white-space:nowrap}
-.ls-coding{color:var(--muted);background:var(--bg3)}
-.ls-local_review,.ls-queued_cli,.ls-cli_reviewing{color:var(--amber);background:var(--amber-b)}
-.ls-reviewing{color:var(--amber);background:var(--amber-b)}
-.ls-reviewed{color:var(--blue);background:var(--blue-b)}
-.ls-merge_ready{color:var(--green);background:var(--green-b)}
-.ls-stale_branch,.ls-abandoned,.ls-blocked{color:var(--red);background:var(--red-b)}
-.ls-blocked_stale{color:var(--red);background:var(--red-b)}
-.ls-paused{color:var(--amber);background:var(--amber-b)}
-.ls-closed{color:var(--muted);background:var(--bg3)}
-/* ── SPARKLINES ─────────────────────────────────────────── */
-.spark-row{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid var(--border);flex-shrink:0}
-.spark-cell{padding:8px 13px 5px}.spark-cell+.spark-cell{border-left:1px solid var(--border)}
-.spark-label{font-size:9px;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.08em}
-canvas.spark{width:100%;height:44px;display:block}
-/* ── RUNS TABLE ─────────────────────────────────────────── */
-.runs-wrap{flex:1;overflow-y:auto;position:relative}
-table.runs{width:100%;border-collapse:collapse}
-table.runs th{font-size:9px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:5px 11px;text-align:left;border-bottom:1px solid var(--border);background:var(--bg1);position:sticky;top:0;z-index:2}
-table.runs td{padding:6px 11px;border-bottom:1px solid var(--border);font-size:11px;vertical-align:middle}
-.run-row{cursor:pointer;transition:background .1s}.run-row:hover{background:var(--bg2)}
-.run-row.live-row{animation:row-in .3s ease}
-@keyframes row-in{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none}}
-.run-repo{font-size:10px;color:var(--muted)}
-.run-gates{display:flex;gap:2px}
-.rg{width:7px;height:7px;border-radius:1px}
-.rg.pass{background:var(--green)}.rg.fail{background:var(--red)}.rg.run{background:var(--amber);animation:blink-g .8s ease-in-out infinite}.rg.idle{background:var(--dim)}
-@keyframes blink-g{0%,100%{opacity:1}50%{opacity:.3}}
-.rs{font-size:10px}.rs.pass{color:var(--green)}.rs.fail{color:var(--red)}.rs.run{color:var(--amber)}.rs.pending{color:var(--muted)}
-.rt{font-size:10px;color:var(--muted)}
-.badge-manual{font-size:8px;background:var(--blue-b);color:var(--blue);padding:1px 4px;border-radius:2px;margin-left:4px}
-/* ── DRAG-DROP ──────────────────────────────────────────── */
-.drop-overlay{display:none;position:absolute;inset:0;z-index:10;background:var(--bg);border:2px dashed var(--border2);align-items:center;justify-content:center;flex-direction:column;gap:8px;pointer-events:none;opacity:0;transition:opacity .2s}
-.drop-overlay.visible{display:flex;pointer-events:all;opacity:1}
-.drop-icon{font-size:28px;opacity:.4}.drop-label{font-size:13px;color:var(--muted)}.drop-sub{font-size:11px;color:var(--dim)}
-/* ── RIGHT PANEL ────────────────────────────────────────── */
-.right-col{display:flex;flex-direction:column}
-.activity-feed{overflow-y:auto}
-.activity-item{display:flex;gap:7px;padding:6px 11px;border-bottom:1px solid var(--border);animation:fade-in .3s ease}
-@keyframes fade-in{from{opacity:0}to{opacity:1}}
-.ai-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0;margin-top:4px}
-.ai-dot.pass{background:var(--green)}.ai-dot.fail{background:var(--red)}.ai-dot.run{background:var(--amber)}.ai-dot.upload{background:var(--blue)}.ai-dot.system{background:var(--muted)}
-.ai-body{flex:1;min-width:0}
-.ai-msg{font-size:11px;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ai-meta{font-size:10px;color:var(--muted);margin-top:1px}
-.block-item{display:flex;align-items:center;gap:7px;padding:4px 11px}
-.bl-rank{font-size:10px;color:var(--dim);width:12px}.bl-name{font-size:10px;flex:1}
-.bl-bar-wrap{width:54px;height:2px;background:var(--border);border-radius:2px;overflow:hidden}
-.bl-bar{height:100%;background:var(--red);border-radius:2px}
-.bl-count{font-size:10px;color:var(--muted);width:18px;text-align:right}
+.shell{display:flex;flex-direction:column;height:100vh;overflow:hidden}
+.page{display:none;flex:1;overflow:hidden;flex-direction:column}.page.active{display:flex}
+/* ── HEALTH BAR ─────────────────────────────────────────── */
+.health-bar{display:flex;align-items:center;gap:20px;padding:7px 18px;border-bottom:1px solid var(--border);background:var(--bg2);flex-shrink:0;flex-wrap:wrap;row-gap:4px}
+.hb-icon{color:var(--teal);font-size:13px}.hb-label{font-size:9px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.hb-item{display:flex;align-items:center;gap:5px;font-size:10px}
+.hb-item .hb-key{color:var(--muted)}.hb-item .hb-val{font-weight:500}.hb-item .hb-num{color:var(--text)}
+.hb-val.ok{color:var(--teal)}.hb-val.stale{color:var(--amber)}.hb-val.down,.hb-val.unavailable{color:var(--red)}.hb-val.degraded{color:var(--amber)}
+.hb-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0}
+.hb-dot.ok{background:var(--teal)}.hb-dot.stale{background:var(--amber)}.hb-dot.down,.hb-dot.unavailable,.hb-dot.error{background:var(--red)}.hb-dot.degraded{background:var(--amber)}
+/* ── PROCESSES PANEL ─────────────────────────────────────── */
+.proc-content{flex:1;overflow-y:auto}
+.agent-row{display:flex;align-items:flex-start;gap:14px;padding:13px 18px;border-bottom:1px solid var(--border);transition:background .1s}
+.agent-row:hover{background:var(--bg2)}
+.agent-icon{width:34px;height:34px;border-radius:5px;background:var(--bg3);border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;margin-top:2px}
+.agent-main{flex:1;min-width:0}
+.agent-header{display:flex;align-items:baseline;gap:7px;margin-bottom:3px;flex-wrap:wrap}
+.agent-name{font-size:12px;font-weight:500}.agent-sep{color:var(--dim);font-weight:300}
+.agent-phase{font-size:11px;color:var(--muted)}
+.agent-sub{font-size:11px;color:var(--muted);margin-bottom:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agent-task-id{font-size:9px;color:var(--dim);margin-left:4px}
+.agent-meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.am-item{font-size:10px;color:var(--muted);display:flex;align-items:center;gap:3px}
+.am-item .key{color:var(--dim)}
+.am-badge{font-size:9px;padding:1px 6px;border-radius:2px;font-weight:500}
+.am-badge.active{background:var(--teal-b);color:var(--teal)}
+.am-badge.waiting{background:var(--amber-b);color:var(--amber)}
+.am-badge.blocked{background:var(--red-b);color:var(--red)}
+.am-badge.unknown{background:var(--bg3);color:var(--muted)}
+.agent-right{flex-shrink:0;padding-top:3px}
+.agent-state-dot{width:7px;height:7px;border-radius:50%}
+.agent-state-dot.active{background:var(--teal);animation:pulse 2.5s ease-in-out infinite}
+.agent-state-dot.waiting{background:var(--amber)}.agent-state-dot.blocked{background:var(--red)}.agent-state-dot.unknown{background:var(--dim)}
+/* ── EVENT LOGS ──────────────────────────────────────────── */
+.filter-bar{display:flex;align-items:center;gap:8px;padding:7px 18px;border-bottom:1px solid var(--border);background:var(--bg1);flex-shrink:0;flex-wrap:wrap}
+.filter-label{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.filter-btn{font-size:9px;padding:3px 10px;border-radius:2px;border:1px solid var(--border2);background:transparent;color:var(--muted);font-family:var(--mono);cursor:pointer;transition:background .1s,color .1s}
+.filter-btn:hover{color:var(--text)}.filter-btn.active{background:var(--teal-b);color:var(--teal);border-color:var(--teal)}
+.filter-count{font-size:9px;color:var(--dim);margin-left:auto}
+.events-list{flex:1;overflow-y:auto}
+.event-row{display:flex;align-items:baseline;gap:10px;padding:7px 18px;border-bottom:1px solid var(--border);transition:background .1s}
+.event-row:hover{background:var(--bg2)}
+.ev-ts{font-size:10px;color:var(--muted);white-space:nowrap;flex-shrink:0;width:76px}
+.ev-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;margin-top:4px}
+.ev-dot.ok,.ev-dot.pass,.ev-dot.info{background:var(--muted)}.ev-dot.critical,.ev-dot.fail{background:var(--red)}
+.ev-dot.high{background:var(--red);opacity:.7}.ev-dot.medium{background:var(--amber)}.ev-dot.low{background:var(--blue)}.ev-dot.system{background:var(--dim)}
+.ev-msg{flex:1;font-size:11px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ev-msg.critical{color:var(--red)}.ev-msg.high{color:var(--amber)}.ev-msg.medium{color:var(--amber);opacity:.85}.ev-msg.low{color:var(--blue)}
+.ev-badge{font-size:8px;padding:1px 5px;border-radius:2px;font-weight:500;white-space:nowrap;flex-shrink:0}
+.ev-badge.CRITICAL{background:var(--red-b);color:var(--red)}.ev-badge.HIGH{background:var(--amber-b);color:var(--amber)}
+.ev-badge.MEDIUM{background:var(--amber-b);color:var(--amber);opacity:.75}.ev-badge.LOW{background:var(--blue-b);color:var(--blue)}
+/* ── FINDINGS ────────────────────────────────────────────── */
+.findings-content{flex:1;overflow-y:auto;padding:16px 18px}
+.stat-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+.stat-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px}
+.stat-icon{font-size:12px;margin-bottom:6px;color:var(--muted)}
+.stat-label{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px}
+.stat-val{font-size:22px;font-weight:300;line-height:1}.stat-val.green{color:var(--teal)}.stat-val.red{color:var(--red)}.stat-val.amber{color:var(--amber)}
+.sev-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
+.sev-card{border-radius:var(--radius);padding:11px 13px;border:1px solid}
+.sev-card.critical{background:rgba(224,100,100,.06);border-color:rgba(224,100,100,.18)}
+.sev-card.high{background:rgba(212,152,48,.06);border-color:rgba(212,152,48,.18)}
+.sev-card.medium{background:rgba(212,152,48,.04);border-color:rgba(212,152,48,.12)}
+.sev-card.low{background:var(--blue-b);border-color:rgba(90,163,220,.18)}
+.sev-dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:4px;vertical-align:middle}
+.sev-dot.critical{background:var(--red)}.sev-dot.high{background:var(--amber)}.sev-dot.medium{background:var(--amber);opacity:.7}.sev-dot.low{background:var(--blue)}
+.sev-label{font-size:9px;text-transform:uppercase;letter-spacing:.1em;font-weight:500}
+.sev-label.critical{color:var(--red)}.sev-label.high{color:var(--amber)}.sev-label.medium{color:var(--amber)}.sev-label.low{color:var(--blue)}
+.sev-count{font-size:20px;font-weight:300;margin-top:4px}
+.gate-table-wrap{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.gate-table-head,.gate-table-row{display:grid;grid-template-columns:48px 1fr 110px 80px 80px 60px;padding:6px 13px;border-bottom:1px solid var(--border);align-items:center}
+.gate-table-head{background:var(--bg3)}
+.gate-table-head span{font-size:9px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.gate-table-row{font-size:11px;transition:background .1s}.gate-table-row:last-child{border-bottom:none}.gate-table-row:hover{background:var(--bg3)}
+.gtr-id{font-size:9px;color:var(--dim)}.gtr-file{font-size:10px;color:var(--teal);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gtr-res{font-size:9px;font-weight:500}
+.gtr-res.PASS{color:var(--teal)}.gtr-res.FAIL{color:var(--red)}.gtr-res.SKIP,.gtr-res.DISABLED{color:var(--muted)}.gtr-res.INFRA_BYPASS{color:var(--amber)}
+.gtr-status{font-size:9px;padding:1px 5px;border-radius:2px;display:inline-block}
+.gtr-status.pass{background:var(--teal-b);color:var(--teal)}.gtr-status.fail{background:var(--red-b);color:var(--red)}
+.gtr-status.skip,.gtr-status.disabled{background:var(--bg3);color:var(--muted)}.gtr-status.infra_bypass{background:var(--amber-b);color:var(--amber)}
+.gtr-dur{font-size:9px;color:var(--dim);text-align:right}
+/* ── ARCHITECTURE ────────────────────────────────────────── */
+.arch-content{flex:1;display:flex;align-items:center;justify-content:center}
+.arch-placeholder{text-align:center;color:var(--muted)}
+.arch-placeholder h2{font-size:13px;font-weight:400;margin-bottom:8px;color:var(--dim)}.arch-placeholder p{font-size:11px}
 /* ── SETTINGS ───────────────────────────────────────────── */
-.settings-page{padding:28px 32px;overflow-y:auto;flex:1;background:var(--bg)}
+.settings-page{padding:28px 32px;overflow-y:auto;flex:1}
 .s-section{margin-bottom:32px}
 .s-title{font-size:11px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:14px;padding-bottom:7px;border-bottom:1px solid var(--border)}
 .integration-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
 .int-card{background:var(--bg1);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;display:flex;flex-direction:column;gap:10px;transition:border-color .15s}
-.int-card:hover{border-color:var(--border2)}.int-card.connected{border-color:rgba(90,158,58,.3)}
+.int-card:hover{border-color:var(--border2)}.int-card.connected{border-color:rgba(63,255,160,.22)}
 .int-top{display:flex;align-items:center;gap:10px}
 .int-icon{width:32px;height:32px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;background:var(--bg3)}
 .int-info{flex:1}.int-name{font-size:12px;font-weight:500;margin-bottom:1px}.int-desc{font-size:10px;color:var(--muted)}
 .int-status{font-size:10px;display:flex;align-items:center;gap:4px}
-.int-status.conn{color:var(--green)}.int-status.disc{color:var(--muted)}
-.int-btn{font-size:10px;padding:4px 12px;border-radius:3px;border:1px solid var(--border2);background:transparent;color:var(--text);font-family:var(--mono);cursor:pointer;transition:background .1s,border-color .1s;align-self:flex-start}
+.int-status.conn{color:var(--teal)}.int-status.disc{color:var(--muted)}
+.int-btn{font-size:10px;padding:4px 12px;border-radius:3px;border:1px solid var(--border2);background:transparent;color:var(--text);font-family:var(--mono);cursor:pointer;align-self:flex-start}
 .int-btn:hover{background:var(--bg3)}.int-btn.disconnect{color:var(--red);border-color:rgba(201,79,79,.3)}.int-btn.disconnect:hover{background:var(--red-b)}
 .gate-config{width:100%;border-collapse:collapse}
 .gate-config th{font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);padding:5px 11px;text-align:left;border-bottom:1px solid var(--border)}
 .gate-config td{padding:7px 11px;border-bottom:1px solid var(--border);font-size:11px}
-.toggle-wrap{display:flex;align-items:center}
-.toggle{width:28px;height:16px;border-radius:8px;background:var(--dim);position:relative;cursor:pointer;transition:background .2s;flex-shrink:0}
-.toggle.on{background:var(--green)}.toggle-knob{position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#fff;transition:transform .2s}.toggle.on .toggle-knob{transform:translateX(12px)}
-/* ── ERROR / EMPTY STATES ───────────────────────────────── */
-.state-msg{padding:24px;text-align:center;color:var(--muted);font-size:11px}
-.state-msg.error{color:var(--red)}
-/* ── MISC ───────────────────────────────────────────────── */
-@keyframes spin{to{transform:rotate(360deg)}}
-.spin{width:8px;height:8px;border:1.5px solid var(--dim);border-top-color:var(--amber);border-radius:50%;animation:spin .7s linear infinite;display:inline-block;flex-shrink:0}
-::-webkit-scrollbar{width:3px;height:3px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--dim);border-radius:2px}
+.toggle-wrap{display:flex}.toggle{width:28px;height:16px;border-radius:8px;background:var(--dim);position:relative;cursor:pointer;transition:background .2s;flex-shrink:0;border:0;padding:0;appearance:none;display:inline-flex;align-items:center}.toggle.on{background:var(--teal)}.toggle-knob{position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#fff;transition:transform .2s}.toggle.on .toggle-knob{transform:translateX(12px)}.toggle:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
 .settings-save{display:flex;align-items:center;gap:8px;margin-top:16px}
-.save-btn{font-size:11px;padding:5px 16px;border-radius:3px;border:1px solid var(--border2);background:var(--bg3);color:var(--text);font-family:var(--mono);cursor:pointer;transition:background .1s}
+.save-btn{font-size:11px;padding:5px 16px;border-radius:3px;border:1px solid var(--border2);background:var(--bg3);color:var(--text);font-family:var(--mono);cursor:pointer}
 .save-btn:hover{background:var(--bg2)}.save-btn:disabled{opacity:.4;cursor:default}
-.save-status{font-size:10px;color:var(--muted)}
-.save-status.ok{color:var(--green)}.save-status.err{color:var(--red)}
+.save-status{font-size:10px;color:var(--muted)}.save-status.ok{color:var(--teal)}.save-status.err{color:var(--red)}
+/* ── MISC ───────────────────────────────────────────────── */
+.state-msg{padding:36px 18px;text-align:center;color:var(--muted);font-size:11px}.state-msg.error{color:var(--red)}
+::-webkit-scrollbar{width:3px;height:3px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--dim);border-radius:2px}
+@media(max-width:640px){
+  .stat-strip{grid-template-columns:1fr 1fr}.sev-strip{grid-template-columns:1fr 1fr}
+  .gate-table-head,.gate-table-row{grid-template-columns:40px 1fr 60px 50px}
+  .gate-table-head span:nth-child(3),.gate-table-row>*:nth-child(3),
+  .gate-table-head span:nth-child(6),.gate-table-row>*:nth-child(6){display:none}
+  .health-bar{gap:12px}
+}
 </style>
 </head>
 <body>
 <div class="shell">
 
-<nav>
-  <div class="nav-logo">codero<span>/review</span></div>
-  <div class="nav-sep"></div>
-  <div class="nav-tabs">
-    <div class="nav-tab active" id="tab-overview" onclick="showPage('overview',this)">overview</div>
-    <div class="nav-tab" id="tab-settings" onclick="showPage('settings',this)">settings</div>
+<!-- TOPBAR -->
+<div class="topbar">
+  <div class="tb-logo">
+    <span class="tb-logo-icon">&#x203A;_</span>
+    <span>CODERO</span>
+    <span class="tb-logo-subtitle">Command Terminal</span>
   </div>
-  <div class="nav-right">
-    <div class="live-badge ok" id="live-badge"><div class="live-dot"></div><span id="live-text">live</span></div>
+  <div class="tb-sep"></div>
+  <div class="tb-tabs" role="tablist" aria-label="Dashboard sections">
+    <button class="tb-tab active" type="button" id="tab-processes" role="tab" data-tab="processes" aria-selected="true" aria-controls="page-processes" tabindex="0" onclick="showTab('processes',this)" onkeydown="return tabKey(event,this)">&#x21BB; Processes</button>
+    <button class="tb-tab" type="button" id="tab-eventlogs" role="tab" data-tab="eventlogs" aria-selected="false" aria-controls="page-eventlogs" tabindex="0" onclick="showTab('eventlogs',this)" onkeydown="return tabKey(event,this)">&#x2261; Event Logs</button>
+    <button class="tb-tab" type="button" id="tab-findings" role="tab" data-tab="findings" aria-selected="false" aria-controls="page-findings" tabindex="0" onclick="showTab('findings',this)" onkeydown="return tabKey(event,this)">&#x25B3; Findings</button>
+    <button class="tb-tab" type="button" id="tab-architecture" role="tab" data-tab="architecture" aria-selected="false" aria-controls="page-architecture" tabindex="0" onclick="showTab('architecture',this)" onkeydown="return tabKey(event,this)">&#x2B21; Architecture</button>
+    <button class="tb-tab" type="button" id="tab-settings" role="tab" data-tab="settings" aria-selected="false" aria-controls="page-settings" tabindex="0" onclick="showTab('settings',this)" onkeydown="return tabKey(event,this)">&#x2699; Settings</button>
+  </div>
+  <div class="tb-right">
+    <div class="agents-badge"><div class="agents-dot"></div><span id="agents-count">0</span>&nbsp;agents active</div>
+    <button class="review-btn" onclick="showTab('findings',document.getElementById('tab-findings'))">Review Findings</button>
     <div class="theme-toggle">
-      <button class="tt-btn" id="tt-system" onclick="setTheme('system')">system</button>
+      <button class="tt-btn" id="tt-system" onclick="setTheme('system')">sys</button>
       <button class="tt-btn active" id="tt-dark" onclick="setTheme('dark')">dark</button>
       <button class="tt-btn" id="tt-light" onclick="setTheme('light')">light</button>
     </div>
   </div>
-</nav>
-
-<!-- OVERVIEW PAGE -->
-<div class="page active" id="page-overview">
-<div class="grid">
-
-  <!-- LEFT: REPOS -->
-  <div class="panel">
-    <div class="panel-head">
-      <div class="ph-label">Repos</div>
-      <div class="ph-meta" id="repo-meta">—</div>
-    </div>
-    <div class="panel-scroll" id="repo-list"><div class="state-msg">loading…</div></div>
-  </div>
-
-  <!-- CENTER -->
-  <div class="panel" style="overflow:hidden">
-    <div style="display:flex;flex-direction:column;height:100%;overflow:hidden">
-      <div class="metric-strip">
-        <div class="metric"><div class="metric-val green" id="m-runs">—</div><div class="metric-label">reviews today</div></div>
-        <div class="metric"><div class="metric-val green" id="m-pass">—</div><div class="metric-label">pass rate</div></div>
-        <div class="metric"><div class="metric-val red"   id="m-blocked">—</div><div class="metric-label">blocked</div></div>
-        <div class="metric"><div class="metric-val amber" id="m-avg">—</div><div class="metric-label">avg review time</div></div>
-      </div>
-      <div class="state-strip">
-        <div class="state-chip sc-coding"><div class="sc-dot"></div><div class="sc-label">coding</div><div class="sc-count" id="sc-coding">—</div></div>
-        <div class="state-chip sc-reviewing"><div class="sc-dot"></div><div class="sc-label">reviewing</div><div class="sc-count" id="sc-reviewing">—</div></div>
-        <div class="state-chip sc-merge-ready"><div class="sc-dot"></div><div class="sc-label">merge ready</div><div class="sc-count" id="sc-merge-ready">—</div></div>
-        <div class="state-chip sc-blocked"><div class="sc-dot"></div><div class="sc-label">blocked/stale</div><div class="sc-count" id="sc-blocked-stale">—</div></div>
-      </div>
-      <div class="spark-row">
-        <div class="spark-cell"><div class="spark-label">pass rate 7d</div><canvas class="spark" id="spark-pass"></canvas></div>
-        <div class="spark-cell"><div class="spark-label">blocks 7d</div><canvas class="spark" id="spark-blocks"></canvas></div>
-      </div>
-      <div class="runs-wrap" id="runs-wrap">
-        <div class="drop-overlay" id="drop-overlay">
-          <div class="drop-icon">⬆</div>
-          <div class="drop-label">drop file for manual review</div>
-          <div class="drop-sub">.py · .ts · .go · .diff · .patch · .js · .rb · .java</div>
-        </div>
-        <table class="runs">
-          <thead><tr>
-            <th>repo</th><th>branch / file</th><th>provider</th>
-            <th>gates</th><th>status</th><th>lifecycle state</th><th>time</th>
-          </tr></thead>
-          <tbody id="runs-tbody"><tr><td colspan="7"><div class="state-msg">loading…</div></td></tr></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-  <!-- RIGHT -->
-  <div class="panel right-col">
-    <div class="panel-head"><div class="ph-label">Activity</div><div class="ph-meta" id="act-count">—</div></div>
-    <div class="activity-feed panel-scroll" id="activity-feed"><div class="state-msg">loading…</div></div>
-    <div class="panel-head" style="border-top:1px solid var(--border)"><div class="ph-label">Block reasons</div><div class="ph-meta">all time</div></div>
-    <div id="block-list"><div class="state-msg">loading…</div></div>
-    <div class="panel-head" style="border-top:1px solid var(--border)"><div class="ph-label">Gate health</div><div class="ph-meta">pass rate</div></div>
-    <div id="gate-health"><div class="state-msg">loading…</div></div>
-  </div>
-
-</div>
 </div>
 
-<!-- SETTINGS PAGE -->
+<!-- MERGE STATUS BAR -->
+<div class="merge-bar">
+  <span class="mb-label">Status:</span>
+  <span class="mb-status unknown" id="mb-status">&#x2014;</span>
+  <span class="mb-sep">&#x2014;</span>
+  <span class="mb-detail" id="mb-detail">loading&#x2026;</span>
+</div>
+
+<!-- PAGE: PROCESSES -->
+<div class="page active" id="page-processes">
+  <div class="health-bar" id="health-bar">
+    <span class="hb-icon">&#x21BB;</span>
+    <span class="hb-label">System Health</span>
+    <div class="hb-item"><div class="hb-dot" id="hb-db-dot"></div><span class="hb-key">db</span><span class="hb-val" id="hb-db">&#x2026;</span></div>
+    <div class="hb-item"><span class="hb-key">agents</span><span class="hb-num" id="hb-agents">&#x2014;</span></div>
+    <div class="hb-item"><div class="hb-dot" id="hb-sessions-dot"></div><span class="hb-key">sessions feed</span><span class="hb-val" id="hb-sessions-status">&#x2026;</span><span class="hb-num" id="hb-sessions-age" style="color:var(--dim);margin-left:2px"></span></div>
+    <div class="hb-item"><div class="hb-dot" id="hb-gate-dot"></div><span class="hb-key">gate-checks</span><span class="hb-val" id="hb-gate-status">&#x2026;</span><span class="hb-num" id="hb-gate-age" style="color:var(--dim);margin-left:2px"></span></div>
+    <div class="hb-item" style="margin-left:auto"><span class="hb-key">refreshed</span><span class="hb-num" id="hb-refreshed">&#x2014;</span></div>
+  </div>
+  <div class="proc-content" id="proc-content">
+    <div class="state-msg">loading&#x2026;</div>
+  </div>
+</div>
+
+<!-- PAGE: EVENT LOGS -->
+<div class="page" id="page-eventlogs">
+  <div class="filter-bar">
+    <span class="filter-label">Filter:</span>
+    <button class="filter-btn active" id="ef-all"      onclick="setEvtFilter('ALL',this)">ALL</button>
+    <button class="filter-btn"        id="ef-critical" onclick="setEvtFilter('CRITICAL',this)">CRITICAL</button>
+    <button class="filter-btn"        id="ef-high"     onclick="setEvtFilter('HIGH',this)">HIGH</button>
+    <button class="filter-btn"        id="ef-medium"   onclick="setEvtFilter('MEDIUM',this)">MEDIUM</button>
+    <button class="filter-btn"        id="ef-low"      onclick="setEvtFilter('LOW',this)">LOW</button>
+    <span class="filter-count" id="ef-count"></span>
+  </div>
+  <div class="events-list" id="events-list"><div class="state-msg">loading&#x2026;</div></div>
+</div>
+
+<!-- PAGE: FINDINGS -->
+<div class="page" id="page-findings">
+  <div class="findings-content">
+    <div class="stat-strip">
+      <div class="stat-card"><div class="stat-icon">&#x2261;</div><div class="stat-label">Checks total</div><div class="stat-val" id="f-total">&#x2014;</div></div>
+      <div class="stat-card"><div class="stat-icon">&#x2717;</div><div class="stat-label">Failed</div><div class="stat-val red" id="f-failed">&#x2014;</div></div>
+      <div class="stat-card"><div class="stat-icon">&#x26A1;</div><div class="stat-label">Overall status</div><div class="stat-val" id="f-overall">&#x2014;</div></div>
+    </div>
+    <div class="sev-strip">
+      <div class="sev-card critical"><span class="sev-dot critical"></span><span class="sev-label critical">FAILED</span><div class="sev-count" id="f-sev-fail" style="color:var(--red)">&#x2014;</div></div>
+      <div class="sev-card high"><span class="sev-dot high"></span><span class="sev-label high">SKIPPED</span><div class="sev-count" id="f-sev-skip" style="color:var(--amber)">&#x2014;</div></div>
+      <div class="sev-card medium"><span class="sev-dot medium"></span><span class="sev-label medium">BYPASSED</span><div class="sev-count" id="f-sev-bypass" style="color:var(--amber)">&#x2014;</div></div>
+      <div class="sev-card low"><span class="sev-dot low"></span><span class="sev-label low">PASSED</span><div class="sev-count" id="f-sev-pass" style="color:var(--teal)">&#x2014;</div></div>
+    </div>
+    <div class="gate-table-wrap" id="gate-table-wrap">
+      <div class="state-msg">loading gate checks&#x2026;</div>
+    </div>
+  </div>
+</div>
+
+<!-- PAGE: ARCHITECTURE -->
+<div class="page" id="page-architecture">
+  <div class="arch-content">
+    <div class="arch-placeholder">
+      <h2>Architecture Visualization</h2>
+      <p>Routing and dependency graph coming in a future release.</p>
+    </div>
+  </div>
+</div>
+
+<!-- PAGE: SETTINGS -->
 <div class="page" id="page-settings">
 <div class="settings-page">
   <div class="s-section">
     <div class="s-title">Integrations</div>
-    <div class="integration-grid" id="int-grid"><div class="state-msg">loading…</div></div>
+    <div class="integration-grid" id="int-grid"><div class="state-msg">loading&#x2026;</div></div>
   </div>
   <div class="s-section">
     <div class="s-title">Gate pipeline</div>
     <table class="gate-config">
       <thead><tr><th>Gate</th><th>Enabled</th><th>Blocks commit</th><th>Timeout</th><th>Provider</th></tr></thead>
-      <tbody id="gate-config-body"><tr><td colspan="5"><div class="state-msg">loading…</div></td></tr></tbody>
+      <tbody id="gate-config-body"><tr><td colspan="5"><div class="state-msg">loading&#x2026;</div></td></tr></tbody>
     </table>
     <div class="settings-save">
       <button class="save-btn" id="save-btn" onclick="saveSettings()" disabled>save changes</button>
@@ -261,459 +296,351 @@ table.runs td{padding:6px 11px;border-bottom:1px solid var(--border);font-size:1
 </div><!-- shell -->
 <script>
 'use strict';
-/* ── CONFIG ──────────────────────────────────────────────── */
-const API   = '/api/v1/dashboard';
-const POLL  = parseInt(document.currentScript?.dataset?.poll ?? '5000', 10) || 5000;
+const API  = '/api/v1/dashboard';
+const POLL = 10000;
 
-/* ── STATE ───────────────────────────────────────────────── */
-let selectedRepo  = null;
-let settingsLocal = null;   // in-memory pending settings edits
+let activeTab     = 'processes';
+let settingsLocal = null;
 let settingsDirty = false;
 let sseSource     = null;
 let pollTimer     = null;
+let allEvents     = [];
+let eventFilter   = 'ALL';
+let findingsCache = null;
+let integrationGridBound = false;
 
-/* ── THEME ───────────────────────────────────────────────── */
+/* THEME */
 const mq = window.matchMedia('(prefers-color-scheme: dark)');
 let currentTheme = 'dark';
 function applyTheme(t) {
   const resolved = t === 'system' ? (mq.matches ? 'dark' : 'light') : t;
   document.documentElement.setAttribute('data-theme', resolved);
-  ['system','dark','light'].forEach(x =>
-    document.getElementById('tt-'+x)?.classList.toggle('active', x === t));
+  ['system','dark','light'].forEach(x => el('tt-'+x)?.classList.toggle('active', x === t));
   currentTheme = t;
-  setTimeout(drawCharts, 50);
 }
 function setTheme(t) { applyTheme(t); }
 mq.addEventListener('change', () => { if (currentTheme === 'system') applyTheme('system'); });
 applyTheme('dark');
 
-/* ── PAGE SWITCHING ──────────────────────────────────────── */
-function showPage(id, tab) {
+/* TABS */
+function showTab(id, tab) {
+  if (!tab) return;
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
-  document.getElementById('page-'+id).classList.add('active');
+  document.querySelectorAll('.tb-tab').forEach(t => t.classList.remove('active'));
+  el('page-'+id).classList.add('active');
   tab.classList.add('active');
-  if (id === 'overview') setTimeout(drawCharts, 50);
-  if (id === 'settings') loadSettings();
+  document.querySelectorAll('.tb-tab').forEach(function(t) {
+    t.setAttribute('aria-selected', t === tab ? 'true' : 'false');
+  });
+  activeTab = id;
+  if (id === 'settings')     loadSettings();
+  if (id === 'findings')     renderFindings(findingsCache);
+  if (id === 'eventlogs')    renderEvents();
 }
 
-/* ── LIVE BADGE ──────────────────────────────────────────── */
-function setLiveBadge(state) {
-  // state: 'ok' | 'degraded' | 'error'
-  const badge = document.getElementById('live-badge');
-  const text  = document.getElementById('live-text');
-  badge.className = 'live-badge ' + state;
-  text.textContent = state === 'ok' ? 'live' : state === 'degraded' ? 'degraded' : 'offline';
+function tabKey(ev, tab) {
+  if (ev.key === 'Enter' || ev.key === ' ') {
+    ev.preventDefault();
+    showTab(tab.getAttribute('data-tab'), tab);
+    return false;
+  }
+  if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return true;
+  var tabs = Array.from(document.querySelectorAll('.tb-tab'));
+  if (!tabs.length) return false;
+  var idx = tabs.indexOf(tab);
+  if (idx < 0) return false;
+  ev.preventDefault();
+  var next = ev.key === 'ArrowRight'
+    ? tabs[(idx + 1) % tabs.length]
+    : tabs[(idx - 1 + tabs.length) % tabs.length];
+  next.focus();
+  showTab(next.getAttribute('data-tab'), next);
+  return false;
 }
 
-/* ── API HELPERS ─────────────────────────────────────────── */
-async function apiFetch(path, opts = {}) {
-  const res = await fetch(API + path, opts);
+/* API */
+async function apiFetch(path, opts) {
+  const res = await fetch(API + path, opts || {});
   if (!res.ok) {
     let msg = res.statusText;
-    try { const j = await res.json(); msg = j.error || msg; } catch (_) {}
-    throw Object.assign(new Error(msg), { status: res.status });
+    try { const j = await res.json(); msg = j.error || msg; } catch (_e) {}
+    const err = new Error(msg); err.status = res.status; throw err;
   }
   return res.json();
 }
 
-/* ── OVERVIEW DATA REFRESH ───────────────────────────────── */
-let sparklineData = { pass: [], blocks: [] };
-
-async function refreshOverview() {
-  try {
-    const [ov, repos, runs, activity, blockReasons, gateHealth] = await Promise.all([
-      apiFetch('/overview'),
-      apiFetch('/repos'),
-      apiFetch('/runs'),
-      apiFetch('/activity'),
-      apiFetch('/block-reasons'),
-      apiFetch('/gate-health'),
-    ]);
-    renderMetrics(ov);
-    renderSparkline(ov.sparkline_7d || []);
-    renderRepos(repos.repos || []);
-    renderRuns(runs.runs || []);
-    renderActivity(activity.events || []);
-    renderBlockReasons(blockReasons.reasons || []);
-    renderGateHealth(gateHealth.gates || []);
-    setLiveBadge('ok');
-  } catch (err) {
-    console.error('overview refresh failed:', err);
-    setLiveBadge(err.status ? 'degraded' : 'error');
-  }
-}
-
-/* ── METRICS STRIP ───────────────────────────────────────── */
-function renderMetrics(ov) {
-  el('m-runs').textContent = ov.runs_today ?? '—';
-  if (ov.pass_rate >= 0) {
-    const pct = ov.pass_rate.toFixed(0) + '%';
-    const cls = ov.pass_rate >= 80 ? 'green' : ov.pass_rate >= 60 ? 'amber' : 'red';
-    el('m-pass').textContent = pct;
-    el('m-pass').className = 'metric-val ' + cls;
+/* MERGE STATUS */
+function updateMergeBar(health, sessions) {
+  const mbS = el('mb-status'), mbD = el('mb-detail');
+  const blocked = (sessions || []).filter(s => s.activity_state === 'blocked').length;
+  if (blocked > 0) {
+    mbS.textContent = 'BLOCKED'; mbS.className = 'mb-status blocked';
+    mbD.textContent = blocked + ' session' + (blocked !== 1 ? 's' : '') + ' blocked';
+  } else if (health && health.database && health.database.status !== 'ok') {
+    mbS.textContent = 'DEGRADED'; mbS.className = 'mb-status degraded';
+    mbD.textContent = 'database ' + (health.database.status || 'error');
   } else {
-    el('m-pass').textContent = '—';
-    el('m-pass').className = 'metric-val green';
+    const active = (sessions || []).length;
+    mbS.textContent = active > 0 ? 'ACTIVE' : 'IDLE';
+    mbS.className   = 'mb-status ok';
+    mbD.textContent = active > 0
+      ? active + ' session' + (active !== 1 ? 's' : '') + ' in progress'
+      : 'no active sessions';
   }
-  el('m-blocked').textContent = ov.blocked_count ?? '—';
-  if (ov.avg_gate_sec > 0) {
-    el('m-avg').textContent = ov.avg_gate_sec.toFixed(1) + 's';
-  } else {
-    el('m-avg').textContent = '—';
-  }
-  // Branch lifecycle state breakdown.
-  const bs = ov.branch_states || {};
-  el('sc-coding').textContent      = bs.coding      ?? '—';
-  el('sc-reviewing').textContent   = (bs.reviewing  ?? bs.cli_reviewing ?? '—');
-  el('sc-merge-ready').textContent = bs.merge_ready ?? '—';
-  el('sc-blocked-stale').textContent = (
-    bs.blocked_stale != null ? bs.blocked_stale : '—'
-  );
 }
 
-/* ── SPARKLINES ──────────────────────────────────────────── */
-function renderSparkline(days) {
-  const passData   = days.map(d => d.total > 0 ? (d.passed / d.total * 100) : 0);
-  const blocksData = days.map(d => d.failed ?? 0);
-  sparklineData = { pass: passData, blocks: blocksData };
-  drawCharts();
+/* HEALTH BAR */
+function renderHealthBar(h) {
+  if (!h) return;
+  const db    = h.database || {};
+  const sessF = (h.feeds || {}).active_sessions || {};
+  const gateF = (h.feeds || {}).gate_checks     || {};
+  elSet('hb-db', db.status || 'unknown', 'hb-val ' + (db.status || 'unknown'));
+  dotSet('hb-db-dot', db.status || 'unknown');
+  el('hb-agents').textContent    = h.active_agent_count != null ? h.active_agent_count : '0';
+  el('agents-count').textContent = h.active_agent_count != null ? h.active_agent_count : '0';
+  elSet('hb-sessions-status', sessF.status || 'unavailable', 'hb-val ' + (sessF.status || 'unavailable'));
+  dotSet('hb-sessions-dot', sessF.status || 'unavailable');
+  el('hb-sessions-age').textContent = sessF.freshness_sec != null ? fmtAge(sessF.freshness_sec) : '';
+  elSet('hb-gate-status', gateF.status || 'unavailable', 'hb-val ' + (gateF.status || 'unavailable'));
+  dotSet('hb-gate-dot', gateF.status || 'unavailable');
+  el('hb-gate-age').textContent = gateF.freshness_sec != null ? fmtAge(gateF.freshness_sec) : '';
+  el('hb-refreshed').textContent = fmtTime(h.generated_at);
 }
-function drawSpark(id, data, stroke, fill) {
-  const c = el(id); if (!c) return;
-  const dpr = window.devicePixelRatio || 1;
-  const w = c.offsetWidth || 300, h = c.offsetHeight || 44;
-  c.width = w * dpr; c.height = h * dpr;
-  const ctx = c.getContext('2d'); ctx.scale(dpr, dpr);
-  if (!data.length) return;
-  const mn = Math.min(...data) * 0.95, mx = Math.max(...data) * 1.05 || 1;
-  const pts = data.map((v, i) => ({
-    x: i / Math.max(data.length - 1, 1) * w,
-    y: h - (v - mn) / (mx - mn || 1) * (h - 6) - 3,
-  }));
-  ctx.beginPath();
-  pts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
-  ctx.strokeStyle = stroke; ctx.lineWidth = 1.5; ctx.stroke();
-  ctx.lineTo(pts[pts.length-1].x, h); ctx.lineTo(pts[0].x, h); ctx.closePath();
-  ctx.fillStyle = fill; ctx.fill();
-  const l = pts[pts.length-1];
-  ctx.beginPath(); ctx.arc(l.x, l.y, 3, 0, Math.PI*2); ctx.fillStyle = stroke; ctx.fill();
-}
-function drawCharts() {
-  drawSpark('spark-pass',   sparklineData.pass,   'rgba(90,158,58,.9)',  'rgba(90,158,58,.08)');
-  drawSpark('spark-blocks', sparklineData.blocks, 'rgba(201,79,79,.9)',  'rgba(201,79,79,.08)');
-}
+function elSet(id, text, cls) { const e = el(id); if (e) { e.textContent = text; e.className = cls; } }
+function dotSet(id, st)       { const e = el(id); if (e) e.className = 'hb-dot ' + st; }
 
-/* ── REPOS LIST ──────────────────────────────────────────── */
-function renderRepos(repos) {
-  if (!repos.length) {
-    el('repo-list').innerHTML = '<div class="state-msg">no repos tracked yet</div>';
-    el('repo-meta').textContent = '0 repos';
-    return;
-  }
-  if (!selectedRepo) selectedRepo = repos[0].repo;
-  el('repo-meta').textContent = repos.length + ' repo' + (repos.length !== 1 ? 's' : '');
-  el('repo-list').innerHTML = repos.map(r => {
-    const pills = (r.gate_summary || []).map(g =>
-      `<span class="gate-pill ${g.status}">${g.name}</span>`
-    ).join('');
-    const statusBadge = r.last_run_status === 'failed'
-      ? '<span style="color:var(--red);font-size:9px">● blocked</span>'
-      : r.last_run_status === 'running'
-        ? '<span style="color:var(--amber);font-size:9px">● running</span>'
-        : '';
-    const lastRun = r.last_run_at ? ' · last: ' + fmtRelative(r.last_run_at) : '';
-    return `<div class="repo-item ${r.repo === selectedRepo ? 'active' : ''}" onclick="selectRepo('${esc(r.repo)}')">
-      <div class="ri-name">${esc(r.repo)} ${statusBadge}</div>
-      <div class="ri-branch">${esc(r.branch || '—')}</div>
-      <div class="ri-gates">${pills}</div>
-      ${lastRun ? `<div class="ri-time">${lastRun}</div>` : ''}
-    </div>`;
+/* ACTIVE AGENTS */
+function renderSessions(sessions) {
+  const c = el('proc-content');
+  if (!sessions || !sessions.length) { c.innerHTML = '<div class="state-msg">no active sessions</div>'; return; }
+  c.innerHTML = sessions.map(function(s) {
+    var task  = s.task || {};
+    var tid   = (task.id && task.id !== 'unknown') ? '<span class="agent-task-id">#' + esc(task.id) + '</span>' : '';
+    var title = (task.title && task.title !== 'unknown') ? esc(task.title) : esc(s.branch || s.session_id);
+    var phase = (task.phase && task.phase !== 'unknown') ? esc(task.phase) : '';
+    var state = s.activity_state || 'unknown';
+    return '<div class="agent-row">' +
+      '<div class="agent-icon">' + agentIcon(s.owner_agent) + '</div>' +
+      '<div class="agent-main">' +
+        '<div class="agent-header">' +
+          '<span class="agent-name">' + esc(s.owner_agent || 'unknown') + '</span>' +
+          (phase ? '<span class="agent-sep">&mdash;</span><span class="agent-phase">' + phase + '</span>' : '') +
+        '</div>' +
+        '<div class="agent-sub">' + title + tid + '</div>' +
+        '<div class="agent-meta">' +
+          '<div class="am-item"><span class="key">repo</span>&nbsp;' + esc(s.repo || '—') + '</div>' +
+          '<div class="am-item"><span class="key">branch</span>&nbsp;' + esc(s.branch || '—') + '</div>' +
+          '<div class="am-item"><span class="key">elapsed</span>&nbsp;' + fmtElapsed(s.elapsed_sec || 0) + '</div>' +
+          '<div class="am-item"><span class="key">heartbeat</span>&nbsp;' + (s.last_heartbeat_at ? fmtRelative(s.last_heartbeat_at) : '&mdash;') + '</div>' +
+          '<span class="am-badge ' + esc(state) + '">' + esc(state) + '</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="agent-right"><div class="agent-state-dot ' + esc(state) + '"></div></div>' +
+    '</div>';
   }).join('');
 }
-function selectRepo(id) { selectedRepo = id; /* re-render highlights only */ }
-
-/* ── RUNS TABLE ──────────────────────────────────────────── */
-function renderRuns(runs) {
-  if (!runs.length) {
-    el('runs-tbody').innerHTML = '<tr><td colspan="7"><div class="state-msg">no runs yet</div></td></tr>';
-    return;
-  }
-  el('runs-tbody').innerHTML = runs.slice(0, 50).map((r, i) => {
-    const statusTxt = r.status === 'completed' ? '✓ passed'
-      : r.status === 'failed' ? '✗ blocked'
-      : r.status === 'running' ? '⋯ running'
-      : '· ' + r.status;
-    const manual  = r.manual ? '<span class="badge-manual">manual</span>' : '';
-    const elapsed = r.started_at && r.finished_at
-      ? ((new Date(r.finished_at) - new Date(r.started_at)) / 1000).toFixed(1) + 's'
-      : '—';
-    const lcState = r.branch_state || '';
-    const lsBadge = lcState
-      ? `<span class="ls ls-${esc(lcState)}">${esc(lcState.replace(/_/g, ' '))}</span>`
-      : '<span style="color:var(--dim)">—</span>';
-    return `<tr class="run-row ${i === 0 && r.status === 'running' ? 'live-row' : ''}">
-      <td><div class="run-repo">${esc(r.repo)}</div></td>
-      <td>${esc(r.branch)}${manual}</td>
-      <td><span style="color:var(--muted)">${esc(r.provider)}</span></td>
-      <td><div class="run-gates"><div class="rg ${r.status === 'completed' ? 'pass' : r.status === 'failed' ? 'fail' : r.status === 'running' ? 'run' : 'idle'}" title="${esc(r.provider)}"></div></div></td>
-      <td><div class="rs ${r.status === 'completed' ? 'pass' : r.status === 'failed' ? 'fail' : r.status === 'running' ? 'run' : 'pending'}">${statusTxt}</div></td>
-      <td>${lsBadge}</td>
-      <td><div class="rt">${elapsed}</div></td>
-    </tr>`;
-  }).join('');
+function agentIcon(agent) {
+  var a = (agent || '').toLowerCase();
+  if (a.indexOf('claude') >= 0)   return '&#x1F916;';
+  if (a.indexOf('copilot') >= 0)  return '&#x1F419;';
+  if (a.indexOf('gemini') >= 0)   return '&#x2728;';
+  if (a.indexOf('codero') >= 0)   return '&#x203A;_';
+  return '&#x2B21;';
 }
 
-/* ── ACTIVITY FEED ───────────────────────────────────────── */
-function renderActivity(events) {
-  if (!events.length) {
-    el('activity-feed').innerHTML = '<div class="state-msg">no activity yet</div>';
-    el('act-count').textContent = '0 events';
-    return;
-  }
-  el('act-count').textContent = events.length + ' events';
-  el('activity-feed').innerHTML = events.map(ev => {
-    const dotClass = eventDotClass(ev.event_type);
-    const msg = activityMessage(ev);
-    return `<div class="activity-item">
-      <div class="ai-dot ${dotClass}"></div>
-      <div class="ai-body">
-        <div class="ai-msg">${esc(msg)}</div>
-        <div class="ai-meta">${fmtTime(ev.created_at)}</div>
-      </div>
-    </div>`;
+/* EVENT LOGS */
+function setEvtFilter(f, btn) {
+  eventFilter = f;
+  document.querySelectorAll('.filter-btn').forEach(function(b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+  renderEvents();
+}
+function renderEvents() {
+  var list = el('events-list'), cnt = el('ef-count');
+  if (!allEvents.length) { list.innerHTML = '<div class="state-msg">no events yet</div>'; cnt.textContent = ''; return; }
+  var filtered = eventFilter === 'ALL' ? allEvents : allEvents.filter(function(e) { return inferSev(e) === eventFilter; });
+  cnt.textContent = filtered.length + ' events';
+  if (!filtered.length) { list.innerHTML = '<div class="state-msg">no ' + eventFilter.toLowerCase() + ' events</div>'; return; }
+  list.innerHTML = filtered.map(function(ev) {
+    var sev  = inferSev(ev);
+    var ts   = fmtTime(ev.created_at);
+    var msg  = evMsg(ev);
+    var dot  = sev !== 'INFO' ? sev.toLowerCase() : 'info';
+    var msgC = sev !== 'INFO' ? sev.toLowerCase() : '';
+    var badge = ['CRITICAL','HIGH','MEDIUM','LOW'].indexOf(sev) >= 0
+      ? '<span class="ev-badge ' + sev + '">' + sev + '</span>' : '';
+    return '<div class="event-row"><span class="ev-ts">' + ts + '</span>' +
+      '<div class="ev-dot ' + dot + '"></div>' +
+      '<span class="ev-msg ' + msgC + '">' + esc(msg) + '</span>' + badge + '</div>';
   }).join('');
 }
-function eventDotClass(type) {
-  if (type.includes('finding') || type.includes('fail')) return 'fail';
-  if (type.includes('state_transition')) return 'run';
-  if (type.includes('system')) return 'system';
-  return 'pass';
+function inferSev(ev) {
+  var t = (ev.event_type || '').toLowerCase();
+  if (t.indexOf('secret') >= 0 || t.indexOf('critical') >= 0) return 'CRITICAL';
+  if (t.indexOf('fail') >= 0 || t.indexOf('blocked') >= 0 || t.indexOf('error') >= 0) return 'HIGH';
+  if (t.indexOf('warn') >= 0 || t.indexOf('degrad') >= 0) return 'MEDIUM';
+  if (t.indexOf('low') >= 0) return 'LOW';
+  try { var p = JSON.parse(ev.payload || '{}'); var s = (p.severity || '').toUpperCase(); if (['CRITICAL','HIGH','MEDIUM','LOW'].indexOf(s) >= 0) return s; } catch (_e) {}
+  return 'INFO';
 }
-function activityMessage(ev) {
+function evMsg(ev) {
   try {
-    const p = JSON.parse(ev.payload);
+    var p = JSON.parse(ev.payload || '{}');
     if (p.message) return p.message;
-    if (p.to_state) return ev.repo + '/' + ev.branch + ' → ' + p.to_state;
-  } catch (_) {}
-  return ev.event_type + ' on ' + ev.repo + '/' + ev.branch;
-}
-function prependActivityItem(ev) {
-  const feed = el('activity-feed');
-  const dotClass = eventDotClass(ev.event_type);
-  const msg = activityMessage(ev);
-  const item = document.createElement('div');
-  item.className = 'activity-item';
-  item.innerHTML = `<div class="ai-dot ${dotClass}"></div>
-    <div class="ai-body">
-      <div class="ai-msg">${esc(msg)}</div>
-      <div class="ai-meta">${fmtTime(ev.created_at)}</div>
-    </div>`;
-  if (feed.firstChild) feed.insertBefore(item, feed.firstChild);
-  else feed.appendChild(item);
-  while (feed.children.length > 50) feed.removeChild(feed.lastChild);
-  el('act-count').textContent = Math.min(feed.children.length, 50) + ' events';
+    if (p.to_state) return (ev.repo || '') + '/' + (ev.branch || '') + ' -> ' + p.to_state;
+  } catch (_e) {}
+  return (ev.event_type || '') + (ev.repo ? ' on ' + ev.repo + (ev.branch ? '/' + ev.branch : '') : '');
 }
 
-/* ── BLOCK REASONS ───────────────────────────────────────── */
-function renderBlockReasons(reasons) {
-  if (!reasons.length) {
-    el('block-list').innerHTML = '<div class="state-msg">no blockers recorded</div>';
+/* FINDINGS */
+function renderFindings(data) {
+  findingsCache = data;
+  if (!data || !data.report) {
+    ['f-total','f-failed','f-overall','f-sev-fail','f-sev-skip','f-sev-bypass','f-sev-pass'].forEach(function(id) { var e = el(id); if (e) e.textContent = '\u2014'; });
+    el('gate-table-wrap').innerHTML = '<div class="state-msg">no gate-check report &mdash; run <code>codero gate-check</code> to generate one</div>';
     return;
   }
-  const max = reasons[0].count || 1;
-  el('block-list').innerHTML = reasons.map((b, i) => `
-    <div class="block-item">
-      <div class="bl-rank">${i+1}</div>
-      <div class="bl-name">${esc(b.source)}</div>
-      <div class="bl-bar-wrap"><div class="bl-bar" style="width:${Math.round(b.count/max*100)}%"></div></div>
-      <div class="bl-count">${b.count}</div>
-    </div>`).join('');
-}
-
-/* ── GATE HEALTH ─────────────────────────────────────────── */
-function renderGateHealth(gates) {
-  if (!gates.length) {
-    el('gate-health').innerHTML = '<div class="state-msg">no gate data yet</div>';
-    return;
-  }
-  el('gate-health').innerHTML = gates.map(g => {
-    const pct = g.pass_rate >= 0 ? g.pass_rate.toFixed(0) + '%' : '—';
-    const barW = g.pass_rate >= 0 ? g.pass_rate : 0;
-    const color = g.pass_rate >= 90 ? 'var(--green)' : g.pass_rate >= 75 ? 'var(--amber)' : 'var(--red)';
-    return `<div style="display:flex;align-items:center;gap:7px;padding:3px 11px">
-      <div style="font-size:10px;color:var(--muted);width:72px;overflow:hidden;text-overflow:ellipsis">${esc(g.provider)}</div>
-      <div style="flex:1;height:2px;background:var(--border);border-radius:1px;overflow:hidden">
-        <div style="width:${barW}%;height:100%;background:${color};border-radius:1px;transition:width .4s"></div>
-      </div>
-      <div style="font-size:10px;color:var(--muted);width:26px;text-align:right">${pct}</div>
-    </div>`;
+  var rpt = data.report, sum = rpt.summary || {};
+  el('f-total').textContent   = sum.total  != null ? sum.total  : '\u2014';
+  el('f-failed').textContent  = sum.failed != null ? sum.failed : '\u2014';
+  var os = (sum.overall_status || '').toLowerCase();
+  elSet('f-overall', sum.overall_status || '\u2014', 'stat-val ' + (os === 'pass' ? 'green' : os === 'fail' ? 'red' : 'amber'));
+  el('f-sev-fail').textContent   = sum.failed           != null ? sum.failed           : '\u2014';
+  el('f-sev-skip').textContent   = ((sum.skipped || 0) + (sum.disabled || 0));
+  el('f-sev-bypass').textContent = sum.infra_bypassed   != null ? sum.infra_bypassed   : '\u2014';
+  el('f-sev-pass').textContent   = sum.passed           != null ? sum.passed           : '\u2014';
+  var checks = rpt.checks || [];
+  if (!checks.length) { el('gate-table-wrap').innerHTML = '<div class="state-msg">no checks in report</div>'; return; }
+  var rows = checks.map(function(c, i) {
+    var st  = (c.status || '').toLowerCase();
+    var res = (c.status || '').toUpperCase();
+    var tool = c.tool_name || c.group || '\u2014';
+    var dur  = c.duration_ms > 0 ? (c.duration_ms / 1000).toFixed(2) + 's' : '\u2014';
+    return '<div class="gate-table-row">' +
+      '<span class="gtr-id">' + String(i+1).padStart(3,'0') + '</span>' +
+      '<span>' + esc(c.name || '\u2014') + '</span>' +
+      '<span class="gtr-file" title="' + esc(c.tool_path || '') + '">' + esc(tool) + '</span>' +
+      '<span class="gtr-res ' + res + '">' + res + '</span>' +
+      '<span class="gtr-status ' + st + '">' + esc(c.status || '\u2014') + '</span>' +
+      '<span class="gtr-dur">' + dur + '</span>' +
+    '</div>';
   }).join('');
+  el('gate-table-wrap').innerHTML =
+    '<div class="gate-table-head"><span>ID</span><span>CHECK</span><span>TOOL</span><span>RESULT</span><span>STATUS</span><span>TIME</span></div>' + rows;
 }
 
-/* ── SETTINGS ────────────────────────────────────────────── */
+/* SETTINGS */
 async function loadSettings() {
   try {
-    const data = await apiFetch('/settings');
-    settingsLocal = JSON.parse(JSON.stringify(data)); // deep clone
+    var data = await apiFetch('/settings');
+    settingsLocal = JSON.parse(JSON.stringify(data));
     settingsDirty = false;
     renderSettings();
   } catch (err) {
-    el('int-grid').innerHTML = `<div class="state-msg error">failed to load settings: ${esc(err.message)}</div>`;
-    el('gate-config-body').innerHTML = `<tr><td colspan="5"><div class="state-msg error">—</div></td></tr>`;
+    el('int-grid').innerHTML = '<div class="state-msg error">failed to load settings: ' + esc(err.message) + '</div>';
   }
 }
 function renderSettings() {
   if (!settingsLocal) return;
-  // Integrations
-  el('int-grid').innerHTML = (settingsLocal.integrations || []).map(c => `
-    <div class="int-card ${c.connected ? 'connected' : ''}">
-      <div class="int-top">
-        <div class="int-icon">${intIcon(c.id)}</div>
-        <div class="int-info"><div class="int-name">${esc(c.name)}</div><div class="int-desc">${esc(c.desc)}</div></div>
-      </div>
-      <div class="int-status ${c.connected ? 'conn' : 'disc'}">${c.connected ? '● connected' : '○ not connected'}</div>
-      <button class="int-btn ${c.connected ? 'disconnect' : ''}" onclick="toggleIntegration('${esc(c.id)}')">
-        ${c.connected ? 'disconnect' : 'connect'}
-      </button>
-    </div>`).join('');
-
-  // Gate pipeline
-  el('gate-config-body').innerHTML = (settingsLocal.gate_pipeline || []).map((g, i) => `
-    <tr>
-      <td>${esc(g.name)}</td>
-      <td><div class="toggle-wrap"><div class="toggle ${g.enabled ? 'on' : ''}" onclick="toggleGate(${i},'enabled')"><div class="toggle-knob"></div></div></div></td>
-      <td><div class="toggle-wrap"><div class="toggle ${g.blocks_commit ? 'on' : ''}" onclick="toggleGate(${i},'blocks_commit')"><div class="toggle-knob"></div></div></div></td>
-      <td><span style="color:var(--muted)">${g.timeout_sec}s</span></td>
-      <td><span style="color:var(--muted)">${esc(g.provider)}</span></td>
-    </tr>`).join('');
-
+  bindIntegrationGrid();
+  el('int-grid').innerHTML = (settingsLocal.integrations || []).map(function(c) {
+    return '<div class="int-card ' + (c.connected ? 'connected' : '') + '">' +
+      '<div class="int-top"><div class="int-icon">' + intIcon(c.id) + '</div>' +
+      '<div class="int-info"><div class="int-name">' + esc(c.name) + '</div><div class="int-desc">' + esc(c.desc) + '</div></div></div>' +
+      '<div class="int-status ' + (c.connected ? 'conn' : 'disc') + '">' + (c.connected ? '&#x25CF; connected' : '&#x25CB; not connected') + '</div>' +
+      '<button type="button" class="int-btn ' + (c.connected ? 'disconnect' : '') + '" data-int-id="' + esc(c.id) + '">' + (c.connected ? 'disconnect' : 'connect') + '</button>' +
+    '</div>';
+  }).join('');
+  el('gate-config-body').innerHTML = (settingsLocal.gate_pipeline || []).map(function(g, i) {
+    return '<tr><td>' + esc(g.name) + '</td>' +
+      '<td><div class="toggle-wrap"><button type="button" class="toggle ' + (g.enabled ? 'on' : '') + '" aria-pressed="' + (g.enabled ? 'true' : 'false') + '" aria-label="Toggle enabled for ' + esc(g.name) + '" onclick="toggleGate(' + i + ',\'enabled\')"><div class="toggle-knob"></div></button></div></td>' +
+      '<td><div class="toggle-wrap"><button type="button" class="toggle ' + (g.blocks_commit ? 'on' : '') + '" aria-pressed="' + (g.blocks_commit ? 'true' : 'false') + '" aria-label="Toggle blocks commit for ' + esc(g.name) + '" onclick="toggleGate(' + i + ',\'blocks_commit\')"><div class="toggle-knob"></div></button></div></td>' +
+      '<td><span style="color:var(--muted)">' + g.timeout_sec + 's</span></td>' +
+      '<td><span style="color:var(--muted)">' + esc(g.provider) + '</span></td></tr>';
+  }).join('');
   el('save-btn').disabled = !settingsDirty;
   el('save-status').textContent = '';
 }
-function toggleIntegration(id) {
-  const c = settingsLocal.integrations.find(x => x.id === id);
-  if (c) { c.connected = !c.connected; settingsDirty = true; renderSettings(); }
+function bindIntegrationGrid() {
+  if (integrationGridBound) return;
+  var grid = el('int-grid');
+  if (!grid) return;
+  grid.addEventListener('click', function(ev) {
+    var btn = ev.target && ev.target.closest ? ev.target.closest('button[data-int-id]') : null;
+    if (!btn || !grid.contains(btn)) return;
+    ev.preventDefault();
+    toggleInt(btn.getAttribute('data-int-id'));
+  });
+  integrationGridBound = true;
 }
-function toggleGate(i, field) {
-  settingsLocal.gate_pipeline[i][field] = !settingsLocal.gate_pipeline[i][field];
-  settingsDirty = true;
-  renderSettings();
-}
+function toggleInt(id) { var c = (settingsLocal.integrations || []).find(function(x) { return x.id === id; }); if (c) { c.connected = !c.connected; settingsDirty = true; renderSettings(); } }
+function toggleGate(i, f) { settingsLocal.gate_pipeline[i][f] = !settingsLocal.gate_pipeline[i][f]; settingsDirty = true; renderSettings(); }
 async function saveSettings() {
-  const btn = el('save-btn');
-  const statusEl = el('save-status');
-  btn.disabled = true;
-  statusEl.textContent = 'saving…';
-  statusEl.className = 'save-status';
+  var btn = el('save-btn'), st = el('save-status');
+  btn.disabled = true; st.textContent = 'saving\u2026'; st.className = 'save-status';
   try {
-    const result = await apiFetch('/settings', {
-      method: 'PUT',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        integrations: settingsLocal.integrations,
-        gate_pipeline: settingsLocal.gate_pipeline,
-      }),
-    });
-    settingsLocal = result;
-    settingsDirty = false;
-    statusEl.textContent = '✓ saved';
-    statusEl.className = 'save-status ok';
-    renderSettings();
-    setTimeout(() => { statusEl.textContent = ''; }, 2500);
-  } catch (err) {
-    statusEl.textContent = '✗ ' + err.message;
-    statusEl.className = 'save-status err';
-    btn.disabled = false;
-  }
+    var result = await apiFetch('/settings', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ integrations: settingsLocal.integrations, gate_pipeline: settingsLocal.gate_pipeline }) });
+    settingsLocal = result; settingsDirty = false; st.textContent = '\u2713 saved'; st.className = 'save-status ok'; renderSettings();
+    setTimeout(function() { st.textContent = ''; }, 2500);
+  } catch (err) { st.textContent = '\u2717 ' + err.message; st.className = 'save-status err'; btn.disabled = false; }
 }
-function intIcon(id) {
-  const map = { coderabbit:'🐰', 'pr-agent':'🤖', 'gh-actions':'⚡', 'gitlab-ci':'🦊', 'semgrep-cloud':'🔍' };
-  return map[id] || '🔗';
-}
+function intIcon(id) { return { coderabbit:'\uD83D\uDC30', 'pr-agent':'\uD83E\uDD16', 'gh-actions':'\u26A1', 'gitlab-ci':'\uD83E\uDD8A', 'semgrep-cloud':'\uD83D\uDD0D' }[id] || '\uD83D\uDD17'; }
 
-/* ── DRAG & DROP UPLOAD ──────────────────────────────────── */
-const runsWrap   = document.getElementById('runs-wrap');
-const dropOverlay = document.getElementById('drop-overlay');
-
-runsWrap.addEventListener('dragover', e => { e.preventDefault(); dropOverlay.classList.add('visible'); });
-runsWrap.addEventListener('dragleave', e => { if (!runsWrap.contains(e.relatedTarget)) dropOverlay.classList.remove('visible'); });
-runsWrap.addEventListener('drop', e => {
-  e.preventDefault();
-  dropOverlay.classList.remove('visible');
-  if (e.dataTransfer.files.length) handleUpload(e.dataTransfer.files[0]);
-});
-
-async function handleUpload(file) {
-  const allowed = ['py','ts','go','js','diff','patch','rb','java'];
-  const ext = file.name.split('.').pop().toLowerCase();
-  if (!allowed.includes(ext)) {
-    showUploadError(`rejected: ${file.name} (unsupported type .${ext})`);
-    return;
-  }
-  const form = new FormData();
-  form.append('file', file);
-  if (selectedRepo) form.append('repo', selectedRepo);
+/* MAIN REFRESH */
+async function refresh() {
   try {
-    const result = await fetch(API + '/manual-review-upload', { method: 'POST', body: form });
-    const data = await result.json();
-    if (!result.ok) throw new Error(data.error || result.statusText);
-    showUploadSuccess(`manual upload accepted: ${file.name} → run ${data.run_id.slice(0,8)}`);
-    setTimeout(refreshOverview, 500);
-  } catch (err) {
-    showUploadError(`upload failed: ${err.message}`);
-  }
+    var results = await Promise.allSettled([
+      apiFetch('/health'),
+      apiFetch('/active-sessions'),
+      apiFetch('/gate-checks'),
+      apiFetch('/activity'),
+    ]);
+    var h   = results[0].status === 'fulfilled' ? results[0].value : null;
+    var sr  = results[1].status === 'fulfilled' ? results[1].value : null;
+    var gc  = results[2].status === 'fulfilled' ? results[2].value : null;
+    var act = results[3].status === 'fulfilled' ? results[3].value : null;
+    var sessions = (sr && sr.sessions) ? sr.sessions : [];
+    renderHealthBar(h);
+    renderSessions(sessions);
+    updateMergeBar(h, sessions);
+    findingsCache = gc;
+    if (activeTab === 'findings')  renderFindings(gc);
+    if (act && act.events) { allEvents = act.events; if (activeTab === 'eventlogs') renderEvents(); }
+  } catch (err) { console.error('refresh error:', err); }
 }
-function showUploadSuccess(msg) { prependActivityItem({ event_type:'manual_upload', repo:'', branch:'', payload:JSON.stringify({message:msg}), created_at:new Date().toISOString() }); }
-function showUploadError(msg)   { prependActivityItem({ event_type:'fail', repo:'', branch:'', payload:JSON.stringify({message:msg}), created_at:new Date().toISOString() }); }
 
-/* ── SSE REALTIME ────────────────────────────────────────── */
+/* SSE */
 function startSSE() {
   if (sseSource) sseSource.close();
   sseSource = new EventSource(API + '/events');
-  sseSource.addEventListener('activity', e => {
-    try {
-      const ev = JSON.parse(e.data);
-      prependActivityItem(ev);
-    } catch (_) {}
+  sseSource.addEventListener('activity', function(e) {
+    try { var ev = JSON.parse(e.data); allEvents.unshift(ev); if (allEvents.length > 100) allEvents.length = 100; if (activeTab === 'eventlogs') renderEvents(); } catch (_e) {}
   });
-  sseSource.onerror = () => {
-    sseSource.close();
-    sseSource = null;
-    setLiveBadge('degraded');
-    // fall back to polling; don't retry SSE immediately
-    schedulePoll();
-  };
+  sseSource.onerror = function() { sseSource.close(); sseSource = null; schedulePoll(); };
 }
 function schedulePoll() {
   if (pollTimer) clearTimeout(pollTimer);
-  pollTimer = setTimeout(async () => {
-    await refreshOverview();
-    schedulePoll();
-  }, POLL);
+  pollTimer = setTimeout(function() { refresh().then(schedulePoll); }, POLL);
 }
 
-/* ── UTILS ───────────────────────────────────────────────── */
-function el(id) { return document.getElementById(id); }
-function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-function fmtTime(iso) {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
-  } catch (_) { return iso; }
-}
+/* UTILS */
+function el(id)  { return document.getElementById(id); }
+function esc(s)  { var d = document.createElement('div'); d.textContent = String(s == null ? '' : s); return d.innerHTML; }
+function fmtTime(iso) { try { var d = new Date(iso); return d.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'}); } catch (_e) { return String(iso || ''); } }
 function fmtRelative(iso) {
-  try {
-    const diff = Date.now() - new Date(iso).getTime();
-    if (diff < 60000)  return Math.round(diff/1000) + 's ago';
-    if (diff < 3600000) return Math.round(diff/60000) + 'm ago';
-    return Math.round(diff/3600000) + 'h ago';
-  } catch (_) { return iso; }
+  try { var diff = Date.now() - new Date(iso).getTime(); if (diff < 60000) return Math.round(diff/1000) + 's ago'; if (diff < 3600000) return Math.round(diff/60000) + 'm ago'; return Math.round(diff/3600000) + 'h ago'; }
+  catch (_e) { return String(iso || ''); }
 }
+function fmtElapsed(sec) {
+  if (!sec) return '\u2014';
+  var h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60), s = sec%60;
+  if (h > 0) return h + 'h ' + m + 'm'; if (m > 0) return m + 'm ' + s + 's'; return s + 's';
+}
+function fmtAge(sec) { if (sec < 60) return sec + 's'; if (sec < 3600) return Math.round(sec/60) + 'm'; return Math.round(sec/3600) + 'h'; }
 
-/* ── BOOT ────────────────────────────────────────────────── */
-window.addEventListener('resize', () => requestAnimationFrame(drawCharts));
-refreshOverview();
+/* BOOT */
+refresh();
 startSSE();
 schedulePoll();
 </script>

@@ -723,6 +723,7 @@ func TestActiveSessions_WithFreshSession(t *testing.T) {
 	if s.ActivityState != "waiting" {
 		t.Fatalf("activity_state = %q, want waiting", s.ActivityState)
 	}
+	// owner_agent must be "unknown" — no reliable source of agent identity exists.
 	if s.OwnerAgent != "unknown" {
 		t.Fatalf("owner_agent = %q, want unknown", s.OwnerAgent)
 	}
@@ -787,5 +788,229 @@ func TestActiveSessions_MethodNotAllowed(t *testing.T) {
 	rec := doRequest(t, h, http.MethodPost, "/api/v1/dashboard/active-sessions", nil)
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("want 405, got %d", rec.Code)
+	}
+}
+
+/* ══════════════════════ TASK CONTEXT ═══════════════════════ */
+
+func TestActiveSessions_TaskContextParsed(t *testing.T) {
+	h, db := newTestHandler(t)
+	startedAt := time.Now().Add(-10 * time.Minute).UTC()
+	lastSeen := time.Now().Add(-30 * time.Second).UTC()
+	// Branch follows the feat/PROJ-ID-description pattern.
+	seedBranchSession(t, db, "acme/api", "feat/COD-042-fix-auth-token", "coding", "sess-task", lastSeen, startedAt)
+
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/active-sessions", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.ActiveSessionsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Sessions) != 1 {
+		t.Fatalf("sessions = %d, want 1", len(resp.Sessions))
+	}
+	s := resp.Sessions[0]
+	if s.Task == nil {
+		t.Fatal("task context must not be nil")
+	}
+	if s.Task.ID != "COD-042" {
+		t.Errorf("task.id = %q, want COD-042", s.Task.ID)
+	}
+	if s.Task.Title != "fix auth token" {
+		t.Errorf("task.title = %q, want 'fix auth token'", s.Task.Title)
+	}
+	if s.Task.Phase == "" {
+		t.Error("task.phase must not be empty")
+	}
+}
+
+func TestActiveSessions_TaskContextFallback(t *testing.T) {
+	h, db := newTestHandler(t)
+	startedAt := time.Now().Add(-5 * time.Minute).UTC()
+	lastSeen := time.Now().Add(-20 * time.Second).UTC()
+	// Branch does not follow the feat/PROJ-ID-description pattern.
+	seedBranchSession(t, db, "acme/api", "hotfix", "blocked", "sess-noid", lastSeen, startedAt)
+
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/active-sessions", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.ActiveSessionsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Sessions) != 1 {
+		t.Fatalf("sessions = %d, want 1", len(resp.Sessions))
+	}
+	// Task must be nil for branches that do not match the PROJ-NNN-desc pattern.
+	if resp.Sessions[0].Task != nil {
+		t.Fatalf("task must be nil for unrecognised branch, got %+v", resp.Sessions[0].Task)
+	}
+	// The activity state must reflect "blocked".
+	if resp.Sessions[0].ActivityState != "blocked" {
+		t.Errorf("activity_state = %q, want blocked", resp.Sessions[0].ActivityState)
+	}
+}
+
+/* ══════════════════════ DASHBOARD HEALTH ═══════════════════ */
+
+func TestDashboardHealth_OK(t *testing.T) {
+	h, _ := newTestHandler(t)
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/health", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.DashboardHealth
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Database.Status != "ok" {
+		t.Errorf("database.status = %q, want ok", resp.Database.Status)
+	}
+	if resp.GeneratedAt.IsZero() {
+		t.Error("generated_at must not be zero")
+	}
+	// Feeds must be populated (status may be "unavailable" in empty test DB).
+	if resp.Feeds.ActiveSessions.Status == "" {
+		t.Error("feeds.active_sessions.status must not be empty")
+	}
+	if resp.Feeds.GateChecks.Status == "" {
+		t.Error("feeds.gate_checks.status must not be empty")
+	}
+}
+
+func TestDashboardHealth_MethodNotAllowed(t *testing.T) {
+	h, _ := newTestHandler(t)
+	rec := doRequest(t, h, http.MethodPost, "/api/v1/dashboard/health", nil)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("want 405, got %d", rec.Code)
+	}
+}
+
+func TestDashboardHealth_ActiveAgentCount(t *testing.T) {
+	h, db := newTestHandler(t)
+	// Seed one visible fresh session and one fresh session that should not be
+	// counted because its state is not surfaced in the active-sessions panel.
+	lastSeen := time.Now().Add(-30 * time.Second).UTC()
+	seedBranchSession(t, db, "acme/api", "feat/x", "coding", "sess-health-1", lastSeen, lastSeen)
+	seedBranchSession(t, db, "acme/api", "feat/y", "completed", "sess-health-2", lastSeen, lastSeen)
+
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/health", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.DashboardHealth
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.ActiveAgentCount != 1 {
+		t.Errorf("active_agent_count = %d, want 1", resp.ActiveAgentCount)
+	}
+	// Sessions feed must be "ok" (fresh heartbeat within threshold).
+	if resp.Feeds.ActiveSessions.Status != "ok" {
+		t.Errorf("feeds.active_sessions.status = %q, want ok", resp.Feeds.ActiveSessions.Status)
+	}
+}
+
+func TestDashboardHealth_GateCheckDirectoryUnavailable(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("CODERO_GATE_CHECK_REPORT_PATH", tmpDir)
+
+	h, _ := newTestHandler(t)
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/health", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.DashboardHealth
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Feeds.GateChecks.Status != "unavailable" {
+		t.Errorf("feeds.gate_checks.status = %q, want unavailable for directory path", resp.Feeds.GateChecks.Status)
+	}
+}
+
+func TestDashboardHealth_StaleFeedDetected(t *testing.T) {
+	h, db := newTestHandler(t)
+	// Seed a session with a heartbeat older than the stale threshold (5 min).
+	lastSeen := time.Now().Add(-10 * time.Minute).UTC()
+	seedBranchSession(t, db, "acme/api", "feat/y", "coding", "sess-stale", lastSeen, lastSeen)
+
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/health", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.DashboardHealth
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// Sessions feed should be "stale" since the last heartbeat is > 5 min ago.
+	if resp.Feeds.ActiveSessions.Status != "stale" {
+		t.Errorf("feeds.active_sessions.status = %q, want stale", resp.Feeds.ActiveSessions.Status)
+	}
+}
+
+func TestDashboardHealth_GateCheckPathFromEnv(t *testing.T) {
+	// The health endpoint must use the same report-path resolution as gate-checks:
+	// honour CODERO_GATE_CHECK_REPORT_PATH when set.
+	tmpDir := t.TempDir()
+	customPath := filepath.Join(tmpDir, "custom-report.json")
+	if err := os.WriteFile(customPath, []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("write custom report: %v", err)
+	}
+
+	t.Setenv("CODERO_GATE_CHECK_REPORT_PATH", customPath)
+
+	h, _ := newTestHandler(t)
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/health", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.DashboardHealth
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// The report file exists and was written just now, so feed should be "ok".
+	if resp.Feeds.GateChecks.Status != "ok" {
+		t.Errorf("feeds.gate_checks.status = %q, want ok (custom path %s)", resp.Feeds.GateChecks.Status, customPath)
+	}
+}
+
+/* ══════════════════════ STATIC DASHBOARD UI ════════════════ */
+
+func TestDashboardHTML_HasProcessesTab(t *testing.T) {
+	// The embedded index.html must contain the Processes tab markup
+	// and the health bar so operators can verify the mockup-driven UI is present.
+	content, err := fs.ReadFile(dashboard.Static, "static/index.html")
+	if err != nil {
+		t.Fatalf("read static/index.html: %v", err)
+	}
+	s := string(content)
+	checks := []struct {
+		needle string
+		desc   string
+	}{
+		{"Processes", "Processes tab"},
+		{"Event Logs", "Event Logs tab"},
+		{"Findings", "Findings tab"},
+		{"System Health", "health bar label"},
+		{"active-sessions", "active-sessions API call"},
+		{"apiFetch('/health')", "health endpoint call"},
+		{"Review Findings", "review findings button"},
+		{"agents active", "agents active badge"},
+	}
+	for _, c := range checks {
+		if !strings.Contains(s, c.needle) {
+			t.Errorf("index.html missing %s (needle %q)", c.desc, c.needle)
+		}
 	}
 }

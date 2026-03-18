@@ -148,10 +148,27 @@ func mustRun(t *testing.T, dir string, args ...string) {
 	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	cmd := exec.Command(args[0], args[1:]...) //nolint:gosec
 	cmd.Dir = dir
+	cmd.Env = cleanGitEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("command %v failed: %v\n%s", args, err, out)
 	}
+}
+
+func cleanGitEnv() []string {
+	env := os.Environ()
+	cleaned := make([]string, 0, len(env))
+	for _, kv := range env {
+		key, _, found := strings.Cut(kv, "=")
+		if !found {
+			continue
+		}
+		if strings.HasPrefix(key, "GIT_") {
+			continue
+		}
+		cleaned = append(cleaned, kv)
+	}
+	return cleaned
 }
 
 // writeFile writes content to path (relative to dir) and returns the absolute path.

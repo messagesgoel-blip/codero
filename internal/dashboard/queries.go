@@ -3,11 +3,29 @@ package dashboard
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
+	"github.com/codero/codero/internal/gatecheck"
+	loglib "github.com/codero/codero/internal/log"
 	"github.com/codero/codero/internal/scheduler"
 )
+
+// gateCheckReportPath returns the path to the last gate-check report file.
+// It honours CODERO_GATE_CHECK_REPORT_PATH and falls back to
+// gatecheck.DefaultReportPath when the variable is unset.
+func gateCheckReportPath() string {
+	if p := os.Getenv("CODERO_GATE_CHECK_REPORT_PATH"); p != "" {
+		return p
+	}
+	return gatecheck.DefaultReportPath
+}
+
+const activeSessionStatesSQL = "('coding', 'local_review', 'queued_cli', 'cli_reviewing', 'reviewed', 'merge_ready', 'blocked', 'paused')"
 
 // queryOverview returns today's aggregate run stats.
 func queryOverview(ctx context.Context, db *sql.DB) (runsToday, passedToday int, blockedCount int, avgGateSec float64, err error) {
@@ -253,20 +271,23 @@ func queryGateHealth(ctx context.Context, db *sql.DB) ([]GateHealth, error) {
 }
 
 // queryActiveSessions returns the current fresh session list for the GUI.
+// Deduplication by session ID is performed in Go before the page-size limit
+// is applied, so callers receive the first `limit` *unique* sessions.
 func queryActiveSessions(ctx context.Context, db *sql.DB, limit int) ([]ActiveSession, error) {
 	// Fresh heartbeats only: stale sessions are filtered out so the panel mirrors
 	// live activity rather than historical branch ownership.
 	threshold := time.Now().Add(-scheduler.SessionHeartbeatTTL)
 
+	// No SQL LIMIT here — limit is applied after dedup below so we never
+	// discard the only row for a session that appears multiple times early.
 	rows, err := db.QueryContext(ctx, `
 		SELECT owner_session_id, repo, branch, state,
 		       owner_session_last_seen, submission_time, created_at, updated_at
 		FROM branch_states
 		WHERE owner_session_id <> ''
 		  AND owner_session_last_seen IS NOT NULL
-		  AND state IN ('coding', 'local_review', 'queued_cli', 'cli_reviewing', 'reviewed', 'merge_ready', 'blocked', 'paused')
-		ORDER BY owner_session_last_seen DESC, updated_at DESC
-		LIMIT ?`, limit)
+		  AND state IN `+activeSessionStatesSQL+`
+		ORDER BY owner_session_last_seen DESC, updated_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("queryActiveSessions: query failed: %w", err)
 	}
@@ -301,12 +322,19 @@ func queryActiveSessions(ctx context.Context, db *sql.DB, limit int) ([]ActiveSe
 			SessionID:       sessionID,
 			Repo:            repo,
 			Branch:          branch,
-			OwnerAgent:      "unknown",
+			OwnerAgent:      resolveOwnerAgent(branch),
 			ActivityState:   sessionActivityState(state),
+			Task:            resolveTaskFromBranch(branch, state),
 			StartedAt:       startedAt,
 			LastHeartbeatAt: lastSeen.Time,
 			ElapsedSec:      int64(elapsed.Seconds()),
 		})
+
+		// Apply the page-size limit only after dedup so callers get the first
+		// N unique sessions, not the first N rows that may share session IDs.
+		if limit > 0 && len(out) >= limit {
+			break
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("queryActiveSessions: rows error: %w", err)
@@ -421,4 +449,153 @@ func insertManualReviewRun(ctx context.Context, db *sql.DB, id, repo, branch, he
 		VALUES (?, ?, ?, ?, 'manual', 'pending', ?, '', ?)`,
 		id, repo, branch, headHash, now, now)
 	return err
+}
+
+// resolveTaskFromBranch derives task context from a branch name.
+// Returns nil unless the branch uses the literal feat/PROJ-NNN-description pattern
+// (e.g. feat/COD-056-fix-auth). Callers must render nil task gracefully.
+func resolveTaskFromBranch(branch, state string) *ActiveTask {
+	if !strings.HasPrefix(branch, "feat/") {
+		return nil
+	}
+	b := strings.TrimPrefix(branch, "feat/")
+	// Must be PROJ-NNN-description where the second segment is numeric,
+	// e.g. COD-056-dashboard-activity-health → taskID="COD-056".
+	parts := strings.SplitN(b, "-", 3)
+	if len(parts) < 3 {
+		return nil
+	}
+	if _, err := strconv.Atoi(parts[1]); err != nil {
+		return nil // second segment is not a numeric ID — not a real task branch
+	}
+	taskID := parts[0] + "-" + parts[1]
+	title := strings.ReplaceAll(parts[2], "-", " ")
+	return &ActiveTask{
+		ID:    taskID,
+		Title: title,
+		Phase: sessionPhaseLabel(state),
+	}
+}
+
+// resolveOwnerAgent returns the agent label for a session.
+// There is no reliable in-DB source for agent identity, so this always returns
+// "unknown". A richer resolver would require explicit agent registration.
+func resolveOwnerAgent(_ string) string {
+	return "unknown"
+}
+
+// sessionPhaseLabel maps a raw branch state to a human-readable phase label.
+func sessionPhaseLabel(state string) string {
+	switch state {
+	case "coding":
+		return "coding"
+	case "local_review":
+		return "local review"
+	case "queued_cli":
+		return "queued for review"
+	case "cli_reviewing":
+		return "review in progress"
+	case "reviewed":
+		return "reviewed"
+	case "merge_ready":
+		return "merge ready"
+	case "blocked":
+		return "blocked"
+	case "paused":
+		return "paused"
+	default:
+		return "unknown"
+	}
+}
+
+// staleFeedThreshold is the age after which a feed is considered stale.
+const staleFeedThreshold = 5 * time.Minute
+
+// queryDashboardHealth probes database connectivity, per-feed freshness, and
+// the live active-agent count. It is the backend for GET /api/v1/dashboard/health.
+// It returns an error when a freshness/count query fails so the handler can
+// surface a real backend failure rather than silently serving stale defaults.
+func queryDashboardHealth(ctx context.Context, db *sql.DB) (DashboardHealth, error) {
+	h := DashboardHealth{GeneratedAt: time.Now().UTC()}
+	dbHealthy := true
+
+	// Database health: a lightweight ping.
+	if err := db.PingContext(ctx); err != nil {
+		loglib.Error("dashboard: health db ping failed",
+			loglib.FieldComponent, "dashboard", "error", err)
+		h.Database = ServiceStatus{Status: "down", Message: "database unreachable"}
+		dbHealthy = false
+	} else {
+		h.Database = ServiceStatus{Status: "ok"}
+	}
+
+	// Active-sessions feed freshness: age of the most recent heartbeat.
+	if dbHealthy {
+		var lastHeartbeat sql.NullTime
+		if err := db.QueryRowContext(ctx,
+			`SELECT owner_session_last_seen FROM branch_states
+			 WHERE owner_session_id <> '' AND owner_session_last_seen IS NOT NULL
+			 ORDER BY owner_session_last_seen DESC LIMIT 1`,
+		).Scan(&lastHeartbeat); err != nil {
+			if !errors.Is(err, sql.ErrNoRows) {
+				return h, fmt.Errorf("queryDashboardHealth: active sessions freshness query: %w", err)
+			}
+			h.Feeds.ActiveSessions = FeedStatus{Status: "unavailable"}
+		} else if lastHeartbeat.Valid {
+			age := time.Since(lastHeartbeat.Time)
+			status := "ok"
+			if age > staleFeedThreshold {
+				status = "stale"
+			}
+			h.Feeds.ActiveSessions = FeedStatus{
+				Status:       status,
+				LastRefresh:  lastHeartbeat.Time.UTC(),
+				FreshnessSec: int64(age.Seconds()),
+			}
+		} else {
+			h.Feeds.ActiveSessions = FeedStatus{Status: "unavailable"}
+		}
+	} else {
+		h.Feeds.ActiveSessions = FeedStatus{Status: "unavailable"}
+	}
+
+	// Gate-checks feed freshness: mod time of the last report file.
+	reportPath := gateCheckReportPath()
+	if info, err := os.Stat(reportPath); err == nil {
+		if !info.Mode().IsRegular() {
+			h.Feeds.GateChecks = FeedStatus{Status: "unavailable"}
+		} else {
+			age := time.Since(info.ModTime())
+			status := "ok"
+			if age > staleFeedThreshold {
+				status = "stale"
+			}
+			h.Feeds.GateChecks = FeedStatus{
+				Status:       status,
+				LastRefresh:  info.ModTime().UTC(),
+				FreshnessSec: int64(age.Seconds()),
+			}
+		}
+	} else {
+		h.Feeds.GateChecks = FeedStatus{Status: "unavailable"}
+	}
+
+	// Count currently active (non-stale) agent sessions.
+	if dbHealthy {
+		threshold := time.Now().Add(-scheduler.SessionHeartbeatTTL)
+		var count int
+		if err := db.QueryRowContext(ctx,
+			`SELECT COUNT(DISTINCT owner_session_id) FROM branch_states
+			 WHERE owner_session_id <> ''
+			   AND owner_session_last_seen IS NOT NULL
+			   AND owner_session_last_seen >= ?
+			   AND state IN `+activeSessionStatesSQL,
+			threshold,
+		).Scan(&count); err != nil {
+			return h, fmt.Errorf("queryDashboardHealth: active agent count query: %w", err)
+		}
+		h.ActiveAgentCount = count
+	}
+
+	return h, nil
 }

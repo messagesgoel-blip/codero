@@ -23,6 +23,22 @@ func repoRoot(t *testing.T) string {
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 }
 
+func cleanGitEnv() []string {
+	env := os.Environ()
+	cleaned := make([]string, 0, len(env))
+	for _, kv := range env {
+		key, _, found := strings.Cut(kv, "=")
+		if !found {
+			continue
+		}
+		if strings.HasPrefix(key, "GIT_") {
+			continue
+		}
+		cleaned = append(cleaned, kv)
+	}
+	return cleaned
+}
+
 // TestHelpContract validates that --help returns exit code 0 (success), not 1 (usage error).
 // This aligns with codero-finish exit code semantics where 0=success, 1=feedback/retry needed.
 func TestHelpContract(t *testing.T) {
@@ -211,7 +227,7 @@ func TestGateCheckInvalidFlagsExitCode2(t *testing.T) {
 	// Build a temporary binary so the exact exit code is preserved.
 	binDir := t.TempDir()
 	binPath := filepath.Join(binDir, "codero-test")
-	buildCmd := exec.Command("go", "build", "-o", binPath, "./cmd/codero")
+	buildCmd := exec.Command("go", "build", "-buildvcs=false", "-o", binPath, "./cmd/codero")
 	buildCmd.Dir = root
 	if buildOut, err := buildCmd.CombinedOutput(); err != nil {
 		t.Fatalf("build codero binary: %v\n%s", err, string(buildOut))
@@ -296,6 +312,7 @@ func gateCheckRepoClean(t *testing.T) string {
 		t.Helper()
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
+		cmd.Env = cleanGitEnv()
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("git %v: %v\noutput: %s", args, err, string(out))
@@ -321,6 +338,7 @@ func gateCheckRepoWithConflict(t *testing.T) string {
 	}
 	cmd := exec.Command("git", "add", "tracked.txt")
 	cmd.Dir = dir
+	cmd.Env = cleanGitEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git add conflict file: %v\noutput: %s", err, string(out))
