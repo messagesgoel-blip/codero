@@ -336,7 +336,7 @@ Evidence: pilot rerun batch 2 evidence directory (local CI run artifacts, not tr
 ---
 
 ### v1.2.3 — Functional Hardening / Non-UI Release (COD-052)
-**Status:** Release candidate  
+**Status:** Released (tag: v1.2.3)  
 **Scope:** Non-UI functional release only
 
 **Included:**
@@ -351,15 +351,15 @@ Evidence: pilot rerun batch 2 evidence directory (local CI run artifacts, not tr
 
 ---
 
-### v1.2.4 — UI Modernization + Feedback Loop Hardening (deferred)
-**Status:** Backlog
-**Scope:** TUI and dashboard visual refresh + pre-push/CI feedback loop hardening
+### v1.2.4 — UI Modernization + Feedback Loop Hardening
+**Status:** In progress
+**Scope:** TUI/dashboard visual refresh + infra/docs clarity; feedback-loop hardening shipped
 **Spec:** `docs/roadmaps/v1.2.4-backlog.md`
 
 Key items:
-- COD-NEW-C: Autonomous finish-loop (`codero-finish.sh`) — agent hands off; Codero drives commit→push→PR→CI→CodeRabbit→feedback loop until merge-ready
-- COD-NEW-A: Post-push CI watcher (`ci-watch.sh`) — surfaces CI failures back to agent after push
-- COD-NEW-B: Pre-push test gate (`pre-push` hook) — runs `go test ./...` before push, blocks on failure
+- ✅ COD-NEW-A: Post-push CI watcher (`ci-watch.sh`) — completed (PR #60)
+- ✅ COD-NEW-B: Pre-push test gate (`pre-push` hook) — completed (PR #60)
+- ✅ COD-NEW-C: Autonomous finish-loop (`codero-finish.sh`) — completed (PR #62)
 - UI-001: TUI layout and visual design modernization (Bubble Tea)
 - UI-002: Dashboard UI component refresh
 - INFRA-001: Clarify `/gate` vs `/gate-check` endpoint naming in docs
