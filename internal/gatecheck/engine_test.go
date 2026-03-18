@@ -319,6 +319,43 @@ func TestEngine_ForbiddenPaths_Disabled(t *testing.T) {
 			if c.Status != gatecheck.StatusDisabled {
 				t.Errorf("forbidden-paths disabled: got %q, want disabled", c.Status)
 			}
+			const wantReason = "CODERO_ENFORCE_FORBIDDEN_PATHS not set"
+			if c.Reason != wantReason {
+				t.Errorf("forbidden-paths reason: got %q, want %q", c.Reason, wantReason)
+			}
+			return
+		}
+	}
+	t.Fatal("forbidden-paths check not found")
+}
+
+// TestEngine_ForbiddenPaths_EnforceSetRegexEmpty verifies that when
+// CODERO_ENFORCE_FORBIDDEN_PATHS is true but CODERO_FORBIDDEN_PATH_REGEX is
+// empty the disabled reason message correctly identifies the missing regex,
+// not the enforce flag (BUG-001 / COD-052).
+func TestEngine_ForbiddenPaths_EnforceSetRegexEmpty(t *testing.T) {
+	dir := makeRepo(t)
+	writeFile(t, dir, "a.go", "package main\n")
+	mustRun(t, dir, "git", "add", "a.go")
+
+	cfg := gatecheck.EngineConfig{
+		Profile:               gatecheck.ProfileStrict,
+		RepoPath:              dir,
+		EnforceForbiddenPaths: true,
+		ForbiddenPathRegex:    "", // enforce set but regex empty
+	}
+	engine := gatecheck.NewEngine(cfg)
+	report := engine.Run(context.Background())
+
+	for _, c := range report.Checks {
+		if c.ID == "forbidden-paths" {
+			if c.Status != gatecheck.StatusDisabled {
+				t.Errorf("forbidden-paths: got status %q, want disabled", c.Status)
+			}
+			const wantReason = "CODERO_FORBIDDEN_PATH_REGEX not set or empty"
+			if c.Reason != wantReason {
+				t.Errorf("forbidden-paths reason: got %q, want %q", c.Reason, wantReason)
+			}
 			return
 		}
 	}
