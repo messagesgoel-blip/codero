@@ -37,6 +37,7 @@ const (
 	ReasonInfraRateLimit ReasonCode = "infra_rate_limit"
 	ReasonInfraNetwork   ReasonCode = "infra_network"
 	ReasonExecError      ReasonCode = "exec_error"
+	ReasonCheckFailed    ReasonCode = "check_failed"
 )
 
 type Group string

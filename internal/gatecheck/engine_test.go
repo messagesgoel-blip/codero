@@ -484,3 +484,103 @@ func TestLoadEngineConfig_EnvOverrides(t *testing.T) {
 		t.Errorf("RequiredChecks: got %v", cfg.RequiredChecks)
 	}
 }
+
+// TestEngine_FailedCheck_HasReasonCode verifies that when a check produces a fail
+// status without an explicit reason_code (the common case for content checks), the
+// engine's normalisation pass fills in ReasonCode = "check_failed".
+// This covers BUG-002 from the v1.2.3 advanced pilot.
+func TestEngine_FailedCheck_HasReasonCode(t *testing.T) {
+	dir := t.TempDir()
+	if err := exec.Command("git", "-C", dir, "init", "-q").Run(); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	if err := exec.Command("git", "-C", dir, "config", "user.email", "t@t.com").Run(); err != nil {
+		t.Fatalf("git config email: %v", err)
+	}
+	if err := exec.Command("git", "-C", dir, "config", "user.name", "Test").Run(); err != nil {
+		t.Fatalf("git config name: %v", err)
+	}
+
+	// Stage a file with merge conflict markers to trigger a deterministic fail.
+	f := filepath.Join(dir, "conflict.txt")
+	content := "hello\n<<<<<<< HEAD\nbranch-a\n=======\nbranch-b\n>>>>>>> other\n"
+	if err := os.WriteFile(f, []byte(content), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	if err := exec.Command("git", "-C", dir, "add", "conflict.txt").Run(); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+
+	cfg := gatecheck.EngineConfig{
+		Profile:  gatecheck.ProfilePortable,
+		RepoPath: dir,
+	}
+	report := gatecheck.NewEngine(cfg).Run(context.Background())
+
+	var failCheck *gatecheck.CheckResult
+	for i := range report.Checks {
+		if report.Checks[i].ID == "merge-markers" {
+			failCheck = &report.Checks[i]
+			break
+		}
+	}
+	if failCheck == nil {
+		t.Fatal("merge-markers check not found in report")
+	}
+	if failCheck.Status != gatecheck.StatusFail {
+		t.Fatalf("expected merge-markers status=fail, got %q", failCheck.Status)
+	}
+	if failCheck.ReasonCode != gatecheck.ReasonCheckFailed {
+		t.Errorf("expected reason_code=%q, got %q", gatecheck.ReasonCheckFailed, failCheck.ReasonCode)
+	}
+}
+
+// TestEngine_ExplicitReasonCode_NotOverwritten confirms that when a check runner
+// sets an explicit reason_code on a fail result (e.g. exec_error, infra_bypass),
+// the normalisation pass does NOT overwrite it.
+func TestEngine_ExplicitReasonCode_NotOverwritten(t *testing.T) {
+	// exec_error is set by runForbiddenPathsCheck when the regex is invalid.
+	dir := t.TempDir()
+	if err := exec.Command("git", "-C", dir, "init", "-q").Run(); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	if err := exec.Command("git", "-C", dir, "config", "user.email", "t@t.com").Run(); err != nil {
+		t.Fatalf("git config email: %v", err)
+	}
+	if err := exec.Command("git", "-C", dir, "config", "user.name", "Test").Run(); err != nil {
+		t.Fatalf("git config name: %v", err)
+	}
+	f := filepath.Join(dir, "file.txt")
+	if err := os.WriteFile(f, []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := exec.Command("git", "-C", dir, "add", "file.txt").Run(); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+
+	cfg := gatecheck.EngineConfig{
+		Profile:               gatecheck.ProfilePortable,
+		RepoPath:              dir,
+		EnforceForbiddenPaths: true,
+		ForbiddenPathRegex:    "[invalid(regex",
+	}
+	report := gatecheck.NewEngine(cfg).Run(context.Background())
+
+	var fpCheck *gatecheck.CheckResult
+	for i := range report.Checks {
+		if report.Checks[i].ID == "forbidden-paths" {
+			fpCheck = &report.Checks[i]
+			break
+		}
+	}
+	if fpCheck == nil {
+		t.Fatal("forbidden-paths check not found")
+	}
+	if fpCheck.Status != gatecheck.StatusFail {
+		t.Fatalf("expected status=fail, got %q", fpCheck.Status)
+	}
+	// exec_error was set by the runner; normalisation must not overwrite it.
+	if fpCheck.ReasonCode != gatecheck.ReasonExecError {
+		t.Errorf("expected reason_code=%q (set by runner), got %q", gatecheck.ReasonExecError, fpCheck.ReasonCode)
+	}
+}

@@ -52,6 +52,9 @@ func (e *Engine) Run(ctx context.Context) Report {
 				result.Reason = "not applicable"
 			}
 		}
+		if result.Status == StatusFail && result.ReasonCode == "" {
+			result.ReasonCode = ReasonCheckFailed
+		}
 		checks = append(checks, result)
 	}
 
