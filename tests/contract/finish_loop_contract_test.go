@@ -81,33 +81,33 @@ func TestFinishLoopCRBodyIsFinalHelperLogic(t *testing.T) {
 	script := finishScriptPath(t)
 
 	cases := []struct {
-		name     string
-		body     string
+		name      string
+		body      string
 		wantFinal bool
 	}{
 		{
-			name: "summary_comment_zero_actionable",
-			body: "<!-- This is an auto-generated comment by CodeRabbit -->\n## Summary by CodeRabbit\n\n**Actionable comments posted: 0**\n",
+			name:      "summary_comment_zero_actionable",
+			body:      "<!-- This is an auto-generated comment by CodeRabbit -->\n## Summary by CodeRabbit\n\n**Actionable comments posted: 0**\n",
 			wantFinal: true,
 		},
 		{
-			name: "summary_comment_nonzero_actionable",
-			body: "<!-- This is an auto-generated comment by CodeRabbit -->\n## Summary by CodeRabbit\n\n**Actionable comments posted: 3**\n",
+			name:      "summary_comment_nonzero_actionable",
+			body:      "<!-- This is an auto-generated comment by CodeRabbit -->\n## Summary by CodeRabbit\n\n**Actionable comments posted: 3**\n",
 			wantFinal: true,
 		},
 		{
-			name: "review_in_progress_placeholder",
-			body: "CodeRabbit review in progress... I will post a summary when complete.",
+			name:      "review_in_progress_placeholder",
+			body:      "CodeRabbit review in progress... I will post a summary when complete.",
 			wantFinal: false,
 		},
 		{
-			name: "walkthrough_marker",
-			body: "<!-- walkthrough_start -->\n## Walkthrough\nSome changes were made.\n",
+			name:      "walkthrough_marker",
+			body:      "<!-- walkthrough_start -->\n## Walkthrough\nSome changes were made.\n",
 			wantFinal: true,
 		},
 		{
-			name: "empty_body",
-			body: "",
+			name:      "empty_body",
+			body:      "",
 			wantFinal: false,
 		},
 	}
