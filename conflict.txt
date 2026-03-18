@@ -1,6 +1,0 @@
-hello
-<<<<<<< HEAD
-branch-a
-=======
-branch-b
->>>>>>> other

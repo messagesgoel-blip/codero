@@ -289,7 +289,7 @@ falls back to the compiled-in default path when the variable is unset.
 
 ```json
 {
-  "database": { "status": "ok", "message": "" },
+  "database": { "status": "ok" },
   "feeds": {
     "active_sessions": {
       "status": "ok",

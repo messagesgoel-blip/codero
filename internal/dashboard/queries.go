@@ -25,6 +25,8 @@ func gateCheckReportPath() string {
 	return gatecheck.DefaultReportPath
 }
 
+const activeSessionStatesSQL = "('coding', 'local_review', 'queued_cli', 'cli_reviewing', 'reviewed', 'merge_ready', 'blocked', 'paused')"
+
 // queryOverview returns today's aggregate run stats.
 func queryOverview(ctx context.Context, db *sql.DB) (runsToday, passedToday int, blockedCount int, avgGateSec float64, err error) {
 	// runs today + passed today
@@ -284,7 +286,7 @@ func queryActiveSessions(ctx context.Context, db *sql.DB, limit int) ([]ActiveSe
 		FROM branch_states
 		WHERE owner_session_id <> ''
 		  AND owner_session_last_seen IS NOT NULL
-		  AND state IN ('coding', 'local_review', 'queued_cli', 'cli_reviewing', 'reviewed', 'merge_ready', 'blocked', 'paused')
+		  AND state IN `+activeSessionStatesSQL+`
 		ORDER BY owner_session_last_seen DESC, updated_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("queryActiveSessions: query failed: %w", err)
@@ -560,15 +562,19 @@ func queryDashboardHealth(ctx context.Context, db *sql.DB) (DashboardHealth, err
 	// Gate-checks feed freshness: mod time of the last report file.
 	reportPath := gateCheckReportPath()
 	if info, err := os.Stat(reportPath); err == nil {
-		age := time.Since(info.ModTime())
-		status := "ok"
-		if age > staleFeedThreshold {
-			status = "stale"
-		}
-		h.Feeds.GateChecks = FeedStatus{
-			Status:       status,
-			LastRefresh:  info.ModTime().UTC(),
-			FreshnessSec: int64(age.Seconds()),
+		if !info.Mode().IsRegular() {
+			h.Feeds.GateChecks = FeedStatus{Status: "unavailable"}
+		} else {
+			age := time.Since(info.ModTime())
+			status := "ok"
+			if age > staleFeedThreshold {
+				status = "stale"
+			}
+			h.Feeds.GateChecks = FeedStatus{
+				Status:       status,
+				LastRefresh:  info.ModTime().UTC(),
+				FreshnessSec: int64(age.Seconds()),
+			}
 		}
 	} else {
 		h.Feeds.GateChecks = FeedStatus{Status: "unavailable"}
@@ -582,7 +588,8 @@ func queryDashboardHealth(ctx context.Context, db *sql.DB) (DashboardHealth, err
 			`SELECT COUNT(DISTINCT owner_session_id) FROM branch_states
 			 WHERE owner_session_id <> ''
 			   AND owner_session_last_seen IS NOT NULL
-			   AND owner_session_last_seen >= ?`,
+			   AND owner_session_last_seen >= ?
+			   AND state IN `+activeSessionStatesSQL,
 			threshold,
 		).Scan(&count); err != nil {
 			return h, fmt.Errorf("queryDashboardHealth: active agent count query: %w", err)

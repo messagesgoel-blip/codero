@@ -307,6 +307,7 @@ let pollTimer     = null;
 let allEvents     = [];
 let eventFilter   = 'ALL';
 let findingsCache = null;
+let integrationGridBound = false;
 
 /* THEME */
 const mq = window.matchMedia('(prefers-color-scheme: dark)');
@@ -542,12 +543,13 @@ async function loadSettings() {
 }
 function renderSettings() {
   if (!settingsLocal) return;
+  bindIntegrationGrid();
   el('int-grid').innerHTML = (settingsLocal.integrations || []).map(function(c) {
     return '<div class="int-card ' + (c.connected ? 'connected' : '') + '">' +
       '<div class="int-top"><div class="int-icon">' + intIcon(c.id) + '</div>' +
       '<div class="int-info"><div class="int-name">' + esc(c.name) + '</div><div class="int-desc">' + esc(c.desc) + '</div></div></div>' +
       '<div class="int-status ' + (c.connected ? 'conn' : 'disc') + '">' + (c.connected ? '&#x25CF; connected' : '&#x25CB; not connected') + '</div>' +
-      '<button class="int-btn ' + (c.connected ? 'disconnect' : '') + '" onclick="toggleInt(\'' + esc(c.id) + '\')">' + (c.connected ? 'disconnect' : 'connect') + '</button>' +
+      '<button type="button" class="int-btn ' + (c.connected ? 'disconnect' : '') + '" data-int-id="' + esc(c.id) + '">' + (c.connected ? 'disconnect' : 'connect') + '</button>' +
     '</div>';
   }).join('');
   el('gate-config-body').innerHTML = (settingsLocal.gate_pipeline || []).map(function(g, i) {
@@ -559,6 +561,18 @@ function renderSettings() {
   }).join('');
   el('save-btn').disabled = !settingsDirty;
   el('save-status').textContent = '';
+}
+function bindIntegrationGrid() {
+  if (integrationGridBound) return;
+  var grid = el('int-grid');
+  if (!grid) return;
+  grid.addEventListener('click', function(ev) {
+    var btn = ev.target && ev.target.closest ? ev.target.closest('button[data-int-id]') : null;
+    if (!btn || !grid.contains(btn)) return;
+    ev.preventDefault();
+    toggleInt(btn.getAttribute('data-int-id'));
+  });
+  integrationGridBound = true;
 }
 function toggleInt(id) { var c = (settingsLocal.integrations || []).find(function(x) { return x.id === id; }); if (c) { c.connected = !c.connected; settingsDirty = true; renderSettings(); } }
 function toggleGate(i, f) { settingsLocal.gate_pipeline[i][f] = !settingsLocal.gate_pipeline[i][f]; settingsDirty = true; renderSettings(); }
