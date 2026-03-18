@@ -157,6 +157,116 @@ Returns per-provider pass rates across all runs.
 
 ---
 
+## GET /api/v1/dashboard/gate-steps
+
+Returns the ordered step matrix for the current pre-commit review run. This is the
+UI-facing feed for the 12-21 step review pipeline used by the v1.2.4 mockups.
+
+The response MUST include every configured step in execution order. A step MUST NOT
+be omitted because it is disabled, not yet started, or blocked by a previous failure.
+
+### Response `200 OK`
+
+```json
+{
+  "run_id": "20260318-104009",
+  "repo": "acme/api",
+  "branch": "feat/rate-limit",
+  "overall_status": "running",
+  "current_step_id": "coderabbit-second-pass",
+  "current_step_index": 6,
+  "total_steps": 14,
+  "steps": [
+    {
+      "ordinal": 1,
+      "id": "gitleaks",
+      "name": "Secret scan",
+      "status": "passing",
+      "reason_code": "",
+      "reason": "",
+      "duration_ms": 980,
+      "started_at": "2026-03-18T14:40:09Z",
+      "finished_at": "2026-03-18T14:40:10Z"
+    },
+    {
+      "ordinal": 2,
+      "id": "path-guard",
+      "name": "Path guard",
+      "status": "disabled",
+      "reason_code": "not_applicable",
+      "reason": "repo has no protected-path rules",
+      "duration_ms": 0,
+      "started_at": null,
+      "finished_at": null
+    }
+  ],
+  "generated_at": "2026-03-18T14:40:34Z"
+}
+```
+
+**`overall_status` values:** `pending`, `running`, `passing`, `failing`, `disabled`
+
+**`steps[].status` values:** `pending`, `running`, `passing`, `failing`, `disabled`
+
+**Step rules:**
+- `passing` means the step completed successfully.
+- `running` means the step is actively executing.
+- `failing` means the step produced a blocking error or finding.
+- `disabled` means the step is not applicable, explicitly disabled, or was not reached
+  because an earlier hard failure stopped the run.
+- `reason_code` is required whenever `status` is `failing` or `disabled`.
+- `steps[]` order is stable and mirrors the execution order shown in the UI.
+- The backend should derive this feed from structured step telemetry, not from freeform
+  log text.
+
+---
+
+## GET /api/v1/dashboard/active-sessions
+
+Returns the currently active review sessions for the GUI. A session appears here only
+while its heartbeat is fresh; expired or inactive sessions MUST be excluded.
+
+Current task context is optional. When available, the backend SHOULD populate it from the
+orchestration/task ledger so the GUI can show what the session is working on.
+
+### Response `200 OK`
+
+```json
+{
+  "active_count": 4,
+  "sessions": [
+    {
+      "session_id": "sess-123",
+      "repo": "acme/api",
+      "branch": "feat/rate-limit",
+      "owner_agent": "Codex",
+      "activity_state": "active",
+      "task": {
+        "id": "COD-055",
+        "title": "Fix finish-loop polling",
+        "phase": "coderabbit-review"
+      },
+      "started_at": "2026-03-18T14:10:00Z",
+      "last_heartbeat_at": "2026-03-18T14:40:30Z",
+      "elapsed_sec": 1830
+    }
+  ],
+  "generated_at": "2026-03-18T14:40:34Z"
+}
+```
+
+**`activity_state` values:** `active`, `waiting`, `blocked`
+
+**Session rules:**
+- Only fresh sessions are returned; stale sessions are filtered out.
+- `task` MAY be omitted when the backend cannot resolve it.
+- `owner_agent` SHOULD identify the current agent or human operator where known.
+- The response MUST NOT expose secrets, tokens, raw prompts, or file contents.
+- The backend should derive active sessions from durable session/branch heartbeat data
+  and enrich them with task-ledger context only when that context is available.
+
+---
+
 ## GET /api/v1/dashboard/settings
 
 Returns current integration connection status and gate pipeline configuration.

@@ -360,6 +360,7 @@ Key items:
 - ✅ COD-NEW-A: Post-push CI watcher (`ci-watch.sh`) — completed (PR #60)
 - ✅ COD-NEW-B: Pre-push test gate (`pre-push` hook) — completed (PR #60)
 - ✅ COD-NEW-C: Autonomous finish-loop (`codero-finish.sh`) — completed (PR #62)
+- ✅ COD-055: Finish-loop stabilization follow-up (`codero-finish.sh`) — completed (PR #63)
 - UI-001: TUI layout and visual design modernization (Bubble Tea)
 - UI-002: Dashboard UI component refresh
 - UI-003: Current activity session panel for the GUI
