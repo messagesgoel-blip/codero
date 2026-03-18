@@ -352,7 +352,11 @@ func runForbiddenPathsCheck(_ context.Context, cfg EngineConfig, staged []string
 	const id, name = "forbidden-paths", "Forbidden path blocker"
 	t := start()
 	if !cfg.EnforceForbiddenPaths || cfg.ForbiddenPathRegex == "" {
-		r := disabledResult(id, name, GroupConfig, true, ReasonUserDisabled, "CODERO_ENFORCE_FORBIDDEN_PATHS not set")
+		msg := "CODERO_ENFORCE_FORBIDDEN_PATHS not set"
+		if cfg.EnforceForbiddenPaths && cfg.ForbiddenPathRegex == "" {
+			msg = "CODERO_FORBIDDEN_PATH_REGEX not set or empty"
+		}
+		r := disabledResult(id, name, GroupConfig, true, ReasonUserDisabled, msg)
 		r.DurationMS = elapsedMS(t)
 		return r
 	}
