@@ -490,16 +490,7 @@ func TestLoadEngineConfig_EnvOverrides(t *testing.T) {
 // engine's normalisation pass fills in ReasonCode = "check_failed".
 // This covers BUG-002 from the v1.2.3 advanced pilot.
 func TestEngine_FailedCheck_HasReasonCode(t *testing.T) {
-	dir := t.TempDir()
-	if err := exec.Command("git", "-C", dir, "init", "-q").Run(); err != nil {
-		t.Fatalf("git init: %v", err)
-	}
-	if err := exec.Command("git", "-C", dir, "config", "user.email", "t@t.com").Run(); err != nil {
-		t.Fatalf("git config email: %v", err)
-	}
-	if err := exec.Command("git", "-C", dir, "config", "user.name", "Test").Run(); err != nil {
-		t.Fatalf("git config name: %v", err)
-	}
+	dir := makeRepo(t)
 
 	// Stage a file with merge conflict markers to trigger a deterministic fail.
 	f := filepath.Join(dir, "conflict.txt")
@@ -507,9 +498,7 @@ func TestEngine_FailedCheck_HasReasonCode(t *testing.T) {
 	if err := os.WriteFile(f, []byte(content), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
-	if err := exec.Command("git", "-C", dir, "add", "conflict.txt").Run(); err != nil {
-		t.Fatalf("git add: %v", err)
-	}
+	mustRun(t, dir, "git", "add", "conflict.txt")
 
 	cfg := gatecheck.EngineConfig{
 		Profile:  gatecheck.ProfilePortable,
@@ -540,23 +529,12 @@ func TestEngine_FailedCheck_HasReasonCode(t *testing.T) {
 // the normalisation pass does NOT overwrite it.
 func TestEngine_ExplicitReasonCode_NotOverwritten(t *testing.T) {
 	// exec_error is set by runForbiddenPathsCheck when the regex is invalid.
-	dir := t.TempDir()
-	if err := exec.Command("git", "-C", dir, "init", "-q").Run(); err != nil {
-		t.Fatalf("git init: %v", err)
-	}
-	if err := exec.Command("git", "-C", dir, "config", "user.email", "t@t.com").Run(); err != nil {
-		t.Fatalf("git config email: %v", err)
-	}
-	if err := exec.Command("git", "-C", dir, "config", "user.name", "Test").Run(); err != nil {
-		t.Fatalf("git config name: %v", err)
-	}
+	dir := makeRepo(t)
 	f := filepath.Join(dir, "file.txt")
 	if err := os.WriteFile(f, []byte("hello\n"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if err := exec.Command("git", "-C", dir, "add", "file.txt").Run(); err != nil {
-		t.Fatalf("git add: %v", err)
-	}
+	mustRun(t, dir, "git", "add", "file.txt")
 
 	cfg := gatecheck.EngineConfig{
 		Profile:               gatecheck.ProfilePortable,
