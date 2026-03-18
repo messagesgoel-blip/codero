@@ -15,11 +15,12 @@ type Theme struct {
 	Muted  lipgloss.Style
 	Accent lipgloss.Style
 
-	Pass    lipgloss.Style
-	Fail    lipgloss.Style
-	Running lipgloss.Style
-	Pending lipgloss.Style
-	Warning lipgloss.Style
+	Pass     lipgloss.Style
+	Fail     lipgloss.Style
+	Disabled lipgloss.Style
+	Running  lipgloss.Style
+	Pending  lipgloss.Style
+	Warning  lipgloss.Style
 
 	PaneBorder   lipgloss.Style
 	PaneTitle    lipgloss.Style
@@ -67,6 +68,7 @@ func newDefaultTheme() Theme {
 		Accent:            lipgloss.NewStyle().Foreground(accent).Bold(true),
 		Pass:              lipgloss.NewStyle().Foreground(pass).Bold(true),
 		Fail:              lipgloss.NewStyle().Foreground(fail).Bold(true),
+		Disabled:          lipgloss.NewStyle().Foreground(muted),
 		Running:           lipgloss.NewStyle().Foreground(running).Bold(true),
 		Pending:           lipgloss.NewStyle().Foreground(muted),
 		Warning:           lipgloss.NewStyle().Foreground(warn),
@@ -111,6 +113,7 @@ func newAltTheme() Theme {
 		Accent:            lipgloss.NewStyle().Foreground(accent).Bold(true),
 		Pass:              lipgloss.NewStyle().Foreground(pass).Bold(true),
 		Fail:              lipgloss.NewStyle().Foreground(fail).Bold(true),
+		Disabled:          lipgloss.NewStyle().Foreground(muted),
 		Running:           lipgloss.NewStyle().Foreground(running).Bold(true),
 		Pending:           lipgloss.NewStyle().Foreground(muted),
 		Warning:           lipgloss.NewStyle().Foreground(warn),
@@ -146,6 +149,21 @@ func (t Theme) GateStatusStyle(gateState string) lipgloss.Style {
 		return t.Warning
 	case "pending":
 		return t.Pending
+	default:
+		return t.Muted
+	}
+}
+
+// DisplayStateStyle returns the theme style for a LOG-001 display state
+// ("passing", "failing", "disabled"). Falls back to Muted for unknown values.
+func (t Theme) DisplayStateStyle(ds string) lipgloss.Style {
+	switch ds {
+	case "passing":
+		return t.Pass
+	case "failing":
+		return t.Fail
+	case "disabled":
+		return t.Disabled
 	default:
 		return t.Muted
 	}

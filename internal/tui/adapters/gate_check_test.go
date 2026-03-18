@@ -90,6 +90,67 @@ func TestFromCheckReport_PreservesHumanReasonWhenReasonCodeMissing(t *testing.T)
 	}
 }
 
+// --- UI-001: DisplayStateIcon and FormatDurationMS helpers ---
+
+func TestDisplayStateIcon(t *testing.T) {
+	cases := []struct {
+		ds   string
+		want string
+	}{
+		{"passing", "✓"},
+		{"failing", "✗"},
+		{"disabled", "–"},
+		{"unknown", "?"},
+		{"", "?"},
+	}
+	for _, tc := range cases {
+		if got := adapters.DisplayStateIcon(tc.ds); got != tc.want {
+			t.Errorf("DisplayStateIcon(%q) = %q, want %q", tc.ds, got, tc.want)
+		}
+	}
+}
+
+func TestFormatDurationMS(t *testing.T) {
+	cases := []struct {
+		ms   int64
+		want string
+	}{
+		{0, ""},
+		{-1, ""},
+		{500, "500ms"},
+		{999, "999ms"},
+		{1000, "1.0s"},
+		{1500, "1.5s"},
+		{10000, "10.0s"},
+	}
+	for _, tc := range cases {
+		if got := adapters.FormatDurationMS(tc.ms); got != tc.want {
+			t.Errorf("FormatDurationMS(%d) = %q, want %q", tc.ms, got, tc.want)
+		}
+	}
+}
+
+// --- UI-001: RequiredFailed/RequiredDisabled propagation ---
+
+func TestFromCheckReport_RequiredCounts(t *testing.T) {
+	report := gatecheck.Report{
+		Summary: gatecheck.Summary{
+			SchemaVersion:    gatecheck.SchemaVersion,
+			RequiredFailed:   2,
+			RequiredDisabled: 1,
+		},
+		RunAt: time.Now().UTC(),
+	}
+
+	vm := adapters.FromCheckReport(report)
+	if vm.Summary.RequiredFailed != 2 {
+		t.Errorf("RequiredFailed = %d, want 2", vm.Summary.RequiredFailed)
+	}
+	if vm.Summary.RequiredDisabled != 1 {
+		t.Errorf("RequiredDisabled = %d, want 1", vm.Summary.RequiredDisabled)
+	}
+}
+
 // --- LOG-001: DisplayState in TUI adapter ---
 
 func TestFromCheckReport_DisplayState(t *testing.T) {

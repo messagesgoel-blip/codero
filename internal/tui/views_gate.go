@@ -12,7 +12,13 @@ import (
 	"github.com/codero/codero/internal/tui/adapters"
 )
 
-// GatePane renders the left-pane gate timeline.
+// narrowThreshold is the pane width below which secondary columns are collapsed
+// so the most important state is always visible on narrow terminals.
+const narrowThreshold = 60
+
+// ── GatePane: PROCESSES & AGENTS + RELAY ORCHESTRATION (left pane) ──────────
+
+// GatePane renders the left pane: agent progress rows + relay orchestration.
 type GatePane struct {
 	vm       adapters.GateViewModel
 	selected int
@@ -54,41 +60,80 @@ func (p GatePane) View() string {
 	lines := make([]string, 0, p.height)
 	w := p.width - 2
 
-	lines = append(lines, p.theme.ListHeader.Render("  GATES"))
+	// ── header: PROCESSES & AGENTS + System Health indicator ─────────────────
+	sysHealth := agentSystemHealth(p.vm)
+	pad := w - 20 - len(sysHealth)
+	if pad < 1 {
+		pad = 1
+	}
+	header := fmt.Sprintf("  PROCESSES & AGENTS%s%s", strings.Repeat(" ", pad), sysHealth)
+	lines = append(lines, p.theme.ListHeader.Render(header))
 	lines = append(lines, p.theme.Muted.Render(strings.Repeat("─", w)))
 
-	authGates := []struct{ name, status string }{
-		{"copilot", p.vm.CopilotStatus},
-		{"litellm", p.vm.LiteLLMStatus},
+	// ── authoritative AI gate agent rows ─────────────────────────────────────
+	authAgents := []struct{ icon, name, status string }{
+		{"🤖", "copilot", p.vm.CopilotStatus},
+		{"🔧", "litellm", p.vm.LiteLLMStatus},
 	}
-	for i, g := range authGates {
-		icon := gate.StateIcon(g.status)
-		if g.name == p.vm.CurrentGate {
-			icon = "●"
+	barW := minInt(w-6, 24)
+	for i, ag := range authAgents {
+		pct := agentPercent(ag.status, p.vm.ElapsedSec, p.vm.PollAfterSec)
+		action := agentAction(ag.name, ag.status)
+		isActive := ag.name == p.vm.CurrentGate
+
+		nameStyle := p.theme.GateAuthoritative
+		if isActive {
+			nameStyle = p.theme.Running
 		}
-		stateStyle := p.theme.GateStatusStyle(g.status)
-		label := fmt.Sprintf("%s %-8s  %s", icon, g.name, g.status)
-		var line string
+
+		line1 := fmt.Sprintf("  %s %s: %s (%d%%)", ag.icon, ag.name, action, pct)
+		bar := fmt.Sprintf("     %s %d%%", renderProgressBar(pct, barW), pct)
+
 		if p.selected == i {
-			line = p.theme.ListSelected.Width(w).Render(fmt.Sprintf("  %s %-8s  %s", icon, g.name, g.status))
+			lines = append(lines, p.theme.ListSelected.Width(w).Render(line1))
 		} else {
-			line = p.theme.GateAuthoritative.Render(fmt.Sprintf("  %s", stateStyle.Render(label)))
+			lines = append(lines, nameStyle.Render(line1))
 		}
-		lines = append(lines, line)
+		lines = append(lines, p.theme.Muted.Render(bar))
+		lines = append(lines, "")
 	}
 
-	lines = append(lines, "")
-	lines = append(lines, p.theme.Muted.Render("  ── pipeline (local) ──"))
-	for i, row := range p.vm.PipelineRows {
-		idx := 2 + i
-		icon := gate.StateIcon(row.Status)
-		var line string
+	// ── pipeline agent rows (local non-authoritative) ─────────────────────────
+	for j, row := range p.vm.PipelineRows {
+		idx := 2 + j
+		icon := pipelineIcon(row.Name)
+		pct := agentPercent(row.Status, 0, 0)
+		action := agentAction(row.Name, row.Status)
+
+		line1 := fmt.Sprintf("  %s %s: %s (%d%%)", icon, row.Name, action, pct)
+		bar := fmt.Sprintf("     %s %d%%", renderProgressBar(pct, barW), pct)
+
 		if p.selected == idx {
-			line = p.theme.ListSelected.Width(w).Render(fmt.Sprintf("  %s %-8s", icon, row.Name))
+			lines = append(lines, p.theme.ListSelected.Width(w).Render(line1))
 		} else {
-			line = p.theme.GatePipeline.Render(fmt.Sprintf("  %s %-8s", icon, row.Name))
+			lines = append(lines, p.theme.GatePipeline.Render(line1))
 		}
-		lines = append(lines, line)
+		lines = append(lines, p.theme.Muted.Render(bar))
+		lines = append(lines, "")
+	}
+
+	// ── relay orchestration section (bottom of left pane) ─────────────────────
+	// Only render if there's enough vertical space remaining.
+	remaining := p.height - len(lines)
+	if remaining >= 6 {
+		for len(lines) < p.height-6-len(p.vm.PipelineRows) {
+			lines = append(lines, "")
+		}
+		lines = append(lines, p.theme.Muted.Render(strings.Repeat("─", w)))
+		lines = append(lines, p.theme.ListHeader.Render("  RELAY ORCHESTRATION"))
+		lines = append(lines, p.theme.Muted.Render(fmt.Sprintf("  %-18s %s", "Standard static", "Parallel LLM-backed")))
+		lines = append(lines, p.theme.Muted.Render(fmt.Sprintf("  %-18s %s", "analysis tools", "agents")))
+		for _, row := range p.vm.PipelineRows {
+			icon := pipelineIcon(row.Name)
+			lines = append(lines, p.theme.Muted.Render(
+				fmt.Sprintf("  %s %-10s ──→ [LLM]", icon, row.Name),
+			))
+		}
 	}
 
 	for len(lines) < p.height {
@@ -101,11 +146,102 @@ func (p GatePane) View() string {
 func (p *GatePane) SetSize(w, h int)                { p.width = w; p.height = h }
 func (p *GatePane) SetVM(vm adapters.GateViewModel) { p.vm = vm }
 
+// ── GatePane helpers ──────────────────────────────────────────────────────────
+
+// agentSystemHealth returns a compact health indicator for the pane header.
+func agentSystemHealth(vm adapters.GateViewModel) string {
+	switch vm.Status {
+	case gate.StatusPass:
+		return "System Health ✓"
+	case gate.StatusFail:
+		return "System Health ✗"
+	default:
+		return "System Health ●"
+	}
+}
+
+// agentPercent derives a 0–100 display percentage from agent status + timing.
+func agentPercent(status string, elapsed, pollAfter int) int {
+	switch status {
+	case "pass", "blocked", "timeout":
+		return 100
+	case "running":
+		if pollAfter > 0 {
+			pct := elapsed * 100 / pollAfter
+			if pct < 5 {
+				return 5
+			}
+			if pct > 90 {
+				return 90
+			}
+			return pct
+		}
+		return 50
+	default: // pending, unknown
+		return 0
+	}
+}
+
+// agentAction returns a human-readable current action label for a given agent.
+func agentAction(name, status string) string {
+	switch status {
+	case "pass":
+		return "Review Complete"
+	case "blocked":
+		return "Blocked — findings"
+	case "timeout":
+		return "Timed out"
+	case "pending":
+		return "Waiting…"
+	}
+	// running
+	switch name {
+	case "copilot":
+		return "Analyzing Diff"
+	case "litellm":
+		return "Deep Arch Review"
+	case "semgrep":
+		return "Secret Scan"
+	case "gitleaks":
+		return "Scanning Secrets"
+	case "pylint", "ruff":
+		return "Linting"
+	default:
+		return "Running"
+	}
+}
+
+// renderProgressBar returns an ASCII block progress bar of the given width.
+func renderProgressBar(pct, width int) string {
+	if width < 4 {
+		width = 10
+	}
+	filled := width * pct / 100
+	if filled > width {
+		filled = width
+	}
+	return "[" + strings.Repeat("█", filled) + strings.Repeat("░", width-filled) + "]"
+}
+
+// pipelineIcon returns the emoji for a well-known pipeline tool name.
+func pipelineIcon(name string) string {
+	switch name {
+	case "semgrep", "gitleaks":
+		return "🔍"
+	case "pylint", "ruff":
+		return "🐍"
+	default:
+		return "⚙"
+	}
+}
+
+// ── ChecksPane: FINDINGS & ROUTING DASHBOARD (right pane) ────────────────────
+
 // checksRefreshMsg is sent when a new gate-check report is available.
 type checksRefreshMsg struct{ vm adapters.CheckReportViewModel }
 
-// ChecksPane renders a panel showing all gate-check results from the local
-// engine run. Disabled/skipped rows are always shown.
+// ChecksPane renders the right pane: findings bucketed by severity, routing
+// flowchart, and a summary section.
 type ChecksPane struct {
 	vm       adapters.CheckReportViewModel
 	selected int
@@ -141,53 +277,99 @@ func (p ChecksPane) Update(msg tea.Msg) (ChecksPane, tea.Cmd) {
 	return p, nil
 }
 
+// severityBucket groups checks by priority level.
+type severityBucket struct {
+	label  string
+	icon   string
+	color  lipgloss.Style
+	checks []adapters.CheckViewModel
+}
+
+// bucketChecks sorts checks into CRITICAL / HIGH / MEDIUM / LOW buckets
+// using the LOG-001 DisplayState model + required flag.
+func (p ChecksPane) bucketChecks() [4]severityBucket {
+	b := [4]severityBucket{
+		{label: "CRITICAL", icon: "🔴", color: p.theme.Fail},
+		{label: "HIGH", icon: "🟠", color: p.theme.Warning},
+		{label: "MEDIUM", icon: "🟡", color: p.theme.Running},
+		{label: "LOW", icon: "🔵", color: p.theme.Accent},
+	}
+	for _, c := range p.vm.Checks {
+		switch {
+		case c.DisplayState == "failing" && c.Required:
+			b[0].checks = append(b[0].checks, c)
+		case c.DisplayState == "failing" && !c.Required:
+			b[1].checks = append(b[1].checks, c)
+		case c.DisplayState == "disabled" && c.Required:
+			b[2].checks = append(b[2].checks, c)
+		default:
+			b[3].checks = append(b[3].checks, c)
+		}
+	}
+	return b
+}
+
 func (p ChecksPane) View() string {
 	if p.width == 0 {
 		return ""
 	}
 	lines := make([]string, 0, p.height)
 	w := p.width - 2
+	narrow := w < narrowThreshold
 
-	lines = append(lines, p.theme.ListHeader.Render("  GATE CHECKS"))
+	// ── header ──────────────────────────────────────────────────────────────
+	lines = append(lines, p.theme.ListHeader.Render("  FINDINGS & ROUTING DASHBOARD"))
 	lines = append(lines, p.theme.Muted.Render(strings.Repeat("─", w)))
-
-	// Summary counters row
-	s := p.vm.Summary
-	counters := fmt.Sprintf("  pass=%d  fail=%d  skip=%d  infra=%d  disabled=%d  [%s]",
-		s.Passed, s.Failed, s.Skipped, s.InfraBypassed, s.Disabled, s.Profile)
-	if s.Overall == "fail" {
-		lines = append(lines, p.theme.Fail.Render(counters))
-	} else {
-		lines = append(lines, p.theme.Pass.Render(counters))
-	}
+	lines = append(lines, p.theme.Bold.Render("  PRIORITIZED FINDINGS BUCKETS"))
 	lines = append(lines, "")
 
-	// Per-check rows grouped by status prominence
-	for i, c := range p.vm.Checks {
-		icon := adapters.StatusIcon(c.Status)
-		req := ""
-		if c.Required {
-			req = " *"
-		}
-		label := fmt.Sprintf("  %s %-22s  %-12s  %-6s%s", icon, c.ID, c.Group, c.Status, req)
-		if reason := gatecheck.DisplayReason(gatecheck.ReasonCode(c.ReasonCode), c.Reason); reason != "" {
-			label += "  " + reason
-		}
-
-		var line string
-		if p.selected == i {
-			line = p.theme.ListSelected.Width(w).Render(label)
-		} else {
-			switch c.Status {
-			case "fail":
-				line = p.theme.Fail.Render(label)
-			case "disabled", "skip":
-				line = p.theme.Muted.Render(label)
-			default:
-				line = p.theme.Pass.Render(label)
+	// ── severity buckets ─────────────────────────────────────────────────────
+	buckets := p.bucketChecks()
+	for _, b := range buckets {
+		label := fmt.Sprintf("  %s [%s]", b.icon, b.label)
+		lines = append(lines, b.color.Render(label))
+		for _, c := range b.checks {
+			icon := adapters.DisplayStateIcon(c.DisplayState)
+			reason := gatecheck.DisplayReason(gatecheck.ReasonCode(c.ReasonCode), c.Reason)
+			var entry string
+			if narrow {
+				entry = fmt.Sprintf("     %s %s", icon, truncStr(c.ID, w-8))
+			} else {
+				entry = fmt.Sprintf("     %s %-20s", icon, truncStr(c.ID, 20))
+				if reason != "" {
+					entry += "  " + truncStr(reason, w-34)
+				}
 			}
+			lines = append(lines, p.theme.Muted.Render(entry))
 		}
-		lines = append(lines, line)
+		if len(b.checks) == 0 {
+			lines = append(lines, p.theme.Muted.Render("     – none"))
+		}
+		lines = append(lines, "")
+	}
+
+	// ── routing flowchart ─────────────────────────────────────────────────────
+	lines = append(lines, p.theme.Muted.Render(strings.Repeat("─", w)))
+	lines = append(lines, p.theme.Bold.Render("  ROUTING FLOWCHART"))
+	lines = append(lines, p.theme.Base.Render("  Finding → AI Agent Review → Human Reviewer"))
+	lines = append(lines, p.theme.Muted.Render("  Target Team: @security_lead @tech_lead"))
+	lines = append(lines, "")
+
+	// ── summary ──────────────────────────────────────────────────────────────
+	s := p.vm.Summary
+	critCount := len(buckets[0].checks)
+	highCount := len(buckets[1].checks)
+	riskLabel := checksRiskScore(critCount, highCount)
+
+	lines = append(lines, p.theme.Muted.Render(strings.Repeat("─", w)))
+	lines = append(lines, p.theme.Bold.Render("  Summary"))
+	lines = append(lines, p.theme.Base.Render(fmt.Sprintf("  Findings Found: %d", s.Failed)))
+	lines = append(lines, p.theme.Base.Render(fmt.Sprintf("  Risk Score: %s", riskLabel)))
+	if s.RequiredFailed > 0 {
+		lines = append(lines, p.theme.Fail.Render(fmt.Sprintf("  ! required-failed=%d", s.RequiredFailed)))
+	}
+	if s.RequiredDisabled > 0 {
+		lines = append(lines, p.theme.Warning.Render(fmt.Sprintf("  ! required-disabled=%d", s.RequiredDisabled)))
 	}
 
 	for len(lines) < p.height {
@@ -195,6 +377,20 @@ func (p ChecksPane) View() string {
 	}
 	content := strings.Join(lines[:minInt(len(lines), p.height)], "\n")
 	return lipgloss.NewStyle().Width(p.width).Height(p.height).Render(content)
+}
+
+// checksRiskScore returns a risk label for the summary section.
+func checksRiskScore(crit, high int) string {
+	switch {
+	case crit > 0:
+		score := minInt(99, 90+crit)
+		return fmt.Sprintf("%d/100 (CRITICAL)", score)
+	case high > 0:
+		score := minInt(89, 70+high)
+		return fmt.Sprintf("%d/100 (HIGH)", score)
+	default:
+		return "0/100 (CLEAR)"
+	}
 }
 
 func (p *ChecksPane) SetSize(w, h int)                       { p.width = w; p.height = h }
