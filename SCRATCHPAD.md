@@ -79,6 +79,16 @@ Summary: COD-055: Implementing invalid-flag exit semantics hardening — UsageEr
 Pending: PR merge
 Open Questions: None.
 
+## Handoff — 2026-03-18T10:38:59Z
+Summary: CODERO-RT-002 complete: implemented UsageError exit semantics (COD-055), 6 files changed, all local gates pass, PR #58 merged to main at 8630a9eb, binary rebuilt as v1.2.4-rc.2 and promoted to /srv/storage/shared/tools/bin/codero (SHA256: 400e987ce302e068824ddf19ac0c8db85dba27ecdfe9e5fd67bdc866fe654021), branch protection restored, live matrix 5/5 pass including exit-2 for invalid flag combo
+Pending: (agent fills this before calling)
+Open Questions: (agent fills this before calling)
+
+## Handoff — 2026-03-18T10:45:00Z
+Summary: IDLE-001: No-Change Feedback Loop — branch created to test Codero automation without source changes. Agent enters idle mode after task creation.
+Pending: Passive observation only.
+Open Questions: Does CodeRabbit trigger and produce feedback on a no-source-change PR?
+
 ## Handoff — 2026-03-18T13:41:46Z
 Summary: Committed and pushed roadmap/docs status sync for v1.2.4 and validated test readiness.
 Pending: (agent fills this before calling)
