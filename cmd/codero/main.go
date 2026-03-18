@@ -67,6 +67,10 @@ func main() {
 	)
 
 	if err := root.Execute(); err != nil {
+		var usageErr *UsageError
+		if errors.As(err, &usageErr) {
+			os.Exit(2)
+		}
 		os.Exit(1)
 	}
 }

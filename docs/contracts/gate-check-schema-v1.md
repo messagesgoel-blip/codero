@@ -108,6 +108,16 @@ Stable enum set for `reason_code` (lowercase):
 | `checks[].reason` | Human-readable reason (optional). |
 | `checks[].duration_ms` | Milliseconds spent in the check runner. |
 
+## Exit Code Contract
+
+| Code | Meaning |
+|---|---|
+| 0 | Overall PASS |
+| 1 | Gate failure — one or more checks failed |
+| 2 | Usage/config error — invalid flag combination or unknown profile (e.g. `--json --tui-snapshot`) |
+
+Exit code 2 is a distinct class from gate failure. Consumers that distinguish gate-fail from usage-error must check for code 2 separately.
+
 ## Compatibility Guarantee
 
 This schema is the single source of truth for CLI JSON, dashboard `/gate-checks`,

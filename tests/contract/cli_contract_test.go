@@ -197,6 +197,40 @@ func TestGateCheckJSONFailureExitCode(t *testing.T) {
 	}
 }
 
+// TestGateCheckInvalidFlagsExitCode2 verifies the exit-code contract for
+// usage/config errors (COD-055): combining --json and --tui-snapshot must
+// produce exit code 2, which is distinct from the gate-failure exit code 1.
+//
+// Note: this test builds a temporary binary because `go run` always exits with
+// code 1 for any child failure, losing the precise exit code.
+func TestGateCheckInvalidFlagsExitCode2(t *testing.T) {
+	root := repoRoot(t)
+
+	// Build a temporary binary so the exact exit code is preserved.
+	binDir := t.TempDir()
+	binPath := filepath.Join(binDir, "codero-test")
+	buildCmd := exec.Command("go", "build", "-o", binPath, "./cmd/codero")
+	buildCmd.Dir = root
+	if buildOut, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("build codero binary: %v\n%s", err, string(buildOut))
+	}
+
+	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+	cmd := exec.Command(binPath, "gate-check", "--json", "--tui-snapshot") //nolint:gosec
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected gate-check --json --tui-snapshot to fail\noutput: %s", string(out))
+	}
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("expected exec.ExitError, got %T: %v\noutput: %s", err, err, string(out))
+	}
+	if exitErr.ExitCode() != 2 {
+		t.Fatalf("gate-check --json --tui-snapshot exit code: got %d, want 2\noutput: %s", exitErr.ExitCode(), string(out))
+	}
+}
+
 func TestGateCheckJSONReportPathEnv(t *testing.T) {
 	root := repoRoot(t)
 	repo := gateCheckRepoClean(t)
