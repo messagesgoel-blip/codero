@@ -89,3 +89,38 @@ func TestFromCheckReport_PreservesHumanReasonWhenReasonCodeMissing(t *testing.T)
 		t.Fatalf("disabled check reason = %q", vm.Checks[1].Reason)
 	}
 }
+
+// --- LOG-001: DisplayState in TUI adapter ---
+
+func TestFromCheckReport_DisplayState(t *testing.T) {
+	report := gatecheck.Report{
+		Summary: gatecheck.Summary{SchemaVersion: gatecheck.SchemaVersion},
+		Checks: []gatecheck.CheckResult{
+			{ID: "a", Status: gatecheck.StatusPass},
+			{ID: "b", Status: gatecheck.StatusFail},
+			{ID: "c", Status: gatecheck.StatusSkip, ReasonCode: gatecheck.ReasonNotInScope},
+			{ID: "d", Status: gatecheck.StatusDisabled, ReasonCode: gatecheck.ReasonMissingTool},
+		},
+		RunAt: time.Now().UTC(),
+	}
+
+	vm := adapters.FromCheckReport(report)
+	if len(vm.Checks) != 4 {
+		t.Fatalf("expected 4 checks, got %d", len(vm.Checks))
+	}
+
+	cases := []struct {
+		idx  int
+		want string
+	}{
+		{0, "passing"},
+		{1, "failing"},
+		{2, "disabled"},
+		{3, "disabled"},
+	}
+	for _, tc := range cases {
+		if got := vm.Checks[tc.idx].DisplayState; got != tc.want {
+			t.Errorf("checks[%d].DisplayState = %q, want %q", tc.idx, got, tc.want)
+		}
+	}
+}

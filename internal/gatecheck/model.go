@@ -24,6 +24,36 @@ func (s CheckStatus) IsTerminalPass() bool {
 }
 func (s CheckStatus) IsFailure() bool { return s == StatusFail }
 
+// DisplayState is the normalized UI display state for a gate-check step.
+// It maps the raw engine statuses to three deterministic presentation states
+// so the dashboard and TUI can render every step without inferring state from
+// freeform text. See docs/contracts/LOG-001.md for the canonical mapping.
+type DisplayState string
+
+const (
+	// DisplayPassing means the check ran and produced a passing result.
+	DisplayPassing DisplayState = "passing"
+	// DisplayFailing means the check ran and produced a failing result.
+	DisplayFailing DisplayState = "failing"
+	// DisplayDisabled means the check was not run (disabled or skipped).
+	DisplayDisabled DisplayState = "disabled"
+)
+
+// ToDisplayState maps a raw CheckStatus to the deterministic UI DisplayState.
+// Both "skip" and "disabled" map to DisplayDisabled because from the UI
+// perspective, a step that did not run is not actionable regardless of the
+// reason — the reason_code/reason fields carry the distinction.
+func (s CheckStatus) ToDisplayState() DisplayState {
+	switch s {
+	case StatusPass:
+		return DisplayPassing
+	case StatusFail:
+		return DisplayFailing
+	default: // StatusSkip, StatusDisabled, or any unknown value
+		return DisplayDisabled
+	}
+}
+
 type ReasonCode string
 
 const (

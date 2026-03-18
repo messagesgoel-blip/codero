@@ -55,3 +55,37 @@ func TestRenderCheckReportSnapshot_PreservesReasonParity(t *testing.T) {
 		}
 	}
 }
+
+// TestRenderCheckReportSnapshot_DisplayStateColumn verifies that the snapshot
+// table includes the DISPLAY column (LOG-001) with the normalized display state.
+func TestRenderCheckReportSnapshot_DisplayStateColumn(t *testing.T) {
+	report := gatecheck.Report{
+		Summary: gatecheck.Summary{
+			OverallStatus: gatecheck.StatusFail,
+			Passed:        1,
+			Failed:        1,
+			Disabled:      1,
+			Total:         3,
+			Profile:       gatecheck.ProfilePortable,
+			SchemaVersion: gatecheck.SchemaVersion,
+		},
+		Checks: []gatecheck.CheckResult{
+			{ID: "c1", Group: gatecheck.GroupFormat, Status: gatecheck.StatusPass},
+			{ID: "c2", Group: gatecheck.GroupSecurity, Status: gatecheck.StatusFail, Required: true, ReasonCode: gatecheck.ReasonCheckFailed},
+			{ID: "c3", Group: gatecheck.GroupLint, Status: gatecheck.StatusDisabled, ReasonCode: gatecheck.ReasonMissingTool},
+		},
+		RunAt: time.Unix(0, 0).UTC(),
+	}
+
+	got := tui.RenderCheckReportSnapshot(report)
+	for _, want := range []string{
+		"DISPLAY",
+		"passing",
+		"failing",
+		"disabled",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("snapshot missing %q\nfull output:\n%s", want, got)
+		}
+	}
+}

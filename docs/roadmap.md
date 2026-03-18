@@ -365,5 +365,5 @@ Key items:
 - UI-002: Dashboard UI component refresh
 - UI-003: Current activity session panel for the GUI
 - INFRA-001: Clarify `/gate` vs `/gate-check` endpoint naming in docs
-- LOG-001: Define structured heartbeat/log states for the full pre-commit step matrix via `gate-checks`
+- LOG-001: Define structured heartbeat/log states for the full pre-commit step matrix via `gate-checks` (in progress — COD-057)
 - DOC-001: Gate-check activation guide

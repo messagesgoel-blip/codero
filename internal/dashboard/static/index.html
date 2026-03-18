@@ -132,7 +132,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:12
 .gate-table-row{font-size:11px;transition:background .1s}.gate-table-row:last-child{border-bottom:none}.gate-table-row:hover{background:var(--bg3)}
 .gtr-id{font-size:9px;color:var(--dim)}.gtr-file{font-size:10px;color:var(--teal);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gtr-res{font-size:9px;font-weight:500}
-.gtr-res.PASS{color:var(--teal)}.gtr-res.FAIL{color:var(--red)}.gtr-res.SKIP,.gtr-res.DISABLED{color:var(--muted)}.gtr-res.INFRA_BYPASS{color:var(--amber)}
+.gtr-res.PASS,.gtr-res.passing{color:var(--teal)}.gtr-res.FAIL,.gtr-res.failing{color:var(--red)}.gtr-res.SKIP,.gtr-res.DISABLED,.gtr-res.disabled{color:var(--muted)}.gtr-res.INFRA_BYPASS{color:var(--amber)}
 .gtr-status{font-size:9px;padding:1px 5px;border-radius:2px;display:inline-block}
 .gtr-status.pass{background:var(--teal-b);color:var(--teal)}.gtr-status.fail{background:var(--red-b);color:var(--red)}
 .gtr-status.skip,.gtr-status.disabled{background:var(--bg3);color:var(--muted)}.gtr-status.infra_bypass{background:var(--amber-b);color:var(--amber)}
@@ -513,14 +513,16 @@ function renderFindings(data) {
   if (!checks.length) { el('gate-table-wrap').innerHTML = '<div class="state-msg">no checks in report</div>'; return; }
   var rows = checks.map(function(c, i) {
     var st  = (c.status || '').toLowerCase();
-    var res = (c.status || '').toUpperCase();
+    // Use display_state if present (LOG-001); fall back to raw status mapping.
+    // Mapping: pass→passing, fail→failing, skip/disabled→disabled.
+    var ds = c.display_state || toDisplayState(st);
     var tool = c.tool_name || c.group || '\u2014';
     var dur  = c.duration_ms > 0 ? (c.duration_ms / 1000).toFixed(2) + 's' : '\u2014';
     return '<div class="gate-table-row">' +
       '<span class="gtr-id">' + String(i+1).padStart(3,'0') + '</span>' +
       '<span>' + esc(c.name || '\u2014') + '</span>' +
       '<span class="gtr-file" title="' + esc(c.tool_path || '') + '">' + esc(tool) + '</span>' +
-      '<span class="gtr-res ' + res + '">' + res + '</span>' +
+      '<span class="gtr-res ' + ds + '">' + ds.toUpperCase() + '</span>' +
       '<span class="gtr-status ' + st + '">' + esc(c.status || '\u2014') + '</span>' +
       '<span class="gtr-dur">' + dur + '</span>' +
     '</div>';
@@ -613,6 +615,13 @@ function schedulePoll() {
 /* UTILS */
 function el(id)  { return document.getElementById(id); }
 function esc(s)  { var d = document.createElement('div'); d.textContent = String(s == null ? '' : s); return d.innerHTML; }
+// toDisplayState maps raw gate-check status values to the LOG-001 normalized
+// display state: pass→passing, fail→failing, skip/disabled→disabled.
+function toDisplayState(status) {
+  if (status === 'pass')  return 'passing';
+  if (status === 'fail')  return 'failing';
+  return 'disabled';
+}
 function fmtTime(iso) { try { var d = new Date(iso); return d.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'}); } catch (_e) { return String(iso || ''); } }
 function fmtRelative(iso) {
   try { var diff = Date.now() - new Date(iso).getTime(); if (diff < 60000) return Math.round(diff/1000) + 's ago'; if (diff < 3600000) return Math.round(diff/60000) + 'm ago'; return Math.round(diff/3600000) + 'h ago'; }
