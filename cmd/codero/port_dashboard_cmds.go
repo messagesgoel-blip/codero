@@ -335,6 +335,7 @@ func waitForDashboard(url string) error {
 	for {
 		resp, err := client.Get(url) //nolint:noctx // startup probe
 		if err == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
 			_ = resp.Body.Close()
 			if resp.StatusCode >= 200 && resp.StatusCode < 400 {
 				return nil
