@@ -300,3 +300,14 @@ Status icon legend:
 - `–` disabled
 
 Rows with `disabled` and `skip` status are always rendered; they are never hidden.
+
+
+## Finish Loop Note
+
+The `codero-finish` script uses the following exit codes:
+- `0`: Success — PR created/updated, all checks passed, merge-ready
+- `1`: Feedback — CodeRabbit requested changes, implement and rerun
+- `2`: CI failure — checks failed, review logs and fix issues
+- `3`: Pre-commit block — local hooks failed, fix and stage changes
+- `4`: Pre-push block — push hooks failed, review and resolve
+- `5`: Infra error — transient infrastructure issues, retry later
