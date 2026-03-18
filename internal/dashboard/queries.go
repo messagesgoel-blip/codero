@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"time"
 
 	"github.com/codero/codero/internal/scheduler"
@@ -267,16 +268,17 @@ func queryActiveSessions(ctx context.Context, db *sql.DB, limit int) ([]ActiveSe
 		ORDER BY owner_session_last_seen DESC, updated_at DESC
 		LIMIT ?`, limit)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("queryActiveSessions: query failed: %w", err)
 	}
 	defer rows.Close()
 
 	var out []ActiveSession
+	seenSessions := map[string]bool{}
 	for rows.Next() {
 		var sessionID, repo, branch, state string
 		var lastSeen, submissionTime, createdAt, updatedAt sql.NullTime
 		if err := rows.Scan(&sessionID, &repo, &branch, &state, &lastSeen, &submissionTime, &createdAt, &updatedAt); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("queryActiveSessions: scan row: %w", err)
 		}
 		if !lastSeen.Valid {
 			continue
@@ -284,6 +286,10 @@ func queryActiveSessions(ctx context.Context, db *sql.DB, limit int) ([]ActiveSe
 		if lastSeen.Time.Before(threshold) {
 			continue
 		}
+		if seenSessions[sessionID] {
+			continue
+		}
+		seenSessions[sessionID] = true
 
 		startedAt := startedAtForSession(submissionTime, createdAt, lastSeen)
 		elapsed := time.Since(startedAt)
@@ -302,7 +308,10 @@ func queryActiveSessions(ctx context.Context, db *sql.DB, limit int) ([]ActiveSe
 			ElapsedSec:      int64(elapsed.Seconds()),
 		})
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("queryActiveSessions: rows error: %w", err)
+	}
+	return out, nil
 }
 
 func startedAtForSession(submissionTime, createdAt, lastSeen sql.NullTime) time.Time {

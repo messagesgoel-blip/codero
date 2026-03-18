@@ -734,6 +734,31 @@ func TestActiveSessions_WithFreshSession(t *testing.T) {
 	}
 }
 
+func TestActiveSessions_DuplicateOwnerSession(t *testing.T) {
+	h, db := newTestHandler(t)
+	startedAt := time.Now().Add(-20 * time.Minute).UTC()
+	lastSeen := time.Now().Add(-1 * time.Minute).UTC()
+
+	seedBranchSession(t, db, "acme/api", "feat/a", "cli_reviewing", "sess-dup", lastSeen, startedAt)
+	seedBranchSession(t, db, "acme/api", "feat/b", "coding", "sess-dup", lastSeen.Add(-10*time.Second), startedAt)
+
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/active-sessions", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.ActiveSessionsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.ActiveCount != 1 || len(resp.Sessions) != 1 {
+		t.Fatalf("expected 1 unique session, got active_count=%d len=%d", resp.ActiveCount, len(resp.Sessions))
+	}
+	if resp.Sessions[0].SessionID != "sess-dup" {
+		t.Fatalf("session_id = %q, want sess-dup", resp.Sessions[0].SessionID)
+	}
+}
+
 func TestActiveSessions_FiltersStale(t *testing.T) {
 	h, db := newTestHandler(t)
 	startedAt := time.Now().Add(-2 * time.Hour).UTC()
