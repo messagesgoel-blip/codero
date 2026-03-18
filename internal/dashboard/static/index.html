@@ -39,8 +39,8 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:12
 .tb-logo-subtitle{font-size:10px;color:var(--muted);font-weight:400;margin-left:4px}
 .tb-sep{width:1px;height:18px;background:var(--border2);margin:0 14px;flex-shrink:0}
 .tb-tabs{display:flex;flex:1;overflow-x:auto;scrollbar-width:none}.tb-tabs::-webkit-scrollbar{display:none}
-.tb-tab{font-size:11px;color:var(--muted);padding:0 13px;height:42px;display:flex;align-items:center;gap:6px;cursor:pointer;border-bottom:2px solid transparent;transition:color .15s,border-color .15s;white-space:nowrap;user-select:none;flex-shrink:0}
-.tb-tab:hover{color:var(--text)}.tb-tab.active{color:var(--teal);border-bottom-color:var(--teal)}
+.tb-tab{font:inherit;font-size:11px;color:var(--muted);padding:0 13px;height:42px;display:flex;align-items:center;gap:6px;cursor:pointer;border:0;border-bottom:2px solid transparent;background:none;appearance:none;transition:color .15s,border-color .15s;white-space:nowrap;user-select:none;flex-shrink:0}
+.tb-tab:hover{color:var(--text)}.tb-tab.active{color:var(--teal);border-bottom-color:var(--teal)}.tb-tab:focus-visible{outline:2px solid var(--teal);outline-offset:-2px}
 .tb-right{display:flex;align-items:center;gap:10px;flex-shrink:0;margin-left:12px}
 .agents-badge{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--teal)}
 .agents-dot{width:6px;height:6px;border-radius:50%;background:var(--teal);animation:pulse 2s ease-in-out infinite;flex-shrink:0}
@@ -158,8 +158,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:12
 .gate-config{width:100%;border-collapse:collapse}
 .gate-config th{font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);padding:5px 11px;text-align:left;border-bottom:1px solid var(--border)}
 .gate-config td{padding:7px 11px;border-bottom:1px solid var(--border);font-size:11px}
-.toggle-wrap{display:flex}.toggle{width:28px;height:16px;border-radius:8px;background:var(--dim);position:relative;cursor:pointer;transition:background .2s;flex-shrink:0}
-.toggle.on{background:var(--teal)}.toggle-knob{position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#fff;transition:transform .2s}.toggle.on .toggle-knob{transform:translateX(12px)}
+.toggle-wrap{display:flex}.toggle{width:28px;height:16px;border-radius:8px;background:var(--dim);position:relative;cursor:pointer;transition:background .2s;flex-shrink:0;border:0;padding:0;appearance:none;display:inline-flex;align-items:center}.toggle.on{background:var(--teal)}.toggle-knob{position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#fff;transition:transform .2s}.toggle.on .toggle-knob{transform:translateX(12px)}.toggle:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
 .settings-save{display:flex;align-items:center;gap:8px;margin-top:16px}
 .save-btn{font-size:11px;padding:5px 16px;border-radius:3px;border:1px solid var(--border2);background:var(--bg3);color:var(--text);font-family:var(--mono);cursor:pointer}
 .save-btn:hover{background:var(--bg2)}.save-btn:disabled{opacity:.4;cursor:default}
@@ -187,12 +186,12 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:12
     <span class="tb-logo-subtitle">Command Terminal</span>
   </div>
   <div class="tb-sep"></div>
-  <div class="tb-tabs">
-    <div class="tb-tab active" id="tab-processes"    onclick="showTab('processes',this)">&#x21BB; Processes</div>
-    <div class="tb-tab"        id="tab-eventlogs"    onclick="showTab('eventlogs',this)">&#x2261; Event Logs</div>
-    <div class="tb-tab"        id="tab-findings"     onclick="showTab('findings',this)">&#x25B3; Findings</div>
-    <div class="tb-tab"        id="tab-architecture" onclick="showTab('architecture',this)">&#x2B21; Architecture</div>
-    <div class="tb-tab"        id="tab-settings"     onclick="showTab('settings',this)">&#x2699; Settings</div>
+  <div class="tb-tabs" role="tablist" aria-label="Dashboard sections">
+    <button class="tb-tab active" type="button" id="tab-processes" role="tab" data-tab="processes" aria-selected="true" aria-controls="page-processes" tabindex="0" onclick="showTab('processes',this)" onkeydown="return tabKey(event,this)">&#x21BB; Processes</button>
+    <button class="tb-tab" type="button" id="tab-eventlogs" role="tab" data-tab="eventlogs" aria-selected="false" aria-controls="page-eventlogs" tabindex="0" onclick="showTab('eventlogs',this)" onkeydown="return tabKey(event,this)">&#x2261; Event Logs</button>
+    <button class="tb-tab" type="button" id="tab-findings" role="tab" data-tab="findings" aria-selected="false" aria-controls="page-findings" tabindex="0" onclick="showTab('findings',this)" onkeydown="return tabKey(event,this)">&#x25B3; Findings</button>
+    <button class="tb-tab" type="button" id="tab-architecture" role="tab" data-tab="architecture" aria-selected="false" aria-controls="page-architecture" tabindex="0" onclick="showTab('architecture',this)" onkeydown="return tabKey(event,this)">&#x2B21; Architecture</button>
+    <button class="tb-tab" type="button" id="tab-settings" role="tab" data-tab="settings" aria-selected="false" aria-controls="page-settings" tabindex="0" onclick="showTab('settings',this)" onkeydown="return tabKey(event,this)">&#x2699; Settings</button>
   </div>
   <div class="tb-right">
     <div class="agents-badge"><div class="agents-dot"></div><span id="agents-count">0</span>&nbsp;agents active</div>
@@ -324,14 +323,38 @@ applyTheme('dark');
 
 /* TABS */
 function showTab(id, tab) {
+  if (!tab) return;
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tb-tab').forEach(t => t.classList.remove('active'));
   el('page-'+id).classList.add('active');
   tab.classList.add('active');
+  document.querySelectorAll('.tb-tab').forEach(function(t) {
+    t.setAttribute('aria-selected', t === tab ? 'true' : 'false');
+  });
   activeTab = id;
   if (id === 'settings')     loadSettings();
   if (id === 'findings')     renderFindings(findingsCache);
   if (id === 'eventlogs')    renderEvents();
+}
+
+function tabKey(ev, tab) {
+  if (ev.key === 'Enter' || ev.key === ' ') {
+    ev.preventDefault();
+    showTab(tab.getAttribute('data-tab'), tab);
+    return false;
+  }
+  if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return true;
+  var tabs = Array.from(document.querySelectorAll('.tb-tab'));
+  if (!tabs.length) return false;
+  var idx = tabs.indexOf(tab);
+  if (idx < 0) return false;
+  ev.preventDefault();
+  var next = ev.key === 'ArrowRight'
+    ? tabs[(idx + 1) % tabs.length]
+    : tabs[(idx - 1 + tabs.length) % tabs.length];
+  next.focus();
+  showTab(next.getAttribute('data-tab'), next);
+  return false;
 }
 
 /* API */
@@ -405,8 +428,8 @@ function renderSessions(sessions) {
         '</div>' +
         '<div class="agent-sub">' + title + tid + '</div>' +
         '<div class="agent-meta">' +
-          '<div class="am-item"><span class="key">repo</span>&nbsp;' + esc(s.repo || '&mdash;') + '</div>' +
-          '<div class="am-item"><span class="key">branch</span>&nbsp;' + esc(s.branch || '&mdash;') + '</div>' +
+          '<div class="am-item"><span class="key">repo</span>&nbsp;' + esc(s.repo || '—') + '</div>' +
+          '<div class="am-item"><span class="key">branch</span>&nbsp;' + esc(s.branch || '—') + '</div>' +
           '<div class="am-item"><span class="key">elapsed</span>&nbsp;' + fmtElapsed(s.elapsed_sec || 0) + '</div>' +
           '<div class="am-item"><span class="key">heartbeat</span>&nbsp;' + (s.last_heartbeat_at ? fmtRelative(s.last_heartbeat_at) : '&mdash;') + '</div>' +
           '<span class="am-badge ' + esc(state) + '">' + esc(state) + '</span>' +
@@ -529,8 +552,8 @@ function renderSettings() {
   }).join('');
   el('gate-config-body').innerHTML = (settingsLocal.gate_pipeline || []).map(function(g, i) {
     return '<tr><td>' + esc(g.name) + '</td>' +
-      '<td><div class="toggle-wrap"><div class="toggle ' + (g.enabled ? 'on' : '') + '" onclick="toggleGate(' + i + ',\'enabled\')"><div class="toggle-knob"></div></div></div></td>' +
-      '<td><div class="toggle-wrap"><div class="toggle ' + (g.blocks_commit ? 'on' : '') + '" onclick="toggleGate(' + i + ',\'blocks_commit\')"><div class="toggle-knob"></div></div></div></td>' +
+      '<td><div class="toggle-wrap"><button type="button" class="toggle ' + (g.enabled ? 'on' : '') + '" aria-pressed="' + (g.enabled ? 'true' : 'false') + '" aria-label="Toggle enabled for ' + esc(g.name) + '" onclick="toggleGate(' + i + ',\'enabled\')"><div class="toggle-knob"></div></button></div></td>' +
+      '<td><div class="toggle-wrap"><button type="button" class="toggle ' + (g.blocks_commit ? 'on' : '') + '" aria-pressed="' + (g.blocks_commit ? 'true' : 'false') + '" aria-label="Toggle blocks commit for ' + esc(g.name) + '" onclick="toggleGate(' + i + ',\'blocks_commit\')"><div class="toggle-knob"></div></button></div></td>' +
       '<td><span style="color:var(--muted)">' + g.timeout_sec + 's</span></td>' +
       '<td><span style="color:var(--muted)">' + esc(g.provider) + '</span></td></tr>';
   }).join('');

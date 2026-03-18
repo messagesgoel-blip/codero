@@ -211,7 +211,7 @@ func TestGateCheckInvalidFlagsExitCode2(t *testing.T) {
 	// Build a temporary binary so the exact exit code is preserved.
 	binDir := t.TempDir()
 	binPath := filepath.Join(binDir, "codero-test")
-	buildCmd := exec.Command("go", "build", "-o", binPath, "./cmd/codero")
+	buildCmd := exec.Command("go", "build", "-buildvcs=false", "-o", binPath, "./cmd/codero")
 	buildCmd.Dir = root
 	if buildOut, err := buildCmd.CombinedOutput(); err != nil {
 		t.Fatalf("build codero binary: %v\n%s", err, string(buildOut))

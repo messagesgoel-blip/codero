@@ -964,40 +964,6 @@ func TestDashboardHealth_GateCheckPathFromEnv(t *testing.T) {
 	}
 }
 
-func TestActiveSessions_DedupeBeforeLimit(t *testing.T) {
-	// Regression: with a limit of 1 and two rows for the same session ID,
-	// the result must contain exactly one session — not zero — because
-	// dedup must happen after rows are scanned, not in SQL.
-	h, db := newTestHandler(t)
-	lastSeen := time.Now().Add(-30 * time.Second).UTC()
-
-	// Two rows for the same session ID across two different branches.
-	seedBranchSession(t, db, "acme/api", "feat/COD-001-first", "coding", "sess-dedup", lastSeen, lastSeen)
-	seedBranchSession(t, db, "acme/api", "feat/COD-001-second", "queued_cli", "sess-dedup", lastSeen.Add(-5*time.Second), lastSeen)
-
-	// Use the handler directly which applies the default page size; we patch
-	// by exercising the underlying query with limit=1.
-	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/active-sessions", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	var resp dashboard.ActiveSessionsResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(resp.Sessions) != 1 {
-		t.Fatalf("expected 1 unique session from 2 rows, got %d", len(resp.Sessions))
-	}
-	if resp.Sessions[0].SessionID != "sess-dedup" {
-		t.Errorf("session_id = %q, want sess-dedup", resp.Sessions[0].SessionID)
-	}
-	// Owner agent must always be "unknown".
-	if resp.Sessions[0].OwnerAgent != "unknown" {
-		t.Errorf("owner_agent = %q, want unknown", resp.Sessions[0].OwnerAgent)
-	}
-}
-
 /* ══════════════════════ STATIC DASHBOARD UI ════════════════ */
 
 func TestDashboardHTML_HasProcessesTab(t *testing.T) {

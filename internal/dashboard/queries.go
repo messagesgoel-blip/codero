@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/codero/codero/internal/gatecheck"
+	loglib "github.com/codero/codero/internal/log"
 	"github.com/codero/codero/internal/scheduler"
 )
 
@@ -448,14 +450,13 @@ func insertManualReviewRun(ctx context.Context, db *sql.DB, id, repo, branch, he
 }
 
 // resolveTaskFromBranch derives task context from a branch name.
-// Returns nil when the branch does not match the PROJ-NNN-description pattern
+// Returns nil unless the branch uses the literal feat/PROJ-NNN-description pattern
 // (e.g. feat/COD-056-fix-auth). Callers must render nil task gracefully.
 func resolveTaskFromBranch(branch, state string) *ActiveTask {
-	b := branch
-	// Strip the type prefix (feat/, fix/, chore/, etc.)
-	if idx := strings.LastIndex(b, "/"); idx >= 0 {
-		b = b[idx+1:]
+	if !strings.HasPrefix(branch, "feat/") {
+		return nil
 	}
+	b := strings.TrimPrefix(branch, "feat/")
 	// Must be PROJ-NNN-description where the second segment is numeric,
 	// e.g. COD-056-dashboard-activity-health → taskID="COD-056".
 	parts := strings.SplitN(b, "-", 3)
@@ -510,34 +511,47 @@ const staleFeedThreshold = 5 * time.Minute
 
 // queryDashboardHealth probes database connectivity, per-feed freshness, and
 // the live active-agent count. It is the backend for GET /api/v1/dashboard/health.
-func queryDashboardHealth(ctx context.Context, db *sql.DB) DashboardHealth {
+// It returns an error when a freshness/count query fails so the handler can
+// surface a real backend failure rather than silently serving stale defaults.
+func queryDashboardHealth(ctx context.Context, db *sql.DB) (DashboardHealth, error) {
 	h := DashboardHealth{GeneratedAt: time.Now().UTC()}
+	dbHealthy := true
 
 	// Database health: a lightweight ping.
 	if err := db.PingContext(ctx); err != nil {
-		h.Database = ServiceStatus{Status: "down", Message: err.Error()}
+		loglib.Error("dashboard: health db ping failed",
+			loglib.FieldComponent, "dashboard", "error", err)
+		h.Database = ServiceStatus{Status: "down", Message: "database unreachable"}
+		dbHealthy = false
 	} else {
 		h.Database = ServiceStatus{Status: "ok"}
 	}
 
 	// Active-sessions feed freshness: age of the most recent heartbeat.
-	var lastHeartbeat sql.NullTime
-	_ = db.QueryRowContext(ctx,
-		`SELECT owner_session_last_seen FROM branch_states
-		 WHERE owner_session_id <> '' AND owner_session_last_seen IS NOT NULL
-		 ORDER BY owner_session_last_seen DESC LIMIT 1`,
-	).Scan(&lastHeartbeat)
-
-	if lastHeartbeat.Valid {
-		age := time.Since(lastHeartbeat.Time)
-		status := "ok"
-		if age > staleFeedThreshold {
-			status = "stale"
-		}
-		h.Feeds.ActiveSessions = FeedStatus{
-			Status:       status,
-			LastRefresh:  lastHeartbeat.Time.UTC(),
-			FreshnessSec: int64(age.Seconds()),
+	if dbHealthy {
+		var lastHeartbeat sql.NullTime
+		if err := db.QueryRowContext(ctx,
+			`SELECT owner_session_last_seen FROM branch_states
+			 WHERE owner_session_id <> '' AND owner_session_last_seen IS NOT NULL
+			 ORDER BY owner_session_last_seen DESC LIMIT 1`,
+		).Scan(&lastHeartbeat); err != nil {
+			if !errors.Is(err, sql.ErrNoRows) {
+				return h, fmt.Errorf("queryDashboardHealth: active sessions freshness query: %w", err)
+			}
+			h.Feeds.ActiveSessions = FeedStatus{Status: "unavailable"}
+		} else if lastHeartbeat.Valid {
+			age := time.Since(lastHeartbeat.Time)
+			status := "ok"
+			if age > staleFeedThreshold {
+				status = "stale"
+			}
+			h.Feeds.ActiveSessions = FeedStatus{
+				Status:       status,
+				LastRefresh:  lastHeartbeat.Time.UTC(),
+				FreshnessSec: int64(age.Seconds()),
+			}
+		} else {
+			h.Feeds.ActiveSessions = FeedStatus{Status: "unavailable"}
 		}
 	} else {
 		h.Feeds.ActiveSessions = FeedStatus{Status: "unavailable"}
@@ -561,16 +575,20 @@ func queryDashboardHealth(ctx context.Context, db *sql.DB) DashboardHealth {
 	}
 
 	// Count currently active (non-stale) agent sessions.
-	threshold := time.Now().Add(-scheduler.SessionHeartbeatTTL)
-	var count int
-	_ = db.QueryRowContext(ctx,
-		`SELECT COUNT(DISTINCT owner_session_id) FROM branch_states
-		 WHERE owner_session_id <> ''
-		   AND owner_session_last_seen IS NOT NULL
-		   AND owner_session_last_seen >= ?`,
-		threshold,
-	).Scan(&count)
-	h.ActiveAgentCount = count
+	if dbHealthy {
+		threshold := time.Now().Add(-scheduler.SessionHeartbeatTTL)
+		var count int
+		if err := db.QueryRowContext(ctx,
+			`SELECT COUNT(DISTINCT owner_session_id) FROM branch_states
+			 WHERE owner_session_id <> ''
+			   AND owner_session_last_seen IS NOT NULL
+			   AND owner_session_last_seen >= ?`,
+			threshold,
+		).Scan(&count); err != nil {
+			return h, fmt.Errorf("queryDashboardHealth: active agent count query: %w", err)
+		}
+		h.ActiveAgentCount = count
+	}
 
-	return h
+	return h, nil
 }

@@ -218,8 +218,8 @@ always receive the first N *unique* sessions, not the first N rows.
 
 Task context is resolved from the branch name using the `feat/PROJ-NNN-description`
 pattern (e.g. `feat/COD-056-fix-auth`). When the branch does not match this pattern,
-the `task` field is **omitted entirely** — callers must render missing task context
-gracefully (e.g. show the branch name instead of a task title).
+the `task` field is omitted entirely (the field is absent, via `omitempty`) — callers
+must render missing task context gracefully and must not expect a JSON `null` value.
 
 `owner_agent` is always `"unknown"` — there is no per-session agent registration in the
 current implementation. Clients must not present this as a meaningful agent identity.
@@ -265,8 +265,9 @@ current implementation. Clients must not present this as a meaningful agent iden
 **Session rules:**
 - Only fresh sessions are returned; stale sessions are filtered out.
 - Dedupe by `session_id` is applied **before** the page-size limit.
-- `task` is **omitted** (null) when the branch does not match `feat/PROJ-NNN-description`.
-  Clients MUST render null `task` gracefully — typically by showing `branch` instead.
+- `task` is omitted entirely when the branch does not match `feat/PROJ-NNN-description`.
+  Clients MUST render a missing `task` field gracefully — typically by showing `branch`
+  instead — and must not depend on a JSON `null`.
 - `owner_agent` is always `"unknown"` in the current implementation; there is no
   session-level agent registration. Clients MUST NOT fabricate an agent label from it.
 - The response MUST NOT expose secrets, tokens, raw prompts, or file contents.

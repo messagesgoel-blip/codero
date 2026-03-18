@@ -298,7 +298,13 @@ func (h *Handler) handleDashboardHealth(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	setCORSHeaders(w)
-	health := queryDashboardHealth(r.Context(), h.db)
+	health, err := queryDashboardHealth(r.Context(), h.db)
+	if err != nil {
+		loglib.Error("dashboard: health query failed",
+			loglib.FieldComponent, "dashboard", "error", err)
+		writeError(w, http.StatusInternalServerError, "health query failed", "db_error")
+		return
+	}
 	writeJSON(w, http.StatusOK, health)
 }
 
