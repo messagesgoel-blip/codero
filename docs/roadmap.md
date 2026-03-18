@@ -351,12 +351,14 @@ Evidence: pilot rerun batch 2 evidence directory (local CI run artifacts, not tr
 
 ---
 
-### v1.2.4 — UI Modernization (deferred)
-**Status:** Backlog  
-**Scope:** TUI and dashboard visual refresh  
+### v1.2.4 — UI Modernization + Feedback Loop Hardening (deferred)
+**Status:** Backlog
+**Scope:** TUI and dashboard visual refresh + pre-push/CI feedback loop hardening
 **Spec:** `docs/roadmaps/v1.2.4-backlog.md`
 
 Key items:
+- COD-NEW-A: Post-push CI watcher (`ci-watch.sh`) — surfaces CI failures back to agent after push
+- COD-NEW-B: Pre-push test gate (`pre-push` hook) — runs `go test ./...` before push, blocks on failure
 - UI-001: TUI layout and visual design modernization (Bubble Tea)
 - UI-002: Dashboard UI component refresh
 - INFRA-001: Clarify `/gate` vs `/gate-check` endpoint naming in docs
