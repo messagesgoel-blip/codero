@@ -1,11 +1,14 @@
 package dashboard
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -282,7 +285,8 @@ func queryActiveSessions(ctx context.Context, db *sql.DB, limit int) ([]ActiveSe
 	// discard the only row for a session that appears multiple times early.
 	rows, err := db.QueryContext(ctx, `
 		SELECT owner_session_id, repo, branch, state,
-		       owner_session_last_seen, submission_time, created_at, updated_at
+		       owner_session_last_seen, submission_time, created_at, updated_at,
+		       pr_number, owner_agent
 		FROM branch_states
 		WHERE owner_session_id <> ''
 		  AND owner_session_last_seen IS NOT NULL
@@ -296,9 +300,10 @@ func queryActiveSessions(ctx context.Context, db *sql.DB, limit int) ([]ActiveSe
 	var out []ActiveSession
 	seenSessions := map[string]bool{}
 	for rows.Next() {
-		var sessionID, repo, branch, state string
+		var sessionID, repo, branch, state, ownerAgent string
+		var prNumber int
 		var lastSeen, submissionTime, createdAt, updatedAt sql.NullTime
-		if err := rows.Scan(&sessionID, &repo, &branch, &state, &lastSeen, &submissionTime, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&sessionID, &repo, &branch, &state, &lastSeen, &submissionTime, &createdAt, &updatedAt, &prNumber, &ownerAgent); err != nil {
 			return nil, fmt.Errorf("queryActiveSessions: scan row: %w", err)
 		}
 		if !lastSeen.Valid {
@@ -322,7 +327,8 @@ func queryActiveSessions(ctx context.Context, db *sql.DB, limit int) ([]ActiveSe
 			SessionID:       sessionID,
 			Repo:            repo,
 			Branch:          branch,
-			OwnerAgent:      resolveOwnerAgent(branch),
+			PRNumber:        prNumber,
+			OwnerAgent:      resolveOwnerAgent(ownerAgent, branch),
 			ActivityState:   sessionActivityState(state),
 			Task:            resolveTaskFromBranch(branch, state),
 			StartedAt:       startedAt,
@@ -477,10 +483,14 @@ func resolveTaskFromBranch(branch, state string) *ActiveTask {
 	}
 }
 
-// resolveOwnerAgent returns the agent label for a session.
-// There is no reliable in-DB source for agent identity, so this always returns
-// "unknown". A richer resolver would require explicit agent registration.
-func resolveOwnerAgent(_ string) string {
+// resolveOwnerAgent returns the agent label for a session. When agentFromDB is
+// non-empty (populated by UpdateOwnerAgent), it is returned directly. Otherwise
+// the branch name is used as a best-effort fallback, still returning "unknown"
+// when no useful signal is available.
+func resolveOwnerAgent(agentFromDB, _ string) string {
+	if agentFromDB != "" {
+		return agentFromDB
+	}
 	return "unknown"
 }
 
@@ -597,5 +607,127 @@ func queryDashboardHealth(ctx context.Context, db *sql.DB) (DashboardHealth, err
 		h.ActiveAgentCount = count
 	}
 
+	// Best-effort metrics derived from local files and DB history.
+	// Failures are silently ignored so a missing coverage file or empty
+	// review_runs table does not degrade the DB/feed health report.
+	reportPath = gateCheckReportPath() // Reuse existing variable
+	repoRoot := os.Getenv("CODERO_REPO_PATH")
+	if repoRoot == "" {
+		repoRoot = "."
+	}
+	h.SecurityScore = computeSecurityScore(reportPath)
+	h.CoveragePct = parseCoverageFile(repoRoot)
+	h.ETAMin = queryETAMinutes(ctx, db, "")
+
 	return h, nil
+}
+
+// computeSecurityScore derives a 0–10 score from the gate-check report.
+// Returns nil when the file is missing, empty, or unparseable.
+func computeSecurityScore(reportPath string) *SecurityScoreStats {
+	data, err := os.ReadFile(reportPath) //nolint:gosec
+	if err != nil {
+		return nil
+	}
+	var report struct {
+		Summary struct {
+			Passed         int `json:"passed"`
+			Failed         int `json:"failed"`
+			RequiredFailed int `json:"required_failed"`
+			Total          int `json:"total"`
+		} `json:"summary"`
+	}
+	if err := json.Unmarshal(data, &report); err != nil {
+		return nil
+	}
+	total := report.Summary.Total
+	if total == 0 {
+		return nil
+	}
+	requiredFailed := report.Summary.RequiredFailed
+	failed := report.Summary.Failed
+	good := total - requiredFailed - failed
+	if good < 0 {
+		good = 0
+	}
+	score := good * 10 / total
+	pct := float64(report.Summary.Passed) / float64(total) * 100
+	return &SecurityScoreStats{
+		Score:    score,
+		Pct:      pct,
+		Critical: requiredFailed,
+		High:     failed,
+		Total:    total,
+	}
+}
+
+// parseCoverageFile parses a Go coverage.out file under repoRoot and returns
+// the statement coverage percentage. Returns nil when the file is missing or empty.
+func parseCoverageFile(repoRoot string) *float64 {
+	path := filepath.Join(repoRoot, "coverage.out")
+	f, err := os.Open(path) //nolint:gosec
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	var totalStmts, coveredStmts int
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" || strings.HasPrefix(line, "mode:") {
+			continue
+		}
+		// Format: pkg/file.go:startLine.col,endLine.col numStmts hitCount
+		fields := strings.Fields(line)
+		if len(fields) != 3 {
+			continue
+		}
+		numStmts, err1 := strconv.Atoi(fields[1])
+		hitCount, err2 := strconv.Atoi(fields[2])
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		totalStmts += numStmts
+		if hitCount > 0 {
+			coveredStmts += numStmts
+		}
+	}
+	if totalStmts == 0 {
+		return nil
+	}
+	pct := float64(coveredStmts) / float64(totalStmts) * 100
+	return &pct
+}
+
+// queryETAMinutes estimates remaining minutes for the active review run in repo.
+// It computes the average completed run duration over the last 7 days, then
+// subtracts the elapsed time of the current running run. Returns nil when there
+// is no historical data.
+func queryETAMinutes(ctx context.Context, db *sql.DB, repo string) *int {
+	var avgMin sql.NullFloat64
+	if err := db.QueryRowContext(ctx, `
+		SELECT ROUND(AVG((julianday(finished_at) - julianday(started_at)) * 1440))
+		FROM review_runs
+		WHERE status IN ('completed', 'approved') AND finished_at IS NOT NULL
+		  AND started_at >= datetime('now', '-7 days')
+		  AND (? = '' OR repo = ?)`, repo, repo).Scan(&avgMin); err != nil || !avgMin.Valid {
+		return nil
+	}
+
+	var elapsedMin sql.NullFloat64
+	_ = db.QueryRowContext(ctx, `
+		SELECT ROUND((julianday('now') - julianday(started_at)) * 1440)
+		FROM review_runs
+		WHERE status = 'running' AND (? = '' OR repo = ?)
+		ORDER BY started_at DESC LIMIT 1`, repo, repo).Scan(&elapsedMin)
+
+	eta := int(avgMin.Float64)
+	if elapsedMin.Valid {
+		eta -= int(elapsedMin.Float64)
+	}
+	if eta < 0 {
+		eta = 0
+	}
+	return &eta
 }

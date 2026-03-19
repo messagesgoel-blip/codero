@@ -194,6 +194,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:12
     <button class="tb-tab" type="button" id="tab-settings" role="tab" data-tab="settings" aria-selected="false" aria-controls="page-settings" tabindex="0" onclick="showTab('settings',this)" onkeydown="return tabKey(event,this)">&#x2699; Settings</button>
   </div>
   <div class="tb-right">
+    <div style="font-size:10px;color:var(--muted)" id="tb-pr-num">PR #&#x2014;</div>
     <div class="agents-badge"><div class="agents-dot"></div><span id="agents-count">0</span>&nbsp;agents active</div>
     <button class="review-btn" onclick="showTab('findings',document.getElementById('tab-findings'))">Review Findings</button>
     <div class="theme-toggle">
@@ -221,6 +222,9 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:12
     <div class="hb-item"><span class="hb-key">agents</span><span class="hb-num" id="hb-agents">&#x2014;</span></div>
     <div class="hb-item"><div class="hb-dot" id="hb-sessions-dot"></div><span class="hb-key">sessions feed</span><span class="hb-val" id="hb-sessions-status">&#x2026;</span><span class="hb-num" id="hb-sessions-age" style="color:var(--dim);margin-left:2px"></span></div>
     <div class="hb-item"><div class="hb-dot" id="hb-gate-dot"></div><span class="hb-key">gate-checks</span><span class="hb-val" id="hb-gate-status">&#x2026;</span><span class="hb-num" id="hb-gate-age" style="color:var(--dim);margin-left:2px"></span></div>
+    <div class="hb-item" id="hb-sr" style="display:none"><span class="hb-key">score</span><span class="hb-num" id="hb-sr-val">&#x2014;/10</span></div>
+    <div class="hb-item" id="hb-cov" style="display:none"><span class="hb-key">coverage</span><span class="hb-num" id="hb-cov-val">&#x2014;%</span></div>
+    <div class="hb-item" id="hb-eta" style="display:none"><span class="hb-key">ETA</span><span class="hb-num" id="hb-eta-val">&#x2014; min</span></div>
     <div class="hb-item" style="margin-left:auto"><span class="hb-key">refreshed</span><span class="hb-num" id="hb-refreshed">&#x2014;</span></div>
   </div>
   <div class="proc-content" id="proc-content">
@@ -418,6 +422,24 @@ function renderHealthBar(h) {
   dotSet('hb-gate-dot', gateF.status || 'unavailable');
   el('hb-gate-age').textContent = gateF.freshness_sec != null ? fmtAge(gateF.freshness_sec) : '';
   el('hb-refreshed').textContent = unavailable ? '—' : fmtTime(h.generated_at);
+  // Security score (from gate-check report).
+  var srItem = el('hb-sr');
+  if (!unavailable && h.security_score && h.security_score.total > 0) {
+    el('hb-sr-val').textContent = h.security_score.score + '/10';
+    if (srItem) srItem.style.display = '';
+  } else if (srItem) srItem.style.display = 'none';
+  // Coverage % (from coverage.out).
+  var covItem = el('hb-cov');
+  if (!unavailable && h.coverage_pct != null) {
+    el('hb-cov-val').textContent = h.coverage_pct.toFixed(1) + '%';
+    if (covItem) covItem.style.display = '';
+  } else if (covItem) covItem.style.display = 'none';
+  // ETA (from review_runs history).
+  var etaItem = el('hb-eta');
+  if (!unavailable && h.eta_min != null) {
+    el('hb-eta-val').textContent = h.eta_min + ' min';
+    if (etaItem) etaItem.style.display = '';
+  } else if (etaItem) etaItem.style.display = 'none';
 }
 function elSet(id, text, cls) { const e = el(id); if (e) { e.textContent = text; e.className = cls; } }
 function dotSet(id, st)       { const e = el(id); if (e) e.className = 'hb-dot ' + st; }
@@ -425,8 +447,18 @@ function dotSet(id, st)       { const e = el(id); if (e) e.className = 'hb-dot '
 /* ACTIVE AGENTS */
 function renderSessions(sessions) {
   const c = el('proc-content');
-  if (sessions === null) { c.innerHTML = '<div class="state-msg error">active sessions feed unavailable</div>'; return; }
-  if (!sessions || !sessions.length) { c.innerHTML = '<div class="state-msg">no active sessions</div>'; return; }
+  if (sessions === null) { 
+    c.innerHTML = '<div class="state-msg error">active sessions feed unavailable</div>'; 
+    var prEl = el('tb-pr-num'); 
+    if (prEl) prEl.textContent = 'PR #\u2014';
+    return; 
+  }
+  if (!sessions || !sessions.length) { 
+    c.innerHTML = '<div class="state-msg">no active sessions</div>'; 
+    var prEl = el('tb-pr-num'); 
+    if (prEl) prEl.textContent = 'PR #\u2014';
+    return; 
+  }
   c.innerHTML = sessions.map(function(s) {
     var task  = s.task || {};
     var tid   = (task.id && task.id !== 'unknown') ? '<span class="agent-task-id">#' + esc(task.id) + '</span>' : '';
@@ -446,12 +478,22 @@ function renderSessions(sessions) {
           '<div class="am-item"><span class="key">branch</span>&nbsp;' + esc(s.branch || '—') + '</div>' +
           '<div class="am-item"><span class="key">elapsed</span>&nbsp;' + fmtElapsed(s.elapsed_sec || 0) + '</div>' +
           '<div class="am-item"><span class="key">heartbeat</span>&nbsp;' + (s.last_heartbeat_at ? fmtRelative(s.last_heartbeat_at) : '&mdash;') + '</div>' +
+          '<div class="am-item"><span class="key">PR</span>&nbsp;' + (s.pr_number > 0 ? '#' + s.pr_number : '\u2014') + '</div>' +
           '<span class="am-badge ' + attrEsc(state) + '">' + esc(state) + '</span>' +
         '</div>' +
       '</div>' +
       '<div class="agent-right"><div class="agent-state-dot ' + attrEsc(state) + '"></div></div>' +
     '</div>';
   }).join('');
+  // Update PR number in nav bar (first session with a known PR wins).
+  var prNum = 0;
+  if (sessions && sessions.length) {
+    for (var i = 0; i < sessions.length; i++) {
+      if (sessions[i].pr_number > 0) { prNum = sessions[i].pr_number; break; }
+    }
+  }
+  var prEl = el('tb-pr-num');
+  if (prEl) prEl.textContent = prNum > 0 ? 'PR #' + prNum : 'PR #\u2014';
 }
 function agentIcon(agent) {
   var a = (agent || '').toLowerCase();

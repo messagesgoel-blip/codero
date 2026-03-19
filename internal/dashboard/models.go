@@ -74,6 +74,7 @@ type ActiveSession struct {
 	SessionID       string      `json:"session_id"`
 	Repo            string      `json:"repo"`
 	Branch          string      `json:"branch"`
+	PRNumber        int         `json:"pr_number"`
 	OwnerAgent      string      `json:"owner_agent"`
 	ActivityState   string      `json:"activity_state"`
 	Task            *ActiveTask `json:"task,omitempty"`
@@ -170,13 +171,26 @@ type DashboardFeeds struct {
 	GateChecks     FeedStatus `json:"gate_checks"`
 }
 
+// SecurityScoreStats holds the computed security score derived from the gate-check report.
+type SecurityScoreStats struct {
+	Score    int     `json:"score"`    // 0–10
+	Pct      float64 `json:"pct"`      // 0–100
+	Critical int     `json:"critical"` // required_failed count
+	High     int     `json:"high"`     // failed count
+	Total    int     `json:"total"`
+}
+
 // DashboardHealth is the response for GET /api/v1/dashboard/health.
-// It reports DB connectivity, per-feed freshness, and live agent count.
+// It reports DB connectivity, per-feed freshness, live agent count, and
+// best-effort metrics derived from local files (security score, coverage, ETA).
 type DashboardHealth struct {
-	Database         ServiceStatus  `json:"database"`
-	Feeds            DashboardFeeds `json:"feeds"`
-	ActiveAgentCount int            `json:"active_agent_count"`
-	GeneratedAt      time.Time      `json:"generated_at"`
+	Database         ServiceStatus       `json:"database"`
+	Feeds            DashboardFeeds      `json:"feeds"`
+	ActiveAgentCount int                 `json:"active_agent_count"`
+	SecurityScore    *SecurityScoreStats `json:"security_score,omitempty"`
+	CoveragePct      *float64            `json:"coverage_pct,omitempty"`
+	ETAMin           *int                `json:"eta_min,omitempty"`
+	GeneratedAt      time.Time           `json:"generated_at"`
 }
 
 // GateCheckStatus mirrors gatecheck.CheckStatus for dashboard JSON.

@@ -306,6 +306,34 @@ func ClearLeaseInfo(db *DB, id string) error {
 	return nil
 }
 
+// UpdatePRNumber stores the GitHub PR number for the given branch.
+func UpdatePRNumber(db *DB, repo, branch string, prNumber int) error {
+	_, err := db.sql.Exec(
+		`UPDATE branch_states SET pr_number = ?, updated_at = datetime('now') WHERE repo = ? AND branch = ?`,
+		prNumber, repo, branch,
+	)
+	if err != nil {
+		return fmt.Errorf("update pr number: %w", err)
+	}
+	return nil
+}
+
+// UpdateOwnerAgent records the agent identifier for the current owner session.
+// A blank agentID is a no-op.
+func UpdateOwnerAgent(db *DB, repo, branch, agentID string) error {
+	if agentID == "" {
+		return nil
+	}
+	_, err := db.sql.Exec(
+		`UPDATE branch_states SET owner_agent = ?, updated_at = datetime('now') WHERE repo = ? AND branch = ?`,
+		agentID, repo, branch,
+	)
+	if err != nil {
+		return fmt.Errorf("update owner agent: %w", err)
+	}
+	return nil
+}
+
 // UpdateSessionHeartbeat records the current time as the last-seen timestamp for
 // the branch owner session. Used by the CLI heartbeat command.
 func UpdateSessionHeartbeat(db *DB, repo, branch string) error {

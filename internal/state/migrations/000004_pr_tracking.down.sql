@@ -1,0 +1,2 @@
+-- SQLite ALTER TABLE DROP COLUMN requires SQLite >= 3.35.0.
+-- Leave columns in place for compatibility with older SQLite builds.

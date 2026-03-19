@@ -194,6 +194,18 @@ func (r *Reconciler) reconcileBranch(ctx context.Context, b state.BranchRecord) 
 		return
 	}
 
+	// Persist the PR number whenever it is known.
+	if ghState.PRNumber > 0 {
+		if err := state.UpdatePRNumber(r.db, b.Repo, b.Branch, ghState.PRNumber); err != nil {
+			loglib.Warn("reconciler: update pr number failed",
+				loglib.FieldComponent, "reconciler",
+				loglib.FieldRepo, b.Repo,
+				loglib.FieldBranch, b.Branch,
+				"error", err,
+			)
+		}
+	}
+
 	// Update merge-readiness fields.
 	if err := state.UpdateMergeReadiness(r.db, b.ID,
 		ghState.Approved, ghState.CIGreen,
