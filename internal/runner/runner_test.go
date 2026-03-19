@@ -325,3 +325,41 @@ func (c *customProvider) Name() string { return "custom" }
 func (c *customProvider) Review(_ context.Context, _ runner.ReviewRequest) (*runner.ReviewResponse, error) {
 	return &runner.ReviewResponse{Findings: c.findings}, nil
 }
+
+func getOwnerAgent(t *testing.T, db *state.DB, id string) string {
+	t.Helper()
+	var agent string
+	if err := db.Unwrap().QueryRow(`SELECT COALESCE(owner_agent,'') FROM branch_states WHERE id = ?`, id).Scan(&agent); err != nil {
+		t.Fatalf("get owner_agent: %v", err)
+	}
+	return agent
+}
+
+func TestRunner_SetsOwnerAgent(t *testing.T) {
+	db, client, _ := setupDeps(t)
+	repo := "owner/repo"
+	branch := "feat/test-agent"
+
+	id := insertQueuedBranch(t, db, repo, branch)
+
+	q := scheduler.NewQueue(client)
+	ctx := context.Background()
+	if err := q.Enqueue(ctx, scheduler.QueueEntry{Repo: repo, Branch: branch}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	t.Setenv("CODERO_AGENT_ID", "test-agent-007")
+
+	r := newTestRunner(db, client, []string{repo}, runner.NewStubProvider(0))
+	runCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	r.Run(runCtx)
+
+	// Branch should be reviewed and owner_agent set.
+	if got := getState(t, db, id); got != state.StateReviewed {
+		t.Errorf("state: got %q, want %q", got, state.StateReviewed)
+	}
+	if got := getOwnerAgent(t, db, id); got != "test-agent-007" {
+		t.Errorf("owner_agent: got %q, want %q", got, "test-agent-007")
+	}
+}

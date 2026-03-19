@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/codero/codero/internal/delivery"
@@ -176,6 +177,18 @@ func (r *ReviewRunner) processEntry(ctx context.Context, repo, branch string) er
 	if err := state.TransitionBranch(r.db, rec.ID, state.StateQueuedCLI, state.StateCLIReviewing, "runner_dispatch"); err != nil {
 		_ = r.leaseMgr.Release(ctx, repo, branch, holderID)
 		return fmt.Errorf("transition to cli_reviewing: %w", err)
+	}
+
+	// Record the agent identity so the dashboard can display it.
+	if agentID := resolveAgentID(); agentID != "" {
+		if err := state.UpdateOwnerAgent(ctx, r.db, repo, branch, agentID); err != nil {
+			loglib.Warn("runner: failed to record owner agent",
+				loglib.FieldComponent, "runner",
+				loglib.FieldRepo, repo,
+				loglib.FieldBranch, branch,
+				"error", err,
+			)
+		}
 	}
 
 	// Record lease info in durable store for crash recovery.
@@ -430,4 +443,19 @@ func (r *ReviewRunner) handleReviewFailure(
 // newHolderID generates a unique holder ID for this runner instance + attempt.
 func newHolderID() string {
 	return "runner-" + uuid.New().String()
+}
+
+// resolveAgentID returns the agent identifier for the current process.
+// It reads CODERO_AGENT_ID; falls back to $USER; then to the hostname.
+func resolveAgentID() string {
+	if v := os.Getenv("CODERO_AGENT_ID"); v != "" {
+		return v
+	}
+	if v := os.Getenv("USER"); v != "" {
+		return v
+	}
+	if host, err := os.Hostname(); err == nil {
+		return host
+	}
+	return ""
 }
