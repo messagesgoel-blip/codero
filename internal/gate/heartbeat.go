@@ -21,7 +21,7 @@ const DefaultHeartbeatBin = "/srv/storage/shared/agent-toolkit/bin/gate-heartbea
 
 // Default timeout values (seconds). All are independently configurable via env.
 const (
-	DefaultCopilotTimeoutSec   = 15
+	DefaultCopilotTimeoutSec   = 75 // only relevant when CODERO_COPILOT_ENABLED=true
 	DefaultLiteLLMTimeoutSec   = 45
 	DefaultGateTotalTimeoutSec = 180
 	DefaultPollIntervalSec     = 180
@@ -59,7 +59,11 @@ func (r Result) IsFinal() bool {
 type Config struct {
 	// HeartbeatBin is the path to the gate-heartbeat script.
 	HeartbeatBin string
+	// CopilotEnabled controls whether the Copilot gate is run at all (CODERO_COPILOT_ENABLED).
+	// Default false. When false, only LiteLLM is tried.
+	CopilotEnabled bool
 	// CopilotTimeoutSec is the per-gate Copilot timeout (CODERO_COPILOT_TIMEOUT_SEC).
+	// Only relevant when CopilotEnabled is true.
 	CopilotTimeoutSec int
 	// LiteLLMTimeoutSec is the per-gate LiteLLM timeout (CODERO_LITELLM_TIMEOUT_SEC).
 	// This timeout is fully independent of CopilotTimeoutSec.
@@ -78,6 +82,7 @@ type Config struct {
 func LoadConfig() Config {
 	return Config{
 		HeartbeatBin:        envOrDefault("CODERO_GATE_HEARTBEAT_BIN", DefaultHeartbeatBin),
+		CopilotEnabled:      os.Getenv("CODERO_COPILOT_ENABLED") == "true",
 		CopilotTimeoutSec:   envIntOrDefault("CODERO_COPILOT_TIMEOUT_SEC", DefaultCopilotTimeoutSec),
 		LiteLLMTimeoutSec:   envIntOrDefault("CODERO_LITELLM_TIMEOUT_SEC", DefaultLiteLLMTimeoutSec),
 		GateTotalTimeoutSec: envIntOrDefault("CODERO_GATE_TOTAL_TIMEOUT_SEC", DefaultGateTotalTimeoutSec),
@@ -211,6 +216,11 @@ func (r *Runner) callHeartbeat(ctx context.Context, env []string) (string, error
 // propagating the current process environment for all other vars.
 func buildEnv(cfg Config) []string {
 	env := os.Environ()
+	copilotEnabled := "false"
+	if cfg.CopilotEnabled {
+		copilotEnabled = "true"
+	}
+	env = setEnvVar(env, "CODERO_COPILOT_ENABLED", copilotEnabled)
 	env = setEnvVar(env, "CODERO_COPILOT_TIMEOUT_SEC", strconv.Itoa(cfg.CopilotTimeoutSec))
 	env = setEnvVar(env, "CODERO_LITELLM_TIMEOUT_SEC", strconv.Itoa(cfg.LiteLLMTimeoutSec))
 	env = setEnvVar(env, "CODERO_GATE_TOTAL_TIMEOUT_SEC", strconv.Itoa(cfg.GateTotalTimeoutSec))
