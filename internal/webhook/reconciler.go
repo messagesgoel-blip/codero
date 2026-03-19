@@ -182,6 +182,19 @@ func (r *Reconciler) reconcileBranch(ctx context.Context, b state.BranchRecord) 
 		return
 	}
 
+	// Persist the PR number as soon as GitHub reports it — before any early
+	// returns so closed/stale branches still have their PR number recorded.
+	if ghState.PRNumber > 0 {
+		if err := state.UpdatePRNumber(ctx, r.db, b.Repo, b.Branch, ghState.PRNumber); err != nil {
+			loglib.Warn("reconciler: update pr number failed",
+				loglib.FieldComponent, "reconciler",
+				loglib.FieldRepo, b.Repo,
+				loglib.FieldBranch, b.Branch,
+				"error", err,
+			)
+		}
+	}
+
 	// Detect: PR closed → T18.
 	if !ghState.PROpen {
 		r.maybeClose(b, "pr_closed")
@@ -192,18 +205,6 @@ func (r *Reconciler) reconcileBranch(ctx context.Context, b state.BranchRecord) 
 	if ghState.HeadHash != "" && b.HeadHash != "" && ghState.HeadHash != b.HeadHash {
 		r.maybeStaleBranch(b, ghState.HeadHash)
 		return
-	}
-
-	// Persist the PR number whenever it is known.
-	if ghState.PRNumber > 0 {
-		if err := state.UpdatePRNumber(r.db, b.Repo, b.Branch, ghState.PRNumber); err != nil {
-			loglib.Warn("reconciler: update pr number failed",
-				loglib.FieldComponent, "reconciler",
-				loglib.FieldRepo, b.Repo,
-				loglib.FieldBranch, b.Branch,
-				"error", err,
-			)
-		}
 	}
 
 	// Update merge-readiness fields.

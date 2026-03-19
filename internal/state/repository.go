@@ -307,8 +307,8 @@ func ClearLeaseInfo(db *DB, id string) error {
 }
 
 // UpdatePRNumber stores the GitHub PR number for the given branch.
-func UpdatePRNumber(db *DB, repo, branch string, prNumber int) error {
-	_, err := db.sql.Exec(
+func UpdatePRNumber(ctx context.Context, db *DB, repo, branch string, prNumber int) error {
+	_, err := db.sql.ExecContext(ctx,
 		`UPDATE branch_states SET pr_number = ?, updated_at = datetime('now') WHERE repo = ? AND branch = ?`,
 		prNumber, repo, branch,
 	)
@@ -320,11 +320,11 @@ func UpdatePRNumber(db *DB, repo, branch string, prNumber int) error {
 
 // UpdateOwnerAgent records the agent identifier for the current owner session.
 // A blank agentID is a no-op.
-func UpdateOwnerAgent(db *DB, repo, branch, agentID string) error {
+func UpdateOwnerAgent(ctx context.Context, db *DB, repo, branch, agentID string) error {
 	if agentID == "" {
 		return nil
 	}
-	_, err := db.sql.Exec(
+	_, err := db.sql.ExecContext(ctx,
 		`UPDATE branch_states SET owner_agent = ?, updated_at = datetime('now') WHERE repo = ? AND branch = ?`,
 		agentID, repo, branch,
 	)

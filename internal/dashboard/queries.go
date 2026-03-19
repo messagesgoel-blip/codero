@@ -693,6 +693,9 @@ func parseCoverageFile(repoRoot string) *float64 {
 			coveredStmts += numStmts
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		return nil
+	}
 	if totalStmts == 0 {
 		return nil
 	}
