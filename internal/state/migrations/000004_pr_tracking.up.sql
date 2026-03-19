@@ -1,0 +1,2 @@
+ALTER TABLE branch_states ADD COLUMN pr_number INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE branch_states ADD COLUMN owner_agent TEXT NOT NULL DEFAULT '';
