@@ -93,3 +93,8 @@ Open Questions: Does CodeRabbit trigger and produce feedback on a no-source-chan
 Summary: Committed and pushed roadmap/docs status sync for v1.2.4 and validated test readiness.
 Pending: (agent fills this before calling)
 Open Questions: (agent fills this before calling)
+
+## Handoff — 2026-03-18T23:59:00Z
+Summary: UI-001 TUI visual design refresh complete — redesigned Bubble Tea TUI to exactly match Codero mockup. Left pane: PROCESSES & AGENTS with emoji icons, agent action labels, ASCII block progress bars, and RELAY ORCHESTRATION section. Right pane: FINDINGS & ROUTING DASHBOARD with CRITICAL/HIGH/MEDIUM/LOW severity buckets, routing flowchart, and Summary with risk score. Bottom bar: dynamic Merge Status (MERGE READY / MERGE BLOCKED / PENDING). Snapshot output restructured with OVERALL/PROFILE/COUNTS/REQUIRED summary block, DISPLAY + DUR columns, ANSI-free. 15 new view tests + adapter unit tests added. All 22 test packages pass. PR #66 opened, CodeRabbit review requested.
+Pending: Wait for CodeRabbit review on PR #66, address any findings, then merge.
+Open Questions: None.

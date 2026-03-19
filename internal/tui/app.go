@@ -25,14 +25,14 @@ import (
 type Tab int
 
 const (
-	TabOutput Tab = iota
+	TabLogs Tab = iota // INTERACTIVE LOGS & ARCHITECTURE VISUALIZATION (default)
+	TabOutput
 	TabEvents
 	TabQueue
-	TabFindings
 	tabCount
 )
 
-var tabLabels = [tabCount]string{"output", "events", "queue", "findings"}
+var tabLabels = [tabCount]string{"logs & arch", "output", "events", "queue"}
 
 // FocusedPane identifies which pane has keyboard focus.
 type FocusedPane int
@@ -73,10 +73,12 @@ type Model struct {
 	keys   KeyMap
 	theme  Theme
 
-	gatePane   GatePane
-	branchPane BranchPane
-	queuePane  QueuePane
-	eventsPane EventsPane
+	gatePane     GatePane
+	branchPane   BranchPane
+	queuePane    QueuePane
+	eventsPane   EventsPane
+	checksPane   ChecksPane
+	logsArchPane LogsArchPane
 
 	outputVP    viewport.Model
 	outputLines []string
@@ -121,12 +123,18 @@ func New(cfg Config) Model {
 		branchPane:   NewBranchPane(theme),
 		queuePane:    NewQueuePane(theme),
 		eventsPane:   NewEventsPane(theme),
+		checksPane:   NewChecksPane(theme),
+		logsArchPane: NewLogsArchPane(theme),
 		gateVM:       cfg.InitialVM,
 		paletteInput: palette,
 		searchInput:  search,
 		activeTab:    cfg.InitialTab,
 	}
 	m.gatePane.SetVM(cfg.InitialVM)
+	// Pre-populate checksPane so the right pane isn't blank on first render.
+	if report, err := adapters.LoadCheckReport(cfg.RepoPath); err == nil {
+		m.checksPane.SetVM(adapters.FromCheckReport(*report))
+	}
 	return m
 }
 
@@ -159,6 +167,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.gateVM = vm
 		m.gatePane.SetVM(vm)
 		m.lastUpdated = msg.t
+		// Also refresh the gate-check report for the findings pane if available.
+		if report, err := adapters.LoadCheckReport(m.cfg.RepoPath); err == nil {
+			checksVM := adapters.FromCheckReport(*report)
+			m.checksPane.SetVM(checksVM)
+		}
 		if !vm.IsFinal || !m.cfg.WatchMode {
 			cmds = append(cmds, tickCmd(m.cfg.Interval))
 		} else {
@@ -168,6 +181,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case gateRefreshMsg:
 		m.gateVM = msg.vm
 		m.gatePane.SetVM(msg.vm)
+		if report, err := adapters.LoadCheckReport(m.cfg.RepoPath); err == nil {
+			m.checksPane.SetVM(adapters.FromCheckReport(*report))
+		}
 
 	case queueRefreshMsg:
 		m.queuePane.SetItems(msg.items)
@@ -203,6 +219,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.queuePane, cmd = m.queuePane.Update(msg)
 	cmds = append(cmds, cmd)
 	m.eventsPane, cmd = m.eventsPane.Update(msg)
+	cmds = append(cmds, cmd)
+	m.checksPane, cmd = m.checksPane.Update(msg)
+	cmds = append(cmds, cmd)
+	m.logsArchPane, cmd = m.logsArchPane.Update(msg)
 	cmds = append(cmds, cmd)
 
 	if m.outputReady {
@@ -247,13 +267,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.activeTab = (m.activeTab + tabCount - 1) % tabCount
 
 	case key.Matches(msg, m.keys.Tab1):
-		m.activeTab = TabOutput
+		m.activeTab = TabLogs
 	case key.Matches(msg, m.keys.Tab2):
-		m.activeTab = TabEvents
+		m.activeTab = TabOutput
 	case key.Matches(msg, m.keys.Tab3):
-		m.activeTab = TabQueue
+		m.activeTab = TabEvents
 	case key.Matches(msg, m.keys.Tab4):
-		m.activeTab = TabFindings
+		m.activeTab = TabQueue
 
 	case key.Matches(msg, m.keys.Refresh):
 		vm := adapters.FromProgressEnv(m.cfg.RepoPath)
@@ -368,27 +388,24 @@ func (m Model) renderTopBar() string {
 
 func (m Model) renderLeft() string {
 	l := m.layout
-	half := l.ContentH / 2
 
-	m.gatePane.SetSize(l.LeftW-2, half-1)
-	m.branchPane.SetSize(l.LeftW-2, l.ContentH-half-1)
-
-	gateView := m.gatePane.View()
-	branchView := m.branchPane.View()
-	pane := lipgloss.JoinVertical(lipgloss.Left, gateView, branchView)
+	// GatePane takes the full left pane height: PROCESSES & AGENTS +
+	// RELAY ORCHESTRATION, matching the mockup layout.
+	m.gatePane.SetSize(l.LeftW-2, l.ContentH)
 
 	border := m.theme.PaneBorder
 	if m.focused == PaneLeft {
 		border = m.theme.ActiveBorder
 	}
-	return border.Width(l.LeftW).Height(l.ContentH).Render(pane)
+	return border.Width(l.LeftW).Height(l.ContentH).Render(m.gatePane.View())
 }
 
 func (m Model) renderCenter() string {
 	l := m.layout
 
 	tabs := m.renderTabs()
-	content := m.renderCenterContent(l.CenterW-2, l.ContentH-2)
+	// contentH minus 1 for the tab bar row
+	content := m.renderCenterContent(l.CenterW-2, l.ContentH-1)
 
 	border := m.theme.PaneBorder
 	if m.focused == PaneCenter {
@@ -413,105 +430,99 @@ func (m Model) renderTabs() string {
 
 func (m Model) renderCenterContent(w, h int) string {
 	switch m.activeTab {
+	case TabLogs:
+		m.logsArchPane.SetSize(w, h)
+		return m.logsArchPane.View()
 	case TabOutput:
-		return m.renderOutputContent(w, h)
+		if !m.outputReady {
+			return m.theme.Muted.Render("  initializing…")
+		}
+		return m.outputVP.View()
 	case TabEvents:
 		m.eventsPane.SetSize(w, h)
 		return m.eventsPane.View()
 	case TabQueue:
 		m.queuePane.SetSize(w, h)
 		return m.queuePane.View()
-	case TabFindings:
-		return m.renderFindingsContent(w, h)
 	}
 	return ""
-}
-
-func (m Model) renderOutputContent(w, h int) string {
-	if !m.outputReady {
-		return m.theme.Muted.Render("  initializing…")
-	}
-	_ = w
-	_ = h
-	return m.outputVP.View()
-}
-
-func (m Model) renderFindingsContent(w, h int) string {
-	return lipgloss.NewStyle().Width(w).Height(h).Render(
-		m.theme.Muted.Render("  Findings available when connected to DB.\n  Run: codero tui --config path/to/codero.yaml"),
-	)
 }
 
 func (m Model) renderRight() string {
 	l := m.layout
 
-	var sb strings.Builder
-	sb.WriteString(m.theme.ListHeader.Render("  GATE BARS") + "\n")
-	sb.WriteString(m.theme.Muted.Render(strings.Repeat("─", l.RightW-4)) + "\n\n")
-
-	sb.WriteString(m.renderGateBar("copilot", m.gateVM.CopilotStatus))
-	sb.WriteString(m.renderGateBar("litellm", m.gateVM.LiteLLMStatus))
-	sb.WriteString("\n")
-	sb.WriteString(m.theme.Muted.Render("  ── pipeline ──") + "\n")
-	for _, row := range m.gateVM.PipelineRows {
-		sb.WriteString(m.renderGateBar(row.Name, row.Status))
-	}
-
-	if len(m.gateVM.Comments) > 0 {
-		sb.WriteString("\n" + m.theme.Fail.Render("  BLOCKERS") + "\n")
-		for _, c := range m.gateVM.Comments {
-			sb.WriteString(m.theme.Warning.Render("  • "+truncStr(c, l.RightW-6)) + "\n")
-		}
-	}
+	// Right pane is the FINDINGS & ROUTING DASHBOARD, rendered by ChecksPane.
+	m.checksPane.SetSize(l.RightW-2, l.ContentH)
 
 	border := m.theme.PaneBorder
 	if m.focused == PaneRight {
 		border = m.theme.ActiveBorder
 	}
-	return border.Width(l.RightW).Height(l.ContentH).Render(sb.String())
-}
-
-func (m Model) renderGateBar(name, status string) string {
-	icon := "●"
-	style := m.theme.Running
-	switch status {
-	case "pass":
-		icon, style = "✓", m.theme.Pass
-	case "blocked", "timeout":
-		icon, style = "✗", m.theme.Fail
-	case "infra_fail":
-		icon, style = "!", m.theme.Warning
-	case "pending":
-		icon, style = "○", m.theme.Pending
-	}
-	barLabel := fmt.Sprintf("  %s %-8s %s", icon, name, status)
-	return style.Render(barLabel) + "\n"
+	return border.Width(l.RightW).Height(l.ContentH).Render(m.checksPane.View())
 }
 
 func (m Model) renderBottomBar() string {
 	l := m.layout
 	t := m.theme
 
+	// Build merge-status line from gate + checks pane data (mirrors the mockup).
+	mergeStatus := m.buildMergeStatus()
+
+	// "Review Findings" button — green, right-aligned (matches mockup).
+	reviewBtn := lipgloss.NewStyle().
+		Background(lipgloss.Color("#50FA7B")).
+		Foreground(lipgloss.Color("#1E1F2E")).
+		Bold(true).
+		Padding(0, 1).
+		Render("Review Findings")
+
+	// Left: merge status + hints.  Right: Review Findings button.
 	hints := []string{
 		t.KeyHint.Render("tab") + t.KeyLabel.Render(" panes"),
-		t.KeyHint.Render("]") + t.KeyLabel.Render(" tabs"),
 		t.KeyHint.Render("r") + t.KeyLabel.Render(" retry"),
-		t.KeyHint.Render("L") + t.KeyLabel.Render(" logs"),
 		t.KeyHint.Render(":") + t.KeyLabel.Render(" palette"),
 		t.KeyHint.Render("q") + t.KeyLabel.Render(" quit"),
 	}
 	hintStr := strings.Join(hints, "  ")
 
-	status := m.statusMsg
-	if status == "" && m.cfg.WatchMode {
-		status = t.Muted.Render(fmt.Sprintf("watching · interval %s", m.cfg.Interval))
+	leftPart := t.Base.Render(mergeStatus+"  ") + t.Muted.Render(hintStr)
+	// Pad between left and button.
+	leftVisible := lipgloss.Width(leftPart)
+	btnVisible := lipgloss.Width(reviewBtn)
+	pad := l.TotalW - leftVisible - btnVisible - 2
+	if pad < 1 {
+		pad = 1
 	}
-
-	bar := lipgloss.JoinHorizontal(lipgloss.Center,
-		t.Base.Render(status+"  "),
-		lipgloss.NewStyle().MarginLeft(1).Render(hintStr),
-	)
+	bar := leftPart + strings.Repeat(" ", pad) + reviewBtn
 	return t.BottomBar.Width(l.TotalW).Render(bar)
+}
+
+// buildMergeStatus returns a concise merge status string for the bottom bar.
+// Format mirrors the mockup: "Merge Status: MERGE BLOCKED – [N Critical, N High] → Review Needed"
+func (m Model) buildMergeStatus() string {
+	t := m.theme
+	s := m.checksPane.vm.Summary
+
+	// Count severity buckets.
+	buckets := m.checksPane.bucketChecks()
+	critCount := len(buckets[0].checks)
+	highCount := len(buckets[1].checks)
+
+	switch m.gateVM.Status {
+	case gate.StatusPass:
+		return t.Pass.Render("Merge Status: MERGE READY — all gates passed")
+	case gate.StatusFail:
+		detail := ""
+		if critCount > 0 || highCount > 0 {
+			detail = fmt.Sprintf(" – [%d Critical, %d High Findings] → Review Needed by Security and Tech Lead",
+				critCount, highCount)
+		} else if s.Failed > 0 {
+			detail = fmt.Sprintf(" – [%d Failed Checks] → Fix required before merge", s.Failed)
+		}
+		return t.Fail.Render("Merge Status: MERGE BLOCKED" + detail)
+	default:
+		return t.Muted.Render("Merge Status: PENDING — gate review in progress")
+	}
 }
 
 func (m Model) renderPalette() string {
@@ -525,11 +536,11 @@ func (m Model) renderPalette() string {
 
 func (m *Model) applyLayout() {
 	l := m.layout
-	half := l.ContentH / 2
-	m.gatePane.SetSize(l.LeftW-2, half-1)
-	m.branchPane.SetSize(l.LeftW-2, l.ContentH-half-1)
+	m.gatePane.SetSize(l.LeftW-2, l.ContentH)
+	m.logsArchPane.SetSize(l.CenterW-2, l.ContentH)
 	m.queuePane.SetSize(l.CenterW-2, l.ContentH-3)
 	m.eventsPane.SetSize(l.CenterW-2, l.ContentH-3)
+	m.checksPane.SetSize(l.RightW-2, l.ContentH)
 	if !m.outputReady {
 		m.outputVP = viewport.New(l.CenterW-2, l.ContentH-3)
 		m.outputReady = true

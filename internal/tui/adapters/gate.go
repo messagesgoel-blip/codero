@@ -3,6 +3,7 @@ package adapters
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -142,6 +143,21 @@ func ParseProgressEnv(content string) gate.Result {
 	return r
 }
 
+// LoadCheckReport reads the last gate-check report from the canonical path
+// inside repoRoot. Returns an error if the file does not exist or is invalid.
+func LoadCheckReport(repoRoot string) (*gatecheck.Report, error) {
+	path := filepath.Join(repoRoot, gatecheck.DefaultReportPath)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading gate report %s: %w", path, err)
+	}
+	var report gatecheck.Report
+	if err := json.Unmarshal(data, &report); err != nil {
+		return nil, fmt.Errorf("parsing gate report %s: %w", path, err)
+	}
+	return &report, nil
+}
+
 // ElapsedLabel formats elapsed seconds as a human-readable string.
 func ElapsedLabel(sec int) string {
 	if sec <= 0 {
@@ -177,14 +193,16 @@ type CheckViewModel struct {
 
 // CheckSummaryViewModel holds the aggregated counters from a gate-check run.
 type CheckSummaryViewModel struct {
-	Overall       string
-	Passed        int
-	Failed        int
-	Skipped       int
-	InfraBypassed int
-	Disabled      int
-	Total         int
-	Profile       string
+	Overall          string
+	Passed           int
+	Failed           int
+	Skipped          int
+	InfraBypassed    int
+	Disabled         int
+	Total            int
+	Profile          string
+	RequiredFailed   int
+	RequiredDisabled int
 }
 
 // CheckReportViewModel is the top-level TUI model for a gate-check report.
@@ -239,15 +257,44 @@ func FromCheckReport(r gatecheck.Report) CheckReportViewModel {
 	s := r.Summary
 	return CheckReportViewModel{
 		Summary: CheckSummaryViewModel{
-			Overall:       string(s.OverallStatus),
-			Passed:        s.Passed,
-			Failed:        s.Failed,
-			Skipped:       s.Skipped,
-			InfraBypassed: s.InfraBypassed,
-			Disabled:      s.Disabled,
-			Total:         s.Total,
-			Profile:       string(s.Profile),
+			Overall:          string(s.OverallStatus),
+			Passed:           s.Passed,
+			Failed:           s.Failed,
+			Skipped:          s.Skipped,
+			InfraBypassed:    s.InfraBypassed,
+			Disabled:         s.Disabled,
+			Total:            s.Total,
+			Profile:          string(s.Profile),
+			RequiredFailed:   s.RequiredFailed,
+			RequiredDisabled: s.RequiredDisabled,
 		},
 		Checks: checks,
 	}
+}
+
+// DisplayStateIcon returns a monospace-friendly icon for a LOG-001 display state.
+// Icons are chosen for readability on monospaced terminals and in diffing contexts.
+func DisplayStateIcon(ds string) string {
+	switch ds {
+	case "passing":
+		return "✓"
+	case "failing":
+		return "✗"
+	case "disabled":
+		return "–"
+	default:
+		return "?"
+	}
+}
+
+// FormatDurationMS formats a duration in milliseconds as a short human-readable string.
+// Returns an empty string for zero/negative values.
+func FormatDurationMS(ms int64) string {
+	if ms <= 0 {
+		return ""
+	}
+	if ms < 1000 {
+		return fmt.Sprintf("%dms", ms)
+	}
+	return fmt.Sprintf("%.1fs", float64(ms)/1000)
 }

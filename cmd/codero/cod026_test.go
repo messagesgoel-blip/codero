@@ -229,14 +229,14 @@ func TestResolveInitialTab(t *testing.T) {
 		input string
 		want  tui.Tab
 	}{
-		{"gate", tui.TabOutput},
+		{"gate", tui.TabLogs},
 		{"output", tui.TabOutput},
 		{"events", tui.TabEvents},
 		{"queue", tui.TabQueue},
-		{"findings", tui.TabFindings},
+		{"findings", tui.TabLogs}, // findings now routes to primary logs & arch view
 		{"EVENTS", tui.TabEvents},
-		{"", tui.TabOutput},
-		{"unknown", tui.TabOutput},
+		{"", tui.TabLogs},
+		{"unknown", tui.TabLogs},
 	}
 	for _, tt := range tests {
 		if got := resolveInitialTab(tt.input); got != tt.want {
