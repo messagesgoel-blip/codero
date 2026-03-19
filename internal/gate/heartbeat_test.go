@@ -159,6 +159,7 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	// Unset all gate env vars to test defaults.
 	vars := []string{
 		"CODERO_GATE_HEARTBEAT_BIN",
+		"CODERO_AI_GATE_FALLBACK",
 		"CODERO_COPILOT_TIMEOUT_SEC",
 		"CODERO_LITELLM_TIMEOUT_SEC",
 		"CODERO_GATE_TOTAL_TIMEOUT_SEC",
@@ -173,6 +174,9 @@ func TestLoadConfig_Defaults(t *testing.T) {
 
 	if cfg.HeartbeatBin != gate.DefaultHeartbeatBin {
 		t.Errorf("HeartbeatBin default: got %q", cfg.HeartbeatBin)
+	}
+	if cfg.FallbackMode != gate.DefaultFallbackMode {
+		t.Errorf("FallbackMode default: got %q, want %q", cfg.FallbackMode, gate.DefaultFallbackMode)
 	}
 	if cfg.CopilotTimeoutSec != gate.DefaultCopilotTimeoutSec {
 		t.Errorf("CopilotTimeoutSec default: got %d, want %d", cfg.CopilotTimeoutSec, gate.DefaultCopilotTimeoutSec)
@@ -241,5 +245,26 @@ func TestLoadConfig_TimeoutIndependence(t *testing.T) {
 	if cfg.GateTotalTimeoutSec != gate.DefaultGateTotalTimeoutSec {
 		t.Errorf("GateTotalTimeoutSec affected by CopilotTimeoutSec: got %d, want %d",
 			cfg.GateTotalTimeoutSec, gate.DefaultGateTotalTimeoutSec)
+	}
+}
+
+func TestParseFallbackMode(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want gate.FallbackMode
+	}{
+		{"block", gate.FallbackBlock},
+		{"warn", gate.FallbackWarn},
+		{"skip", gate.FallbackSkip},
+		{"", gate.DefaultFallbackMode},
+		{"unknown", gate.DefaultFallbackMode},
+		{"BLOCK", gate.DefaultFallbackMode}, // case-sensitive
+	}
+	for _, tc := range cases {
+		t.Setenv("CODERO_AI_GATE_FALLBACK", tc.raw)
+		cfg := gate.LoadConfig()
+		if cfg.FallbackMode != tc.want {
+			t.Errorf("CODERO_AI_GATE_FALLBACK=%q: got %q, want %q", tc.raw, cfg.FallbackMode, tc.want)
+		}
 	}
 }
