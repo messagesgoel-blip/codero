@@ -9,7 +9,7 @@ COPY . .
 
 ARG VERSION=dev
 RUN CGO_ENABLED=1 GOOS=linux \
-    go build -ldflags="-s -w -X main.version=${VERSION}" \
+    go build -buildvcs=false -ldflags="-s -w -X main.version=${VERSION}" \
     -o /codero ./cmd/codero
 
 # ---- Runtime stage ----
