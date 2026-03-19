@@ -16,6 +16,11 @@ import (
 // so the most important state is always visible on narrow terminals.
 const narrowThreshold = 60
 
+// authAgentCount is the number of authoritative AI gate agents (copilot + litellm).
+// It is a named constant so that navigation bounds in Update and the rendering
+// index offsets in View stay in sync if the agent list changes.
+const authAgentCount = 2
+
 // ── GatePane: PROCESSES & AGENTS + RELAY ORCHESTRATION (left pane) ──────────
 
 // GatePane renders the left pane: agent progress rows + relay orchestration.
@@ -42,7 +47,7 @@ func (p GatePane) Update(msg tea.Msg) (GatePane, tea.Cmd) {
 				p.selected--
 			}
 		case "down", "j":
-			total := 2 + len(p.vm.PipelineRows)
+			total := authAgentCount + len(p.vm.PipelineRows)
 			if p.selected < total-1 {
 				p.selected++
 			}
@@ -58,7 +63,7 @@ func (p GatePane) View() string {
 		return ""
 	}
 	lines := make([]string, 0, p.height)
-	w := p.width - 2
+	w := maxInt(0, p.width-2)
 
 	// ── header: PROCESSES & AGENTS + System Health indicator ─────────────────
 	sysHealth := agentSystemHealth(p.vm)
@@ -100,7 +105,7 @@ func (p GatePane) View() string {
 
 	// ── pipeline agent rows (local non-authoritative) ─────────────────────────
 	for j, row := range p.vm.PipelineRows {
-		idx := 2 + j
+		idx := authAgentCount + j
 		icon := pipelineIcon(row.Name)
 		pct := agentPercent(row.Status, 0, 0)
 		action := agentAction(row.Name, row.Status)
@@ -163,7 +168,7 @@ func agentSystemHealth(vm adapters.GateViewModel) string {
 // agentPercent derives a 0–100 display percentage from agent status + timing.
 func agentPercent(status string, elapsed, pollAfter int) int {
 	switch status {
-	case "pass", "blocked", "timeout":
+	case "pass", "blocked", "timeout", "infra_fail":
 		return 100
 	case "running":
 		if pollAfter > 0 {
@@ -191,6 +196,8 @@ func agentAction(name, status string) string {
 		return "Blocked — findings"
 	case "timeout":
 		return "Timed out"
+	case "infra_fail":
+		return "Infrastructure failure"
 	case "pending":
 		return "Waiting…"
 	}
@@ -314,7 +321,7 @@ func (p ChecksPane) View() string {
 		return ""
 	}
 	lines := make([]string, 0, p.height)
-	w := p.width - 2
+	w := maxInt(0, p.width-2)
 	narrow := w < narrowThreshold
 
 	// ── header ──────────────────────────────────────────────────────────────

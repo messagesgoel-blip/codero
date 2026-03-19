@@ -149,11 +149,11 @@ func LoadCheckReport(repoRoot string) (*gatecheck.Report, error) {
 	path := filepath.Join(repoRoot, gatecheck.DefaultReportPath)
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reading gate report %s: %w", path, err)
 	}
 	var report gatecheck.Report
 	if err := json.Unmarshal(data, &report); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parsing gate report %s: %w", path, err)
 	}
 	return &report, nil
 }
