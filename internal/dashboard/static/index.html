@@ -346,8 +346,8 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:12
         <circle class="stat-ring-fill" id="sr-ring-fill" cx="19" cy="19" r="16" stroke-dasharray="100.5" stroke-dashoffset="22"/>
       </svg>
       <div class="stat-ring-label">
-        <span class="stat-ring-score" id="sr-score">5/10</span>
-        <span class="stat-ring-pct" id="sr-pct">78%+</span>
+        <span class="stat-ring-score" id="sr-score">&#x2014;</span>
+        <span class="stat-ring-pct" id="sr-pct">&#x2014;</span>
       </div>
     </div>
     <div class="stat-card-body">
@@ -371,7 +371,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:12
   <!-- Coverage -->
   <div class="stat-card">
     <div class="stat-card-body">
-      <div class="stat-card-val teal" id="stat-coverage">92%</div>
+      <div class="stat-card-val teal" id="stat-coverage">&#x2014;</div>
       <div class="stat-card-label">Coverage &middot; Tests + Scans</div>
     </div>
   </div>
@@ -474,22 +474,8 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:12
             <div class="state-msg" style="padding:16px 0;font-size:10px">no findings to resolve</div>
           </div>
           <button class="res-resolve-btn" id="res-resolve-btn">Resolve All (0)</button>
-          <!-- Change Impact mini-diagram -->
-          <div class="change-impact" id="change-impact">
-            <div class="ci-title">Change Impact</div>
-            <div class="ci-diagram">
-              <div class="ci-node green">Auth Service</div>
-              <div class="ci-arrow">&#x2193;</div>
-              <div class="ci-node amber">Auth Middleware</div>
-              <div class="ci-arrow">&#x2193;</div>
-              <div class="ci-row" style="gap:10px">
-                <div style="display:flex;align-items:center;gap:4px"><div class="ci-dot unknown"></div><span class="ci-row-label">Redis Cache</span></div>
-                <div style="display:flex;align-items:center;gap:4px"><div class="ci-dot unknown"></div><span class="ci-row-label">Database</span></div>
-                <div style="display:flex;align-items:center;gap:4px"><div class="ci-dot unknown"></div><span class="ci-row-label">API Gateway</span></div>
-              </div>
-              <div style="font-size:8px;color:var(--dim);margin-top:4px">Unknown impact status</div>
-            </div>
-          </div>
+          <!-- Change Impact mini-diagram (populated from live check data) -->
+          <div class="change-impact" id="change-impact" style="display:none"></div>
         </div>
       </div>
     </div>
@@ -665,12 +651,12 @@ function updateMergeBar(health, sessions) {
     mbD.textContent = active > 0
       ? active + ' session' + (active !== 1 ? 's' : '') + ' in progress'
       : 'no active sessions';
-    updateTopbarMergeBadge('ready', active > 0 ? 'Active' : 'Ready');
+    updateTopbarMergeBadge(active > 0 ? 'active' : 'ready', active > 0 ? 'Active' : 'Ready');
   }
-  // Update topbar branch info from first session
+  // Update topbar branch and PR info from first session
   var first = sessions && sessions[0];
   if (first) {
-    el('tb-pr-num').textContent = 'PR #\u2014';
+    el('tb-pr-num').textContent = first.pr_number > 0 ? 'PR #' + first.pr_number : 'PR #\u2014';
     el('tb-branch').textContent = first.branch || '\u2014';
   }
 }
@@ -700,6 +686,20 @@ function renderHealthBar(h) {
   dotSet('hb-gate-dot', gateF.status || 'unavailable');
   el('hb-gate-age').textContent = gateF.freshness_sec != null ? fmtAge(gateF.freshness_sec) : '';
   el('hb-refreshed').textContent = unavailable ? '\u2014' : fmtTime(h.generated_at);
+  // Security score ring (from gate-check report)
+  var ss = unavailable ? null : h.security_score;
+  var srScore = el('sr-score'), srPct = el('sr-pct'), srRing = el('sr-ring-fill');
+  if (srScore) srScore.textContent = ss ? ss.score + '/10' : '\u2014';
+  if (srPct)   srPct.textContent   = ss ? ss.pct.toFixed(0) + '%' : '\u2014';
+  if (srRing && ss) {
+    var circumference = 100.5;
+    var offset = circumference - (ss.pct / 100) * circumference;
+    srRing.setAttribute('stroke-dashoffset', offset.toFixed(1));
+  }
+  // Coverage percentage
+  var cov = unavailable ? null : h.coverage_pct;
+  var covEl = el('stat-coverage');
+  if (covEl) covEl.textContent = cov != null ? cov.toFixed(1) + '%' : '\u2014';
 }
 function elSet(id, text, cls) { const e = el(id); if (e) { e.textContent = text; e.className = cls; } }
 function dotSet(id, st)       { const e = el(id); if (e) e.className = 'hb-dot ' + st; }
@@ -895,7 +895,7 @@ function renderFindings(data) {
       // Group by severity bucket based on status
       var critical = checks.filter(function(c) { var st = (c.status||'').toLowerCase(); return st === 'fail' && (c.severity === 'critical' || ((c.name||'').toLowerCase().indexOf('secret') >= 0)); });
       var high     = checks.filter(function(c) { var st = (c.status||'').toLowerCase(); return st === 'fail' && critical.indexOf(c) < 0; });
-      var medium   = checks.filter(function(c) { var st = (c.status||'').toLowerCase(); return st === 'skip' || st === 'disabled'; });
+      var medium   = checks.filter(function(c) { var st = (c.status||'').toLowerCase(); return st === 'skip' || st === 'disabled' || st === 'bypass'; });
       var low      = checks.filter(function(c) { var st = (c.status||'').toLowerCase(); return st === 'pass'; });
 
       var html = '';
@@ -1001,8 +1001,15 @@ function renderResolutionPanel(failChecks) {
 function postComment() {
   var ta = el('comment-input');
   if (!ta || !ta.value.trim()) return;
-  // In production this would POST to an API; for now just clear the field
-  ta.value = '';
+  var draft = ta.value.trim();
+  // POST to review API when available; preserve draft on failure
+  fetch('/api/v1/dashboard/comments', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ body: draft })
+  }).then(function(r) {
+    if (r.ok) { ta.value = ''; }
+  }).catch(function() { /* network error — draft preserved */ });
 }
 
 /* SETTINGS */
