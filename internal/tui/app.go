@@ -21,18 +21,18 @@ import (
 	"github.com/codero/codero/internal/tui/adapters"
 )
 
-// Tab identifies the active auxiliary tab (accessible via palette / keybind).
+// Tab identifies the active center-pane tab.
 type Tab int
 
 const (
-	TabOutput Tab = iota
+	TabLogs Tab = iota // INTERACTIVE LOGS & ARCHITECTURE VISUALIZATION (default)
+	TabOutput
 	TabEvents
 	TabQueue
-	TabFindings
 	tabCount
 )
 
-var tabLabels = [tabCount]string{"output", "events", "queue", "findings"}
+var tabLabels = [tabCount]string{"logs & arch", "output", "events", "queue"}
 
 // FocusedPane identifies which pane has keyboard focus.
 type FocusedPane int
@@ -260,13 +260,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.activeTab = (m.activeTab + tabCount - 1) % tabCount
 
 	case key.Matches(msg, m.keys.Tab1):
-		m.activeTab = TabOutput
+		m.activeTab = TabLogs
 	case key.Matches(msg, m.keys.Tab2):
-		m.activeTab = TabEvents
+		m.activeTab = TabOutput
 	case key.Matches(msg, m.keys.Tab3):
-		m.activeTab = TabQueue
+		m.activeTab = TabEvents
 	case key.Matches(msg, m.keys.Tab4):
-		m.activeTab = TabFindings
+		m.activeTab = TabQueue
 
 	case key.Matches(msg, m.keys.Refresh):
 		vm := adapters.FromProgressEnv(m.cfg.RepoPath)
@@ -396,32 +396,49 @@ func (m Model) renderLeft() string {
 func (m Model) renderCenter() string {
 	l := m.layout
 
-	// Primary view: INTERACTIVE LOGS & ARCHITECTURE VISUALIZATION (matches mockup).
-	// Auxiliary views (output, events, queue) are still accessible via the palette.
-	m.logsArchPane.SetSize(l.CenterW-2, l.ContentH)
+	tabs := m.renderTabs()
+	// contentH minus 1 for the tab bar row
+	content := m.renderCenterContent(l.CenterW-2, l.ContentH-1)
 
 	border := m.theme.PaneBorder
 	if m.focused == PaneCenter {
 		border = m.theme.ActiveBorder
 	}
-	return border.Width(l.CenterW).Height(l.ContentH).Render(m.logsArchPane.View())
+	inner := lipgloss.JoinVertical(lipgloss.Left, tabs, content)
+	return border.Width(l.CenterW).Height(l.ContentH).Render(inner)
 }
 
-// renderAuxContent renders the non-primary auxiliary views (palette-accessible).
-func (m Model) renderAuxContent(w, h int) string {
+func (m Model) renderTabs() string {
+	parts := make([]string, tabCount)
+	for i := Tab(0); i < tabCount; i++ {
+		label := fmt.Sprintf(" %s ", tabLabels[i])
+		if i == m.activeTab {
+			parts[i] = m.theme.TabActive.Render(label)
+		} else {
+			parts[i] = m.theme.TabInactive.Render(label)
+		}
+	}
+	return strings.Join(parts, m.theme.Muted.Render("│"))
+}
+
+func (m Model) renderCenterContent(w, h int) string {
 	switch m.activeTab {
+	case TabLogs:
+		m.logsArchPane.SetSize(w, h)
+		return m.logsArchPane.View()
+	case TabOutput:
+		if !m.outputReady {
+			return m.theme.Muted.Render("  initializing…")
+		}
+		return m.outputVP.View()
 	case TabEvents:
 		m.eventsPane.SetSize(w, h)
 		return m.eventsPane.View()
 	case TabQueue:
 		m.queuePane.SetSize(w, h)
 		return m.queuePane.View()
-	default:
-		if !m.outputReady {
-			return m.theme.Muted.Render("  initializing…")
-		}
-		return m.outputVP.View()
 	}
+	return ""
 }
 
 func (m Model) renderRight() string {
