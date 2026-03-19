@@ -21,7 +21,7 @@ import (
 	"github.com/codero/codero/internal/tui/adapters"
 )
 
-// Tab identifies the active center-pane tab.
+// Tab identifies the active auxiliary tab (accessible via palette / keybind).
 type Tab int
 
 const (
@@ -73,11 +73,12 @@ type Model struct {
 	keys   KeyMap
 	theme  Theme
 
-	gatePane   GatePane
-	branchPane BranchPane
-	queuePane  QueuePane
-	eventsPane EventsPane
-	checksPane ChecksPane
+	gatePane     GatePane
+	branchPane   BranchPane
+	queuePane    QueuePane
+	eventsPane   EventsPane
+	checksPane   ChecksPane
+	logsArchPane LogsArchPane
 
 	outputVP    viewport.Model
 	outputLines []string
@@ -123,6 +124,7 @@ func New(cfg Config) Model {
 		queuePane:    NewQueuePane(theme),
 		eventsPane:   NewEventsPane(theme),
 		checksPane:   NewChecksPane(theme),
+		logsArchPane: NewLogsArchPane(theme),
 		gateVM:       cfg.InitialVM,
 		paletteInput: palette,
 		searchInput:  search,
@@ -212,6 +214,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.eventsPane, cmd = m.eventsPane.Update(msg)
 	cmds = append(cmds, cmd)
 	m.checksPane, cmd = m.checksPane.Update(msg)
+	cmds = append(cmds, cmd)
+	m.logsArchPane, cmd = m.logsArchPane.Update(msg)
 	cmds = append(cmds, cmd)
 
 	if m.outputReady {
@@ -392,59 +396,32 @@ func (m Model) renderLeft() string {
 func (m Model) renderCenter() string {
 	l := m.layout
 
-	tabs := m.renderTabs()
-	content := m.renderCenterContent(l.CenterW-2, l.ContentH-2)
+	// Primary view: INTERACTIVE LOGS & ARCHITECTURE VISUALIZATION (matches mockup).
+	// Auxiliary views (output, events, queue) are still accessible via the palette.
+	m.logsArchPane.SetSize(l.CenterW-2, l.ContentH)
 
 	border := m.theme.PaneBorder
 	if m.focused == PaneCenter {
 		border = m.theme.ActiveBorder
 	}
-	inner := lipgloss.JoinVertical(lipgloss.Left, tabs, content)
-	return border.Width(l.CenterW).Height(l.ContentH).Render(inner)
+	return border.Width(l.CenterW).Height(l.ContentH).Render(m.logsArchPane.View())
 }
 
-func (m Model) renderTabs() string {
-	parts := make([]string, tabCount)
-	for i := Tab(0); i < tabCount; i++ {
-		label := fmt.Sprintf(" %s ", tabLabels[i])
-		if i == m.activeTab {
-			parts[i] = m.theme.TabActive.Render(label)
-		} else {
-			parts[i] = m.theme.TabInactive.Render(label)
-		}
-	}
-	return strings.Join(parts, m.theme.Muted.Render("│"))
-}
-
-func (m Model) renderCenterContent(w, h int) string {
+// renderAuxContent renders the non-primary auxiliary views (palette-accessible).
+func (m Model) renderAuxContent(w, h int) string {
 	switch m.activeTab {
-	case TabOutput:
-		return m.renderOutputContent(w, h)
 	case TabEvents:
 		m.eventsPane.SetSize(w, h)
 		return m.eventsPane.View()
 	case TabQueue:
 		m.queuePane.SetSize(w, h)
 		return m.queuePane.View()
-	case TabFindings:
-		return m.renderFindingsContent(w, h)
+	default:
+		if !m.outputReady {
+			return m.theme.Muted.Render("  initializing…")
+		}
+		return m.outputVP.View()
 	}
-	return ""
-}
-
-func (m Model) renderOutputContent(w, h int) string {
-	if !m.outputReady {
-		return m.theme.Muted.Render("  initializing…")
-	}
-	_ = w
-	_ = h
-	return m.outputVP.View()
-}
-
-func (m Model) renderFindingsContent(w, h int) string {
-	return lipgloss.NewStyle().Width(w).Height(h).Render(
-		m.theme.Muted.Render("  Findings available when connected to DB.\n  Run: codero tui --config path/to/codero.yaml"),
-	)
 }
 
 func (m Model) renderRight() string {
@@ -464,23 +441,35 @@ func (m Model) renderBottomBar() string {
 	l := m.layout
 	t := m.theme
 
+	// Build merge-status line from gate + checks pane data (mirrors the mockup).
+	mergeStatus := m.buildMergeStatus()
+
+	// "Review Findings" button — green, right-aligned (matches mockup).
+	reviewBtn := lipgloss.NewStyle().
+		Background(lipgloss.Color("#50FA7B")).
+		Foreground(lipgloss.Color("#1E1F2E")).
+		Bold(true).
+		Padding(0, 1).
+		Render("Review Findings")
+
+	// Left: merge status + hints.  Right: Review Findings button.
 	hints := []string{
 		t.KeyHint.Render("tab") + t.KeyLabel.Render(" panes"),
-		t.KeyHint.Render("]") + t.KeyLabel.Render(" tabs"),
 		t.KeyHint.Render("r") + t.KeyLabel.Render(" retry"),
-		t.KeyHint.Render("L") + t.KeyLabel.Render(" logs"),
 		t.KeyHint.Render(":") + t.KeyLabel.Render(" palette"),
 		t.KeyHint.Render("q") + t.KeyLabel.Render(" quit"),
 	}
 	hintStr := strings.Join(hints, "  ")
 
-	// Build merge-status line from gate + checks pane data (mirrors the mockup).
-	mergeStatus := m.buildMergeStatus()
-
-	bar := lipgloss.JoinHorizontal(lipgloss.Center,
-		t.Base.Render(mergeStatus+"  "),
-		lipgloss.NewStyle().MarginLeft(1).Render(hintStr),
-	)
+	leftPart := t.Base.Render(mergeStatus+"  ") + t.Muted.Render(hintStr)
+	// Pad between left and button.
+	leftVisible := lipgloss.Width(leftPart)
+	btnVisible := lipgloss.Width(reviewBtn)
+	pad := l.TotalW - leftVisible - btnVisible - 2
+	if pad < 1 {
+		pad = 1
+	}
+	bar := leftPart + strings.Repeat(" ", pad) + reviewBtn
 	return t.BottomBar.Width(l.TotalW).Render(bar)
 }
 
@@ -524,6 +513,7 @@ func (m Model) renderPalette() string {
 func (m *Model) applyLayout() {
 	l := m.layout
 	m.gatePane.SetSize(l.LeftW-2, l.ContentH)
+	m.logsArchPane.SetSize(l.CenterW-2, l.ContentH)
 	m.queuePane.SetSize(l.CenterW-2, l.ContentH-3)
 	m.eventsPane.SetSize(l.CenterW-2, l.ContentH-3)
 	m.checksPane.SetSize(l.RightW-2, l.ContentH)
