@@ -617,8 +617,15 @@ func queryDashboardHealth(ctx context.Context, db *sql.DB) (DashboardHealth, err
 	if repoRoot == "" {
 		repoRoot = "."
 	}
+	// CODERO_COVERAGE_PATH overrides the default coverage.out location.
+	// This allows CI to point to a generated file outside the repo root
+	// without needing filesystem access to the dashboard server.
+	coveragePath := os.Getenv("CODERO_COVERAGE_PATH")
+	if coveragePath == "" {
+		coveragePath = filepath.Join(repoRoot, "coverage.out")
+	}
 	h.SecurityScore = computeSecurityScore(reportPath)
-	h.CoveragePct = parseCoverageFile(repoRoot)
+	h.CoveragePct = parseCoverageFilePath(coveragePath)
 	h.ETAMin = queryETAMinutes(ctx, db, "")
 
 	return h, nil
@@ -663,10 +670,10 @@ func computeSecurityScore(reportPath string) *SecurityScoreStats {
 	}
 }
 
-// parseCoverageFile parses a Go coverage.out file under repoRoot and returns
-// the statement coverage percentage. Returns nil when the file is missing or empty.
-func parseCoverageFile(repoRoot string) *float64 {
-	path := filepath.Join(repoRoot, "coverage.out")
+// parseCoverageFilePath parses a Go coverage.out file at the given absolute or
+// relative path and returns the statement coverage percentage.
+// Returns nil when the file is missing, empty, or unparseable.
+func parseCoverageFilePath(path string) *float64 {
 	f, err := os.Open(path) //nolint:gosec
 	if err != nil {
 		return nil
