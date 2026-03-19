@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -65,5 +66,51 @@ func TestActiveSessions_DedupeBeforeLimit(t *testing.T) {
 	// No owner_agent in DB; expect branch-name fallback per resolveOwnerAgent.
 	if sessions[0].OwnerAgent != "feat/COD-001-first" || sessions[1].OwnerAgent != "feat/COD-002-unique" {
 		t.Fatalf("owner_agent values must fall back to branch name: %+v", sessions)
+	}
+}
+
+func TestParseCoverageFilePath_ValidFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "coverage.out")
+	content := "mode: set\ngithub.com/codero/codero/internal/dashboard/queries.go:10.20,15.2 3 1\ngithub.com/codero/codero/internal/dashboard/queries.go:20.10,25.2 2 0\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write coverage file: %v", err)
+	}
+	pct := parseCoverageFilePath(path)
+	if pct == nil {
+		t.Fatal("expected non-nil coverage pct")
+	}
+	// 3 stmts covered out of 5 total → 60%
+	if got := *pct; got < 59.9 || got > 60.1 {
+		t.Errorf("coverage pct = %.2f, want ~60.0", got)
+	}
+}
+
+func TestParseCoverageFilePath_MissingFile(t *testing.T) {
+	pct := parseCoverageFilePath("/nonexistent/path/coverage.out")
+	if pct != nil {
+		t.Errorf("expected nil for missing file, got %v", pct)
+	}
+}
+
+func TestCoveragePath_EnvOverride(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "custom-coverage.out")
+	content := "mode: set\ngithub.com/codero/codero/x.go:1.1,2.1 4 1\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write coverage file: %v", err)
+	}
+	t.Setenv("CODERO_COVERAGE_PATH", path)
+	// Resolve via the same logic as queryDashboardHealth.
+	coveragePath := os.Getenv("CODERO_COVERAGE_PATH")
+	if coveragePath == "" {
+		coveragePath = filepath.Join(".", "coverage.out")
+	}
+	pct := parseCoverageFilePath(coveragePath)
+	if pct == nil {
+		t.Fatal("expected non-nil coverage pct with CODERO_COVERAGE_PATH set")
+	}
+	if got := *pct; got < 99.9 || got > 100.1 {
+		t.Errorf("coverage pct = %.2f, want 100.0", got)
 	}
 }
