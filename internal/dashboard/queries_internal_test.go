@@ -87,7 +87,7 @@ func TestParseCoverageFilePath_ValidFile(t *testing.T) {
 }
 
 func TestParseCoverageFilePath_MissingFile(t *testing.T) {
-	pct := parseCoverageFilePath("/nonexistent/path/coverage.out")
+	pct := parseCoverageFilePath(filepath.Join(t.TempDir(), "missing-coverage.out"))
 	if pct != nil {
 		t.Errorf("expected nil for missing file, got %v", pct)
 	}
@@ -101,16 +101,24 @@ func TestCoveragePath_EnvOverride(t *testing.T) {
 		t.Fatalf("write coverage file: %v", err)
 	}
 	t.Setenv("CODERO_COVERAGE_PATH", path)
-	// Resolve via the same logic as queryDashboardHealth.
-	coveragePath := os.Getenv("CODERO_COVERAGE_PATH")
-	if coveragePath == "" {
-		coveragePath = filepath.Join(".", "coverage.out")
+
+	// Validate through queryDashboardHealth so env resolution and parsing are
+	// both exercised together (avoids duplicating the resolution logic here).
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := state.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open test db: %v", err)
 	}
-	pct := parseCoverageFilePath(coveragePath)
-	if pct == nil {
-		t.Fatal("expected non-nil coverage pct with CODERO_COVERAGE_PATH set")
+	defer db.Close()
+
+	h, err := queryDashboardHealth(context.Background(), db.Unwrap())
+	if err != nil {
+		t.Fatalf("queryDashboardHealth: %v", err)
 	}
-	if got := *pct; got < 99.9 || got > 100.1 {
-		t.Errorf("coverage pct = %.2f, want 100.0", got)
+	if h.CoveragePct == nil {
+		t.Fatal("expected non-nil CoveragePct with CODERO_COVERAGE_PATH set")
+	}
+	if got := *h.CoveragePct; got < 99.9 || got > 100.1 {
+		t.Errorf("CoveragePct = %.2f, want 100.0", got)
 	}
 }
