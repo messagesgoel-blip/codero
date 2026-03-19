@@ -62,7 +62,8 @@ func TestActiveSessions_DedupeBeforeLimit(t *testing.T) {
 	if sessions[1].SessionID != "sess-unique" {
 		t.Fatalf("sessions[1].session_id = %q, want sess-unique", sessions[1].SessionID)
 	}
-	if sessions[0].OwnerAgent != "unknown" || sessions[1].OwnerAgent != "unknown" {
-		t.Fatalf("owner_agent values must remain unknown: %+v", sessions)
+	// No owner_agent in DB; expect branch-name fallback per resolveOwnerAgent.
+	if sessions[0].OwnerAgent != "feat/COD-001-first" || sessions[1].OwnerAgent != "feat/COD-002-unique" {
+		t.Fatalf("owner_agent values must fall back to branch name: %+v", sessions)
 	}
 }

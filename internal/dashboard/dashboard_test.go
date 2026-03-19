@@ -723,9 +723,9 @@ func TestActiveSessions_WithFreshSession(t *testing.T) {
 	if s.ActivityState != "waiting" {
 		t.Fatalf("activity_state = %q, want waiting", s.ActivityState)
 	}
-	// owner_agent must be "unknown" — no reliable source of agent identity exists.
-	if s.OwnerAgent != "unknown" {
-		t.Fatalf("owner_agent = %q, want unknown", s.OwnerAgent)
+	// No owner_agent in DB; expect branch-name fallback per resolveOwnerAgent.
+	if s.OwnerAgent != s.Branch {
+		t.Fatalf("owner_agent = %q, want branch fallback %q", s.OwnerAgent, s.Branch)
 	}
 	if s.ElapsedSec <= 0 {
 		t.Fatalf("elapsed_sec = %d, want > 0", s.ElapsedSec)

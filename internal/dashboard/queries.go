@@ -487,9 +487,12 @@ func resolveTaskFromBranch(branch, state string) *ActiveTask {
 // non-empty (populated by UpdateOwnerAgent), it is returned directly. Otherwise
 // the branch name is used as a best-effort fallback, still returning "unknown"
 // when no useful signal is available.
-func resolveOwnerAgent(agentFromDB, _ string) string {
+func resolveOwnerAgent(agentFromDB, branch string) string {
 	if agentFromDB != "" {
 		return agentFromDB
+	}
+	if branch != "" {
+		return branch
 	}
 	return "unknown"
 }
@@ -610,7 +613,6 @@ func queryDashboardHealth(ctx context.Context, db *sql.DB) (DashboardHealth, err
 	// Best-effort metrics derived from local files and DB history.
 	// Failures are silently ignored so a missing coverage file or empty
 	// review_runs table does not degrade the DB/feed health report.
-	reportPath = gateCheckReportPath() // Reuse existing variable
 	repoRoot := os.Getenv("CODERO_REPO_PATH")
 	if repoRoot == "" {
 		repoRoot = "."
