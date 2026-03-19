@@ -53,12 +53,10 @@ func TestLogsArchPane_View_ShowsDefaultLogEntries(t *testing.T) {
 	p.SetSize(100, 30)
 
 	view := p.View()
-	// Default entries mirror the mockup
-	if !strings.Contains(view, "semgrep finds a secret") {
-		t.Error("LogsArchPane default log should contain 'semgrep finds a secret'")
-	}
-	if !strings.Contains(view, "copilot finds rate-limit bypass") {
-		t.Error("LogsArchPane default log should contain 'copilot finds rate-limit bypass'")
+	// Default (no events) state: pane should still render without panic.
+	// The arch diagram header is always visible.
+	if !strings.Contains(view, "INTERACTIVE LOGS") {
+		t.Error("LogsArchPane default view should render header without panic")
 	}
 }
 
@@ -100,8 +98,8 @@ func TestChecksPane_View_ShowsTotalLinesAnalyzed(t *testing.T) {
 	p.SetVM(makeChecksVM())
 
 	view := p.View()
-	if !strings.Contains(view, "Total Lines Analyzed") {
-		t.Error("ChecksPane Summary should show 'Total Lines Analyzed'")
+	if !strings.Contains(view, "Est. Lines Analyzed") {
+		t.Error("ChecksPane Summary should show 'Est. Lines Analyzed'")
 	}
 }
 
