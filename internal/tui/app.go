@@ -131,6 +131,10 @@ func New(cfg Config) Model {
 		activeTab:    cfg.InitialTab,
 	}
 	m.gatePane.SetVM(cfg.InitialVM)
+	// Pre-populate checksPane so the right pane isn't blank on first render.
+	if report, err := adapters.LoadCheckReport(cfg.RepoPath); err == nil {
+		m.checksPane.SetVM(adapters.FromCheckReport(*report))
+	}
 	return m
 }
 
@@ -177,6 +181,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case gateRefreshMsg:
 		m.gateVM = msg.vm
 		m.gatePane.SetVM(msg.vm)
+		if report, err := adapters.LoadCheckReport(m.cfg.RepoPath); err == nil {
+			m.checksPane.SetVM(adapters.FromCheckReport(*report))
+		}
 
 	case queueRefreshMsg:
 		m.queuePane.SetItems(msg.items)

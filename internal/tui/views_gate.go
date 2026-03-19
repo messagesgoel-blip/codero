@@ -59,11 +59,11 @@ func (p GatePane) Update(msg tea.Msg) (GatePane, tea.Cmd) {
 }
 
 func (p GatePane) View() string {
-	if p.width == 0 {
+	if p.width <= 2 || p.height <= 0 {
 		return ""
 	}
 	lines := make([]string, 0, p.height)
-	w := maxInt(0, p.width-2)
+	w := p.width - 2
 
 	// ── header: PROCESSES & AGENTS + System Health indicator ─────────────────
 	sysHealth := agentSystemHealth(p.vm)
@@ -317,11 +317,11 @@ func (p ChecksPane) bucketChecks() [4]severityBucket {
 }
 
 func (p ChecksPane) View() string {
-	if p.width == 0 {
+	if p.width <= 2 || p.height <= 0 {
 		return ""
 	}
 	lines := make([]string, 0, p.height)
-	w := maxInt(0, p.width-2)
+	w := p.width - 2
 	narrow := w < narrowThreshold
 
 	// ── header ──────────────────────────────────────────────────────────────
@@ -373,9 +373,9 @@ func (p ChecksPane) View() string {
 	lines = append(lines, p.theme.Muted.Render(strings.Repeat("─", w)))
 	lines = append(lines, p.theme.Bold.Render("  Summary"))
 	if s.Total > 0 {
-		// Approximate: assume ~20 lines per check on average when line counts unavailable
+		// Approximate: ~20 lines per check; label makes the estimate explicit
 		approxLines := s.Total * 20
-		lines = append(lines, p.theme.Base.Render(fmt.Sprintf("  Total Lines Analyzed: %s", formatLargeInt(approxLines))))
+		lines = append(lines, p.theme.Base.Render(fmt.Sprintf("  Est. Lines Analyzed: %s", formatLargeInt(approxLines))))
 	}
 	lines = append(lines, p.theme.Base.Render(fmt.Sprintf("  Findings Found: %d", s.Failed)))
 	lines = append(lines, p.theme.Base.Render(fmt.Sprintf("  Risk Score: %s", riskLabel)))

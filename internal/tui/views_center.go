@@ -73,23 +73,10 @@ func deliveryEventsToLog(events []state.DeliveryEvent) []logEntry {
 	return out
 }
 
-// defaultLogEntries returns placeholder entries that mirror the mockup visually
-// when no live event data is available.
+// defaultLogEntries returns an empty slice; the pane renders an idle-state
+// message when there are no live events to display.
 func defaultLogEntries() []logEntry {
-	ts := "2024 at 9:33 PM"
-	return []logEntry{
-		{ts: ts, msg: "Event events, timed", level: "normal"},
-		{ts: ts, msg: "Event events, timed", level: "normal"},
-		{ts: ts, msg: "semgrep finds a secret", level: "finding"},
-		{ts: ts, msg: "Event events, timed", level: "normal"},
-		{ts: ts, msg: "copilot finds rate-limit bypass", level: "alert", arrow: true},
-		{ts: ts, msg: "Event events, timed", level: "normal"},
-		{ts: ts, msg: "Event events, timed", level: "normal"},
-		{ts: ts, msg: "config.yaml: [snippet]", level: "normal"},
-		{ts: ts, msg: "Event events, timed", level: "normal"},
-		{ts: ts, msg: "litellm starts token flow review", level: "finding"},
-		{ts: ts, msg: "Event events, timed", level: "normal"},
-	}
+	return []logEntry{}
 }
 
 func (p LogsArchPane) View() string {

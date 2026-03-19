@@ -96,7 +96,7 @@ Examples:
 	cmd.Flags().StringVar(&themeName, "theme", "dark",
 		"UI theme: dark (default), light, system, dracula, vscode")
 	cmd.Flags().StringVar(&viewName, "view", "gate",
-		"initial center-pane view: gate, queue, events, output, findings")
+		"initial center-pane view: gate, logs, queue, events, output")
 	cmd.Flags().BoolVar(&noAltScreen, "no-alt-screen", false,
 		"disable alt-screen mode (useful in tmux or CI-adjacent terminals)")
 

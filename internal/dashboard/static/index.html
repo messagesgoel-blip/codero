@@ -1097,7 +1097,7 @@ async function refresh() {
     renderSessions(sessions);
     updateMergeBar(h, sessions);
     findingsCache = gc;
-    if (activeTab === 'findings')  renderFindings(gc);
+    renderFindings(gc);
     if (act && act.events) {
       eventsUnavailable = false;
       allEvents = act.events;
