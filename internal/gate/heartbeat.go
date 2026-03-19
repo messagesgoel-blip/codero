@@ -27,6 +27,23 @@ const (
 	DefaultPollIntervalSec     = 180
 )
 
+// FallbackMode controls what happens when the AI gate encounters an infra failure
+// (timeout, missing binary, auth error) rather than an explicit finding.
+type FallbackMode string
+
+const (
+	// FallbackBlock causes infra failures to block the commit (strict mode).
+	FallbackBlock FallbackMode = "block"
+	// FallbackWarn logs the failure and allows the commit to proceed.
+	FallbackWarn FallbackMode = "warn"
+	// FallbackSkip silently bypasses the gate on infra failure (permissive).
+	FallbackSkip FallbackMode = "skip"
+)
+
+// DefaultFallbackMode is warn: infra failures are surfaced but not blocking.
+// Set CODERO_AI_GATE_FALLBACK=block to harden, or =skip to soften.
+const DefaultFallbackMode = FallbackWarn
+
 // Status represents the terminal or intermediate gate state.
 type Status string
 
@@ -62,6 +79,9 @@ type Config struct {
 	// CopilotEnabled controls whether the Copilot gate is run at all (CODERO_COPILOT_ENABLED).
 	// Default false. When false, only LiteLLM is tried.
 	CopilotEnabled bool
+	// FallbackMode controls gate behaviour on infra failures (CODERO_AI_GATE_FALLBACK).
+	// Valid values: "block", "warn" (default), "skip".
+	FallbackMode FallbackMode
 	// CopilotTimeoutSec is the per-gate Copilot timeout (CODERO_COPILOT_TIMEOUT_SEC).
 	// Only relevant when CopilotEnabled is true.
 	CopilotTimeoutSec int
@@ -83,11 +103,23 @@ func LoadConfig() Config {
 	return Config{
 		HeartbeatBin:        envOrDefault("CODERO_GATE_HEARTBEAT_BIN", DefaultHeartbeatBin),
 		CopilotEnabled:      os.Getenv("CODERO_COPILOT_ENABLED") == "true",
+		FallbackMode:        parseFallbackMode(os.Getenv("CODERO_AI_GATE_FALLBACK")),
 		CopilotTimeoutSec:   envIntOrDefault("CODERO_COPILOT_TIMEOUT_SEC", DefaultCopilotTimeoutSec),
 		LiteLLMTimeoutSec:   envIntOrDefault("CODERO_LITELLM_TIMEOUT_SEC", DefaultLiteLLMTimeoutSec),
 		GateTotalTimeoutSec: envIntOrDefault("CODERO_GATE_TOTAL_TIMEOUT_SEC", DefaultGateTotalTimeoutSec),
 		PollIntervalSec:     envIntOrDefault("CODERO_GATE_POLL_INTERVAL_SEC", DefaultPollIntervalSec),
 		RepoPath:            os.Getenv("CODERO_REPO_PATH"),
+	}
+}
+
+// parseFallbackMode validates and normalises the raw env string.
+// Unrecognised values fall back to DefaultFallbackMode.
+func parseFallbackMode(raw string) FallbackMode {
+	switch FallbackMode(raw) {
+	case FallbackBlock, FallbackWarn, FallbackSkip:
+		return FallbackMode(raw)
+	default:
+		return DefaultFallbackMode
 	}
 }
 
@@ -221,6 +253,11 @@ func buildEnv(cfg Config) []string {
 		copilotEnabled = "true"
 	}
 	env = setEnvVar(env, "CODERO_COPILOT_ENABLED", copilotEnabled)
+	mode := cfg.FallbackMode
+	if mode == "" {
+		mode = DefaultFallbackMode
+	}
+	env = setEnvVar(env, "CODERO_AI_GATE_FALLBACK", string(mode))
 	env = setEnvVar(env, "CODERO_COPILOT_TIMEOUT_SEC", strconv.Itoa(cfg.CopilotTimeoutSec))
 	env = setEnvVar(env, "CODERO_LITELLM_TIMEOUT_SEC", strconv.Itoa(cfg.LiteLLMTimeoutSec))
 	env = setEnvVar(env, "CODERO_GATE_TOTAL_TIMEOUT_SEC", strconv.Itoa(cfg.GateTotalTimeoutSec))
