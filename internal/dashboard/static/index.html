@@ -1191,6 +1191,17 @@ function finalizeChatAssistant(index, payload) {
   renderChatActions(payload.actions || []);
 }
 
+function terminalChatPayload() {
+  return {
+    reply: 'No assistant response was returned.',
+    provider: 'fallback',
+    model: 'local-summary',
+    suggestions: [],
+    actions: [],
+    generated_at: new Date().toISOString()
+  };
+}
+
 async function consumeChatStream(resp, assistantIndex) {
   if (!resp.body || !resp.body.getReader) {
     throw new Error('streaming response not supported by browser');
@@ -1303,10 +1314,10 @@ async function submitChat(promptOverride) {
     var finalPayload;
     if (contentType.indexOf('application/json') !== -1 || contentType.indexOf('text/event-stream') === -1) {
       finalPayload = await resp.json();
-      if (finalPayload) finalizeChatAssistant(assistantIndex, finalPayload);
+      finalizeChatAssistant(assistantIndex, finalPayload || terminalChatPayload());
     } else {
       finalPayload = await consumeChatStream(resp, assistantIndex);
-      if (finalPayload) finalizeChatAssistant(assistantIndex, finalPayload);
+      finalizeChatAssistant(assistantIndex, finalPayload || terminalChatPayload());
     }
     if (ta) ta.value = '';
   } catch (err) {
