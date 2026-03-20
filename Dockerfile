@@ -15,6 +15,8 @@ RUN CGO_ENABLED=1 GOOS=linux \
 # ---- Runtime stage ----
 FROM debian:bullseye-slim
 
+ARG APP_USER=codero
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates wget \
     && rm -rf /var/lib/apt/lists/*
@@ -23,10 +25,12 @@ COPY --from=builder /codero /usr/local/bin/codero
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 # Runtime data directories (overridden by volume mounts in production).
-RUN addgroup --system codero \
-    && adduser --system --ingroup codero --home /nonexistent --no-create-home codero \
-    && mkdir -p /data/db /data/logs /data/pids /data/tmp /data/snapshots \
-    && chown -R codero:codero /data
+RUN set -eux; \
+    APP_HOME="/data/runtime/${APP_USER}"; \
+    addgroup --system "${APP_USER}"; \
+    adduser --system --ingroup "${APP_USER}" --home "${APP_HOME}" "${APP_USER}"; \
+    mkdir -p /data/db /data/logs /data/pids /data/tmp /data/snapshots; \
+    chown -R "${APP_USER}:${APP_USER}" "${APP_HOME}" /data
 
 VOLUME ["/data"]
 
