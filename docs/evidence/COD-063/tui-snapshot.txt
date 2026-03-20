@@ -1,0 +1,23 @@
+GATE CHECKS
+════════════════════════════════════════════════════════════
+OVERALL  FAIL
+PROFILE  portable
+COUNTS   pass=6    fail=1    skip=2    disabled=4    total=13
+REQUIRED failed=0  disabled=1
+════════════════════════════════════════════════════════════
+
+ID                      GROUP       DISPLAY     STATUS        REQ  DUR      REASON
+----------------------  ----------  ----------  ------------  ---  -------  ----------------------------------
+file-size               format      passing     pass          req  —
+merge-markers           format      passing     pass          req  —
+trailing-whitespace     format      passing     pass          opt  —
+final-newline           format      passing     pass          opt  —
+forbidden-paths         config      disabled    disabled      req  —        user_disabled - CODERO_ENFORCE_FORBIDDEN_PATHS not set
+config-validation       config      passing     pass          req  —
+lockfile-sync           config      disabled    disabled      opt  —        user_disabled - CODERO_ENFORCE_LOCKFILE_SYNC not set
+exec-bit-policy         config      disabled    disabled      opt  —        user_disabled - CODERO_ENFORCE_EXECUTABLE_POLICY not set
+gofmt                   format      disabled    skip          opt  —        not_in_scope - no staged .go files
+gitleaks-staged         security    passing     pass          req  609ms
+semgrep                 security    failing     fail          opt  8.4s     check_failed
+ruff-lint               lint        disabled    skip          opt  —        not_in_scope - no staged .py files
+ai-gate                 ai          disabled    disabled      opt  —        not_in_scope - AI gate is run separately via `codero commit-gate`; use gate-check for local checks only
