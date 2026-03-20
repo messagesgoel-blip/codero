@@ -1,0 +1,153 @@
+{
+  "summary": {
+    "overall_status": "fail",
+    "passed": 6,
+    "failed": 1,
+    "skipped": 2,
+    "infra_bypassed": 0,
+    "disabled": 4,
+    "total": 13,
+    "required_failed": 0,
+    "required_disabled": 1,
+    "profile": "portable",
+    "schema_version": "1"
+  },
+  "checks": [
+    {
+      "id": "file-size",
+      "name": "File size limit",
+      "group": "format",
+      "required": true,
+      "enabled": true,
+      "status": "pass",
+      "duration_ms": 0
+    },
+    {
+      "id": "merge-markers",
+      "name": "Merge conflict markers",
+      "group": "format",
+      "required": true,
+      "enabled": true,
+      "status": "pass",
+      "duration_ms": 0
+    },
+    {
+      "id": "trailing-whitespace",
+      "name": "Trailing whitespace",
+      "group": "format",
+      "required": false,
+      "enabled": true,
+      "status": "pass",
+      "duration_ms": 0
+    },
+    {
+      "id": "final-newline",
+      "name": "Missing final newline",
+      "group": "format",
+      "required": false,
+      "enabled": true,
+      "status": "pass",
+      "duration_ms": 0
+    },
+    {
+      "id": "forbidden-paths",
+      "name": "Forbidden path blocker",
+      "group": "config",
+      "required": true,
+      "enabled": false,
+      "status": "disabled",
+      "reason_code": "user_disabled",
+      "reason": "CODERO_ENFORCE_FORBIDDEN_PATHS not set",
+      "duration_ms": 0
+    },
+    {
+      "id": "config-validation",
+      "name": "Config file validation (JSON/YAML)",
+      "group": "config",
+      "required": true,
+      "enabled": true,
+      "status": "pass",
+      "duration_ms": 0
+    },
+    {
+      "id": "lockfile-sync",
+      "name": "Lockfile sync check",
+      "group": "config",
+      "required": false,
+      "enabled": false,
+      "status": "disabled",
+      "reason_code": "user_disabled",
+      "reason": "CODERO_ENFORCE_LOCKFILE_SYNC not set",
+      "duration_ms": 0
+    },
+    {
+      "id": "exec-bit-policy",
+      "name": "Executable bit policy",
+      "group": "config",
+      "required": false,
+      "enabled": false,
+      "status": "disabled",
+      "reason_code": "user_disabled",
+      "reason": "CODERO_ENFORCE_EXECUTABLE_POLICY not set",
+      "duration_ms": 0
+    },
+    {
+      "id": "gofmt",
+      "name": "Go formatting (gofmt)",
+      "group": "format",
+      "required": false,
+      "enabled": true,
+      "status": "skip",
+      "reason_code": "not_in_scope",
+      "reason": "no staged .go files",
+      "duration_ms": 0
+    },
+    {
+      "id": "gitleaks-staged",
+      "name": "Secret scan (gitleaks)",
+      "group": "security",
+      "required": true,
+      "enabled": true,
+      "status": "pass",
+      "tool_name": "gitleaks",
+      "tool_path": "<redacted-path>",
+      "duration_ms": 607
+    },
+    {
+      "id": "semgrep",
+      "name": "SAST scan (semgrep)",
+      "group": "security",
+      "required": false,
+      "enabled": true,
+      "status": "fail",
+      "reason_code": "check_failed",
+      "tool_name": "semgrep",
+      "tool_path": "<redacted-path>",
+      "duration_ms": 8666,
+      "details": "┌─────────────────┐\n│ 4 Code Findings │\n└─────────────────┘\n                                                     \n    scripts/evidence/capture-progress-screenshots.mjs\n     ❱ javascript.audit.detect-replaceall-sanitization.detect-replaceall-sanitization\n          ❰❰ Blocking ❱❱\n          Detected a call to `replaceAll()` in an attempt to HTML escape the string `value`. Manually    \n          sanitizing input through a manually built list can be circumvented in many situations, and it's\n          better to use a well known sanitization library such as `sanitize-html` or `DOMPurify`.        \n          Details: https://sg.run/AzoB                                                                   \n                                                                                                         \n           29┆ return value\n           30┆   .replaceAll('&', '&amp;')\n            ⋮┆----------------------------------------\n     ❱ javascript.audit.detect-replaceall-sanitization.detect-replaceall-sanitization\n          ❰❰ Blocking ❱❱\n          Detected a call to `replaceAll()` in an attempt to HTML escape the string `value                 \n          .replaceAll('&', '&amp;')`. Manually sanitizing input through a manually built list can be       \n          circumvented in many situations, and it's better to use a well known sanitization library such as\n          `sanitize-html` or `DOMPurify`.                                                                  \n          Details: https://sg.run/AzoB                                                                     \n                                                                                                           \n           29┆ return value\n           30┆   .replaceAll('&', '&amp;')\n           31┆   .replaceAll('<', '&lt;')\n            ⋮┆----------------------------------------\n     ❱ javascript.audit.detect-replaceall-sanitization.detect-replaceall-sanitization\n          ❰❰ Blocking ❱❱\n          Detected a call to `replaceAll()` in an attempt to HTML escape the string `value               \n          .replaceAll('&', '&amp;')     .replaceAll('<', '&lt;')`. Manually sanitizing input through a   \n          manually built list can be circumvented in many situations, and it's better to use a well known\n          sanitization library such as `sanitize-html` or `DOMPurify`.                                   \n          Details: https://sg.run/AzoB                                                                   \n                                                                                                         \n           29┆ return value\n           30┆   .replaceAll('&', '&amp;')\n           31┆   .replaceAll('<', '&lt;')\n           32┆   .replaceAll('>', '&gt;')\n            ⋮┆----------------------------------------\n     ❱ javascript.audit.detect-replaceall-sanitization.detect-replaceall-sanitization\n          ❰❰ Blocking ❱❱\n          Detected a call to `replaceAll()` in an attempt to HTML escape the string `value               \n          .replaceAll('&', '&amp;')     .replaceAll('<', '&lt;')     .replaceAll('>', '&gt;')`. Manually \n          sanitizing input through a manually built list can be circumvented in many situations, and it's\n          better to use a well known sanitization library such as `sanitize-html` or `DOMPurify`.        \n          Details: https://sg.run/AzoB                                                                   \n                                                                                                         \n           29┆ return value\n           30┆   .replaceAll('&', '&amp;')\n           31┆   .replaceAll('<', '&lt;')\n           32┆   .replaceAll('>', '&gt;')\n           33┆   .replaceAll('\"', '&quot;')"
+    },
+    {
+      "id": "ruff-lint",
+      "name": "Python lint (ruff)",
+      "group": "lint",
+      "required": false,
+      "enabled": true,
+      "status": "skip",
+      "reason_code": "not_in_scope",
+      "reason": "no staged .py files",
+      "duration_ms": 0
+    },
+    {
+      "id": "ai-gate",
+      "name": "AI review gate",
+      "group": "ai",
+      "required": false,
+      "enabled": false,
+      "status": "disabled",
+      "reason_code": "not_in_scope",
+      "reason": "AI gate is run separately via `codero commit-gate`; use gate-check for local checks only",
+      "duration_ms": 0
+    }
+  ],
+  "run_at": "NORMALIZED_TIMESTAMP"
+}

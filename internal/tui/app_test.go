@@ -1,6 +1,7 @@
 package tui_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -58,6 +59,47 @@ func TestView_AfterWindowSize(t *testing.T) {
 	view := newModel.(tui.Model).View()
 	if len(view) == 0 {
 		t.Error("expected non-empty View after WindowSizeMsg")
+	}
+}
+
+func TestView_ShowsMockStyleTitle(t *testing.T) {
+	cfg := makeCfg(false)
+	m := tui.New(cfg)
+
+	newModel, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	view := newModel.(tui.Model).View()
+	if !strings.Contains(view, "COMMAND TERMINAL - CODERO") {
+		t.Error("expected mock-style title in top bar")
+	}
+}
+
+func TestView_ShowsCommandStrip(t *testing.T) {
+	cfg := makeCfg(false)
+	m := tui.New(cfg)
+
+	newModel, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	view := newModel.(tui.Model).View()
+	for _, want := range []string{
+		"> Type a command or message…",
+		"status",
+		"help",
+		"run gate",
+		"queue",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected command strip to contain %q\nfull view:\n%s", want, view)
+		}
+	}
+}
+
+func TestView_HidesCenterTabStrip(t *testing.T) {
+	cfg := makeCfg(false)
+	m := tui.New(cfg)
+
+	newModel, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	view := newModel.(tui.Model).View()
+	if strings.Contains(view, "logs & arch") {
+		t.Fatalf("expected center tab strip to be hidden\nfull view:\n%s", view)
 	}
 }
 
