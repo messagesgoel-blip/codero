@@ -147,16 +147,15 @@ type dashboardChatPromptGateCheck struct {
 }
 
 type dashboardChatPromptCheck struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Group       string `json:"group"`
-	Required    bool   `json:"required"`
-	Enabled     bool   `json:"enabled"`
-	Status      string `json:"status"`
-	ReasonCode  string `json:"reason_code,omitempty"`
-	ToolName    string `json:"tool_name,omitempty"`
-	ToolVersion string `json:"tool_version,omitempty"`
-	DurationMS  int64  `json:"duration_ms"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Group      string `json:"group"`
+	Required   bool   `json:"required"`
+	Enabled    bool   `json:"enabled"`
+	Status     string `json:"status"`
+	ReasonCode string `json:"reason_code,omitempty"`
+	ToolName   string `json:"tool_name,omitempty"`
+	DurationMS int64  `json:"duration_ms"`
 }
 
 // handleChat serves POST /api/v1/dashboard/chat (and the legacy /comments alias).
@@ -727,16 +726,15 @@ func sanitizeDashboardChatSnapshot(snapshot dashboardChatSnapshot) dashboardChat
 			sanitized.GateChecks.Checks = make([]dashboardChatPromptCheck, 0, len(snapshot.GateChecks.Checks))
 			for _, check := range snapshot.GateChecks.Checks {
 				sanitized.GateChecks.Checks = append(sanitized.GateChecks.Checks, dashboardChatPromptCheck{
-					ID:          check.ID,
-					Name:        check.Name,
-					Group:       check.Group,
-					Required:    check.Required,
-					Enabled:     check.Enabled,
-					Status:      check.Status,
-					ReasonCode:  check.ReasonCode,
-					ToolName:    check.ToolName,
-					ToolVersion: check.ToolVersion,
-					DurationMS:  check.DurationMS,
+					ID:         check.ID,
+					Name:       check.Name,
+					Group:      check.Group,
+					Required:   check.Required,
+					Enabled:    check.Enabled,
+					Status:     check.Status,
+					ReasonCode: check.ReasonCode,
+					ToolName:   check.ToolName,
+					DurationMS: check.DurationMS,
 				})
 			}
 		}

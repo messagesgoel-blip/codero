@@ -76,7 +76,7 @@ func TestDashboardChatPrompt_SanitizesSensitiveFields(t *testing.T) {
 	}
 
 	prompt := dashboardChatPrompt(ChatRequest{Prompt: "status", Tab: "processes"}, snapshot)
-	for _, forbidden := range []string{"do not leak this", "token=abc123", "secret=shh", "secret reason detail", "hidden details", "redacted-tool-path", "\"payload\"", "\"reason\"", "\"details\""} {
+	for _, forbidden := range []string{"do not leak this", "token=abc123", "secret=shh", "secret reason detail", "hidden details", "redacted-tool-path", "tool_version", "1.0.0", "\"payload\"", "\"reason\"", "\"details\""} {
 		if strings.Contains(prompt, forbidden) {
 			t.Fatalf("prompt leaked %q: %s", forbidden, prompt)
 		}
