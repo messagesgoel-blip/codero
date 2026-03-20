@@ -83,6 +83,28 @@ func Compute(totalW, totalH int) Layout {
 			}
 		}
 	} else {
+		if totalW < paneCount {
+			centerW = minInt(1, totalW)
+			remaining := totalW - centerW
+			leftW = minInt(1, maxInt(0, remaining))
+			remaining -= leftW
+			rightW = minInt(1, maxInt(0, remaining))
+			remaining -= rightW
+			pipelineW = maxInt(0, remaining)
+
+			return Layout{
+				TotalW:     totalW,
+				TotalH:     totalH,
+				TopBarH:    topBarH,
+				BottomBarH: bottomBarH,
+				ContentH:   contentH,
+				LeftW:      leftW,
+				CenterW:    centerW,
+				PipelineW:  pipelineW,
+				RightW:     rightW,
+			}
+		}
+
 		weights := []int{20, 40, 15, 25}
 		leftW = maxInt(1, totalW*weights[0]/100)
 		centerW = maxInt(1, totalW*weights[1]/100)

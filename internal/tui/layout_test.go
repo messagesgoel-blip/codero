@@ -64,6 +64,16 @@ func TestCompute_Narrow(t *testing.T) {
 	}
 }
 
+func TestCompute_TinyWidthCollapsesLowerPriorityPanes(t *testing.T) {
+	l := tui.Compute(2, 24)
+	if got := l.LeftW + l.CenterW + l.PipelineW + l.RightW; got != l.TotalW {
+		t.Fatalf("pane widths %d+%d+%d+%d != %d", l.LeftW, l.CenterW, l.PipelineW, l.RightW, l.TotalW)
+	}
+	if l.CenterW != 1 || l.LeftW != 1 || l.RightW != 0 || l.PipelineW != 0 {
+		t.Fatalf("unexpected tiny-width allocation: %+v", l)
+	}
+}
+
 func TestCompute_Zero(t *testing.T) {
 	l := tui.Compute(0, 0)
 	if l.TotalW < 1 {

@@ -103,12 +103,16 @@ async function waitForUrl(url, timeoutMs = 20000) {
   const started = Date.now();
   let lastErr = null;
   while (Date.now() - started < timeoutMs) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1500);
     try {
-      const resp = await fetch(url, { method: 'GET' });
+      const resp = await fetch(url, { method: 'GET', signal: controller.signal });
       if (resp.ok) { await resp.arrayBuffer(); return; }
       lastErr = new Error(`status ${resp.status}`);
     } catch (err) {
       lastErr = err;
+    } finally {
+      clearTimeout(timer);
     }
     await new Promise((r) => setTimeout(r, 200));
   }

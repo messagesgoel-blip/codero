@@ -89,6 +89,9 @@ Examples:
 			if cfgErr != nil {
 				fmt.Fprintf(os.Stderr, "note: config load error (%v); using defaults where needed\n", cfgErr)
 			}
+			if fixtureDirPath != "" && !serveFixtureMode {
+				return fmt.Errorf("--fixture-dir can only be used with --serve-fixture")
+			}
 
 			// Determine base URL: prefer explicit public URL from config.
 			baseURL := fmt.Sprintf("http://%s:%d", effectiveHost, effectivePort)

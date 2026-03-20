@@ -155,9 +155,17 @@ func renderTerminalCLI(m Model) string {
 }
 
 func commandChip(t Theme, label string) string {
+	bg := t.ChipBackground
+	if bg == "" {
+		bg = lipgloss.Color("#31384A")
+	}
+	fg := t.ChipForeground
+	if fg == "" {
+		fg = lipgloss.Color("#A3A6B8")
+	}
 	return lipgloss.NewStyle().
-		Background(lipgloss.Color("#31384A")).
-		Foreground(lipgloss.Color("#A3A6B8")).
+		Background(bg).
+		Foreground(fg).
 		Padding(0, 1).
 		Render(label)
 }
@@ -178,7 +186,7 @@ func (m Model) renderTerminalThread(width, height int) []string {
 	}
 
 	for _, msg := range m.cliMessages {
-		renderedMsg := renderTerminalMsg(m.theme, msg, width-4)
+		renderedMsg := renderTerminalMsg(m.theme, msg)
 		msgLines := strings.Split(renderedMsg, "\n")
 		lines = append(lines, msgLines...)
 		if len(lines) >= height {
@@ -191,7 +199,7 @@ func (m Model) renderTerminalThread(width, height int) []string {
 	return lines[:height]
 }
 
-func renderTerminalMsg(t Theme, msg terminalMessage, width int) string {
+func renderTerminalMsg(t Theme, msg terminalMessage) string {
 	roleStyle := t.Base
 	switch msg.Role {
 	case "user":

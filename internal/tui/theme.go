@@ -43,6 +43,9 @@ type Theme struct {
 	Palette      lipgloss.Style
 	PaletteInput lipgloss.Style
 
+	ChipBackground lipgloss.Color
+	ChipForeground lipgloss.Color
+
 	Title lipgloss.Style
 }
 
@@ -92,6 +95,8 @@ func newDefaultTheme() Theme {
 		GatePipeline:      lipgloss.NewStyle().Foreground(muted).Italic(true),
 		Palette:           lipgloss.NewStyle().Background(bgPalette).BorderStyle(lipgloss.RoundedBorder()).BorderForeground(activeBorder).Padding(0, 1),
 		PaletteInput:      lipgloss.NewStyle().Foreground(fg),
+		ChipBackground:    lipgloss.Color("#31384A"),
+		ChipForeground:    lipgloss.Color("#A3A6B8"),
 		Title:             lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Bold(true),
 		Name:              "dark",
 	}
@@ -140,6 +145,8 @@ func newAltTheme() Theme {
 		GatePipeline:      lipgloss.NewStyle().Foreground(muted).Italic(true),
 		Palette:           lipgloss.NewStyle().Background(bgPalette).BorderStyle(lipgloss.RoundedBorder()).BorderForeground(activeBorder).Padding(0, 1),
 		PaletteInput:      lipgloss.NewStyle().Foreground(fg),
+		ChipBackground:    lipgloss.Color("#2D2D2D"),
+		ChipForeground:    lipgloss.Color("#D4D4D4"),
 		Title:             lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Bold(true),
 		Name:              "light",
 	}

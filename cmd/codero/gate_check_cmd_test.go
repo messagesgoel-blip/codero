@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/codero/codero/internal/dashboard"
 	"github.com/codero/codero/internal/gatecheck"
 )
 
@@ -176,6 +179,7 @@ func TestGateCheck_LoadReportTUISnapshot_UsesProvidedReport(t *testing.T) {
 	if err := os.WriteFile(reportPath, []byte(reportJSON), 0o600); err != nil {
 		t.Fatalf("write report: %v", err)
 	}
+	t.Setenv("CODERO_GATE_CHECK_REPORT_PATH", reportPath)
 
 	out := captureGateCheckStdout(t, func() error {
 		cmd := gateCheckCmd()
@@ -195,6 +199,29 @@ func TestGateCheck_LoadReportTUISnapshot_UsesProvidedReport(t *testing.T) {
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("snapshot missing %q\nfull output:\n%s", want, out)
+		}
+	}
+
+	h := dashboard.NewHandler(nil, dashboard.NewSettingsStore(t.TempDir()))
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/dashboard/gate-checks", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("gate-checks status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`"overall_status":"FAIL"`,
+		`"profile":"PORTABLE"`,
+		`"total":14`,
+		`"infra_bypassed":1`,
+		`"secret-scan"`,
+		`"sonarcloud"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("gate-checks body missing %q\nfull body:\n%s", want, body)
 		}
 	}
 }
@@ -241,6 +268,11 @@ func makeConflictRepoForGateTest(t *testing.T) string {
 func captureGateCheckStdout(t *testing.T, fn func() error) string {
 	t.Helper()
 
+	type readResult struct {
+		out []byte
+		err error
+	}
+
 	orig := os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -249,19 +281,25 @@ func captureGateCheckStdout(t *testing.T, fn func() error) string {
 	os.Stdout = w
 	defer func() { os.Stdout = orig }()
 
+	readCh := make(chan readResult, 1)
+	go func() {
+		out, err := io.ReadAll(r)
+		readCh <- readResult{out: out, err: err}
+	}()
+
 	runErr := fn()
 	_ = w.Close()
-	out, readErr := io.ReadAll(r)
+	result := <-readCh
 	_ = r.Close()
-	if readErr != nil {
-		t.Fatalf("read stdout: %v", readErr)
+	if result.err != nil {
+		t.Fatalf("read stdout: %v", result.err)
 	}
 	if runErr == nil {
-		return string(out)
+		return string(result.out)
 	}
 	var usageErr *UsageError
 	if errors.As(runErr, &usageErr) {
 		t.Fatalf("expected plain gate failure or nil, got usage error: %v", runErr)
 	}
-	return string(out)
+	return string(result.out)
 }
