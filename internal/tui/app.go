@@ -322,7 +322,7 @@ func (m Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, teaCmd
 }
 
-func (m Model) executePaletteCmd(cmd string) tea.Cmd {
+func (m *Model) executePaletteCmd(cmd string) tea.Cmd {
 	switch cmd {
 	case "status":
 		m.statusMsg = fmt.Sprintf("%s / %s / %s",
@@ -621,15 +621,4 @@ func renderStatusInline(t Theme, vm adapters.GateViewModel) string {
 	default:
 		return t.Running.Render(vm.StatusIcon + " " + vm.StatusLabel)
 	}
-}
-
-func repoBaseName(path string) string {
-	if path == "" {
-		return "."
-	}
-	parts := strings.Split(strings.TrimRight(path, "/"), "/")
-	if len(parts) > 0 {
-		return parts[len(parts)-1]
-	}
-	return path
 }

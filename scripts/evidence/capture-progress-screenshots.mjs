@@ -126,11 +126,15 @@ async function stopProcess(child, timeoutMs = 5000) {
   if (child.exitCode != null || child.signalCode != null) {
     return;
   }
+  const waitForClose = new Promise((resolve) => {
+    child.once('close', resolve);
+  });
+  const waitForTimeout = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   child.kill('SIGINT');
-  await new Promise((resolve) => setTimeout(resolve, timeoutMs));
+  await Promise.race([waitForClose, waitForTimeout(timeoutMs)]);
   if (child.exitCode == null && child.signalCode == null) {
     child.kill('SIGKILL');
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await Promise.race([waitForClose, waitForTimeout(1000)]);
   }
 }
 
@@ -260,12 +264,17 @@ async function main() {
     reportPath,
   ]);
 
-  if (reportRun.stderr) {
-    process.stderr.write(reportRun.stderr);
+  if (reportRun.code !== 0) {
+    if (reportRun.stderr) {
+      process.stderr.write(reportRun.stderr);
+    }
+    throw new Error(`dashboard report command failed with exit code ${reportRun.code}${reportRun.signal ? ` signal ${reportRun.signal}` : ''}`);
   }
 
   const reportJson = JSON.parse(await readFile(reportPath, 'utf8'));
-  await writeFile(dashboardReportPath, JSON.stringify(sanitizePaths(reportJson), null, 2) + '\n', 'utf8');
+  const normalizedReport = sanitizePaths(reportJson);
+  normalizedReport.run_at = 'NORMALIZED_TIMESTAMP';
+  await writeFile(dashboardReportPath, JSON.stringify(normalizedReport, null, 2) + '\n', 'utf8');
 
   const port = await findFreePort();
   const dashboard = spawnStreaming('go', [
@@ -294,10 +303,12 @@ async function main() {
       });
       await page.goto(`http://127.0.0.1:${port}/dashboard/`, { waitUntil: 'load' });
       await page.waitForSelector('#page-processes');
-      await page.waitForTimeout(1200);
       await page.click('#tab-findings');
       await page.waitForSelector('#page-findings.active');
-      await page.waitForTimeout(800);
+      await page.waitForFunction(() => {
+        const cards = document.querySelector('#findings-cards');
+        return Boolean(cards && !cards.textContent.includes('loading gate checks'));
+      });
       await page.screenshot({ path: dashboardPng, fullPage: true });
     } finally {
       await browser.close();

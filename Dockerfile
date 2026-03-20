@@ -39,7 +39,7 @@ EXPOSE 8080
 HEALTHCHECK --interval=10s --timeout=5s --retries=3 \
     CMD wget -qO- http://localhost:8080/health || exit 1
 
-USER codero
+USER ${APP_USER}
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["codero", "daemon"]
