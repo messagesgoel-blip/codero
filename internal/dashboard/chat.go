@@ -63,6 +63,102 @@ type liteLLMChatResponse struct {
 	} `json:"choices"`
 }
 
+type dashboardChatPromptSnapshot struct {
+	Focus         string                        `json:"focus,omitempty"`
+	Overview      dashboardChatPromptOverview   `json:"overview"`
+	Health        dashboardChatPromptHealth     `json:"health"`
+	ActiveSession []dashboardChatPromptSession  `json:"active_sessions"`
+	RecentEvents  []dashboardChatPromptEvent    `json:"recent_events"`
+	BlockReasons  []dashboardChatPromptBlocker  `json:"block_reasons"`
+	GateChecks    *dashboardChatPromptGateCheck `json:"gate_checks,omitempty"`
+	GeneratedAt   time.Time                     `json:"generated_at"`
+}
+
+type dashboardChatPromptOverview struct {
+	RunsToday    int     `json:"runs_today"`
+	PassRate     float64 `json:"pass_rate"`
+	BlockedCount int     `json:"blocked_count"`
+	AvgGateSec   float64 `json:"avg_gate_sec"`
+}
+
+type dashboardChatPromptHealth struct {
+	Database         dashboardChatPromptServiceStatus `json:"database"`
+	Feeds            dashboardChatPromptFeeds         `json:"feeds"`
+	ActiveAgentCount int                              `json:"active_agent_count"`
+	SecurityScore    *SecurityScoreStats              `json:"security_score,omitempty"`
+	CoveragePct      *float64                         `json:"coverage_pct,omitempty"`
+	ETAMin           *int                             `json:"eta_min,omitempty"`
+	GeneratedAt      time.Time                        `json:"generated_at"`
+}
+
+type dashboardChatPromptServiceStatus struct {
+	Status string `json:"status"`
+}
+
+type dashboardChatPromptFeeds struct {
+	ActiveSessions dashboardChatPromptFeedStatus `json:"active_sessions"`
+	GateChecks     dashboardChatPromptFeedStatus `json:"gate_checks"`
+}
+
+type dashboardChatPromptFeedStatus struct {
+	Status       string    `json:"status"`
+	LastRefresh  time.Time `json:"last_refresh,omitempty"`
+	FreshnessSec int64     `json:"freshness_sec"`
+}
+
+type dashboardChatPromptTask struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Phase string `json:"phase"`
+}
+
+type dashboardChatPromptSession struct {
+	SessionID       string                   `json:"session_id"`
+	Repo            string                   `json:"repo"`
+	Branch          string                   `json:"branch"`
+	PRNumber        int                      `json:"pr_number"`
+	OwnerAgent      string                   `json:"owner_agent"`
+	ActivityState   string                   `json:"activity_state"`
+	Task            *dashboardChatPromptTask `json:"task,omitempty"`
+	StartedAt       time.Time                `json:"started_at"`
+	LastHeartbeatAt time.Time                `json:"last_heartbeat_at"`
+	ElapsedSec      int64                    `json:"elapsed_sec"`
+}
+
+type dashboardChatPromptEvent struct {
+	Seq       int64     `json:"seq"`
+	Repo      string    `json:"repo"`
+	Branch    string    `json:"branch"`
+	EventType string    `json:"event_type"`
+	Summary   string    `json:"summary"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type dashboardChatPromptBlocker struct {
+	Source string `json:"source"`
+	Count  int    `json:"count"`
+}
+
+type dashboardChatPromptGateCheck struct {
+	Summary     GateCheckSummary           `json:"summary"`
+	Checks      []dashboardChatPromptCheck `json:"checks"`
+	RunAt       time.Time                  `json:"run_at"`
+	GeneratedAt time.Time                  `json:"generated_at"`
+}
+
+type dashboardChatPromptCheck struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Group       string `json:"group"`
+	Required    bool   `json:"required"`
+	Enabled     bool   `json:"enabled"`
+	Status      string `json:"status"`
+	ReasonCode  string `json:"reason_code,omitempty"`
+	ToolName    string `json:"tool_name,omitempty"`
+	ToolVersion string `json:"tool_version,omitempty"`
+	DurationMS  int64  `json:"duration_ms"`
+}
+
 // handleChat serves POST /api/v1/dashboard/chat (and the legacy /comments alias).
 func (h *Handler) handleChat(w http.ResponseWriter, r *http.Request) {
 	setCORSHeaders(w)
@@ -322,7 +418,7 @@ func (h *Handler) streamLiteLLM(w http.ResponseWriter, flusher http.Flusher, ctx
 	}
 
 	final := ChatResponse{
-		Reply:       strings.TrimSpace(reply.String()),
+		Reply:       reply.String(),
 		Provider:    "litellm",
 		Model:       model,
 		Suggestions: dashboardChatSuggestions(req.Tab, req.Prompt, snapshot),
@@ -337,13 +433,13 @@ func dashboardChatStreamChunk(ev liteLLMStreamResponse) string {
 		return ""
 	}
 	for _, choice := range ev.Choices {
-		if content := strings.TrimSpace(choice.Delta.Content); content != "" {
+		if content := choice.Delta.Content; content != "" {
 			return content
 		}
-		if content := strings.TrimSpace(choice.Message.Content); content != "" {
+		if content := choice.Message.Content; content != "" {
 			return content
 		}
-		if content := strings.TrimSpace(choice.Text); content != "" {
+		if content := choice.Text; content != "" {
 			return content
 		}
 	}
@@ -520,7 +616,8 @@ Prefer concrete names, counts, and statuses over vague summaries.
 }
 
 func dashboardChatPrompt(req ChatRequest, snapshot dashboardChatSnapshot) string {
-	snapshotJSON, err := json.MarshalIndent(snapshot, "", "  ")
+	sanitized := sanitizeDashboardChatSnapshot(snapshot)
+	snapshotJSON, err := json.MarshalIndent(sanitized, "", "  ")
 	if err != nil {
 		snapshotJSON = []byte(`{"error":"failed to serialize snapshot"}`)
 	}
@@ -538,6 +635,116 @@ func dashboardChatPrompt(req ChatRequest, snapshot dashboardChatSnapshot) string
 	return b.String()
 }
 
+func sanitizeDashboardChatSnapshot(snapshot dashboardChatSnapshot) dashboardChatPromptSnapshot {
+	sanitized := dashboardChatPromptSnapshot{
+		Focus: snapshot.Focus,
+		Overview: dashboardChatPromptOverview{
+			RunsToday:    snapshot.Overview.RunsToday,
+			PassRate:     snapshot.Overview.PassRate,
+			BlockedCount: snapshot.Overview.BlockedCount,
+			AvgGateSec:   snapshot.Overview.AvgGateSec,
+		},
+		Health: dashboardChatPromptHealth{
+			Database: dashboardChatPromptServiceStatus{Status: snapshot.Health.Database.Status},
+			Feeds: dashboardChatPromptFeeds{
+				ActiveSessions: dashboardChatPromptFeedStatus{
+					Status:       snapshot.Health.Feeds.ActiveSessions.Status,
+					LastRefresh:  snapshot.Health.Feeds.ActiveSessions.LastRefresh,
+					FreshnessSec: snapshot.Health.Feeds.ActiveSessions.FreshnessSec,
+				},
+				GateChecks: dashboardChatPromptFeedStatus{
+					Status:       snapshot.Health.Feeds.GateChecks.Status,
+					LastRefresh:  snapshot.Health.Feeds.GateChecks.LastRefresh,
+					FreshnessSec: snapshot.Health.Feeds.GateChecks.FreshnessSec,
+				},
+			},
+			ActiveAgentCount: snapshot.Health.ActiveAgentCount,
+			SecurityScore:    snapshot.Health.SecurityScore,
+			CoveragePct:      snapshot.Health.CoveragePct,
+			ETAMin:           snapshot.Health.ETAMin,
+			GeneratedAt:      snapshot.Health.GeneratedAt,
+		},
+		GeneratedAt: snapshot.GeneratedAt,
+	}
+
+	if len(snapshot.ActiveSession) > 0 {
+		sanitized.ActiveSession = make([]dashboardChatPromptSession, 0, len(snapshot.ActiveSession))
+		for _, s := range snapshot.ActiveSession {
+			var task *dashboardChatPromptTask
+			if s.Task != nil {
+				task = &dashboardChatPromptTask{
+					ID:    s.Task.ID,
+					Title: s.Task.Title,
+					Phase: s.Task.Phase,
+				}
+			}
+			sanitized.ActiveSession = append(sanitized.ActiveSession, dashboardChatPromptSession{
+				SessionID:       s.SessionID,
+				Repo:            s.Repo,
+				Branch:          s.Branch,
+				PRNumber:        s.PRNumber,
+				OwnerAgent:      s.OwnerAgent,
+				ActivityState:   s.ActivityState,
+				Task:            task,
+				StartedAt:       s.StartedAt,
+				LastHeartbeatAt: s.LastHeartbeatAt,
+				ElapsedSec:      s.ElapsedSec,
+			})
+		}
+	}
+
+	if len(snapshot.RecentEvents) > 0 {
+		sanitized.RecentEvents = make([]dashboardChatPromptEvent, 0, len(snapshot.RecentEvents))
+		for _, ev := range snapshot.RecentEvents {
+			sanitized.RecentEvents = append(sanitized.RecentEvents, dashboardChatPromptEvent{
+				Seq:       ev.Seq,
+				Repo:      ev.Repo,
+				Branch:    ev.Branch,
+				EventType: ev.EventType,
+				Summary:   dashboardActivityPromptSummary(ev),
+				CreatedAt: ev.CreatedAt,
+			})
+		}
+	}
+
+	if len(snapshot.BlockReasons) > 0 {
+		sanitized.BlockReasons = make([]dashboardChatPromptBlocker, 0, len(snapshot.BlockReasons))
+		for _, r := range snapshot.BlockReasons {
+			sanitized.BlockReasons = append(sanitized.BlockReasons, dashboardChatPromptBlocker{
+				Source: r.Source,
+				Count:  r.Count,
+			})
+		}
+	}
+
+	if snapshot.GateChecks != nil {
+		sanitized.GateChecks = &dashboardChatPromptGateCheck{
+			Summary:     snapshot.GateChecks.Summary,
+			RunAt:       snapshot.GateChecks.RunAt,
+			GeneratedAt: snapshot.GateChecks.GeneratedAt,
+		}
+		if len(snapshot.GateChecks.Checks) > 0 {
+			sanitized.GateChecks.Checks = make([]dashboardChatPromptCheck, 0, len(snapshot.GateChecks.Checks))
+			for _, check := range snapshot.GateChecks.Checks {
+				sanitized.GateChecks.Checks = append(sanitized.GateChecks.Checks, dashboardChatPromptCheck{
+					ID:          check.ID,
+					Name:        check.Name,
+					Group:       check.Group,
+					Required:    check.Required,
+					Enabled:     check.Enabled,
+					Status:      check.Status,
+					ReasonCode:  check.ReasonCode,
+					ToolName:    check.ToolName,
+					ToolVersion: check.ToolVersion,
+					DurationMS:  check.DurationMS,
+				})
+			}
+		}
+	}
+
+	return sanitized
+}
+
 func dashboardChatReplyFromLLM(resp liteLLMChatResponse) string {
 	if len(resp.Choices) == 0 {
 		return ""
@@ -551,6 +758,20 @@ func dashboardChatReplyFromLLM(resp liteLLMChatResponse) string {
 		}
 	}
 	return ""
+}
+
+func dashboardActivityPromptSummary(ev ActivityEvent) string {
+	payload := strings.TrimSpace(ev.EventType)
+	if payload == "" {
+		payload = "activity"
+	}
+	if ev.Repo != "" {
+		if ev.Branch != "" {
+			return fmt.Sprintf("%s on %s/%s", payload, ev.Repo, ev.Branch)
+		}
+		return fmt.Sprintf("%s on %s", payload, ev.Repo)
+	}
+	return payload
 }
 
 func dashboardChatFallbackReply(req ChatRequest, snapshot dashboardChatSnapshot) string {

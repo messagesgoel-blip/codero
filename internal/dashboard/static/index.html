@@ -594,6 +594,7 @@ let chatHistory   = [];
 let chatBusy      = false;
 let chatSuggestionState = [];
 let chatActionState = [];
+let chatPromptDelegationBound = false;
 
 /* THEME */
 const mq = window.matchMedia('(prefers-color-scheme: dark)');
@@ -1108,8 +1109,9 @@ function renderChatSuggestions(items) {
   chatSuggestionState = (items && items.length ? items : defaultChatSuggestionsForTab(activeTab)).slice();
   c.innerHTML = chatSuggestionState.map(function(item, idx) {
     var cls = idx === 0 ? 'chat-chip primary' : 'chat-chip';
-    return '<button class="' + cls + '" type="button" onclick="submitChatPreset(' + JSON.stringify(item.prompt) + ')">' + esc(item.label) + '</button>';
+    return '<button class="' + cls + '" type="button" data-prompt="' + attrEsc(item.prompt) + '">' + esc(item.label) + '</button>';
   }).join('');
+  bindChatPromptDelegation();
 }
 
 function renderChatActions(items) {
@@ -1124,15 +1126,30 @@ function renderChatActions(items) {
     return '<div class="chat-action-card">' +
       '<div class="chat-action-title">' + esc(item.title) + '</div>' +
       '<div class="chat-action-detail">' + esc(item.detail) + '</div>' +
-      '<button class="chat-action-btn" type="button" onclick="submitChatPreset(' + JSON.stringify(item.prompt) + ')">Ask</button>' +
+      '<button class="chat-action-btn" type="button" data-prompt="' + attrEsc(item.prompt) + '">Ask</button>' +
     '</div>';
   }).join('');
+  bindChatPromptDelegation();
 }
 
 function submitChatPreset(prompt) {
+  if (typeof prompt !== 'string') prompt = String(prompt || '');
   var ta = el('comment-input');
   if (ta) ta.value = prompt;
   submitChat(prompt);
+}
+
+function bindChatPromptDelegation() {
+  if (chatPromptDelegationBound) return;
+  chatPromptDelegationBound = true;
+  document.addEventListener('click', function(ev) {
+    var target = ev.target && ev.target.closest ? ev.target.closest('.chat-chip[data-prompt], .chat-action-btn[data-prompt]') : null;
+    if (!target) return;
+    var prompt = target.getAttribute('data-prompt');
+    if (!prompt) return;
+    ev.preventDefault();
+    submitChatPreset(prompt);
+  });
 }
 
 function renderChatThread() {
@@ -1283,8 +1300,15 @@ async function submitChat(promptOverride) {
       } catch (_e) {}
       throw new Error(errMsg);
     }
-    var finalPayload = await consumeChatStream(resp, assistantIndex);
-    if (finalPayload) finalizeChatAssistant(assistantIndex, finalPayload);
+    var contentType = String(resp.headers.get('Content-Type') || '').toLowerCase();
+    var finalPayload;
+    if (contentType.indexOf('application/json') !== -1 || contentType.indexOf('text/event-stream') === -1) {
+      finalPayload = await resp.json();
+      if (finalPayload) finalizeChatAssistant(assistantIndex, finalPayload);
+    } else {
+      finalPayload = await consumeChatStream(resp, assistantIndex);
+      if (finalPayload) finalizeChatAssistant(assistantIndex, finalPayload);
+    }
     if (ta) ta.value = '';
   } catch (err) {
     if (assistantIndex >= 0 && assistantIndex < chatHistory.length) {
@@ -1463,6 +1487,7 @@ function fmtElapsed(sec) {
 function fmtAge(sec) { if (sec < 60) return sec + 's'; if (sec < 3600) return Math.round(sec/60) + 'm'; return Math.round(sec/3600) + 'h'; }
 
 /* BOOT */
+bindChatPromptDelegation();
 renderChatSuggestions(defaultChatSuggestionsForTab(activeTab));
 renderChatActions(defaultChatActionsForTab(activeTab));
 refresh();

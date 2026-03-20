@@ -509,8 +509,8 @@ func TestChat_UsesLiteLLM(t *testing.T) {
 	if resp.Model != "dashboard-test" {
 		t.Fatalf("model = %q, want dashboard-test", resp.Model)
 	}
-	if !strings.Contains(resp.Reply, "Queue is clear") {
-		t.Fatalf("reply = %q, want model content", resp.Reply)
+	if !strings.Contains(resp.Reply, "Health is green. Queue is clear.") {
+		t.Fatalf("reply = %q, want streamed whitespace preserved", resp.Reply)
 	}
 	if len(resp.Suggestions) == 0 || len(resp.Actions) == 0 {
 		t.Fatal("expected suggestions and actions in response")
