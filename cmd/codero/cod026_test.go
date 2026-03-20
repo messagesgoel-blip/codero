@@ -357,7 +357,7 @@ func TestRunDashboardFixture_CheckMode(t *testing.T) {
 		t.Fatalf("write report: %v", err)
 	}
 
-	if err := runDashboardFixture("127.0.0.1", 0, "/dashboard", dir, reportPath, true, true); err != nil {
+	if err := runDashboardFixture("127.0.0.1", 0, "/dashboard", dir, reportPath, "", true, true); err != nil {
 		t.Fatalf("runDashboardFixture(check): %v", err)
 	}
 }

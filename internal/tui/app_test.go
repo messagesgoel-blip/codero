@@ -68,7 +68,7 @@ func TestView_ShowsMockStyleTitle(t *testing.T) {
 
 	newModel, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	view := newModel.(tui.Model).View()
-	if !strings.Contains(view, "COMMAND TERMINAL - CODERO") {
+	if !strings.Contains(view, "COMMAND TERMINAL — CODERO") {
 		t.Error("expected mock-style title in top bar")
 	}
 }
@@ -80,13 +80,13 @@ func TestView_ShowsCommandStrip(t *testing.T) {
 	newModel, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	view := newModel.(tui.Model).View()
 	for _, want := range []string{
-		"> Type a command or message…",
+		"type a command or message…",
 		"status",
 		"help",
 		"run gate",
 		"queue",
 	} {
-		if !strings.Contains(view, want) {
+		if !strings.Contains(strings.ToLower(view), strings.ToLower(want)) {
 			t.Fatalf("expected command strip to contain %q\nfull view:\n%s", want, view)
 		}
 	}

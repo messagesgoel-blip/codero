@@ -67,20 +67,23 @@ func (p GatePane) View() string {
 
 	// ── header: PROCESSES & AGENTS + System Health indicator ─────────────────
 	sysHealth := agentSystemHealth(p.vm)
-	pad := w - 20 - len(sysHealth)
-	if pad < 1 {
-		pad = 1
+	headerTitle := p.theme.PaneHeader.Render("PROCESSES & AGENTS")
+	headerHealth := agentSystemHealthStyle(p.theme, p.vm).Render(sysHealth)
+	pad := w - lipgloss.Width(headerTitle) - lipgloss.Width(headerHealth)
+	if pad < 0 {
+		pad = 0
 	}
-	header := fmt.Sprintf("  PROCESSES & AGENTS%s%s", strings.Repeat(" ", pad), sysHealth)
-	lines = append(lines, p.theme.ListHeader.Render(header))
+	header := headerTitle + strings.Repeat(" ", pad) + headerHealth
+	lines = append(lines, header)
 	lines = append(lines, p.theme.Muted.Render(strings.Repeat("─", w)))
+	lines = append(lines, "")
 
 	// ── authoritative AI gate agent rows ─────────────────────────────────────
 	authAgents := []struct{ icon, name, status string }{
 		{"🤖", "copilot", p.vm.CopilotStatus},
 		{"🔧", "litellm", p.vm.LiteLLMStatus},
 	}
-	barW := minInt(w-6, 24)
+	barW := minInt(w-10, 20)
 	for i, ag := range authAgents {
 		pct := agentPercent(ag.status, p.vm.ElapsedSec, p.vm.PollAfterSec)
 		action := agentAction(ag.name, ag.status)
@@ -91,15 +94,15 @@ func (p GatePane) View() string {
 			nameStyle = p.theme.Running
 		}
 
-		line1 := fmt.Sprintf("  %s %s: %s (%d%%)", ag.icon, ag.name, action, pct)
-		bar := fmt.Sprintf("     %s %d%%", renderProgressBar(pct, barW), pct)
+		line1 := fmt.Sprintf("  %s %-10s %s", ag.icon, ag.name, p.theme.Muted.Render(action))
+		bar := fmt.Sprintf("     %s %3d%%", renderProgressBar(pct, barW), pct)
 
 		if p.selected == i {
 			lines = append(lines, p.theme.ListSelected.Width(w).Render(line1))
 		} else {
 			lines = append(lines, nameStyle.Render(line1))
 		}
-		lines = append(lines, p.theme.Muted.Render(bar))
+		lines = append(lines, bar)
 		lines = append(lines, "")
 	}
 
@@ -110,15 +113,15 @@ func (p GatePane) View() string {
 		pct := agentPercent(row.Status, 0, 0)
 		action := agentAction(row.Name, row.Status)
 
-		line1 := fmt.Sprintf("  %s %s: %s (%d%%)", icon, row.Name, action, pct)
-		bar := fmt.Sprintf("     %s %d%%", renderProgressBar(pct, barW), pct)
+		line1 := fmt.Sprintf("  %s %-10s %s", icon, row.Name, p.theme.Muted.Render(action))
+		bar := fmt.Sprintf("     %s %3d%%", renderProgressBar(pct, barW), pct)
 
 		if p.selected == idx {
 			lines = append(lines, p.theme.ListSelected.Width(w).Render(line1))
 		} else {
 			lines = append(lines, p.theme.GatePipeline.Render(line1))
 		}
-		lines = append(lines, p.theme.Muted.Render(bar))
+		lines = append(lines, bar)
 		lines = append(lines, "")
 	}
 
@@ -126,17 +129,15 @@ func (p GatePane) View() string {
 	// Only render if there's enough vertical space remaining.
 	remaining := p.height - len(lines)
 	if remaining >= 6 {
-		for len(lines) < p.height-6-len(p.vm.PipelineRows) {
+		for len(lines) < p.height-6 {
 			lines = append(lines, "")
 		}
-		lines = append(lines, p.theme.Muted.Render(strings.Repeat("─", w)))
-		lines = append(lines, p.theme.ListHeader.Render("  RELAY ORCHESTRATION"))
-		lines = append(lines, p.theme.Muted.Render(fmt.Sprintf("  %-18s %s", "Standard static", "Parallel LLM-backed")))
-		lines = append(lines, p.theme.Muted.Render(fmt.Sprintf("  %-18s %s", "analysis tools", "agents")))
-		for _, row := range p.vm.PipelineRows {
+		lines = append(lines, p.theme.PaneHeader.Width(w).Render("RELAY ORCHESTRATION"))
+		lines = append(lines, p.theme.Muted.Render(" Static Tools      AI Agents"))
+		for _, row := range p.vm.PipelineRows[:minInt(len(p.vm.PipelineRows), 3)] {
 			icon := pipelineIcon(row.Name)
 			lines = append(lines, p.theme.Muted.Render(
-				fmt.Sprintf("  %s %-10s ──→ [LLM]", icon, row.Name),
+				fmt.Sprintf(" %s %-12s ──→ [LLM]", icon, truncStr(row.Name, 12)),
 			))
 		}
 	}
@@ -145,7 +146,7 @@ func (p GatePane) View() string {
 		lines = append(lines, "")
 	}
 	content := strings.Join(lines[:minInt(len(lines), p.height)], "\n")
-	return lipgloss.NewStyle().Width(p.width).Height(p.height).Render(content)
+	return lipgloss.NewStyle().Width(p.width).Render(content)
 }
 
 func (p *GatePane) SetSize(w, h int)                { p.width = w; p.height = h }
@@ -162,6 +163,17 @@ func agentSystemHealth(vm adapters.GateViewModel) string {
 		return "System Health ✗"
 	default:
 		return "System Health ●"
+	}
+}
+
+func agentSystemHealthStyle(t Theme, vm adapters.GateViewModel) lipgloss.Style {
+	switch vm.Status {
+	case gate.StatusPass:
+		return t.Pass
+	case gate.StatusFail:
+		return t.Fail
+	default:
+		return t.Running
 	}
 }
 
@@ -325,15 +337,15 @@ func (p ChecksPane) View() string {
 	narrow := w < narrowThreshold
 
 	// ── header ──────────────────────────────────────────────────────────────
-	lines = append(lines, p.theme.ListHeader.Render("  FINDINGS & ROUTING DASHBOARD"))
+	lines = append(lines, p.theme.PaneHeader.Width(w).Render("FINDINGS & ROUTING DASHBOARD"))
 	lines = append(lines, p.theme.Muted.Render(strings.Repeat("─", w)))
-	lines = append(lines, p.theme.Bold.Render("  PRIORITIZED FINDINGS BUCKETS"))
+	lines = append(lines, p.theme.Bold.Render("  PRIORITIZED BUCKETS"))
 	lines = append(lines, "")
 
 	// ── severity buckets ─────────────────────────────────────────────────────
 	buckets := p.bucketChecks()
 	for _, b := range buckets {
-		label := fmt.Sprintf("  %s [%s]", b.icon, b.label)
+		label := fmt.Sprintf("  %s %s", b.icon, b.label)
 		lines = append(lines, b.color.Render(label))
 		for _, c := range b.checks {
 			icon := adapters.DisplayStateIcon(c.DisplayState)
@@ -344,10 +356,10 @@ func (p ChecksPane) View() string {
 			} else {
 				entry = fmt.Sprintf("     %s %-20s", icon, truncStr(c.ID, 20))
 				if reason != "" {
-					entry += "  " + truncStr(reason, w-34)
+					entry += "  " + p.theme.Muted.Render(truncStr(reason, w-34))
 				}
 			}
-			lines = append(lines, p.theme.Muted.Render(entry))
+			lines = append(lines, entry)
 		}
 		if len(b.checks) == 0 {
 			lines = append(lines, p.theme.Muted.Render("     – none"))
@@ -358,39 +370,44 @@ func (p ChecksPane) View() string {
 	}
 
 	// ── routing flowchart ─────────────────────────────────────────────────────
-	lines = append(lines, p.theme.Muted.Render(strings.Repeat("─", w)))
-	lines = append(lines, p.theme.Bold.Render("  ROUTING FLOWCHART"))
-	lines = append(lines, p.theme.Base.Render("  Finding → AI Agent Review → Human Reviewer"))
-	lines = append(lines, p.theme.Muted.Render("  Target Team: @security_lead @tech_lead"))
-	lines = append(lines, "")
+	remaining := p.height - len(lines)
+	if remaining >= 8 {
+		lines = append(lines, p.theme.Muted.Render(strings.Repeat("─", w)))
+		lines = append(lines, p.theme.Bold.Render("  ROUTING FLOWCHART"))
+		lines = append(lines, p.theme.Base.Render("  Finding → AI Agent Review → Human"))
+		lines = append(lines, p.theme.Muted.Render("  Target: @security @tech"))
+		lines = append(lines, "")
 
-	// ── summary ──────────────────────────────────────────────────────────────
-	s := p.vm.Summary
-	critCount := len(buckets[0].checks)
-	highCount := len(buckets[1].checks)
-	riskLabel := checksRiskScore(critCount, highCount)
+		// ── summary ──────────────────────────────────────────────────────────────
+		s := p.vm.Summary
+		critCount := len(buckets[0].checks)
+		highCount := len(buckets[1].checks)
+		riskLabel := checksRiskScore(critCount, highCount)
 
-	lines = append(lines, p.theme.Muted.Render(strings.Repeat("─", w)))
-	lines = append(lines, p.theme.Bold.Render("  Summary"))
-	if s.Total > 0 {
-		// Approximate: ~20 lines per check; label makes the estimate explicit
-		approxLines := s.Total * 20
-		lines = append(lines, p.theme.Base.Render(fmt.Sprintf("  Est. Lines Analyzed: %s", formatLargeInt(approxLines))))
-	}
-	lines = append(lines, p.theme.Base.Render(fmt.Sprintf("  Findings Found: %d", s.Failed)))
-	lines = append(lines, p.theme.Base.Render(fmt.Sprintf("  Risk Score: %s", riskLabel)))
-	if s.RequiredFailed > 0 {
-		lines = append(lines, p.theme.Fail.Render(fmt.Sprintf("  ! required-failed=%d", s.RequiredFailed)))
-	}
-	if s.RequiredDisabled > 0 {
-		lines = append(lines, p.theme.Warning.Render(fmt.Sprintf("  ! required-disabled=%d", s.RequiredDisabled)))
+		lines = append(lines, p.theme.Muted.Render(strings.Repeat("─", w)))
+		lines = append(lines, p.theme.Bold.Render("  Summary"))
+		lines = append(lines, p.theme.Base.Render(fmt.Sprintf("  Findings Found: %d", s.Failed)))
+
+		riskStyle := p.theme.Running
+		if critCount > 0 {
+			riskStyle = p.theme.Fail
+		} else if highCount > 0 {
+			riskStyle = p.theme.Warning
+		} else if s.Failed == 0 {
+			riskStyle = p.theme.Pass
+		}
+
+		lines = append(lines, p.theme.Base.Render("  Risk Score: ")+riskStyle.Render(riskLabel))
+		// Estimated lines analyzed (heuristic: ~500 lines per check)
+		estLines := s.Total * 500
+		lines = append(lines, p.theme.Base.Render(fmt.Sprintf("  Est. Lines Analyzed: ~%d", estLines)))
 	}
 
 	for len(lines) < p.height {
 		lines = append(lines, "")
 	}
 	content := strings.Join(lines[:minInt(len(lines), p.height)], "\n")
-	return lipgloss.NewStyle().Width(p.width).Height(p.height).Render(content)
+	return lipgloss.NewStyle().Width(p.width).Render(content)
 }
 
 // checksRiskScore returns a risk label for the summary section.

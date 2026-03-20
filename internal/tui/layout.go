@@ -9,17 +9,19 @@ type Layout struct {
 	BottomBarH int
 	ContentH   int
 
-	LeftW   int
-	CenterW int
-	RightW  int
+	LeftW     int
+	CenterW   int
+	PipelineW int
+	RightW    int
 }
 
 const (
-	minLeftW   = 20
-	minRightW  = 22
-	minCenterW = 28
-	topBarH    = 1
-	bottomBarH = 1
+	minLeftW     = 26
+	minCenterW   = 40
+	minPipelineW = 16
+	minRightW    = 24
+	topBarH      = 1
+	bottomBarH   = 12
 )
 
 // Compute derives pane dimensions from total terminal size.
@@ -32,28 +34,81 @@ func Compute(totalW, totalH int) Layout {
 	}
 
 	contentH := totalH - topBarH - bottomBarH
-	if contentH < 4 {
-		contentH = 4
+	if contentH < 8 {
+		contentH = 8
 	}
 
-	leftW := maxInt(minLeftW, totalW*22/100)
-	rightW := maxInt(minRightW, totalW*22/100)
-	centerW := totalW - leftW - rightW
-	if centerW < minCenterW {
-		excess := minCenterW - centerW
-		leftReduction := minInt(leftW, excess/2)
-		rightReduction := minInt(rightW, excess-leftReduction)
-		leftW -= leftReduction
-		rightW -= rightReduction
-		if leftW < 1 {
-			leftW = 1
+	var leftW, centerW, pipelineW, rightW int
+	minSum := minLeftW + minCenterW + minPipelineW + minRightW
+	if totalW >= minSum {
+		leftW = minLeftW
+		centerW = minCenterW
+		pipelineW = minPipelineW
+		rightW = minRightW
+
+		extra := totalW - minSum
+		adds := []int{
+			extra * 20 / 100,
+			extra * 40 / 100,
+			extra * 15 / 100,
+			extra * 25 / 100,
 		}
+		leftW += adds[0]
+		centerW += adds[1]
+		pipelineW += adds[2]
+		rightW += adds[3]
+
+		used := adds[0] + adds[1] + adds[2] + adds[3]
+		for i := 0; i < extra-used; i++ {
+			switch i % 4 {
+			case 0:
+				centerW++
+			case 1:
+				leftW++
+			case 2:
+				rightW++
+			default:
+				pipelineW++
+			}
+		}
+	} else {
+		weights := []int{20, 40, 15, 25}
+		leftW = maxInt(1, totalW*weights[0]/100)
+		centerW = maxInt(1, totalW*weights[1]/100)
+		pipelineW = maxInt(1, totalW*weights[2]/100)
+		rightW = totalW - leftW - centerW - pipelineW
 		if rightW < 1 {
 			rightW = 1
 		}
-		centerW = totalW - leftW - rightW
-		if centerW < 1 {
-			centerW = 1
+
+		used := leftW + centerW + pipelineW + rightW
+		if used != totalW {
+			diff := used - totalW
+			for diff > 0 {
+				if centerW > leftW && centerW > pipelineW && centerW > 1 {
+					centerW--
+				} else if leftW >= pipelineW && leftW > 1 {
+					leftW--
+				} else if pipelineW > 1 {
+					pipelineW--
+				} else if rightW > 1 {
+					rightW--
+				}
+				diff--
+			}
+			for diff < 0 {
+				switch (-diff) % 4 {
+				case 0:
+					centerW++
+				case 1:
+					leftW++
+				case 2:
+					rightW++
+				default:
+					pipelineW++
+				}
+				diff++
+			}
 		}
 	}
 
@@ -65,6 +120,7 @@ func Compute(totalW, totalH int) Layout {
 		ContentH:   contentH,
 		LeftW:      leftW,
 		CenterW:    centerW,
+		PipelineW:  pipelineW,
 		RightW:     rightW,
 	}
 }

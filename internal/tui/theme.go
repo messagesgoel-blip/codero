@@ -24,6 +24,7 @@ type Theme struct {
 
 	PaneBorder   lipgloss.Style
 	PaneTitle    lipgloss.Style
+	PaneHeader   lipgloss.Style
 	ActiveBorder lipgloss.Style
 	TabActive    lipgloss.Style
 	TabInactive  lipgloss.Style
@@ -41,6 +42,8 @@ type Theme struct {
 
 	Palette      lipgloss.Style
 	PaletteInput lipgloss.Style
+
+	Title lipgloss.Style
 }
 
 var DefaultTheme = newDefaultTheme()
@@ -60,6 +63,7 @@ func newDefaultTheme() Theme {
 	paneTitle := lipgloss.Color("#BD93F9")
 	bgPane := lipgloss.Color("#1E1F2E")
 	bgPalette := lipgloss.Color("#1A1B26")
+	headerBg := lipgloss.Color("#282A36")
 
 	return Theme{
 		Base:              lipgloss.NewStyle().Foreground(fg),
@@ -74,6 +78,7 @@ func newDefaultTheme() Theme {
 		Warning:           lipgloss.NewStyle().Foreground(warn),
 		PaneBorder:        lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(border),
 		PaneTitle:         lipgloss.NewStyle().Foreground(paneTitle).Bold(true),
+		PaneHeader:        lipgloss.NewStyle().Background(headerBg).Foreground(fg).Bold(true).Padding(0, 1),
 		ActiveBorder:      lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(activeBorder),
 		TabActive:         lipgloss.NewStyle().Foreground(fg).Bold(true).Underline(true),
 		TabInactive:       lipgloss.NewStyle().Foreground(muted),
@@ -87,6 +92,7 @@ func newDefaultTheme() Theme {
 		GatePipeline:      lipgloss.NewStyle().Foreground(muted).Italic(true),
 		Palette:           lipgloss.NewStyle().Background(bgPalette).BorderStyle(lipgloss.RoundedBorder()).BorderForeground(activeBorder).Padding(0, 1),
 		PaletteInput:      lipgloss.NewStyle().Foreground(fg),
+		Title:             lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Bold(true),
 		Name:              "dark",
 	}
 }

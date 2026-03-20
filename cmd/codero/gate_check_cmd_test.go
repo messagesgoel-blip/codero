@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/codero/codero/internal/gatecheck"
 )
@@ -106,6 +109,76 @@ func TestGatePass_NoError(t *testing.T) {
 	}
 }
 
+func TestUsageError_LoadReportConflictWithProfile(t *testing.T) {
+	reportPath := filepath.Join(t.TempDir(), "report.json")
+	if err := os.WriteFile(reportPath, []byte(`{"summary":{"overall_status":"pass"}}`), 0o600); err != nil {
+		t.Fatalf("write report: %v", err)
+	}
+
+	cmd := gateCheckCmd()
+	cmd.SetArgs([]string{"--load-report", reportPath, "--profile", "portable"})
+	err := cmd.ExecuteContext(context.Background())
+	if err == nil {
+		t.Fatal("expected error for --load-report --profile, got nil")
+	}
+	var usageErr *UsageError
+	if !errors.As(err, &usageErr) {
+		t.Fatalf("expected *UsageError for invalid flag combo, got %T: %v", err, err)
+	}
+}
+
+func TestGateCheck_LoadReportTUISnapshot_UsesProvidedReport(t *testing.T) {
+	report := gatecheck.Report{
+		Summary: gatecheck.Summary{
+			OverallStatus:  gatecheck.StatusFail,
+			Passed:         8,
+			Failed:         3,
+			Skipped:        1,
+			Disabled:       1,
+			InfraBypassed:  1,
+			RequiredFailed: 2,
+			Total:          14,
+			Profile:        gatecheck.ProfilePortable,
+			SchemaVersion:  gatecheck.SchemaVersion,
+		},
+		Checks: []gatecheck.CheckResult{
+			{ID: "secret-scan", Group: gatecheck.GroupSecurity, Status: gatecheck.StatusFail, Required: true, ReasonCode: gatecheck.ReasonCheckFailed},
+			{ID: "fmt-check", Group: gatecheck.GroupFormat, Status: gatecheck.StatusPass},
+			{ID: "sonarcloud", Group: gatecheck.GroupOther, Status: gatecheck.StatusSkip, ReasonCode: gatecheck.ReasonInfraBypass},
+		},
+		RunAt: time.Unix(0, 0).UTC(),
+	}
+	reportPath := filepath.Join(t.TempDir(), "fixture-report.json")
+	data, err := json.Marshal(report)
+	if err != nil {
+		t.Fatalf("marshal report: %v", err)
+	}
+	if err := os.WriteFile(reportPath, data, 0o600); err != nil {
+		t.Fatalf("write report: %v", err)
+	}
+
+	out := captureGateCheckStdout(t, func() error {
+		cmd := gateCheckCmd()
+		cmd.SetArgs([]string{"--tui-snapshot", "--load-report", reportPath})
+		return cmd.ExecuteContext(context.Background())
+	})
+
+	for _, want := range []string{
+		"OVERALL  FAIL",
+		"PROFILE  portable",
+		"total=14",
+		"infra=1",
+		"failing",
+		"passing",
+		"secret-scan",
+		"sonarcloud",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("snapshot missing %q\nfull output:\n%s", want, out)
+		}
+	}
+}
+
 // makeCleanRepoForGateTest creates a minimal git repo with no staged conflicts.
 func makeCleanRepoForGateTest(t *testing.T) string {
 	t.Helper()
@@ -143,4 +216,32 @@ func makeConflictRepoForGateTest(t *testing.T) string {
 		t.Fatalf("git add conflict file: %v\n%s", err, string(out))
 	}
 	return dir
+}
+
+func captureGateCheckStdout(t *testing.T, fn func() error) string {
+	t.Helper()
+
+	orig := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe stdout: %v", err)
+	}
+	os.Stdout = w
+	defer func() { os.Stdout = orig }()
+
+	runErr := fn()
+	_ = w.Close()
+	out, readErr := io.ReadAll(r)
+	_ = r.Close()
+	if readErr != nil {
+		t.Fatalf("read stdout: %v", readErr)
+	}
+	if runErr == nil {
+		return string(out)
+	}
+	var usageErr *UsageError
+	if errors.As(runErr, &usageErr) {
+		t.Fatalf("expected plain gate failure or nil, got usage error: %v", runErr)
+	}
+	return string(out)
 }

@@ -1,0 +1,18 @@
+[
+  {
+    "session_id": "sess-codero-agent-1",
+    "repo": "acme/api",
+    "branch": "feat/auth-refactor",
+    "state": "coding",
+    "pr_number": 42,
+    "owner_agent": "copilot"
+  },
+  {
+    "session_id": "sess-codero-agent-2",
+    "repo": "acme/api",
+    "branch": "feat/db-migration",
+    "state": "local_review",
+    "pr_number": 43,
+    "owner_agent": "opencode"
+  }
+]
