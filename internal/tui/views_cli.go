@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -66,36 +67,36 @@ func dashboardChatCmd(ctx context.Context, prompt, tab string) tea.Cmd {
 		}
 		body, err := json.Marshal(reqBody)
 		if err != nil {
-			return terminalChatErrorMsg{prompt: prompt, err: err}
+			return terminalChatErrorMsg{prompt: prompt, err: fmt.Errorf("marshal dashboard chat request: %w", err)}
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, dashboardChatEndpoint(), bytes.NewReader(body))
 		if err != nil {
-			return terminalChatErrorMsg{prompt: prompt, err: err}
+			return terminalChatErrorMsg{prompt: prompt, err: fmt.Errorf("build dashboard chat request: %w", err)}
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json")
 
 		resp, err := dashboardChatHTTPClient.Do(req)
 		if err != nil {
-			return terminalChatErrorMsg{prompt: prompt, err: err}
+			return terminalChatErrorMsg{prompt: prompt, err: fmt.Errorf("send dashboard chat request: %w", err)}
 		}
 		defer resp.Body.Close()
 
 		raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
 		if err != nil {
-			return terminalChatErrorMsg{prompt: prompt, err: err}
+			return terminalChatErrorMsg{prompt: prompt, err: fmt.Errorf("read dashboard chat response: %w", err)}
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			msg := strings.TrimSpace(string(raw))
 			if msg == "" {
 				msg = resp.Status
 			}
-			return terminalChatErrorMsg{prompt: prompt, err: fmt.Errorf("dashboard chat %s: %s", resp.Status, msg)}
+			return terminalChatErrorMsg{prompt: prompt, err: fmt.Errorf("dashboard chat %s: %w", resp.Status, errors.New(msg))}
 		}
 
 		var out dashboard.ChatResponse
 		if err := json.Unmarshal(raw, &out); err != nil {
-			return terminalChatErrorMsg{prompt: prompt, err: err}
+			return terminalChatErrorMsg{prompt: prompt, err: fmt.Errorf("decode dashboard chat response: %w", err)}
 		}
 		return terminalChatResultMsg{prompt: prompt, response: out}
 	}
@@ -158,7 +159,11 @@ func renderTerminalCLI(m Model) string {
 	}
 	lines = append(lines, inputLine)
 
-	return t.BottomBar.Width(width).Render(strings.Join(lines[:minInt(len(lines), height)], "\n"))
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+
+	return t.BottomBar.Width(width).Render(strings.Join(lines[:height], "\n"))
 }
 
 func commandChip(t Theme, label string) string {
@@ -196,9 +201,9 @@ func (m Model) renderTerminalThread(width, height int) []string {
 		renderedMsg := renderTerminalMsg(m.theme, m.cliMessages[i])
 		msgLines := strings.Split(renderedMsg, "\n")
 		if len(msgLines) > height {
-			msgLines = msgLines[len(msgLines)-height:]
+			msgLines = clipTerminalMessageLines(msgLines, height)
 		} else if remaining := height - len(lines); len(msgLines) > remaining {
-			msgLines = msgLines[len(msgLines)-remaining:]
+			msgLines = clipTerminalMessageLines(msgLines, remaining)
 		}
 		lines = append(msgLines, lines...)
 	}
@@ -206,6 +211,25 @@ func (m Model) renderTerminalThread(width, height int) []string {
 		lines = append([]string{""}, lines...)
 	}
 	return lines
+}
+
+func clipTerminalMessageLines(msgLines []string, maxLines int) []string {
+	if maxLines <= 0 || len(msgLines) == 0 {
+		return nil
+	}
+	if len(msgLines) <= maxLines {
+		return msgLines
+	}
+	if maxLines == 1 {
+		return msgLines[:1]
+	}
+
+	header := msgLines[:1]
+	tail := msgLines[1:]
+	if len(tail) >= maxLines-1 {
+		tail = tail[len(tail)-(maxLines-1):]
+	}
+	return append(header, tail...)
 }
 
 func renderTerminalMsg(t Theme, msg terminalMessage) string {

@@ -287,6 +287,9 @@ async function main() {
   const tuiTextPath = path.join(outputDir, `tui-${VERSION}-view.txt`);
   await writeFile(tuiTextPath, tuiText, 'utf8');
   console.log(`  → ${path.basename(tuiTextPath)}`);
+  const tuiImagePath = path.join(outputDir, `tui-${VERSION}-view.png`);
+  await renderTuiSnapshot(tuiText, tuiImagePath);
+  console.log(`  → ${path.basename(tuiImagePath)}`);
 
   // Start fixture dashboard server.
   console.log('\n[step 2] Starting dashboard fixture server...');
