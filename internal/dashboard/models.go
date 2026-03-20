@@ -135,6 +135,38 @@ type SettingsUpdateRequest struct {
 	GatePipeline []GateConfig      `json:"gate_pipeline,omitempty"`
 }
 
+// ChatRequest is the body for POST /api/v1/dashboard/chat.
+type ChatRequest struct {
+	Prompt  string `json:"prompt"`
+	Tab     string `json:"tab,omitempty"`
+	Context string `json:"context,omitempty"`
+	Stream  bool   `json:"stream,omitempty"`
+}
+
+// ChatSuggestion is a follow-up prompt returned by the assistant.
+type ChatSuggestion struct {
+	Label  string `json:"label"`
+	Prompt string `json:"prompt"`
+}
+
+// ChatAction is an advisory next-step card returned with each assistant reply.
+type ChatAction struct {
+	Title  string `json:"title"`
+	Detail string `json:"detail"`
+	Prompt string `json:"prompt"`
+	Tab    string `json:"tab,omitempty"`
+}
+
+// ChatResponse is the assistant response envelope for the dashboard chat API.
+type ChatResponse struct {
+	Reply       string           `json:"reply"`
+	Provider    string           `json:"provider"`
+	Model       string           `json:"model"`
+	Suggestions []ChatSuggestion `json:"suggestions,omitempty"`
+	Actions     []ChatAction     `json:"actions,omitempty"`
+	GeneratedAt time.Time        `json:"generated_at"`
+}
+
 // UploadResponse is the response for POST /api/v1/dashboard/manual-review-upload.
 type UploadResponse struct {
 	RunID   string `json:"run_id"`

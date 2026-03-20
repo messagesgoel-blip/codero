@@ -423,6 +423,151 @@ func TestSettings_PutEmptyGateName(t *testing.T) {
 	}
 }
 
+/* ══════════════════════ CHAT ═══════════════════════════════ */
+
+func TestChat_UsesLiteLLM(t *testing.T) {
+	requestSeen := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case requestSeen <- struct{}{}:
+		default:
+		}
+		if r.Method != http.MethodPost {
+			t.Fatalf("model request method = %s, want POST", r.Method)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
+			t.Fatalf("authorization header = %q, want bearer token", got)
+		}
+		var payload map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if payload["model"] != "dashboard-test" {
+			t.Fatalf("model = %v, want dashboard-test", payload["model"])
+		}
+		msgs, ok := payload["messages"].([]interface{})
+		if !ok || len(msgs) != 2 {
+			t.Fatalf("messages = %#v, want 2 entries", payload["messages"])
+		}
+		first := msgs[0].(map[string]interface{})
+		if first["role"] != "system" {
+			t.Fatalf("first message role = %v, want system", first["role"])
+		}
+		second := msgs[1].(map[string]interface{})
+		if second["role"] != "user" {
+			t.Fatalf("second message role = %v, want user", second["role"])
+		}
+		if !strings.Contains(second["content"].(string), "status") {
+			t.Fatalf("user prompt did not reach LiteLLM: %v", second["content"])
+		}
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"Health is green.\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{\"content\":\" Queue is clear.\"}}]}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	t.Setenv("CODERO_LITELLM_URL", srv.URL)
+	t.Setenv("CODERO_LITELLM_MODEL", "dashboard-test")
+	t.Setenv("CODERO_LITELLM_MASTER_KEY", "test-key")
+
+	h, _ := newTestHandler(t)
+	rec := doRequest(t, h, http.MethodPost, "/api/v1/dashboard/chat", strings.NewReader(`{"prompt":"status","tab":"processes","stream":true}`))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	select {
+	case <-requestSeen:
+	default:
+		t.Fatal("expected LiteLLM request to be sent")
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "event: delta") || !strings.Contains(body, "event: done") {
+		t.Fatalf("stream body missing SSE events: %s", body)
+	}
+	doneIdx := strings.LastIndex(body, "event: done")
+	if doneIdx < 0 {
+		t.Fatal("missing done event in stream body")
+	}
+	doneDataIdx := strings.Index(body[doneIdx:], "data: ")
+	if doneDataIdx < 0 {
+		t.Fatal("missing done payload in stream body")
+	}
+	donePayload := strings.TrimSpace(body[doneIdx+doneDataIdx+len("data: "):])
+	donePayload = strings.TrimSpace(strings.TrimSuffix(donePayload, "\n\n"))
+	donePayload = strings.TrimSpace(strings.TrimPrefix(donePayload, "data: "))
+	donePayload = strings.TrimSpace(strings.TrimSuffix(donePayload, "\n"))
+	var resp dashboard.ChatResponse
+	if err := json.Unmarshal([]byte(donePayload), &resp); err != nil {
+		t.Fatalf("decode done payload: %v", err)
+	}
+	if resp.Provider != "litellm" {
+		t.Fatalf("provider = %q, want litellm", resp.Provider)
+	}
+	if resp.Model != "dashboard-test" {
+		t.Fatalf("model = %q, want dashboard-test", resp.Model)
+	}
+	if !strings.Contains(resp.Reply, "Queue is clear") {
+		t.Fatalf("reply = %q, want model content", resp.Reply)
+	}
+	if len(resp.Suggestions) == 0 || len(resp.Actions) == 0 {
+		t.Fatal("expected suggestions and actions in response")
+	}
+	if !strings.Contains(resp.Actions[0].Prompt, "review") {
+		t.Fatalf("action prompt is not review scoped: %+v", resp.Actions[0])
+	}
+}
+
+func TestChat_FallsBackWithoutLiteLLM(t *testing.T) {
+	h, db := newTestHandler(t)
+	startedAt := time.Now().Add(-15 * time.Minute).UTC()
+	lastSeen := time.Now().Add(-45 * time.Second).UTC()
+	seedBranchSession(t, db, "acme/api", "feat/live", "coding", "sess-chat", lastSeen, startedAt)
+	seedRun(t, db, "run-chat", "acme/api", "feat/live", "litellm", "completed", 12*time.Second)
+
+	// Point the dashboard at a dead endpoint so the handler exercises the
+	// deterministic fallback path while still returning a useful summary.
+	t.Setenv("CODERO_LITELLM_URL", "http://127.0.0.1:1/v1/chat/completions")
+	t.Setenv("CODERO_LITELLM_MODEL", "dashboard-test")
+	t.Setenv("CODERO_LITELLM_MASTER_KEY", "test-key")
+
+	rec := doRequest(t, h, http.MethodPost, "/api/v1/dashboard/chat", strings.NewReader(`{"prompt":"queue","tab":"queue","stream":true}`))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "event: delta") || !strings.Contains(body, "event: done") {
+		t.Fatalf("expected fallback stream events, got: %s", body)
+	}
+	doneIdx := strings.LastIndex(body, "event: done")
+	if doneIdx < 0 {
+		t.Fatal("missing done event")
+	}
+	doneDataIdx := strings.Index(body[doneIdx:], "data: ")
+	if doneDataIdx < 0 {
+		t.Fatal("missing done payload")
+	}
+	donePayload := strings.TrimSpace(body[doneIdx+doneDataIdx+len("data: "):])
+	donePayload = strings.TrimSpace(strings.TrimSuffix(donePayload, "\n\n"))
+	donePayload = strings.TrimSpace(strings.TrimPrefix(donePayload, "data: "))
+	donePayload = strings.TrimSpace(strings.TrimSuffix(donePayload, "\n"))
+	var resp dashboard.ChatResponse
+	if err := json.Unmarshal([]byte(donePayload), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Provider != "fallback" {
+		t.Fatalf("provider = %q, want fallback", resp.Provider)
+	}
+	if !strings.Contains(resp.Reply, "Top active session") {
+		t.Fatalf("fallback reply missing live snapshot details: %q", resp.Reply)
+	}
+	if len(resp.Actions) == 0 || !strings.Contains(resp.Actions[0].Prompt, "review") {
+		t.Fatalf("fallback actions are not review scoped: %+v", resp.Actions)
+	}
+}
+
 /* ══════════════════════ UPLOAD ══════════════════════════════ */
 
 func TestUpload_ValidFile(t *testing.T) {
@@ -1005,6 +1150,10 @@ func TestDashboardHTML_HasProcessesTab(t *testing.T) {
 		{"System Health", "health bar label"},
 		{"active-sessions", "active-sessions API call"},
 		{"apiFetch('/health')", "health endpoint call"},
+		{"Ask Codero", "chat command prompt"},
+		{"fetch(API + '/chat'", "chat endpoint call"},
+		{"review process", "review-process placeholder"},
+		{"chat-actions", "next-action cards container"},
 		{"Review Findings", "review findings button"},
 		{"agents active", "agents active badge"},
 	}

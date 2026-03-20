@@ -75,6 +75,7 @@ All dashboard-specific endpoints live under `/api/v1/dashboard/`.
 | GET | `/api/v1/dashboard/gate-health` | Per-provider pass rates |
 | GET | `/api/v1/dashboard/settings` | Integrations + gate pipeline config |
 | PUT | `/api/v1/dashboard/settings` | Validated settings update (persisted, audited) |
+| POST | `/api/v1/dashboard/chat` | LiteLLM-backed review-process assistant for the live dashboard |
 | POST | `/api/v1/dashboard/manual-review-upload` | Drag/drop file upload for manual review |
 | GET | `/api/v1/dashboard/events` | SSE stream of live delivery events |
 
@@ -158,6 +159,8 @@ only the metadata (name, repo, branch derivation) is persisted.
 ## Security Properties
 
 - No secrets, tokens, or credentials are served through the dashboard API.
+- The chat assistant is advisory only. It may explain and recommend, but it does not execute actions or mutate state.
+- The assistant is scoped to the review process only: queue, gate checks, findings, activity, and merge readiness.
 - Upload endpoint validates file type and size; file content is not executed or persisted to disk.
 - Settings writes are validated before persistence; invalid updates return 422 with a descriptive error.
 - CORS headers allow `*` for local development; in production the dashboard is served from the same origin as the API.
