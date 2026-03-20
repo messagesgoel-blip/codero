@@ -78,6 +78,13 @@ function spawnStreaming(cmd, args, opts = {}) {
     stdio: ['ignore', 'pipe', 'pipe'],
     ...opts,
   });
+  child.startup = new Promise((resolve, reject) => {
+    child.once('spawn', resolve);
+    child.once('error', (err) => {
+      process.stderr.write(`[spawn] failed to start ${cmd}: ${err.message}\n`);
+      reject(err);
+    });
+  });
   child.stdout.on('data', (chunk) => process.stdout.write(chunk));
   child.stderr.on('data', (chunk) => process.stderr.write(chunk));
   return child;
@@ -296,6 +303,7 @@ async function main() {
 
   const baseUrl = `http://127.0.0.1:${port}`;
   try {
+    await serverProc.startup;
     await waitForUrl(`${baseUrl}/gate`);
     console.log(`  → Server ready at ${baseUrl}`);
 

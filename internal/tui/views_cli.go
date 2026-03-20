@@ -18,7 +18,14 @@ import (
 	"github.com/codero/codero/internal/tui/adapters"
 )
 
-const maxResponseBodyBytes = 10 << 20
+const (
+	maxResponseBodyBytes = 10 << 20
+	// header, separator, suggestion row, input row, plus two spare lines
+	// so the assistant thread does not crowd the bottom bar edge.
+	terminalReservedLines = 6
+)
+
+var dashboardChatHTTPClient = &http.Client{Timeout: 45 * time.Second}
 
 type terminalMessage struct {
 	Role    string
@@ -68,7 +75,7 @@ func dashboardChatCmd(ctx context.Context, prompt, tab string) tea.Cmd {
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json")
 
-		resp, err := (&http.Client{Timeout: 45 * time.Second}).Do(req)
+		resp, err := dashboardChatHTTPClient.Do(req)
 		if err != nil {
 			return terminalChatErrorMsg{prompt: prompt, err: err}
 		}
@@ -119,7 +126,7 @@ func renderTerminalCLI(m Model) string {
 	sepLine := t.Muted.Render(strings.Repeat("─", width))
 	lines = append(lines, sepLine)
 
-	threadLines := m.renderTerminalThread(width, height-6)
+	threadLines := m.renderTerminalThread(width, height-terminalReservedLines)
 	lines = append(lines, threadLines...)
 
 	suggestions := m.cliSuggestions
@@ -185,18 +192,20 @@ func (m Model) renderTerminalThread(width, height int) []string {
 		return lines[:height]
 	}
 
-	for _, msg := range m.cliMessages {
-		renderedMsg := renderTerminalMsg(m.theme, msg)
+	for i := len(m.cliMessages) - 1; i >= 0 && len(lines) < height; i-- {
+		renderedMsg := renderTerminalMsg(m.theme, m.cliMessages[i])
 		msgLines := strings.Split(renderedMsg, "\n")
-		lines = append(lines, msgLines...)
-		if len(lines) >= height {
-			break
+		if len(msgLines) > height {
+			msgLines = msgLines[len(msgLines)-height:]
+		} else if remaining := height - len(lines); len(msgLines) > remaining {
+			msgLines = msgLines[len(msgLines)-remaining:]
 		}
+		lines = append(msgLines, lines...)
 	}
 	for len(lines) < height {
-		lines = append(lines, "")
+		lines = append([]string{""}, lines...)
 	}
-	return lines[:height]
+	return lines
 }
 
 func renderTerminalMsg(t Theme, msg terminalMessage) string {
