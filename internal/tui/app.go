@@ -108,7 +108,7 @@ func New(cfg Config) Model {
 	keys := DefaultKeyMap()
 
 	palette := textinput.New()
-	palette.Placeholder = "type command…"
+	palette.Placeholder = "Type a command or message…"
 	palette.CharLimit = 64
 
 	search := textinput.New()
@@ -300,7 +300,7 @@ func (m Model) handlePaletteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.paletteInput.Blur()
 		return m, nil
 	case "enter":
-		cmd := strings.TrimSpace(m.paletteInput.Value())
+		cmd := strings.ToLower(strings.TrimSpace(m.paletteInput.Value()))
 		m.paletteActive = false
 		m.paletteInput.Blur()
 		return m, m.executePaletteCmd(cmd)
@@ -324,6 +324,24 @@ func (m Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) executePaletteCmd(cmd string) tea.Cmd {
 	switch cmd {
+	case "status":
+		m.statusMsg = fmt.Sprintf("%s / %s / %s",
+			strings.ToLower(m.gateVM.CopilotStatus),
+			strings.ToLower(m.gateVM.LiteLLMStatus),
+			strings.ToLower(m.gateVM.StatusLabel))
+		return nil
+	case "help":
+		m.statusMsg = "commands: status, help, run gate, queue, logs, retry, quit"
+		return nil
+	case "run gate":
+		if m.gateVM.IsFinal {
+			return retryGateCmd(m.cfg.RepoPath)
+		}
+		m.statusMsg = "gate is already running"
+		return nil
+	case "queue":
+		m.statusMsg = "queue view is available from the center pane controls"
+		return nil
 	case "retry", "r":
 		if m.gateVM.IsFinal {
 			return retryGateCmd(m.cfg.RepoPath)
@@ -348,41 +366,32 @@ func (m Model) View() string {
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, center, right)
 	bottom := m.renderBottomBar()
 	full := lipgloss.JoinVertical(lipgloss.Left, top, body, bottom)
-
-	if m.paletteActive {
-		return full + "\n" + m.renderPalette()
-	}
 	return full
 }
 
 func (m Model) renderTopBar() string {
 	l := m.layout
-	t := m.theme
+	title := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#A9AEBF")).
+		Bold(true).
+		Render("COMMAND TERMINAL - CODERO")
 
-	statusStyle := t.Pending
-	switch m.gateVM.Status {
-	case gate.StatusPass:
-		statusStyle = t.Pass
-	case gate.StatusFail:
-		statusStyle = t.Fail
-	default:
-		if !m.gateVM.IsFinal {
-			statusStyle = t.Running
-		}
+	dots := lipgloss.JoinHorizontal(
+		lipgloss.Left,
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5F56")).Render("●"),
+		" ",
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#FFBD2E")).Render("●"),
+		" ",
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#27C93F")).Render("●"),
+	)
+
+	leftPad := 3
+	rightPad := 3
+	titlePad := l.TotalW - lipgloss.Width(dots) - lipgloss.Width(title) - leftPad - rightPad
+	if titlePad < 1 {
+		titlePad = 1
 	}
-
-	repoName := repoBaseName(m.cfg.RepoPath)
-	statusStr := statusStyle.Render(fmt.Sprintf(" %s %s ", m.gateVM.StatusIcon, m.gateVM.StatusLabel))
-
-	var updated string
-	if !m.lastUpdated.IsZero() {
-		updated = t.Muted.Render(fmt.Sprintf(" updated %s ", m.lastUpdated.Format("15:04:05")))
-	}
-
-	title := t.Accent.Render(" ◆ codero ")
-	repoStr := t.Muted.Render(fmt.Sprintf(" %s ", repoName))
-
-	bar := lipgloss.JoinHorizontal(lipgloss.Center, title, repoStr, statusStr, updated)
+	bar := " " + dots + strings.Repeat(" ", leftPad) + strings.Repeat(" ", titlePad/2) + title
 	return lipgloss.NewStyle().Width(l.TotalW).Background(lipgloss.Color("#1E1F2E")).Render(bar)
 }
 
@@ -402,50 +411,14 @@ func (m Model) renderLeft() string {
 
 func (m Model) renderCenter() string {
 	l := m.layout
-
-	tabs := m.renderTabs()
-	// contentH minus 1 for the tab bar row
-	content := m.renderCenterContent(l.CenterW-2, l.ContentH-1)
+	m.logsArchPane.SetSize(l.CenterW-2, l.ContentH)
+	content := m.logsArchPane.View()
 
 	border := m.theme.PaneBorder
 	if m.focused == PaneCenter {
 		border = m.theme.ActiveBorder
 	}
-	inner := lipgloss.JoinVertical(lipgloss.Left, tabs, content)
-	return border.Width(l.CenterW).Height(l.ContentH).Render(inner)
-}
-
-func (m Model) renderTabs() string {
-	parts := make([]string, tabCount)
-	for i := Tab(0); i < tabCount; i++ {
-		label := fmt.Sprintf(" %s ", tabLabels[i])
-		if i == m.activeTab {
-			parts[i] = m.theme.TabActive.Render(label)
-		} else {
-			parts[i] = m.theme.TabInactive.Render(label)
-		}
-	}
-	return strings.Join(parts, m.theme.Muted.Render("│"))
-}
-
-func (m Model) renderCenterContent(w, h int) string {
-	switch m.activeTab {
-	case TabLogs:
-		m.logsArchPane.SetSize(w, h)
-		return m.logsArchPane.View()
-	case TabOutput:
-		if !m.outputReady {
-			return m.theme.Muted.Render("  initializing…")
-		}
-		return m.outputVP.View()
-	case TabEvents:
-		m.eventsPane.SetSize(w, h)
-		return m.eventsPane.View()
-	case TabQueue:
-		m.queuePane.SetSize(w, h)
-		return m.queuePane.View()
-	}
-	return ""
+	return border.Width(l.CenterW).Height(l.ContentH).Render(content)
 }
 
 func (m Model) renderRight() string {
@@ -476,16 +449,11 @@ func (m Model) renderBottomBar() string {
 		Padding(0, 1).
 		Render("Review Findings")
 
-	// Left: merge status + hints.  Right: Review Findings button.
-	hints := []string{
-		t.KeyHint.Render("tab") + t.KeyLabel.Render(" panes"),
-		t.KeyHint.Render("r") + t.KeyLabel.Render(" retry"),
-		t.KeyHint.Render(":") + t.KeyLabel.Render(" palette"),
-		t.KeyHint.Render("q") + t.KeyLabel.Render(" quit"),
+	// Left: merge status.  Right: Review Findings button.
+	leftPart := t.Base.Render(mergeStatus + "  ")
+	if m.statusMsg != "" {
+		leftPart += t.Muted.Render(m.statusMsg + "  ")
 	}
-	hintStr := strings.Join(hints, "  ")
-
-	leftPart := t.Base.Render(mergeStatus+"  ") + t.Muted.Render(hintStr)
 	// Pad between left and button.
 	leftVisible := lipgloss.Width(leftPart)
 	btnVisible := lipgloss.Width(reviewBtn)
@@ -493,7 +461,27 @@ func (m Model) renderBottomBar() string {
 	if pad < 1 {
 		pad = 1
 	}
-	bar := leftPart + strings.Repeat(" ", pad) + reviewBtn
+	firstRow := leftPart + strings.Repeat(" ", pad) + reviewBtn
+
+	m.paletteInput.Width = maxInt(24, l.TotalW-48)
+	prompt := t.Accent.Render(">") + " " + t.PaletteInput.Render(m.paletteInput.View())
+	chips := []string{
+		commandChip("status"),
+		commandChip("help"),
+		commandChip("run gate"),
+		commandChip("queue"),
+	}
+	chipLine := strings.Join(chips, " ")
+	secondRow := prompt
+	if chipLine != "" {
+		spacer := l.TotalW - lipgloss.Width(prompt) - lipgloss.Width(chipLine) - 2
+		if spacer < 1 {
+			spacer = 1
+		}
+		secondRow = prompt + strings.Repeat(" ", spacer) + chipLine
+	}
+
+	bar := firstRow + "\n" + secondRow
 	return t.BottomBar.Width(l.TotalW).Render(bar)
 }
 
@@ -538,6 +526,7 @@ func (m *Model) applyLayout() {
 	l := m.layout
 	m.gatePane.SetSize(l.LeftW-2, l.ContentH)
 	m.logsArchPane.SetSize(l.CenterW-2, l.ContentH)
+	m.paletteInput.Width = maxInt(24, l.TotalW-48)
 	m.queuePane.SetSize(l.CenterW-2, l.ContentH-3)
 	m.eventsPane.SetSize(l.CenterW-2, l.ContentH-3)
 	m.checksPane.SetSize(l.RightW-2, l.ContentH)
@@ -556,6 +545,15 @@ func (m *Model) applyLayout() {
 		m.rightVP.Width = l.RightW - 2
 		m.rightVP.Height = l.ContentH - 1
 	}
+}
+
+func commandChip(label string) string {
+	return lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#2F3648")).
+		Foreground(lipgloss.Color("#A3A6B8")).
+		Padding(0, 1).
+		Render(label)
 }
 
 func (m Model) buildOutputContent() string {
