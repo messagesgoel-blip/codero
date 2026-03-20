@@ -255,6 +255,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:12
 .chat-message-model{margin-left:auto;color:var(--dim);text-transform:none;letter-spacing:0}
 .chat-message-body{font-size:11px;white-space:normal;line-height:1.55;color:var(--text)}
 .chat-compose{display:flex;gap:10px;align-items:flex-end}
+.visually-hidden{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .comment-textarea{flex:1;font-family:var(--mono);font-size:11px;background:var(--input-bg);border:1px solid var(--border2);border-radius:var(--radius);color:var(--text);padding:8px 12px;resize:none;min-height:42px;max-height:92px;outline:none;transition:border-color .15s}
 .comment-textarea:focus{border-color:var(--teal)}
 .comment-post-btn{font-size:10px;font-weight:500;padding:8px 16px;border-radius:3px;border:1.5px solid var(--teal);background:var(--teal-b);color:var(--teal);font-family:var(--mono);cursor:pointer;white-space:nowrap;transition:background .12s}
@@ -508,6 +509,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:12
       <div class="chat-empty" id="chat-empty">Ask Codero about the review process: queue, gate checks, findings, active sessions, activity, or merge readiness.</div>
     </div>
     <div class="chat-compose">
+      <label for="comment-input" class="visually-hidden">Ask Codero about the review process</label>
       <textarea class="comment-textarea" id="comment-input" placeholder="Ask Codero about the review process..." rows="1" onkeydown="handleChatKeydown(event)"></textarea>
       <button class="comment-post-btn" id="chat-send-btn" onclick="submitChat()">Ask</button>
     </div>
