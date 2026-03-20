@@ -247,7 +247,11 @@ func runDashboardFixture(bindHost string, bindPort int, basePath, repoPath, repo
 	// was not explicitly set. Sessions and activity are always seeded from the dir.
 	var resolvedFixtureDir string
 	if fixtureDirPath != "" {
-		abs, err := filepath.Abs(fixtureDirPath)
+		resolvedPath := fixtureDirPath
+		if !filepath.IsAbs(resolvedPath) {
+			resolvedPath = filepath.Join(repoPath, fixtureDirPath)
+		}
+		abs, err := filepath.Abs(resolvedPath)
 		if err != nil {
 			return fmt.Errorf("resolve fixture-dir: %w", err)
 		}

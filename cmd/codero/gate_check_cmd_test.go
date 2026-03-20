@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -10,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/codero/codero/internal/gatecheck"
 )
@@ -128,32 +126,54 @@ func TestUsageError_LoadReportConflictWithProfile(t *testing.T) {
 }
 
 func TestGateCheck_LoadReportTUISnapshot_UsesProvidedReport(t *testing.T) {
-	report := gatecheck.Report{
-		Summary: gatecheck.Summary{
-			OverallStatus:  gatecheck.StatusFail,
-			Passed:         8,
-			Failed:         3,
-			Skipped:        1,
-			Disabled:       1,
-			InfraBypassed:  1,
-			RequiredFailed: 2,
-			Total:          14,
-			Profile:        gatecheck.ProfilePortable,
-			SchemaVersion:  gatecheck.SchemaVersion,
-		},
-		Checks: []gatecheck.CheckResult{
-			{ID: "secret-scan", Group: gatecheck.GroupSecurity, Status: gatecheck.StatusFail, Required: true, ReasonCode: gatecheck.ReasonCheckFailed},
-			{ID: "fmt-check", Group: gatecheck.GroupFormat, Status: gatecheck.StatusPass},
-			{ID: "sonarcloud", Group: gatecheck.GroupOther, Status: gatecheck.StatusSkip, ReasonCode: gatecheck.ReasonInfraBypass},
-		},
-		RunAt: time.Unix(0, 0).UTC(),
-	}
 	reportPath := filepath.Join(t.TempDir(), "fixture-report.json")
-	data, err := json.Marshal(report)
-	if err != nil {
-		t.Fatalf("marshal report: %v", err)
-	}
-	if err := os.WriteFile(reportPath, data, 0o600); err != nil {
+	reportJSON := `{
+  "schema_version": "1.0.0",
+  "profile": "PORTABLE",
+  "summary": {
+    "overall_status": "FAIL",
+    "passed": 8,
+    "failed": 3,
+    "skipped": 1,
+    "infra_bypassed": 1,
+    "disabled": 1,
+    "total": 14,
+    "required_failed": 2
+  },
+  "checks": [
+    {
+      "id": "secret-scan",
+      "name": "Secret Scan",
+      "group": "security",
+      "required": true,
+      "enabled": true,
+      "status": "FAILED",
+      "reason_code": "check_failed",
+      "duration_ms": 0
+    },
+    {
+      "id": "fmt-check",
+      "name": "Format Check",
+      "group": "format",
+      "required": false,
+      "enabled": true,
+      "status": "pass",
+      "duration_ms": 0
+    },
+    {
+      "id": "sonarcloud",
+      "name": "SonarCloud Analysis",
+      "group": "other",
+      "required": false,
+      "enabled": true,
+      "status": "SKIP",
+      "reason_code": "infra_bypass",
+      "duration_ms": 0
+    }
+  ],
+  "run_at": "1970-01-01T00:00:00Z"
+}`
+	if err := os.WriteFile(reportPath, []byte(reportJSON), 0o600); err != nil {
 		t.Fatalf("write report: %v", err)
 	}
 

@@ -139,7 +139,6 @@ func (p PipelinePane) pipelineSteps() []pipelineStep {
 }
 
 func (p PipelinePane) renderStep(step pipelineStep, isActive, isPast bool, width int) string {
-	_ = isPast
 	icon := "○"
 	style := p.theme.Muted
 	switch step.status {
@@ -179,6 +178,9 @@ func (p PipelinePane) renderStep(step pipelineStep, isActive, isPast bool, width
 
 	if isActive {
 		return p.theme.ListSelected.Width(width).Render(label)
+	}
+	if isPast {
+		style = style.Copy().Faint(true)
 	}
 	return style.Render(label)
 }

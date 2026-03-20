@@ -33,9 +33,20 @@ func Compute(totalW, totalH int) Layout {
 		totalH = 24
 	}
 
+	topBarH, bottomBarH := topBarH, bottomBarH
+	if topBarH+bottomBarH > totalH {
+		overflow := topBarH + bottomBarH - totalH
+		if bottomBarH >= overflow {
+			bottomBarH -= overflow
+		} else {
+			overflow -= bottomBarH
+			bottomBarH = 0
+			topBarH = maxInt(0, topBarH-overflow)
+		}
+	}
 	contentH := totalH - topBarH - bottomBarH
-	if contentH < 8 {
-		contentH = 8
+	if contentH < 0 {
+		contentH = 0
 	}
 
 	var leftW, centerW, pipelineW, rightW int
@@ -85,14 +96,22 @@ func Compute(totalW, totalH int) Layout {
 		if used != totalW {
 			diff := used - totalW
 			for diff > 0 {
+				reduced := false
 				if centerW > leftW && centerW > pipelineW && centerW > 1 {
 					centerW--
+					reduced = true
 				} else if leftW >= pipelineW && leftW > 1 {
 					leftW--
+					reduced = true
 				} else if pipelineW > 1 {
 					pipelineW--
+					reduced = true
 				} else if rightW > 1 {
 					rightW--
+					reduced = true
+				}
+				if !reduced {
+					break
 				}
 				diff--
 			}

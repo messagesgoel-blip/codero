@@ -100,14 +100,20 @@ func (p LogsArchPane) View() string {
 	if len(p.events) > contentH/2 {
 		body = p.renderLogColumn(w, contentH)
 	} else {
-		logH := contentH / 2
-		if logH < 3 {
-			logH = 3
+		logH := 0
+		if contentH < 3 {
+			logH = contentH
+		} else {
+			logH = minInt(contentH, maxInt(3, contentH/2))
 		}
-		archH := contentH - logH
+		archH := maxInt(0, contentH-logH)
 		logs := p.renderLogColumn(w, logH)
-		arch := p.renderArchColumn(w, archH)
-		body = lipgloss.JoinVertical(lipgloss.Left, logs, p.theme.Muted.Render(strings.Repeat("─", w)), arch)
+		if archH == 0 {
+			body = logs
+		} else {
+			arch := p.renderArchColumn(w, archH)
+			body = lipgloss.JoinVertical(lipgloss.Left, logs, p.theme.Muted.Render(strings.Repeat("─", w)), arch)
+		}
 	}
 
 	full := lipgloss.JoinVertical(lipgloss.Left, header, sep, body)

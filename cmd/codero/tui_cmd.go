@@ -71,6 +71,7 @@ Examples:
 			initialVM := tui.AdapterFromPath(repoPath)
 			cfg := tui.Config{
 				RepoPath:   repoPath,
+				Context:    cmd.Context(),
 				Interval:   time.Duration(intervalSec) * time.Second,
 				Theme:      theme,
 				WatchMode:  true,
@@ -78,7 +79,7 @@ Examples:
 				InitialTab: initialTab,
 			}
 
-			opts := []tea.ProgramOption{}
+			opts := []tea.ProgramOption{tea.WithContext(cmd.Context())}
 			if !noAltScreen {
 				opts = append(opts, tea.WithAltScreen())
 			}

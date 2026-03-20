@@ -268,7 +268,10 @@ async function main() {
   if (tuiRun.code !== 0 && tuiRun.code !== 1) {
     throw new Error(`tui snapshot command failed with exit code ${tuiRun.code}${tuiRun.stderr ? `: ${tuiRun.stderr.trim()}` : ''}`);
   }
-  const tuiText = canonicalizeSnapshot(tuiRun.stdout || tuiRun.stderr || 'No TUI snapshot captured.');
+  const tuiText = canonicalizeSnapshot(tuiRun.stdout || '');
+  if (!tuiText.trim()) {
+    throw new Error(`tui snapshot command produced no stdout${tuiRun.stderr ? `: ${tuiRun.stderr.trim()}` : ''}`);
+  }
   assertTuiSnapshotText(tuiText);
   const tuiTextPath = path.join(outputDir, `tui-${VERSION}-view.txt`);
   await writeFile(tuiTextPath, tuiText, 'utf8');

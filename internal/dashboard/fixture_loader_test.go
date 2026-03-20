@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/codero/codero/internal/dashboard"
@@ -37,6 +38,15 @@ func TestLoadFixtureDir_WithReportJSON(t *testing.T) {
 	}
 	if result.ReportPath != reportFile {
 		t.Errorf("want ReportPath %q, got %q", reportFile, result.ReportPath)
+	}
+	t.Setenv("CODERO_GATE_CHECK_REPORT_PATH", result.ReportPath)
+	h := dashboard.NewHandler(db, dashboard.NewSettingsStore(t.TempDir()))
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/gate-checks", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d — body: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"schema_version":"1.0.0"`) {
+		t.Fatalf("expected gate-checks body to expose discovered report, got: %s", rec.Body.String())
 	}
 }
 

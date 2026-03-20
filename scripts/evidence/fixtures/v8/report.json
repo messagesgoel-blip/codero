@@ -181,7 +181,7 @@
       "name": "SonarCloud Analysis",
       "group": "quality",
       "tool_name": "sonarcloud",
-      "status": "INFRA_BYPASS",
+      "status": "skip",
       "required": false,
       "reason": "SonarCloud token not configured — infrastructure bypass",
       "reason_code": "infra_bypass",

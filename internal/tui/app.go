@@ -45,6 +45,10 @@ const (
 	PaneRight
 )
 
+const paneCount = int(PaneRight) + 1
+const maxCLIHistoryMessages = 8
+const cliHistoryTruncatedNotice = "Earlier conversation truncated for brevity."
+
 // internal Bubble Tea messages
 type (
 	tickMsg          struct{ t time.Time }
@@ -59,6 +63,7 @@ type (
 // Config is provided by the command layer to configure the TUI program.
 type Config struct {
 	RepoPath  string
+	Context   context.Context
 	Interval  time.Duration
 	Theme     Theme
 	WatchMode bool
@@ -116,6 +121,9 @@ type Model struct {
 
 // New constructs the root TUI model from a Config.
 func New(cfg Config) Model {
+	if cfg.Context == nil {
+		cfg.Context = context.Background()
+	}
 	theme := cfg.Theme
 	keys := DefaultKeyMap()
 
@@ -133,22 +141,22 @@ func New(cfg Config) Model {
 	cli.Focus()
 
 	m := Model{
-		cfg:          cfg,
-		keys:         keys,
-		theme:        theme,
-		gatePane:     NewGatePane(theme),
-		branchPane:   NewBranchPane(theme),
-		queuePane:    NewQueuePane(theme),
-		eventsPane:   NewEventsPane(theme),
-		checksPane:   NewChecksPane(theme),
-		logsArchPane: NewLogsArchPane(theme),
-		pipelinePane: NewPipelinePane(theme),
-		gateVM:       cfg.InitialVM,
-		paletteInput: palette,
-		searchInput:  search,
-		cliInput:     cli,
+		cfg:           cfg,
+		keys:          keys,
+		theme:         theme,
+		gatePane:      NewGatePane(theme),
+		branchPane:    NewBranchPane(theme),
+		queuePane:     NewQueuePane(theme),
+		eventsPane:    NewEventsPane(theme),
+		checksPane:    NewChecksPane(theme),
+		logsArchPane:  NewLogsArchPane(theme),
+		pipelinePane:  NewPipelinePane(theme),
+		gateVM:        cfg.InitialVM,
+		paletteInput:  palette,
+		searchInput:   search,
+		cliInput:      cli,
 		cliHistoryIdx: -1,
-		activeTab:    cfg.InitialTab,
+		activeTab:     cfg.InitialTab,
 		cliMessages: []terminalMessage{
 			{Role: "system", Meta: "codero", Content: "Type help, status, gate, queue, or ask a review question."},
 		},
@@ -297,10 +305,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case key.Matches(msg, m.keys.NextPane):
-		m.focused = (m.focused + 1) % 4
+		m.focused = FocusedPane((int(m.focused) + 1) % paneCount)
 
 	case key.Matches(msg, m.keys.PrevPane):
-		m.focused = (m.focused - 1 + 4) % 4
+		m.focused = FocusedPane((int(m.focused) - 1 + paneCount) % paneCount)
 
 	case key.Matches(msg, m.keys.Refresh):
 		vm := adapters.FromProgressEnv(m.cfg.RepoPath)
@@ -359,7 +367,7 @@ func (m Model) handleTerminalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cliBusy = true
 		m.cliSuggestions = nil
 		m.cliActions = nil
-		return m, dashboardChatCmd(cmd, m.chatContextTab())
+		return m, dashboardChatCmd(m.cfg.Context, cmd, m.chatContextTab())
 
 	case "esc":
 		m.cliInput.SetValue("")
@@ -367,8 +375,12 @@ func (m Model) handleTerminalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "up", "k":
+		input := m.cliInput.Value()
+		if input != "" && m.cliInput.Position() > 0 {
+			break
+		}
 		if len(m.cliHistory) == 0 {
-			return m, nil
+			break
 		}
 		if m.cliHistoryIdx < len(m.cliHistory)-1 {
 			m.cliHistoryIdx++
@@ -380,8 +392,12 @@ func (m Model) handleTerminalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "down", "j":
+		input := m.cliInput.Value()
+		if input != "" && m.cliInput.Position() < len([]rune(input)) {
+			break
+		}
 		if len(m.cliHistory) == 0 {
-			return m, nil
+			break
 		}
 		if m.cliHistoryIdx > 0 {
 			m.cliHistoryIdx--
@@ -400,8 +416,10 @@ func (m Model) handleTerminalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) truncateCLIHistory() {
-	if len(m.cliMessages) > 8 {
-		m.cliMessages = m.cliMessages[len(m.cliMessages)-8:]
+	if len(m.cliMessages) > maxCLIHistoryMessages {
+		retained := append([]terminalMessage(nil), m.cliMessages[len(m.cliMessages)-maxCLIHistoryMessages:]...)
+		notice := terminalMessage{Role: "system", Meta: "codero", Content: cliHistoryTruncatedNotice}
+		m.cliMessages = append([]terminalMessage{notice}, retained...)
 	}
 }
 

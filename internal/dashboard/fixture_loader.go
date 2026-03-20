@@ -1,7 +1,9 @@
 package dashboard
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -102,7 +104,7 @@ func SeedFixtureSessions(db *sql.DB, entries []FixtureSessionEntry) error {
 		if state == "" {
 			state = "coding"
 		}
-		id := fmt.Sprintf("fixture-bs-%s-%s", e.Repo, e.Branch)
+		id := fixtureBranchStateID(e.Repo, e.Branch)
 		// nosemgrep: go.lang.security.audit.sqli.gosql-sqli.gosql-sqli
 		_, err := db.Exec(`
 			INSERT OR REPLACE INTO branch_states
@@ -123,6 +125,11 @@ func SeedFixtureSessions(db *sql.DB, entries []FixtureSessionEntry) error {
 		}
 	}
 	return nil
+}
+
+func fixtureBranchStateID(repo, branch string) string {
+	sum := sha256.Sum256([]byte(repo + ":" + branch))
+	return "fixture-bs-" + hex.EncodeToString(sum[:8])
 }
 
 // SeedFixtureActivity inserts delivery_event rows for each activity entry.

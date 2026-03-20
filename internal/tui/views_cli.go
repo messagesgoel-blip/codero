@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,6 +17,8 @@ import (
 	"github.com/codero/codero/internal/dashboard"
 	"github.com/codero/codero/internal/tui/adapters"
 )
+
+const maxResponseBodyBytes = 10 << 20
 
 type terminalMessage struct {
 	Role    string
@@ -43,8 +46,11 @@ func dashboardChatEndpoint() string {
 	return "http://127.0.0.1:8080/api/v1/dashboard/chat"
 }
 
-func dashboardChatCmd(prompt, tab string) tea.Cmd {
+func dashboardChatCmd(ctx context.Context, prompt, tab string) tea.Cmd {
 	return func() tea.Msg {
+		if ctx == nil {
+			ctx = context.Background()
+		}
 		reqBody := dashboard.ChatRequest{
 			Prompt:  prompt,
 			Tab:     tab,
@@ -55,7 +61,7 @@ func dashboardChatCmd(prompt, tab string) tea.Cmd {
 		if err != nil {
 			return terminalChatErrorMsg{prompt: prompt, err: err}
 		}
-		req, err := http.NewRequest(http.MethodPost, dashboardChatEndpoint(), bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, dashboardChatEndpoint(), bytes.NewReader(body))
 		if err != nil {
 			return terminalChatErrorMsg{prompt: prompt, err: err}
 		}
@@ -68,7 +74,7 @@ func dashboardChatCmd(prompt, tab string) tea.Cmd {
 		}
 		defer resp.Body.Close()
 
-		raw, err := io.ReadAll(resp.Body)
+		raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
 		if err != nil {
 			return terminalChatErrorMsg{prompt: prompt, err: err}
 		}
