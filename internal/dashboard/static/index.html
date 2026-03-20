@@ -242,12 +242,35 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:12
 .ci-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0}
 .ci-dot.green{background:var(--teal)}.ci-dot.red{background:var(--red)}.ci-dot.unknown{background:var(--dim)}
 .ci-row-label{font-size:9px;color:var(--muted)}
-/* ── COMMENT BOX ─────────────────────────────────────────── */
-.comment-box{padding:14px 18px;border-top:1px solid var(--border);background:var(--bg1);flex-shrink:0;display:flex;gap:10px;align-items:flex-end}
-.comment-textarea{flex:1;font-family:var(--mono);font-size:11px;background:var(--input-bg);border:1px solid var(--border2);border-radius:var(--radius);color:var(--text);padding:8px 12px;resize:none;min-height:38px;max-height:80px;outline:none;transition:border-color .15s}
+/* ── CHAT / COMMAND BOX ─────────────────────────────────── */
+.comment-box{padding:14px 18px;border-top:1px solid var(--border);background:var(--bg1);flex-shrink:0;display:flex;flex-direction:column;gap:10px}
+.chat-thread{display:flex;flex-direction:column;gap:8px;max-height:118px;overflow-y:auto;padding-right:4px}
+.chat-empty{font-size:10px;color:var(--muted);padding:8px 10px;border:1px dashed var(--border2);border-radius:var(--radius);background:var(--bg2)}
+.chat-message{border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;background:var(--bg2)}
+.chat-message.user{border-color:rgba(90,163,220,.25);background:rgba(90,163,220,.06)}
+.chat-message.assistant{border-color:rgba(63,255,160,.22);background:rgba(63,255,160,.06)}
+.chat-message.error{border-color:rgba(224,100,100,.28);background:rgba(224,100,100,.06)}
+.chat-message-meta{display:flex;align-items:center;gap:8px;margin-bottom:5px;font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+.chat-message-role{font-weight:500;color:var(--text)}
+.chat-message-model{margin-left:auto;color:var(--dim);text-transform:none;letter-spacing:0}
+.chat-message-body{font-size:11px;white-space:normal;line-height:1.55;color:var(--text)}
+.chat-compose{display:flex;gap:10px;align-items:flex-end}
+.visually-hidden{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.comment-textarea{flex:1;font-family:var(--mono);font-size:11px;background:var(--input-bg);border:1px solid var(--border2);border-radius:var(--radius);color:var(--text);padding:8px 12px;resize:none;min-height:42px;max-height:92px;outline:none;transition:border-color .15s}
 .comment-textarea:focus{border-color:var(--teal)}
-.comment-post-btn{font-size:10px;font-weight:500;padding:6px 16px;border-radius:3px;border:1.5px solid var(--teal);background:var(--teal-b);color:var(--teal);font-family:var(--mono);cursor:pointer;white-space:nowrap;transition:background .12s}
+.comment-post-btn{font-size:10px;font-weight:500;padding:8px 16px;border-radius:3px;border:1.5px solid var(--teal);background:var(--teal-b);color:var(--teal);font-family:var(--mono);cursor:pointer;white-space:nowrap;transition:background .12s}
 .comment-post-btn:hover{background:var(--teal);color:#0d0d0d}
+.comment-post-btn:disabled{opacity:.5;cursor:not-allowed}
+.chat-suggestions{display:flex;flex-wrap:wrap;gap:6px}
+.chat-chip{font-size:9px;padding:4px 10px;border-radius:999px;border:1px solid var(--border2);background:var(--bg2);color:var(--muted);font-family:var(--mono);cursor:pointer;transition:background .12s,color .12s,border-color .12s}
+.chat-chip:hover{color:var(--text);border-color:var(--teal);background:var(--teal-b)}
+.chat-chip.primary{border-color:var(--teal);color:var(--teal);background:var(--teal-b)}
+.chat-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.chat-action-card{border:1px solid var(--border2);border-radius:var(--radius);background:var(--bg2);padding:9px 10px;display:flex;flex-direction:column;gap:5px}
+.chat-action-title{font-size:10px;font-weight:500;color:var(--text)}
+.chat-action-detail{font-size:9px;color:var(--muted);line-height:1.5}
+.chat-action-btn{align-self:flex-start;font-size:9px;padding:3px 9px;border-radius:2px;border:1px solid var(--teal);background:var(--teal-b);color:var(--teal);font-family:var(--mono);cursor:pointer}
+.chat-action-btn:hover{background:var(--teal);color:#0d0d0d}
 /* ── ARCHITECTURE ────────────────────────────────────────── */
 .arch-content{flex:1;display:flex;align-items:center;justify-content:center;overflow:auto;padding:24px}
 .arch-diagram{display:flex;gap:40px;align-items:flex-start}
@@ -482,8 +505,18 @@ body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:12
   </div>
   <!-- Comment box -->
   <div class="comment-box">
-    <textarea class="comment-textarea" id="comment-input" placeholder="Add comment..." rows="1"></textarea>
-    <button class="comment-post-btn" onclick="postComment()">Post</button>
+    <div class="chat-thread" id="chat-thread" aria-live="polite">
+      <div class="chat-empty" id="chat-empty">Ask Codero about the review process: queue, gate checks, findings, active sessions, activity, or merge readiness.</div>
+    </div>
+    <div class="chat-compose">
+      <label for="comment-input" class="visually-hidden">Ask Codero about the review process</label>
+      <textarea class="comment-textarea" id="comment-input" placeholder="Ask Codero about the review process..." rows="1" onkeydown="handleChatKeydown(event)"></textarea>
+      <button class="comment-post-btn" id="chat-send-btn" onclick="submitChat()">Ask</button>
+    </div>
+    <div class="chat-suggestions" id="chat-suggestions">
+      <!-- populated dynamically -->
+    </div>
+    <div class="chat-actions" id="chat-actions"></div>
   </div>
 </div>
 
@@ -559,6 +592,11 @@ let eventFilter   = 'ALL';
 let findingsCache = null;
 let integrationGridBound = false;
 let findingsView  = 'cards'; // 'cards' | 'table'
+let chatHistory   = [];
+let chatBusy      = false;
+let chatSuggestionState = [];
+let chatActionState = [];
+let chatPromptDelegationBound = false;
 
 /* THEME */
 const mq = window.matchMedia('(prefers-color-scheme: dark)');
@@ -587,6 +625,8 @@ function showTab(id, tab) {
   if (id === 'settings' && !settingsDirty) loadSettings();
   if (id === 'findings')     renderFindings(findingsCache);
   if (id === 'eventlogs')    renderEvents();
+  renderChatSuggestions(defaultChatSuggestionsForTab(id));
+  renderChatActions(defaultChatActionsForTab(id));
 }
 
 function tabKey(ev, tab) {
@@ -997,19 +1037,309 @@ function renderResolutionPanel(failChecks) {
   }).join('');
 }
 
-/* COMMENT BOX */
-function postComment() {
+/* CHAT / COMMAND BOX */
+function handleChatKeydown(ev) {
+  if (ev.key === 'Enter' && !ev.shiftKey) {
+    ev.preventDefault();
+    submitChat();
+  }
+}
+
+function defaultChatSuggestionsForTab(tab) {
+  tab = String(tab || '').toLowerCase();
+  if (tab === 'findings') {
+    return [
+      { label: 'top blocker', prompt: 'What is the top blocker in the review findings?' },
+      { label: 'gate', prompt: 'Summarize the gate checks and blockers.' },
+      { label: 'merge', prompt: 'Is the branch ready to merge?' },
+      { label: 'status', prompt: 'Summarize the current review status.' },
+    ];
+  }
+  if (tab === 'eventlogs') {
+    return [
+      { label: 'latest activity', prompt: 'Summarize the latest review activity.' },
+      { label: 'status', prompt: 'Summarize the current review status.' },
+      { label: 'gate', prompt: 'Summarize the gate checks and blockers.' },
+      { label: 'findings', prompt: 'Show the main findings from the review.' },
+    ];
+  }
+  if (tab === 'processes') {
+    return [
+      { label: 'status', prompt: 'Summarize the current review status.' },
+      { label: 'queue', prompt: 'What is happening in the review queue right now?' },
+      { label: 'gate', prompt: 'What gate checks are blocking progress?' },
+      { label: 'findings', prompt: 'Summarize the open findings.' },
+    ];
+  }
+  return [
+    { label: 'status', prompt: 'Give me the current review status.' },
+    { label: 'help', prompt: 'Show me the useful review commands.' },
+    { label: 'gate', prompt: 'Summarize the gate checks and blockers.' },
+    { label: 'queue', prompt: 'What is happening in the review queue right now?' },
+  ];
+}
+
+function defaultChatActionsForTab(tab) {
+  tab = String(tab || '').toLowerCase();
+  if (tab === 'findings') {
+    return [
+      { title: 'Review top blocker', detail: 'Use the current findings to identify the highest-priority blocker.', prompt: 'What is the top blocker in the review findings?' },
+      { title: 'Check merge readiness', detail: 'Confirm whether the gate and findings allow a merge-ready state.', prompt: 'Is the branch ready to merge?' },
+    ];
+  }
+  if (tab === 'eventlogs') {
+    return [
+      { title: 'Summarize latest activity', detail: 'Convert the newest event log entries into a review-process summary.', prompt: 'Summarize the latest review activity.' },
+      { title: 'Trace review blockers', detail: 'Follow the event trail that led to the current review state.', prompt: 'Trace the events that led to the current review blockers.' },
+    ];
+  }
+  if (tab === 'processes') {
+    return [
+      { title: 'Inspect active review', detail: 'Focus on the currently active sessions and their review phase.', prompt: 'Summarize the active review sessions and their phase.' },
+      { title: 'Check queue pressure', detail: 'Describe whether the review queue is growing or clearing.', prompt: 'What is happening in the review queue right now?' },
+    ];
+  }
+  return [
+    { title: 'Review status', detail: 'Ask for the current review state and blockers.', prompt: 'Summarize the current review status.' },
+    { title: 'Gate checks', detail: 'Ask for the current gate status and blocking checks.', prompt: 'Summarize the gate checks and blockers.' },
+  ];
+}
+
+function renderChatSuggestions(items) {
+  var c = el('chat-suggestions');
+  if (!c) return;
+  chatSuggestionState = (items && items.length ? items : defaultChatSuggestionsForTab(activeTab)).slice();
+  c.innerHTML = chatSuggestionState.map(function(item, idx) {
+    var cls = idx === 0 ? 'chat-chip primary' : 'chat-chip';
+    return '<button class="' + cls + '" type="button" data-prompt="' + attrEsc(item.prompt) + '">' + esc(item.label) + '</button>';
+  }).join('');
+  bindChatPromptDelegation();
+}
+
+function renderChatActions(items) {
+  var c = el('chat-actions');
+  if (!c) return;
+  chatActionState = (items && items.length ? items : defaultChatActionsForTab(activeTab)).slice();
+  if (!chatActionState.length) {
+    c.innerHTML = '';
+    return;
+  }
+  c.innerHTML = chatActionState.map(function(item) {
+    return '<div class="chat-action-card">' +
+      '<div class="chat-action-title">' + esc(item.title) + '</div>' +
+      '<div class="chat-action-detail">' + esc(item.detail) + '</div>' +
+      '<button class="chat-action-btn" type="button" data-prompt="' + attrEsc(item.prompt) + '">Ask</button>' +
+    '</div>';
+  }).join('');
+  bindChatPromptDelegation();
+}
+
+function submitChatPreset(prompt) {
+  if (typeof prompt !== 'string') prompt = String(prompt || '');
   var ta = el('comment-input');
-  if (!ta || !ta.value.trim()) return;
-  var draft = ta.value.trim();
-  // POST to review API when available; preserve draft on failure
-  fetch('/api/v1/dashboard/comments', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ body: draft })
-  }).then(function(r) {
-    if (r.ok) { ta.value = ''; }
-  }).catch(function() { /* network error — draft preserved */ });
+  if (ta) ta.value = prompt;
+  submitChat(prompt);
+}
+
+function bindChatPromptDelegation() {
+  if (chatPromptDelegationBound) return;
+  chatPromptDelegationBound = true;
+  document.addEventListener('click', function(ev) {
+    var target = ev.target && ev.target.closest ? ev.target.closest('.chat-chip[data-prompt], .chat-action-btn[data-prompt]') : null;
+    if (!target) return;
+    var prompt = target.getAttribute('data-prompt');
+    if (!prompt) return;
+    ev.preventDefault();
+    submitChatPreset(prompt);
+  });
+}
+
+function renderChatThread() {
+  var thread = el('chat-thread');
+  if (!thread) return;
+  if (!chatHistory.length) {
+    thread.innerHTML = '<div class="chat-empty" id="chat-empty">Ask Codero about status, queue, gate checks, or findings.</div>';
+    return;
+  }
+  thread.innerHTML = chatHistory.map(function(msg) {
+    var cls = msg.role || 'assistant';
+    var meta = msg.meta || '';
+    var body = esc(msg.content || '').replace(/\n/g, '<br>');
+    return '<div class="chat-message ' + attrEsc(cls) + '">' +
+      '<div class="chat-message-meta">' +
+        '<span class="chat-message-role">' + esc(cls) + '</span>' +
+        (meta ? '<span class="chat-message-model">' + esc(meta) + '</span>' : '') +
+      '</div>' +
+      '<div class="chat-message-body">' + body + '</div>' +
+    '</div>';
+  }).join('');
+  thread.scrollTop = thread.scrollHeight;
+}
+
+function updateChatAssistantContent(index, delta) {
+  if (index < 0 || index >= chatHistory.length) return;
+  chatHistory[index].content = (chatHistory[index].content || '') + delta;
+  renderChatThread();
+}
+
+function finalizeChatAssistant(index, payload) {
+  if (index < 0 || index >= chatHistory.length) return;
+  chatHistory[index].content = payload.reply || chatHistory[index].content || 'No assistant response was returned.';
+  chatHistory[index].meta = payload.provider ? (payload.provider + (payload.model ? ' / ' + payload.model : '')) : 'assistant';
+  renderChatThread();
+  renderChatSuggestions(payload.suggestions || []);
+  renderChatActions(payload.actions || []);
+}
+
+function terminalChatPayload() {
+  return {
+    reply: 'No assistant response was returned.',
+    provider: 'fallback',
+    model: 'local-summary',
+    suggestions: [],
+    actions: [],
+    generated_at: new Date().toISOString()
+  };
+}
+
+async function consumeChatStream(resp, assistantIndex) {
+  if (!resp.body || !resp.body.getReader) {
+    throw new Error('streaming response not supported by browser');
+  }
+  var reader = resp.body.getReader();
+  var decoder = new TextDecoder();
+  var buffer = '';
+  var eventName = 'message';
+  var dataLines = [];
+  var finalPayload = null;
+
+  function flushEvent() {
+    if (!dataLines.length) {
+      eventName = 'message';
+      return null;
+    }
+    var payload = dataLines.join('\n');
+    var parsed = null;
+    if (eventName === 'delta') {
+      try {
+        parsed = JSON.parse(payload);
+        if (parsed && parsed.delta) updateChatAssistantContent(assistantIndex, parsed.delta);
+      } catch (_e) {}
+    } else if (eventName === 'done') {
+      try { parsed = JSON.parse(payload); } catch (_e) {}
+      if (parsed) finalPayload = parsed;
+    } else if (eventName === 'error') {
+      try {
+        parsed = JSON.parse(payload);
+      } catch (_e) {
+        parsed = { error: payload };
+      }
+      throw new Error(parsed.error || 'assistant stream error');
+    }
+    eventName = 'message';
+    dataLines = [];
+    return parsed;
+  }
+
+  while (true) {
+    var step = await reader.read();
+    buffer += decoder.decode(step.value || new Uint8Array(), { stream: !step.done });
+    var lines = buffer.split(/\r?\n/);
+    buffer = lines.pop();
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      if (line === '') {
+        flushEvent();
+        continue;
+      }
+      if (line.indexOf('event:') === 0) {
+        eventName = line.slice(6).trim();
+        continue;
+      }
+      if (line.indexOf('data:') === 0) {
+        dataLines.push(line.slice(5).trimStart());
+      }
+    }
+    if (step.done) break;
+  }
+  if (buffer.trim() !== '') {
+    var tailLines = buffer.split(/\r?\n/);
+    for (var j = 0; j < tailLines.length; j++) {
+      var tail = tailLines[j];
+      if (tail.indexOf('event:') === 0) {
+        eventName = tail.slice(6).trim();
+      } else if (tail.indexOf('data:') === 0) {
+        dataLines.push(tail.slice(5).trimStart());
+      }
+    }
+  }
+  if (dataLines.length) flushEvent();
+  return finalPayload;
+}
+
+async function submitChat(promptOverride) {
+  if (chatBusy) return;
+  var ta = el('comment-input');
+  var prompt = String(promptOverride || (ta ? ta.value : '') || '').trim();
+  if (!prompt) return;
+
+  chatBusy = true;
+  var sendBtn = el('chat-send-btn');
+  if (sendBtn) sendBtn.disabled = true;
+  if (ta) ta.disabled = true;
+
+  chatHistory.push({ role: 'user', content: prompt });
+  chatHistory.push({ role: 'assistant', content: '…', meta: 'streaming' });
+  if (chatHistory.length > 8) chatHistory = chatHistory.slice(-8);
+  var assistantIndex = chatHistory.length - 1;
+  renderChatThread();
+  renderChatSuggestions(defaultChatSuggestionsForTab(activeTab));
+  renderChatActions(defaultChatActionsForTab(activeTab));
+
+  try {
+    var resp = await fetch(API + '/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+      body: JSON.stringify({ prompt: prompt, tab: activeTab, context: 'review tab: ' + activeTab, stream: true })
+    });
+    if (!resp.ok) {
+      var errMsg = resp.statusText;
+      try {
+        var errJson = await resp.json();
+        errMsg = errJson.error || errMsg;
+      } catch (_e) {}
+      throw new Error(errMsg);
+    }
+    var contentType = String(resp.headers.get('Content-Type') || '').toLowerCase();
+    var finalPayload;
+    if (contentType.indexOf('application/json') !== -1 || contentType.indexOf('text/event-stream') === -1) {
+      finalPayload = await resp.json();
+      finalizeChatAssistant(assistantIndex, finalPayload || terminalChatPayload());
+    } else {
+      finalPayload = await consumeChatStream(resp, assistantIndex);
+      finalizeChatAssistant(assistantIndex, finalPayload || terminalChatPayload());
+    }
+    if (ta) ta.value = '';
+  } catch (err) {
+    if (assistantIndex >= 0 && assistantIndex < chatHistory.length) {
+      chatHistory[assistantIndex].role = 'error';
+      chatHistory[assistantIndex].content = 'Review assistant unavailable: ' + err.message;
+      chatHistory[assistantIndex].meta = 'fallback';
+    } else {
+      chatHistory.push({
+        role: 'error',
+        content: 'Review assistant unavailable: ' + err.message,
+        meta: 'fallback'
+      });
+    }
+    renderChatThread();
+    renderChatSuggestions(defaultChatSuggestionsForTab(activeTab));
+    renderChatActions(defaultChatActionsForTab(activeTab));
+  } finally {
+    chatBusy = false;
+    if (sendBtn) sendBtn.disabled = false;
+    if (ta) ta.disabled = false;
+  }
 }
 
 /* SETTINGS */
@@ -1167,6 +1497,9 @@ function fmtElapsed(sec) {
 function fmtAge(sec) { if (sec < 60) return sec + 's'; if (sec < 3600) return Math.round(sec/60) + 'm'; return Math.round(sec/3600) + 'h'; }
 
 /* BOOT */
+bindChatPromptDelegation();
+renderChatSuggestions(defaultChatSuggestionsForTab(activeTab));
+renderChatActions(defaultChatActionsForTab(activeTab));
 refresh();
 startSSE();
 schedulePoll();

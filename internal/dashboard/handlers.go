@@ -55,6 +55,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/dashboard/gate-checks", h.handleGateChecks)
 	mux.HandleFunc("/api/v1/dashboard/health", h.handleDashboardHealth)
 	mux.HandleFunc("/api/v1/dashboard/settings", h.handleSettings)
+	mux.HandleFunc("/api/v1/dashboard/chat", h.handleChat)
+	mux.HandleFunc("/api/v1/dashboard/comments", h.handleChat)
 	mux.HandleFunc("/api/v1/dashboard/manual-review-upload", h.handleUpload)
 	mux.HandleFunc("/api/v1/dashboard/events", h.handleSSE)
 }

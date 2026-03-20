@@ -12,6 +12,7 @@
 //	GET  /gate-health        - pass rates by provider
 //	GET  /settings           - integrations + gate pipeline config
 //	PUT  /settings           - validated settings update (persisted, audited)
+//	POST /chat               - LiteLLM-backed review-process assistant
 //	POST /manual-review-upload - file upload for manual review
 //	GET  /events             - SSE stream of live dashboard events
 package dashboard
