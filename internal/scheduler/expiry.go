@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/codero/codero/internal/delivery"
@@ -12,11 +14,14 @@ import (
 	"github.com/codero/codero/internal/state"
 )
 
-const (
+var (
 	// SessionHeartbeatTTL is how long a branch can go without a session heartbeat
-	// before it is considered abandoned (T14). Matches the roadmap spec (1800s).
-	SessionHeartbeatTTL = 1800 * time.Second
+	// before it is considered abandoned (T14). Defaults to the roadmap spec
+	// (1800s), but allows a shorter pilot override for integration testing.
+	SessionHeartbeatTTL = sessionHeartbeatTTLFromEnv()
+)
 
+const (
 	// LeaseAuditInterval is how often the lease audit goroutine runs.
 	// Appendix G: "Lease audit goroutine runs every 30 seconds."
 	LeaseAuditInterval = 30 * time.Second
@@ -24,6 +29,22 @@ const (
 	// SessionExpiryInterval is how often the session expiry goroutine runs.
 	SessionExpiryInterval = 60 * time.Second
 )
+
+func sessionHeartbeatTTLFromEnv() time.Duration {
+	const defaultSeconds = 1800
+
+	raw := os.Getenv("CODERO_SESSION_HEARTBEAT_TTL_SECONDS")
+	if raw == "" {
+		return defaultSeconds * time.Second
+	}
+
+	seconds, err := strconv.Atoi(raw)
+	if err != nil || seconds <= 0 {
+		return defaultSeconds * time.Second
+	}
+
+	return time.Duration(seconds) * time.Second
+}
 
 // ExpiryWorker runs two background routines:
 //  1. Session heartbeat expiry: expires agent sessions and legacy branch

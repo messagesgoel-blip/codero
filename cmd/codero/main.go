@@ -626,6 +626,7 @@ func sessionCmd(configPath *string) *cobra.Command {
 	}
 
 	cmd.AddCommand(
+		sessionBootstrapCmd(configPath),
 		sessionRegisterCmd(configPath),
 		sessionHeartbeatCmd(configPath),
 		sessionAttachCmd(configPath),
