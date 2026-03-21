@@ -805,8 +805,17 @@ func queryDashboardHealth(ctx context.Context, db *sql.DB) (DashboardHealth, err
 		} else {
 			h.Feeds.ActiveSessions = FeedStatus{Status: "unavailable"}
 		}
+
+		staleCount, expiredCount, reconStatus, err := querySessionMonitoring(ctx, db)
+		if err != nil {
+			return h, fmt.Errorf("queryDashboardHealth: session monitoring query: %w", err)
+		}
+		h.StaleSessionCount = staleCount
+		h.ExpiredSessionCount = expiredCount
+		h.ReconciliationStatus = reconStatus
 	} else {
 		h.Feeds.ActiveSessions = FeedStatus{Status: "unavailable"}
+		h.ReconciliationStatus = "unavailable"
 	}
 
 	// Gate-checks feed freshness: mod time of the last report file.
@@ -849,6 +858,66 @@ func queryDashboardHealth(ctx context.Context, db *sql.DB) (DashboardHealth, err
 	h.ETAMin = queryETAMinutes(ctx, db, "")
 
 	return h, nil
+}
+
+func querySessionMonitoring(ctx context.Context, db *sql.DB) (staleCount, expiredCount int, status string, err error) {
+	now := time.Now().UTC()
+	staleThreshold := now.Add(-staleFeedThreshold)
+	expiredThreshold := now.Add(-scheduler.SessionHeartbeatTTL)
+
+	hasAgentSessions, err := tableExists(ctx, db, "agent_sessions")
+	if err != nil {
+		return 0, 0, "", err
+	}
+
+	if hasAgentSessions {
+		if err := db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM agent_sessions
+			 WHERE ended_at IS NULL AND last_seen_at < ? AND last_seen_at >= ?`,
+			staleThreshold, expiredThreshold,
+		).Scan(&staleCount); err != nil {
+			return 0, 0, "", err
+		}
+		if err := db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM agent_sessions
+			 WHERE ended_at IS NULL AND last_seen_at < ?`,
+			expiredThreshold,
+		).Scan(&expiredCount); err != nil {
+			return 0, 0, "", err
+		}
+	} else {
+		if err := db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM branch_states
+			 WHERE owner_session_id <> ''
+			   AND owner_session_last_seen IS NOT NULL
+			   AND owner_session_last_seen < ?
+			   AND owner_session_last_seen >= ?
+			   AND state IN `+activeSessionStatesSQL,
+			staleThreshold, expiredThreshold,
+		).Scan(&staleCount); err != nil {
+			return 0, 0, "", err
+		}
+		if err := db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM branch_states
+			 WHERE owner_session_id <> ''
+			   AND owner_session_last_seen IS NOT NULL
+			   AND owner_session_last_seen < ?
+			   AND state IN `+activeSessionStatesSQL,
+			expiredThreshold,
+		).Scan(&expiredCount); err != nil {
+			return 0, 0, "", err
+		}
+	}
+
+	switch {
+	case expiredCount > 0:
+		status = "attention"
+	case staleCount > 0:
+		status = "stale"
+	default:
+		status = "ok"
+	}
+	return staleCount, expiredCount, status, nil
 }
 
 // computeSecurityScore derives a 0–10 score from the gate-check report.

@@ -319,6 +319,9 @@ falls back to the compiled-in default path when the variable is unset.
     }
   },
   "active_agent_count": 3,
+  "stale_session_count": 1,
+  "expired_session_count": 0,
+  "reconciliation_status": "stale",
   "generated_at": "2026-03-18T14:40:34Z"
 }
 ```
@@ -337,6 +340,11 @@ falls back to the compiled-in default path when the variable is unset.
 - `feeds.gate_checks.freshness_sec` is derived from the mod-time of the last
   gate-check report file, resolved via `CODERO_GATE_CHECK_REPORT_PATH` (same as
   the gate-checks endpoint).
+- `stale_session_count` counts sessions with last heartbeat older than 5 minutes
+  but not yet expired.
+- `expired_session_count` counts sessions with last heartbeat older than
+  `SessionHeartbeatTTL`.
+- `reconciliation_status` values: `ok`, `stale`, `attention`, `unavailable`.
 - The response MUST NOT expose secrets, tokens, raw prompts, or file contents.
 - This endpoint is read-only and idempotent.
 
