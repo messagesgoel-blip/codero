@@ -97,7 +97,7 @@ func (w *ExpiryWorker) runSessionExpiry(ctx context.Context) {
 			loglib.FieldComponent, "expiry",
 			"error", err,
 		)
-		return
+		hasAgentSessions = false
 	}
 
 	if hasAgentSessions {
@@ -107,16 +107,16 @@ func (w *ExpiryWorker) runSessionExpiry(ctx context.Context) {
 				loglib.FieldComponent, "expiry",
 				"error", err,
 			)
-			return
-		}
-		for _, session := range expired {
-			if err := w.expireAgentSession(ctx, session); err != nil {
-				loglib.Error("expiry: expire agent session failed",
-					loglib.FieldComponent, "expiry",
-					"session_id", session.SessionID,
-					"agent_id", session.AgentID,
-					"error", err,
-				)
+		} else {
+			for _, session := range expired {
+				if err := w.expireAgentSession(ctx, session); err != nil {
+					loglib.Error("expiry: expire agent session failed",
+						loglib.FieldComponent, "expiry",
+						"session_id", session.SessionID,
+						"agent_id", session.AgentID,
+						"error", err,
+					)
+				}
 			}
 		}
 	}

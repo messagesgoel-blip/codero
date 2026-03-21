@@ -72,13 +72,18 @@ func RegisterAgentSession(ctx context.Context, db *DB, sessionID, agentID, mode 
 // UpdateAgentSessionHeartbeat updates the last_seen_at timestamp for a session.
 func UpdateAgentSessionHeartbeat(ctx context.Context, db *DB, sessionID string) error {
 	res, err := db.sql.ExecContext(ctx,
-		`UPDATE agent_sessions SET last_seen_at = datetime('now') WHERE session_id = ?`,
+		`UPDATE agent_sessions
+		 SET last_seen_at = datetime('now')
+		 WHERE session_id = ? AND ended_at IS NULL`,
 		sessionID,
 	)
 	if err != nil {
 		return fmt.Errorf("update agent session heartbeat: %w", err)
 	}
-	affected, _ := res.RowsAffected()
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update agent session heartbeat rows affected: %w", err)
+	}
 	if affected == 0 {
 		return ErrAgentSessionNotFound
 	}
@@ -202,6 +207,24 @@ func AttachAgentAssignment(ctx context.Context, db *DB, assignment *AgentAssignm
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	res, err := tx.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET last_seen_at = datetime('now')
+		WHERE session_id = ? AND ended_at IS NULL`,
+		assignment.SessionID,
+	)
+	if err != nil {
+		return fmt.Errorf("attach agent assignment: touch session: %w", err)
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("attach agent assignment: touch session rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrAgentSessionNotFound
+	}
+
 	_, err = tx.ExecContext(ctx, `
 		UPDATE agent_assignments
 		SET ended_at = datetime('now'), end_reason = 'superseded', superseded_by = ?
@@ -221,14 +244,6 @@ func AttachAgentAssignment(ctx context.Context, db *DB, assignment *AgentAssignm
 	)
 	if err != nil {
 		return fmt.Errorf("attach agent assignment: insert: %w", err)
-	}
-
-	_, err = tx.ExecContext(ctx,
-		`UPDATE agent_sessions SET last_seen_at = datetime('now') WHERE session_id = ?`,
-		assignment.SessionID,
-	)
-	if err != nil {
-		return fmt.Errorf("attach agent assignment: touch session: %w", err)
 	}
 
 	return tx.Commit()
