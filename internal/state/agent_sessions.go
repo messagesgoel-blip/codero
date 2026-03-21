@@ -60,6 +60,8 @@ func RegisterAgentSession(ctx context.Context, db *DB, sessionID, agentID, mode 
 		ON CONFLICT(session_id) DO UPDATE SET
 			agent_id = excluded.agent_id,
 			mode = COALESCE(NULLIF(excluded.mode, ''), agent_sessions.mode),
+			ended_at = NULL,
+			end_reason = '',
 			last_seen_at = datetime('now')`,
 		sessionID, agentID, mode,
 	)
@@ -120,7 +122,7 @@ func ListActiveAgentSessions(ctx context.Context, db *DB) ([]AgentSession, error
 
 // ListExpiredAgentSessions returns sessions whose last_seen_at has passed the TTL.
 func ListExpiredAgentSessions(ctx context.Context, db *DB, ttl time.Duration) ([]AgentSession, error) {
-	threshold := time.Now().UTC().Add(-ttl)
+	threshold := time.Now().UTC().Add(-ttl).Truncate(time.Second)
 	const q = `
 		SELECT session_id, agent_id, mode, started_at, last_seen_at, ended_at, end_reason
 		FROM agent_sessions

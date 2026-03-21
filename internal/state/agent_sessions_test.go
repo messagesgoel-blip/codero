@@ -62,6 +62,43 @@ func TestRegisterAgentSession_UpsertAndHeartbeat(t *testing.T) {
 	}
 }
 
+func TestRegisterAgentSession_RevivesEndedSession(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	if err := RegisterAgentSession(ctx, db, "sess-revive", "agent-1", ""); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	if err := ExpireAgentSession(ctx, db, "sess-revive", "expired"); err != nil {
+		t.Fatalf("ExpireAgentSession: %v", err)
+	}
+
+	if err := RegisterAgentSession(ctx, db, "sess-revive", "agent-2", "cli"); err != nil {
+		t.Fatalf("RegisterAgentSession revive: %v", err)
+	}
+
+	s, err := GetAgentSession(ctx, db, "sess-revive")
+	if err != nil {
+		t.Fatalf("GetAgentSession: %v", err)
+	}
+	if s.EndedAt != nil {
+		t.Fatalf("ended_at should be cleared on revive, got %v", s.EndedAt)
+	}
+	if s.EndReason != "" {
+		t.Fatalf("end_reason should be cleared on revive, got %q", s.EndReason)
+	}
+	if s.AgentID != "agent-2" {
+		t.Fatalf("agent_id after revive: got %q, want %q", s.AgentID, "agent-2")
+	}
+	if s.Mode != "cli" {
+		t.Fatalf("mode after revive: got %q, want %q", s.Mode, "cli")
+	}
+
+	if err := UpdateAgentSessionHeartbeat(ctx, db, "sess-revive"); err != nil {
+		t.Fatalf("UpdateAgentSessionHeartbeat after revive: %v", err)
+	}
+}
+
 func TestUpdateAgentSessionHeartbeat_NotFound(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
