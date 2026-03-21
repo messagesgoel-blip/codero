@@ -254,11 +254,14 @@ func TestAgentEvents_AppendAndList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListAgentEvents: %v", err)
 	}
-	if len(events) != 1 {
-		t.Fatalf("events count: got %d, want 1", len(events))
+	if len(events) != 2 {
+		t.Fatalf("events count: got %d, want 2", len(events))
 	}
 	if events[0].EventType != "session_registered" {
 		t.Errorf("event_type: got %q, want %q", events[0].EventType, "session_registered")
+	}
+	if events[1].EventType != "session_registered" {
+		t.Errorf("appended event_type: got %q, want %q", events[1].EventType, "session_registered")
 	}
 }
 

@@ -52,6 +52,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/dashboard/block-reasons", h.handleBlockReasons)
 	mux.HandleFunc("/api/v1/dashboard/gate-health", h.handleGateHealth)
 	mux.HandleFunc("/api/v1/dashboard/active-sessions", h.handleActiveSessions)
+	mux.HandleFunc("/api/v1/dashboard/assignments", h.handleAssignments)
+	mux.HandleFunc("/api/v1/dashboard/agent-events", h.handleAgentEvents)
 	mux.HandleFunc("/api/v1/dashboard/gate-checks", h.handleGateChecks)
 	mux.HandleFunc("/api/v1/dashboard/health", h.handleDashboardHealth)
 	mux.HandleFunc("/api/v1/dashboard/settings", h.handleSettings)
@@ -286,6 +288,56 @@ func (h *Handler) handleActiveSessions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, ActiveSessionsResponse{
 		ActiveCount: len(sessions),
 		Sessions:    sessions,
+		GeneratedAt: time.Now().UTC(),
+	})
+}
+
+// handleAssignments serves GET /api/v1/dashboard/assignments.
+func (h *Handler) handleAssignments(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "")
+		return
+	}
+	setCORSHeaders(w)
+
+	assignments, err := queryAssignments(r.Context(), h.db, activeSessionsPageSize*4)
+	if err != nil {
+		loglib.Error("dashboard: assignments query failed",
+			loglib.FieldComponent, "dashboard", "error", err)
+		writeError(w, http.StatusInternalServerError, "assignments query failed", "db_error")
+		return
+	}
+	if assignments == nil {
+		assignments = []AssignmentSummary{}
+	}
+	writeJSON(w, http.StatusOK, AssignmentsResponse{
+		Count:       len(assignments),
+		Assignments: assignments,
+		GeneratedAt: time.Now().UTC(),
+	})
+}
+
+// handleAgentEvents serves GET /api/v1/dashboard/agent-events.
+func (h *Handler) handleAgentEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "")
+		return
+	}
+	setCORSHeaders(w)
+
+	events, err := queryAgentEvents(r.Context(), h.db, activityPageSize*2)
+	if err != nil {
+		loglib.Error("dashboard: agent-events query failed",
+			loglib.FieldComponent, "dashboard", "error", err)
+		writeError(w, http.StatusInternalServerError, "agent-events query failed", "db_error")
+		return
+	}
+	if events == nil {
+		events = []AgentEventRow{}
+	}
+	writeJSON(w, http.StatusOK, AgentEventsResponse{
+		Count:       len(events),
+		Events:      events,
 		GeneratedAt: time.Now().UTC(),
 	})
 }

@@ -3,6 +3,7 @@ package state
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -54,7 +55,13 @@ type AgentEvent struct {
 // Registration starts with session_id + agent_id; mode is optional and
 // only updates when provided.
 func RegisterAgentSession(ctx context.Context, db *DB, sessionID, agentID, mode string) error {
-	_, err := db.sql.ExecContext(ctx, `
+	tx, err := db.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("register agent session: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO agent_sessions (session_id, agent_id, mode, started_at, last_seen_at)
 		VALUES (?, ?, ?, datetime('now'), datetime('now'))
 		ON CONFLICT(session_id) DO UPDATE SET
@@ -67,6 +74,22 @@ func RegisterAgentSession(ctx context.Context, db *DB, sessionID, agentID, mode 
 	)
 	if err != nil {
 		return fmt.Errorf("register agent session: %w", err)
+	}
+	payload, err := json.Marshal(map[string]string{
+		"mode": mode,
+	})
+	if err != nil {
+		return fmt.Errorf("register agent session: marshal event payload: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO agent_events (session_id, agent_id, event_type, payload)
+		VALUES (?, ?, ?, ?)`,
+		sessionID, agentID, "session_registered", string(payload),
+	); err != nil {
+		return fmt.Errorf("register agent session: append event: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("register agent session: commit: %w", err)
 	}
 	return nil
 }
@@ -182,13 +205,20 @@ func ExpireAgentSession(ctx context.Context, db *DB, sessionID, reason string) e
 		return fmt.Errorf("expire agent session: end assignments: %w", err)
 	}
 
+	payload, err := json.Marshal(map[string]string{
+		"reason": reason,
+	})
+	if err != nil {
+		return fmt.Errorf("expire agent session: marshal event payload: %w", err)
+	}
+
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO agent_events (session_id, agent_id, event_type, payload)
 		SELECT session_id, agent_id, ?, ?
 		FROM agent_sessions
 		WHERE session_id = ?`,
 		"session_expired",
-		fmt.Sprintf(`{"reason":%q}`, reason),
+		string(payload),
 		sessionID,
 	); err != nil {
 		return fmt.Errorf("expire agent session: append event: %w", err)
@@ -250,6 +280,27 @@ func AttachAgentAssignment(ctx context.Context, db *DB, assignment *AgentAssignm
 	)
 	if err != nil {
 		return fmt.Errorf("attach agent assignment: insert: %w", err)
+	}
+
+	payload, err := json.Marshal(map[string]string{
+		"assignment_id": assignment.ID,
+		"repo":          assignment.Repo,
+		"branch":        assignment.Branch,
+		"worktree":      assignment.Worktree,
+		"task_id":       assignment.TaskID,
+	})
+	if err != nil {
+		return fmt.Errorf("attach agent assignment: marshal event payload: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO agent_events (session_id, agent_id, event_type, payload)
+		VALUES (?, ?, ?, ?)`,
+		assignment.SessionID,
+		assignment.AgentID,
+		"assignment_attached",
+		string(payload),
+	); err != nil {
+		return fmt.Errorf("attach agent assignment: append event: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -347,6 +398,36 @@ func ListAgentEvents(ctx context.Context, db *DB, sessionID string, sinceID int6
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list agent events: %w", err)
+	}
+	return events, nil
+}
+
+// ListRecentAgentEvents returns recent agent events across all sessions.
+func ListRecentAgentEvents(ctx context.Context, db *DB, limit int) ([]AgentEvent, error) {
+	const q = `
+		SELECT id, session_id, agent_id, event_type, payload, created_at
+		FROM agent_events
+		ORDER BY created_at DESC, id DESC
+		LIMIT ?`
+
+	rows, err := db.sql.QueryContext(ctx, q, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list recent agent events: %w", err)
+	}
+	defer rows.Close()
+
+	var events []AgentEvent
+	for rows.Next() {
+		var ev AgentEvent
+		if err := rows.Scan(
+			&ev.ID, &ev.SessionID, &ev.AgentID, &ev.EventType, &ev.Payload, &ev.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan recent agent event: %w", err)
+		}
+		events = append(events, ev)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list recent agent events: %w", err)
 	}
 	return events, nil
 }

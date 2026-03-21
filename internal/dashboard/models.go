@@ -93,6 +93,50 @@ type ActiveSessionsResponse struct {
 	GeneratedAt time.Time       `json:"generated_at"`
 }
 
+// AssignmentSummary is one row in the assignments panel.
+type AssignmentSummary struct {
+	AssignmentID  string     `json:"assignment_id"`
+	SessionID     string     `json:"session_id"`
+	AgentID       string     `json:"agent_id"`
+	Repo          string     `json:"repo"`
+	Branch        string     `json:"branch"`
+	Worktree      string     `json:"worktree,omitempty"`
+	TaskID        string     `json:"task_id,omitempty"`
+	Mode          string     `json:"mode,omitempty"`
+	State         string     `json:"state"`
+	ActivityState string     `json:"activity_state,omitempty"`
+	BranchState   string     `json:"branch_state,omitempty"`
+	PRNumber      int        `json:"pr_number"`
+	StartedAt     time.Time  `json:"started_at"`
+	EndedAt       *time.Time `json:"ended_at,omitempty"`
+	EndReason     string     `json:"end_reason,omitempty"`
+	SupersededBy  string     `json:"superseded_by,omitempty"`
+}
+
+// AssignmentsResponse is the response for GET /api/v1/dashboard/assignments.
+type AssignmentsResponse struct {
+	Count       int                 `json:"count"`
+	Assignments []AssignmentSummary `json:"assignments"`
+	GeneratedAt time.Time           `json:"generated_at"`
+}
+
+// AgentEventRow is one row in the agent-session event stream.
+type AgentEventRow struct {
+	ID        int64     `json:"id"`
+	SessionID string    `json:"session_id"`
+	AgentID   string    `json:"agent_id"`
+	EventType string    `json:"event_type"`
+	Payload   string    `json:"payload"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// AgentEventsResponse is the response for GET /api/v1/dashboard/agent-events.
+type AgentEventsResponse struct {
+	Count       int             `json:"count"`
+	Events      []AgentEventRow `json:"events"`
+	GeneratedAt time.Time       `json:"generated_at"`
+}
+
 // RunRow is one row in the runs table.
 type RunRow struct {
 	ID         string     `json:"id"`

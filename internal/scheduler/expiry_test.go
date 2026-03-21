@@ -206,11 +206,11 @@ func TestExpiryWorker_AgentSessionExpiry_EndsSessionAndAssignment(t *testing.T) 
 	if err != nil {
 		t.Fatalf("ListAgentEvents: %v", err)
 	}
-	if len(events) != 1 {
-		t.Fatalf("events count: got %d, want 1", len(events))
+	if len(events) != 3 {
+		t.Fatalf("events count: got %d, want 3", len(events))
 	}
-	if events[0].EventType != "session_expired" {
-		t.Errorf("event_type: got %q, want %q", events[0].EventType, "session_expired")
+	if events[len(events)-1].EventType != "session_expired" {
+		t.Errorf("event_type: got %q, want %q", events[len(events)-1].EventType, "session_expired")
 	}
 }
 

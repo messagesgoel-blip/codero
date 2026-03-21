@@ -50,7 +50,7 @@ type FixtureDirResult struct {
 //
 // Missing fixture files are silently skipped. Malformed files return an error.
 // This function is intended for use with --serve-fixture mode only.
-func LoadFixtureDir(db *sql.DB, dir string) (FixtureDirResult, error) {
+func LoadFixtureDir(ctx context.Context, db *sql.DB, dir string) (FixtureDirResult, error) {
 	var result FixtureDirResult
 
 	absDir, err := filepath.Abs(dir)
@@ -71,7 +71,7 @@ func LoadFixtureDir(db *sql.DB, dir string) (FixtureDirResult, error) {
 		return result, fmt.Errorf("fixture_loader: read sessions.json: %w", err)
 	}
 	if len(sessions) > 0 {
-		if err := SeedFixtureSessions(db, sessions); err != nil {
+		if err := SeedFixtureSessions(ctx, db, sessions); err != nil {
 			return result, fmt.Errorf("fixture_loader: seed sessions: %w", err)
 		}
 	}
@@ -94,9 +94,9 @@ func LoadFixtureDir(db *sql.DB, dir string) (FixtureDirResult, error) {
 // SeedFixtureSessions inserts branch_state rows for each session entry.
 // owner_session_last_seen is set to now so the sessions appear as active within
 // the dashboard's SessionHeartbeatTTL window.
-func SeedFixtureSessions(db *sql.DB, entries []FixtureSessionEntry) error {
+func SeedFixtureSessions(ctx context.Context, db *sql.DB, entries []FixtureSessionEntry) error {
 	now := time.Now().UTC()
-	useAgentSessions, err := tableExists(context.Background(), db, "agent_sessions")
+	useAgentSessions, err := tableExists(ctx, db, "agent_sessions")
 	if err != nil {
 		return fmt.Errorf("fixture_loader: check agent_sessions: %w", err)
 	}
@@ -112,29 +112,76 @@ func SeedFixtureSessions(db *sql.DB, entries []FixtureSessionEntry) error {
 			agentID = e.SessionID
 		}
 		if useAgentSessions {
-			// nosemgrep: go.lang.security.audit.sqli.gosql-sqli.gosql-sqli
-			_, err := db.Exec(`
+			sessionPayload, err := json.Marshal(map[string]string{
+				"mode": e.Mode,
+			})
+			if err != nil {
+				return fmt.Errorf("fixture_loader: marshal session event for %q: %w", e.SessionID, err)
+			}
+			assignmentID := fixtureAssignmentID(e.SessionID, e.Repo, e.Branch, e.TaskID)
+			assignmentPayload, err := json.Marshal(map[string]string{
+				"assignment_id": assignmentID,
+				"repo":          e.Repo,
+				"branch":        e.Branch,
+				"worktree":      e.Worktree,
+				"task_id":       e.TaskID,
+			})
+			if err != nil {
+				return fmt.Errorf("fixture_loader: marshal assignment event %q: %w", assignmentID, err)
+			}
+			tx, err := db.BeginTx(ctx, nil)
+			if err != nil {
+				return fmt.Errorf("fixture_loader: begin tx for session %q: %w", e.SessionID, err)
+			}
+			_, err = tx.Exec(`
 				INSERT OR REPLACE INTO agent_sessions
 					(session_id, agent_id, mode, started_at, last_seen_at, ended_at, end_reason)
 				VALUES (?,?,?,?,?,NULL,'')`,
 				e.SessionID, agentID, e.Mode, now, now,
 			)
 			if err != nil {
+				_ = tx.Rollback()
 				return fmt.Errorf("fixture_loader: insert agent session %q: %w", e.SessionID, err)
 			}
+			_, err = tx.Exec(`
+				INSERT INTO agent_events (session_id, agent_id, event_type, payload)
+				VALUES (?, ?, 'session_registered', ?)`,
+				e.SessionID, agentID, string(sessionPayload),
+			)
+			if err != nil {
+				_ = tx.Rollback()
+				return fmt.Errorf("fixture_loader: insert agent event for session %q: %w", e.SessionID, err)
+			}
 			if e.Repo == "" || e.Branch == "" {
+				if err := tx.Commit(); err != nil {
+					_ = tx.Rollback()
+					return fmt.Errorf("fixture_loader: commit session %q: %w", e.SessionID, err)
+				}
 				continue
 			}
-			assignmentID := fixtureAssignmentID(e.SessionID, e.Repo, e.Branch, e.TaskID)
-			// nosemgrep: go.lang.security.audit.sqli.gosql-sqli.gosql-sqli
-			_, err = db.Exec(`
+			_, err = tx.Exec(`
 				INSERT OR REPLACE INTO agent_assignments
 					(assignment_id, session_id, agent_id, repo, branch, worktree, task_id, started_at, ended_at, end_reason, superseded_by)
 				VALUES (?,?,?,?,?,?,?,?,NULL,'',NULL)`,
 				assignmentID, e.SessionID, agentID, e.Repo, e.Branch, e.Worktree, e.TaskID, now,
 			)
 			if err != nil {
+				_ = tx.Rollback()
 				return fmt.Errorf("fixture_loader: insert agent assignment %q: %w", assignmentID, err)
+			}
+			_, err = tx.Exec(`
+				INSERT INTO agent_events (session_id, agent_id, event_type, payload)
+				VALUES (?, ?, 'assignment_attached', ?)`,
+				e.SessionID, agentID,
+				string(assignmentPayload),
+			)
+			if err != nil {
+				_ = tx.Rollback()
+				return fmt.Errorf("fixture_loader: insert assignment event %q: %w", assignmentID, err)
+			}
+			if err := tx.Commit(); err != nil {
+				_ = tx.Rollback()
+				return fmt.Errorf("fixture_loader: commit session+assignment %q: %w", e.SessionID, err)
 			}
 			continue
 		}

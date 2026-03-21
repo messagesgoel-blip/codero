@@ -296,7 +296,7 @@ func runDashboardFixture(bindHost string, bindPort int, basePath, repoPath, repo
 
 	// Seed fixture data (sessions, activity) from --fixture-dir when provided.
 	if resolvedFixtureDir != "" {
-		if _, loadErr := dashboardpkg.LoadFixtureDir(db.Unwrap(), resolvedFixtureDir); loadErr != nil {
+		if _, loadErr := dashboardpkg.LoadFixtureDir(context.Background(), db.Unwrap(), resolvedFixtureDir); loadErr != nil {
 			return fmt.Errorf("load fixture dir %q: %w", resolvedFixtureDir, loadErr)
 		}
 	}
