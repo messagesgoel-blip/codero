@@ -73,6 +73,35 @@ func seedBranchSession(t *testing.T, db *sql.DB, repo, branch, st, sessionID str
 	}
 }
 
+// seedAgentSession inserts one agent_sessions row.
+func seedAgentSession(t *testing.T, db *sql.DB, sessionID, agentID, mode string, startedAt, lastSeen time.Time) {
+	t.Helper()
+	if mode == "" {
+		mode = "cli"
+	}
+	// nosemgrep: go.lang.security.audit.sqli.gosql-sqli.gosql-sqli
+	_, err := db.Exec(`INSERT INTO agent_sessions
+		(session_id, agent_id, mode, started_at, last_seen_at, ended_at, end_reason)
+		VALUES (?,?,?,?,?,NULL,'')`,
+		sessionID, agentID, mode, startedAt, lastSeen)
+	if err != nil {
+		t.Fatalf("seedAgentSession: %v", err)
+	}
+}
+
+// seedAgentAssignment inserts one agent_assignments row.
+func seedAgentAssignment(t *testing.T, db *sql.DB, assignmentID, sessionID, agentID, repo, branch, worktree, taskID string, startedAt time.Time) {
+	t.Helper()
+	// nosemgrep: go.lang.security.audit.sqli.gosql-sqli.gosql-sqli
+	_, err := db.Exec(`INSERT INTO agent_assignments
+		(assignment_id, session_id, agent_id, repo, branch, worktree, task_id, started_at, ended_at, end_reason, superseded_by)
+		VALUES (?,?,?,?,?,?,?,?,NULL,'',NULL)`,
+		assignmentID, sessionID, agentID, repo, branch, worktree, taskID, startedAt)
+	if err != nil {
+		t.Fatalf("seedAgentAssignment: %v", err)
+	}
+}
+
 // seedRun inserts one review_runs row.
 func seedRun(t *testing.T, db *sql.DB, id, repo, branch, provider, status string, dur time.Duration) {
 	t.Helper()
@@ -524,7 +553,8 @@ func TestChat_FallsBackWithoutLiteLLM(t *testing.T) {
 	h, db := newTestHandler(t)
 	startedAt := time.Now().Add(-15 * time.Minute).UTC()
 	lastSeen := time.Now().Add(-45 * time.Second).UTC()
-	seedBranchSession(t, db, "acme/api", "feat/live", "coding", "sess-chat", lastSeen, startedAt)
+	seedAgentSession(t, db, "sess-chat", "agent-chat", "cli", startedAt, lastSeen)
+	seedAgentAssignment(t, db, "assign-chat", "sess-chat", "agent-chat", "acme/api", "feat/live", "", "", startedAt)
 	seedRun(t, db, "run-chat", "acme/api", "feat/live", "litellm", "completed", 12*time.Second)
 
 	// Point the dashboard at a dead endpoint so the handler exercises the
@@ -844,7 +874,7 @@ func TestActiveSessions_WithFreshSession(t *testing.T) {
 	h, db := newTestHandler(t)
 	startedAt := time.Now().Add(-45 * time.Minute).UTC()
 	lastSeen := time.Now().Add(-2 * time.Minute).UTC()
-	seedBranchSession(t, db, "acme/api", "feat/live", "cli_reviewing", "sess-123", lastSeen, startedAt)
+	seedAgentSession(t, db, "sess-123", "agent-1", "cli", startedAt, lastSeen)
 
 	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/active-sessions", nil)
 	if rec.Code != http.StatusOK {
@@ -862,15 +892,14 @@ func TestActiveSessions_WithFreshSession(t *testing.T) {
 		t.Fatalf("sessions length = %d, want 1", len(resp.Sessions))
 	}
 	s := resp.Sessions[0]
-	if s.SessionID != "sess-123" || s.Repo != "acme/api" || s.Branch != "feat/live" {
+	if s.SessionID != "sess-123" || s.AgentID != "agent-1" {
 		t.Fatalf("unexpected session row: %+v", s)
 	}
 	if s.ActivityState != "waiting" {
 		t.Fatalf("activity_state = %q, want waiting", s.ActivityState)
 	}
-	// No owner_agent in DB; expect branch-name fallback per resolveOwnerAgent.
-	if s.OwnerAgent != s.Branch {
-		t.Fatalf("owner_agent = %q, want branch fallback %q", s.OwnerAgent, s.Branch)
+	if s.OwnerAgent != "agent-1" {
+		t.Fatalf("owner_agent = %q, want agent-1", s.OwnerAgent)
 	}
 	if s.ElapsedSec <= 0 {
 		t.Fatalf("elapsed_sec = %d, want > 0", s.ElapsedSec)
@@ -885,8 +914,9 @@ func TestActiveSessions_DuplicateOwnerSession(t *testing.T) {
 	startedAt := time.Now().Add(-20 * time.Minute).UTC()
 	lastSeen := time.Now().Add(-1 * time.Minute).UTC()
 
-	seedBranchSession(t, db, "acme/api", "feat/a", "cli_reviewing", "sess-dup", lastSeen, startedAt)
-	seedBranchSession(t, db, "acme/api", "feat/b", "coding", "sess-dup", lastSeen.Add(-10*time.Second), startedAt)
+	seedAgentSession(t, db, "sess-dup", "agent-dup", "cli", startedAt, lastSeen)
+	seedAgentAssignment(t, db, "assign-1", "sess-dup", "agent-dup", "acme/api", "feat/a", "", "", startedAt)
+	seedAgentAssignment(t, db, "assign-2", "sess-dup", "agent-dup", "acme/api", "feat/b", "", "", startedAt.Add(2*time.Minute))
 
 	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/active-sessions", nil)
 	if rec.Code != http.StatusOK {
@@ -903,13 +933,16 @@ func TestActiveSessions_DuplicateOwnerSession(t *testing.T) {
 	if resp.Sessions[0].SessionID != "sess-dup" {
 		t.Fatalf("session_id = %q, want sess-dup", resp.Sessions[0].SessionID)
 	}
+	if resp.Sessions[0].Branch != "feat/b" {
+		t.Fatalf("branch = %q, want latest assignment branch feat/b", resp.Sessions[0].Branch)
+	}
 }
 
 func TestActiveSessions_FiltersStale(t *testing.T) {
 	h, db := newTestHandler(t)
 	startedAt := time.Now().Add(-2 * time.Hour).UTC()
 	lastSeen := time.Now().Add(-31 * time.Minute).UTC()
-	seedBranchSession(t, db, "acme/api", "feat/stale", "coding", "sess-old", lastSeen, startedAt)
+	seedAgentSession(t, db, "sess-old", "agent-old", "cli", startedAt, lastSeen)
 
 	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/active-sessions", nil)
 	if rec.Code != http.StatusOK {
@@ -943,7 +976,8 @@ func TestActiveSessions_TaskContextParsed(t *testing.T) {
 	startedAt := time.Now().Add(-10 * time.Minute).UTC()
 	lastSeen := time.Now().Add(-30 * time.Second).UTC()
 	// Branch follows the feat/PROJ-ID-description pattern.
-	seedBranchSession(t, db, "acme/api", "feat/COD-042-fix-auth-token", "coding", "sess-task", lastSeen, startedAt)
+	seedAgentSession(t, db, "sess-task", "agent-task", "cli", startedAt, lastSeen)
+	seedAgentAssignment(t, db, "assign-task", "sess-task", "agent-task", "acme/api", "feat/COD-042-fix-auth-token", "", "", startedAt)
 
 	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/active-sessions", nil)
 	if rec.Code != http.StatusOK {
@@ -977,7 +1011,8 @@ func TestActiveSessions_TaskContextFallback(t *testing.T) {
 	startedAt := time.Now().Add(-5 * time.Minute).UTC()
 	lastSeen := time.Now().Add(-20 * time.Second).UTC()
 	// Branch does not follow the feat/PROJ-ID-description pattern.
-	seedBranchSession(t, db, "acme/api", "hotfix", "blocked", "sess-noid", lastSeen, startedAt)
+	seedAgentSession(t, db, "sess-noid", "agent-noid", "cli", startedAt, lastSeen)
+	seedAgentAssignment(t, db, "assign-noid", "sess-noid", "agent-noid", "acme/api", "hotfix", "", "", startedAt)
 
 	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/active-sessions", nil)
 	if rec.Code != http.StatusOK {
@@ -995,9 +1030,9 @@ func TestActiveSessions_TaskContextFallback(t *testing.T) {
 	if resp.Sessions[0].Task != nil {
 		t.Fatalf("task must be nil for unrecognised branch, got %+v", resp.Sessions[0].Task)
 	}
-	// The activity state must reflect "blocked".
-	if resp.Sessions[0].ActivityState != "blocked" {
-		t.Errorf("activity_state = %q, want blocked", resp.Sessions[0].ActivityState)
+	// The activity state should reflect an active assignment.
+	if resp.Sessions[0].ActivityState != "active" {
+		t.Errorf("activity_state = %q, want active", resp.Sessions[0].ActivityState)
 	}
 }
 
@@ -1039,11 +1074,13 @@ func TestDashboardHealth_MethodNotAllowed(t *testing.T) {
 
 func TestDashboardHealth_ActiveAgentCount(t *testing.T) {
 	h, db := newTestHandler(t)
-	// Seed one visible fresh session and one fresh session that should not be
-	// counted because its state is not surfaced in the active-sessions panel.
+	// Seed one visible fresh session and one ended session that should not be counted.
 	lastSeen := time.Now().Add(-30 * time.Second).UTC()
-	seedBranchSession(t, db, "acme/api", "feat/x", "coding", "sess-health-1", lastSeen, lastSeen)
-	seedBranchSession(t, db, "acme/api", "feat/y", "completed", "sess-health-2", lastSeen, lastSeen)
+	seedAgentSession(t, db, "sess-health-1", "agent-health-1", "cli", lastSeen, lastSeen)
+	seedAgentSession(t, db, "sess-health-2", "agent-health-2", "cli", lastSeen, lastSeen)
+	if _, err := db.Exec(`UPDATE agent_sessions SET ended_at = datetime('now') WHERE session_id = ?`, "sess-health-2"); err != nil {
+		t.Fatalf("mark session ended: %v", err)
+	}
 
 	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/health", nil)
 	if rec.Code != http.StatusOK {
@@ -1086,7 +1123,7 @@ func TestDashboardHealth_StaleFeedDetected(t *testing.T) {
 	h, db := newTestHandler(t)
 	// Seed a session with a heartbeat older than the stale threshold (5 min).
 	lastSeen := time.Now().Add(-10 * time.Minute).UTC()
-	seedBranchSession(t, db, "acme/api", "feat/y", "coding", "sess-stale", lastSeen, lastSeen)
+	seedAgentSession(t, db, "sess-stale", "agent-stale", "cli", lastSeen, lastSeen)
 
 	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/health", nil)
 	if rec.Code != http.StatusOK {

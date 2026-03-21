@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -9,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -17,11 +19,15 @@ import (
 // State must be one of the active-session states accepted by the dashboard API.
 type FixtureSessionEntry struct {
 	SessionID  string `json:"session_id"`
+	AgentID    string `json:"agent_id"` // optional; falls back to owner_agent for legacy fixtures
 	Repo       string `json:"repo"`
 	Branch     string `json:"branch"`
-	State      string `json:"state"`       // e.g. "coding", "local_review", "cli_reviewing"
-	PRNumber   int    `json:"pr_number"`   // optional; 0 = no PR
-	OwnerAgent string `json:"owner_agent"` // optional display label
+	Worktree   string `json:"worktree,omitempty"`
+	TaskID     string `json:"task_id,omitempty"`
+	Mode       string `json:"mode,omitempty"`
+	State      string `json:"state"`       // legacy branch_states status (e.g. "coding")
+	PRNumber   int    `json:"pr_number"`   // optional; 0 = no PR (legacy branch_states only)
+	OwnerAgent string `json:"owner_agent"` // optional display label (legacy)
 }
 
 // FixtureActivityEntry describes one seeded delivery event for fixture mode.
@@ -90,10 +96,49 @@ func LoadFixtureDir(db *sql.DB, dir string) (FixtureDirResult, error) {
 // the dashboard's SessionHeartbeatTTL window.
 func SeedFixtureSessions(db *sql.DB, entries []FixtureSessionEntry) error {
 	now := time.Now().UTC()
+	useAgentSessions, err := tableExists(context.Background(), db, "agent_sessions")
+	if err != nil {
+		return fmt.Errorf("fixture_loader: check agent_sessions: %w", err)
+	}
 	for i, e := range entries {
 		if e.SessionID == "" {
 			return fmt.Errorf("fixture_loader: sessions[%d]: session_id is required", i)
 		}
+		agentID := strings.TrimSpace(e.AgentID)
+		if agentID == "" {
+			agentID = strings.TrimSpace(e.OwnerAgent)
+		}
+		if agentID == "" {
+			agentID = e.SessionID
+		}
+		if useAgentSessions {
+			// nosemgrep: go.lang.security.audit.sqli.gosql-sqli.gosql-sqli
+			_, err := db.Exec(`
+				INSERT OR REPLACE INTO agent_sessions
+					(session_id, agent_id, mode, started_at, last_seen_at, ended_at, end_reason)
+				VALUES (?,?,?,?,?,NULL,'')`,
+				e.SessionID, agentID, e.Mode, now, now,
+			)
+			if err != nil {
+				return fmt.Errorf("fixture_loader: insert agent session %q: %w", e.SessionID, err)
+			}
+			if e.Repo == "" || e.Branch == "" {
+				continue
+			}
+			assignmentID := fixtureAssignmentID(e.SessionID, e.Repo, e.Branch, e.TaskID)
+			// nosemgrep: go.lang.security.audit.sqli.gosql-sqli.gosql-sqli
+			_, err = db.Exec(`
+				INSERT OR REPLACE INTO agent_assignments
+					(assignment_id, session_id, agent_id, repo, branch, worktree, task_id, started_at, ended_at, end_reason, superseded_by)
+				VALUES (?,?,?,?,?,?,?,?,NULL,'',NULL)`,
+				assignmentID, e.SessionID, agentID, e.Repo, e.Branch, e.Worktree, e.TaskID, now,
+			)
+			if err != nil {
+				return fmt.Errorf("fixture_loader: insert agent assignment %q: %w", assignmentID, err)
+			}
+			continue
+		}
+
 		if e.Repo == "" {
 			return fmt.Errorf("fixture_loader: sessions[%d]: repo is required", i)
 		}
@@ -130,6 +175,11 @@ func SeedFixtureSessions(db *sql.DB, entries []FixtureSessionEntry) error {
 func fixtureBranchStateID(repo, branch string) string {
 	sum := sha256.Sum256([]byte(repo + ":" + branch))
 	return "fixture-bs-" + hex.EncodeToString(sum[:8])
+}
+
+func fixtureAssignmentID(sessionID, repo, branch, taskID string) string {
+	sum := sha256.Sum256([]byte(sessionID + ":" + repo + ":" + branch + ":" + taskID))
+	return "fixture-asg-" + hex.EncodeToString(sum[:8])
 }
 
 // SeedFixtureActivity inserts delivery_event rows for each activity entry.

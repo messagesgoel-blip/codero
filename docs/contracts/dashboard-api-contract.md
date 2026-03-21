@@ -216,13 +216,18 @@ while its heartbeat is fresh; expired or inactive sessions MUST be excluded.
 Deduplication by `session_id` is applied **before** the page-size limit so callers
 always receive the first N *unique* sessions, not the first N rows.
 
-Task context is resolved from the branch name using the `feat/PROJ-NNN-description`
-pattern (e.g. `feat/COD-056-fix-auth`). When the branch does not match this pattern,
-the `task` field is omitted entirely (the field is absent, via `omitempty`) — callers
+Session registration starts with **`session_id` + `agent_id` only**. Assignment context
+(`repo`, `branch`, `worktree`, `task_id`) is attached later when the agent claims or is
+assigned work. The dashboard API reflects this: sessions may appear with empty repo/branch
+until an assignment is attached.
+
+Task context is resolved from the assignment `task_id` when present; otherwise the
+`feat/PROJ-NNN-description` branch pattern is used (e.g. `feat/COD-056-fix-auth`).
+When neither is available, the `task` field is omitted entirely (`omitempty`) — callers
 must render missing task context gracefully and must not expect a JSON `null` value.
 
-`owner_agent` is always `"unknown"` — there is no per-session agent registration in the
-current implementation. Clients must not present this as a meaningful agent identity.
+`owner_agent` is retained for backward compatibility with the current dashboard/TUI
+assumptions. It mirrors `agent_id` and should not be treated as an independent identity.
 
 ### Response `200 OK`
 
@@ -232,10 +237,14 @@ current implementation. Clients must not present this as a meaningful agent iden
   "sessions": [
     {
       "session_id": "sess-123",
+      "agent_id": "agent-007",
+      "owner_agent": "agent-007",
+      "mode": "cli",
       "repo": "acme/api",
       "branch": "feat/COD-055-fix-finish-loop",
-      "owner_agent": "unknown",
-      "activity_state": "waiting",
+      "worktree": "/worktrees/codero/wt-1",
+      "pr_number": 42,
+      "activity_state": "active",
       "task": {
         "id": "COD-055",
         "title": "fix finish loop",
@@ -247,10 +256,13 @@ current implementation. Clients must not present this as a meaningful agent iden
     },
     {
       "session_id": "sess-456",
-      "repo": "acme/web",
-      "branch": "hotfix",
-      "owner_agent": "unknown",
-      "activity_state": "active",
+      "agent_id": "agent-ops-3",
+      "owner_agent": "agent-ops-3",
+      "mode": "tui",
+      "repo": "",
+      "branch": "",
+      "pr_number": 0,
+      "activity_state": "waiting",
       "started_at": "2026-03-18T14:30:00Z",
       "last_heartbeat_at": "2026-03-18T14:40:28Z",
       "elapsed_sec": 628
@@ -260,16 +272,20 @@ current implementation. Clients must not present this as a meaningful agent iden
 }
 ```
 
-**`activity_state` values:** `active`, `waiting`, `blocked`
+**`activity_state` values:** `active`, `waiting`, `blocked` (legacy)
 
 **Session rules:**
 - Only fresh sessions are returned; stale sessions are filtered out.
 - Dedupe by `session_id` is applied **before** the page-size limit.
-- `task` is omitted entirely when the branch does not match `feat/PROJ-NNN-description`.
+- Sessions are considered **active** while `agent_sessions.ended_at IS NULL`; ended
+  sessions are removed from this feed. `end_reason` is internal state and may appear
+  in future responses but is not surfaced today.
+- Registration begins with `session_id` + `agent_id` only. Repo/branch/worktree/task
+  may be empty until an assignment is attached.
+- `task` is omitted entirely when neither `task_id` nor a matching branch pattern exists.
   Clients MUST render a missing `task` field gracefully — typically by showing `branch`
   instead — and must not depend on a JSON `null`.
-- `owner_agent` is always `"unknown"` in the current implementation; there is no
-  session-level agent registration. Clients MUST NOT fabricate an agent label from it.
+- `owner_agent` mirrors `agent_id` for dashboard/TUI parity; treat it as a legacy alias.
 - The response MUST NOT expose secrets, tokens, raw prompts, or file contents.
 
 ---
@@ -317,7 +333,7 @@ falls back to the compiled-in default path when the variable is unset.
 **Rules:**
 - Database health is determined by a lightweight `PING` against the configured store.
 - `feeds.active_sessions.freshness_sec` is derived from the most recent
-  `owner_session_last_seen` heartbeat across all tracked branches.
+  `agent_sessions.last_seen_at` heartbeat (legacy fallback: `branch_states.owner_session_last_seen`).
 - `feeds.gate_checks.freshness_sec` is derived from the mod-time of the last
   gate-check report file, resolved via `CODERO_GATE_CHECK_REPORT_PATH` (same as
   the gate-checks endpoint).

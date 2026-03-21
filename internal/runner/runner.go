@@ -11,6 +11,7 @@ import (
 	loglib "github.com/codero/codero/internal/log"
 	"github.com/codero/codero/internal/normalizer"
 	"github.com/codero/codero/internal/scheduler"
+	"github.com/codero/codero/internal/session"
 	"github.com/codero/codero/internal/state"
 	"github.com/google/uuid"
 )
@@ -50,12 +51,18 @@ func (c *Config) defaults() {
 // review workflows, and records deterministic state transitions. It is the
 // central dispatch engine for Sprint 5.
 type ReviewRunner struct {
-	db       *state.DB
-	queue    *scheduler.Queue
-	leaseMgr *scheduler.LeaseManager
-	stream   *delivery.Stream
-	provider Provider
-	cfg      Config
+	db              *state.DB
+	queue           *scheduler.Queue
+	leaseMgr        *scheduler.LeaseManager
+	stream          *delivery.Stream
+	provider        Provider
+	cfg             Config
+	sessionStore    *session.Store
+	sessionID       string
+	sessionAgentID  string
+	sessionMode     string
+	sessionWorktree string
+	sessionTaskID   string
 }
 
 // New creates a ReviewRunner with the given dependencies.
@@ -68,13 +75,20 @@ func New(
 	cfg Config,
 ) *ReviewRunner {
 	cfg.defaults()
+	agentID := resolveAgentID()
 	return &ReviewRunner{
-		db:       db,
-		queue:    queue,
-		leaseMgr: leaseMgr,
-		stream:   stream,
-		provider: provider,
-		cfg:      cfg,
+		db:              db,
+		queue:           queue,
+		leaseMgr:        leaseMgr,
+		stream:          stream,
+		provider:        provider,
+		cfg:             cfg,
+		sessionStore:    session.NewStore(db),
+		sessionID:       resolveSessionID(),
+		sessionAgentID:  agentID,
+		sessionMode:     resolveSessionMode(),
+		sessionWorktree: resolveWorktree(),
+		sessionTaskID:   resolveTaskID(),
 	}
 }
 
@@ -91,6 +105,15 @@ func (r *ReviewRunner) Run(ctx context.Context) {
 	ticker := time.NewTicker(r.cfg.PollInterval)
 	defer ticker.Stop()
 
+	r.registerSession(ctx)
+
+	var sessionTick <-chan time.Time
+	if r.sessionStore != nil && r.sessionID != "" {
+		sessionTicker := time.NewTicker(r.cfg.HeartbeatInterval)
+		defer sessionTicker.Stop()
+		sessionTick = sessionTicker.C
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -99,6 +122,8 @@ func (r *ReviewRunner) Run(ctx context.Context) {
 				loglib.FieldComponent, "runner",
 			)
 			return
+		case <-sessionTick:
+			r.emitSessionHeartbeat(ctx)
 		case <-ticker.C:
 			for _, repo := range r.cfg.Repos {
 				r.dispatchRepo(ctx, repo)
@@ -179,8 +204,10 @@ func (r *ReviewRunner) processEntry(ctx context.Context, repo, branch string) er
 		return fmt.Errorf("transition to cli_reviewing: %w", err)
 	}
 
+	r.attachSessionAssignment(ctx, repo, branch)
+
 	// Record the agent identity so the dashboard can display it.
-	if agentID := resolveAgentID(); agentID != "" {
+	if agentID := r.sessionAgentID; agentID != "" {
 		if err := state.UpdateOwnerAgent(ctx, r.db, repo, branch, agentID); err != nil {
 			loglib.Warn("runner: failed to record owner agent",
 				loglib.FieldComponent, "runner",
@@ -458,4 +485,85 @@ func resolveAgentID() string {
 		return host
 	}
 	return ""
+}
+
+func resolveSessionID() string {
+	if v := os.Getenv("CODERO_SESSION_ID"); v != "" {
+		return v
+	}
+	if v := os.Getenv("CODERO_AGENT_SESSION_ID"); v != "" {
+		return v
+	}
+	return ""
+}
+
+func resolveSessionMode() string {
+	if v := os.Getenv("CODERO_SESSION_MODE"); v != "" {
+		return v
+	}
+	return "runner"
+}
+
+func resolveWorktree() string {
+	if v := os.Getenv("CODERO_WORKTREE"); v != "" {
+		return v
+	}
+	return ""
+}
+
+func resolveTaskID() string {
+	if v := os.Getenv("CODERO_TASK_ID"); v != "" {
+		return v
+	}
+	return ""
+}
+
+func (r *ReviewRunner) registerSession(ctx context.Context) {
+	if r.sessionStore == nil || r.sessionID == "" {
+		return
+	}
+	if err := r.sessionStore.Register(ctx, r.sessionID, r.sessionAgentID, r.sessionMode); err != nil {
+		loglib.Warn("runner: session register failed",
+			loglib.FieldComponent, "runner",
+			"session_id", r.sessionID,
+			"error", err,
+		)
+	}
+}
+
+func (r *ReviewRunner) emitSessionHeartbeat(ctx context.Context) {
+	if r.sessionStore == nil || r.sessionID == "" {
+		return
+	}
+	if err := r.sessionStore.Heartbeat(ctx, r.sessionID); err != nil {
+		loglib.Warn("runner: session heartbeat failed",
+			loglib.FieldComponent, "runner",
+			"session_id", r.sessionID,
+			"error", err,
+		)
+	}
+}
+
+func (r *ReviewRunner) attachSessionAssignment(ctx context.Context, repo, branch string) {
+	if r.sessionStore == nil || r.sessionID == "" {
+		return
+	}
+	if err := r.sessionStore.AttachAssignment(
+		ctx,
+		r.sessionID,
+		r.sessionAgentID,
+		repo,
+		branch,
+		r.sessionWorktree,
+		r.sessionMode,
+		r.sessionTaskID,
+	); err != nil {
+		loglib.Warn("runner: session attach failed",
+			loglib.FieldComponent, "runner",
+			loglib.FieldRepo, repo,
+			loglib.FieldBranch, branch,
+			"session_id", r.sessionID,
+			"error", err,
+		)
+	}
 }

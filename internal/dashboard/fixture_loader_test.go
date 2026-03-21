@@ -54,8 +54,8 @@ func TestLoadFixtureDir_WithSessions(t *testing.T) {
 	db := openTestDB(t)
 	dir := t.TempDir()
 	sessions := []dashboard.FixtureSessionEntry{
-		{SessionID: "sess-1", Repo: "acme/api", Branch: "feat/auth", State: "coding", OwnerAgent: "copilot"},
-		{SessionID: "sess-2", Repo: "acme/api", Branch: "feat/db", State: "local_review"},
+		{SessionID: "sess-1", AgentID: "copilot", Repo: "acme/api", Branch: "feat/auth", State: "coding"},
+		{SessionID: "sess-2", AgentID: "opencode", Repo: "acme/api", Branch: "feat/db", State: "local_review"},
 	}
 	writeJSON(t, filepath.Join(dir, "sessions.json"), sessions)
 
@@ -143,7 +143,7 @@ func TestLoadFixtureDir_InvalidActivityMalformedJSON(t *testing.T) {
 func TestSeedFixtureSessions_IdempotentOnReplace(t *testing.T) {
 	db := openTestDB(t)
 	entries := []dashboard.FixtureSessionEntry{
-		{SessionID: "sess-abc", Repo: "acme/api", Branch: "feat/x", State: "coding"},
+		{SessionID: "sess-abc", AgentID: "agent-abc", Repo: "acme/api", Branch: "feat/x", State: "coding"},
 	}
 	// Seeding twice should not error (INSERT OR REPLACE).
 	if err := dashboard.SeedFixtureSessions(db, entries); err != nil {

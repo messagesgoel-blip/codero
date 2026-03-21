@@ -335,6 +335,31 @@ func getOwnerAgent(t *testing.T, db *state.DB, id string) string {
 	return agent
 }
 
+func getOwnerSessionID(t *testing.T, db *state.DB, id string) string {
+	t.Helper()
+	var sessionID string
+	if err := db.Unwrap().QueryRow(`SELECT COALESCE(owner_session_id,'') FROM branch_states WHERE id = ?`, id).Scan(&sessionID); err != nil {
+		t.Fatalf("get owner_session_id: %v", err)
+	}
+	return sessionID
+}
+
+func getSessionAssignment(t *testing.T, db *state.DB, sessionID string) (string, string, string) {
+	t.Helper()
+	var agentID, repo, branch string
+	if err := db.Unwrap().QueryRow(
+		`SELECT agent_id, repo, branch
+		 FROM agent_assignments
+		 WHERE session_id = ? AND ended_at IS NULL
+		 ORDER BY started_at DESC
+		 LIMIT 1`,
+		sessionID,
+	).Scan(&agentID, &repo, &branch); err != nil {
+		t.Fatalf("get agent_assignments: %v", err)
+	}
+	return agentID, repo, branch
+}
+
 func TestRunner_SetsOwnerAgent(t *testing.T) {
 	db, client, _ := setupDeps(t)
 	repo := "owner/repo"
@@ -361,5 +386,42 @@ func TestRunner_SetsOwnerAgent(t *testing.T) {
 	}
 	if got := getOwnerAgent(t, db, id); got != "test-agent-007" {
 		t.Errorf("owner_agent: got %q, want %q", got, "test-agent-007")
+	}
+}
+
+func TestRunner_AttachesSession(t *testing.T) {
+	db, client, _ := setupDeps(t)
+	repo := "owner/repo"
+	branch := "feat/test-session"
+
+	id := insertQueuedBranch(t, db, repo, branch)
+
+	q := scheduler.NewQueue(client)
+	ctx := context.Background()
+	if err := q.Enqueue(ctx, scheduler.QueueEntry{Repo: repo, Branch: branch}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	t.Setenv("CODERO_AGENT_ID", "agent-123")
+	t.Setenv("CODERO_SESSION_ID", "sess-abc")
+	t.Setenv("CODERO_SESSION_MODE", "runner")
+
+	r := newTestRunner(db, client, []string{repo}, runner.NewStubProvider(0))
+	runCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	r.Run(runCtx)
+
+	if got := getState(t, db, id); got != state.StateReviewed {
+		t.Errorf("state: got %q, want %q", got, state.StateReviewed)
+	}
+	if got := getOwnerSessionID(t, db, id); got != "sess-abc" {
+		t.Errorf("owner_session_id: got %q, want %q", got, "sess-abc")
+	}
+	agentID, gotRepo, gotBranch := getSessionAssignment(t, db, "sess-abc")
+	if agentID != "agent-123" {
+		t.Errorf("agent_id: got %q, want %q", agentID, "agent-123")
+	}
+	if gotRepo != repo || gotBranch != branch {
+		t.Errorf("session assignment: got %s/%s, want %s/%s", gotRepo, gotBranch, repo, branch)
 	}
 }

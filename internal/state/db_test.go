@@ -64,7 +64,14 @@ func TestOpen_ForeignKeys(t *testing.T) {
 func TestOpen_TablesCreated(t *testing.T) {
 	db := openTestDB(t)
 
-	for _, table := range []string{"branch_states", "state_transitions", "schema_migrations"} {
+	for _, table := range []string{
+		"branch_states",
+		"state_transitions",
+		"agent_sessions",
+		"agent_assignments",
+		"agent_events",
+		"schema_migrations",
+	} {
 		var name string
 		err := db.Unwrap().QueryRow(
 			"SELECT name FROM sqlite_master WHERE type='table' AND name=?", table,

@@ -367,3 +367,26 @@ Key items:
 - INFRA-001: Clarify `/gate` vs `/gate-check` endpoint naming in docs
 - LOG-001: Define structured heartbeat/log states for the full pre-commit step matrix via `gate-checks` (in progress — COD-057)
 - DOC-001: Gate-check activation guide
+
+**Active implementation direction (2026-03-20):**
+- TUI is the current UI focus for v1.2.4; dashboard follow-up should preserve parity but is not the lead surface for the next slice.
+- Preserve the current Codero strengths: review assistant shell, findings/routing pane, pipeline pane, and event stream/architecture pane.
+- Rework the TUI shell around:
+  - a compact operator top strip
+  - shared panel/metric primitives
+  - a true mode-aware bottom action bar
+  - stronger selected-row and active-pane treatment
+  - centered help/detail overlays where a persistent pane would add clutter
+- Current UI-001 gap audit should drive the first implementation slice:
+  - fix SSE / `DeliveryEvent` flow and log rendering first
+  - add the persistent merge-status footer from `BlockReason`
+  - bind live agent row state and findings detail data
+  - add the missing findings/history/detail affordances before extra polish
+- Borrow implementation ideas from existing terminal UIs rather than inventing new interaction patterns:
+  - `gh-dash`: Bubble Tea workflow ergonomics, selected-row treatment, action hints
+  - `campfire`: realtime event/log presentation
+  - `kue`: overview/detail/modals and contextual help flow
+  - `lazygcs`: search/preview navigation patterns
+  - `k9s` / `lazydocker`: dense operator framing and split-pane discipline
+  - `Helius`: visual density, metric cards, and status/command bar ideas only; do not copy code
+- Dashboard follow-up should align terminology and hierarchy with the final TUI shell and may borrow density/quick-action ideas from Cacheflow dashboard polish work.
