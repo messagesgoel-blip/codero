@@ -238,6 +238,173 @@ func TestExpiryWorker_AgentSessionExpiry_EndsSessionAndAssignment(t *testing.T) 
 	}
 }
 
+func TestExpiryWorker_AssignmentHoldTTL_WarnsOnce(t *testing.T) {
+	db, client, _ := setupExpiryDeps(t)
+
+	ctx := context.Background()
+	worktree := filepath.Join(t.TempDir(), "wt-hold-warn")
+	if err := state.RegisterAgentSession(ctx, db, "sess-hold-warn", "agent-1", "cli"); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	if err := state.AttachAgentAssignment(ctx, db, &state.AgentAssignment{
+		ID:        "assign-hold-warn",
+		SessionID: "sess-hold-warn",
+		AgentID:   "agent-1",
+		Repo:      "owner/repo",
+		Branch:    "feat/COD-300-hold-warn",
+		Worktree:  worktree,
+		TaskID:    "COD-300",
+	}); err != nil {
+		t.Fatalf("AttachAgentAssignment: %v", err)
+	}
+	branchID := insertBranchWithState(t, db, "owner/repo", "feat/COD-300-hold-warn", state.StateCoding, 3, 0)
+	if _, err := db.Unwrap().ExecContext(ctx, `
+		UPDATE branch_states
+		SET owner_session_id = ?, owner_session_last_seen = ?, owner_agent = ?
+		WHERE id = ?`,
+		"sess-hold-warn", time.Now().UTC(), "agent-1", branchID,
+	); err != nil {
+		t.Fatalf("seed branch ownership: %v", err)
+	}
+	if _, err := db.Unwrap().ExecContext(ctx, `
+		UPDATE agent_assignments
+		SET started_at = ?
+		WHERE assignment_id = ?`,
+		time.Now().UTC().Add(-scheduler.BranchHoldWarningTTL-time.Hour), "assign-hold-warn",
+	); err != nil {
+		t.Fatalf("seed assignment started_at: %v", err)
+	}
+
+	worker := scheduler.NewExpiryWorker(db, scheduler.NewQueue(client), delivery.NewStream(db, client))
+	worker.RunSessionExpiryCycle(ctx)
+	worker.RunSessionExpiryCycle(ctx)
+
+	active, err := state.GetActiveAgentAssignment(ctx, db, "sess-hold-warn")
+	if err != nil {
+		t.Fatalf("GetActiveAgentAssignment: %v", err)
+	}
+	if active.ID != "assign-hold-warn" {
+		t.Fatalf("active assignment id: got %q, want %q", active.ID, "assign-hold-warn")
+	}
+
+	check, err := state.GetAssignmentRuleCheck(ctx, db, "assign-hold-warn", "RULE-003")
+	if err != nil {
+		t.Fatalf("GetAssignmentRuleCheck: %v", err)
+	}
+	if check.Result != "warn" {
+		t.Fatalf("rule-003 result: got %q, want %q", check.Result, "warn")
+	}
+	if check.ViolationRaised {
+		t.Fatal("rule-003 violation_raised: got true, want false on warning")
+	}
+
+	events, err := state.ListAgentEvents(ctx, db, "sess-hold-warn", 0)
+	if err != nil {
+		t.Fatalf("ListAgentEvents: %v", err)
+	}
+	var warningCount int
+	for _, event := range events {
+		if event.EventType == "assignment_hold_warning" {
+			warningCount++
+		}
+	}
+	if warningCount != 1 {
+		t.Fatalf("assignment_hold_warning count: got %d, want 1", warningCount)
+	}
+}
+
+func TestExpiryWorker_AssignmentHoldTTL_ReleasesBranch(t *testing.T) {
+	db, client, _ := setupExpiryDeps(t)
+
+	ctx := context.Background()
+	worktree := filepath.Join(t.TempDir(), "wt-hold-release")
+	if err := state.RegisterAgentSession(ctx, db, "sess-hold-release", "agent-1", "cli"); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	if err := state.AttachAgentAssignment(ctx, db, &state.AgentAssignment{
+		ID:        "assign-hold-release",
+		SessionID: "sess-hold-release",
+		AgentID:   "agent-1",
+		Repo:      "owner/repo",
+		Branch:    "feat/COD-301-hold-release",
+		Worktree:  worktree,
+		TaskID:    "COD-301",
+	}); err != nil {
+		t.Fatalf("AttachAgentAssignment: %v", err)
+	}
+	branchID := insertBranchWithState(t, db, "owner/repo", "feat/COD-301-hold-release", state.StateCoding, 3, 0)
+	if _, err := db.Unwrap().ExecContext(ctx, `
+		UPDATE branch_states
+		SET owner_session_id = ?, owner_session_last_seen = ?, owner_agent = ?
+		WHERE id = ?`,
+		"sess-hold-release", time.Now().UTC(), "agent-1", branchID,
+	); err != nil {
+		t.Fatalf("seed branch ownership: %v", err)
+	}
+	if _, err := db.Unwrap().ExecContext(ctx, `
+		UPDATE agent_assignments
+		SET started_at = ?
+		WHERE assignment_id = ?`,
+		time.Now().UTC().Add(-scheduler.BranchHoldReleaseTTL-time.Hour), "assign-hold-release",
+	); err != nil {
+		t.Fatalf("seed assignment started_at: %v", err)
+	}
+
+	worker := scheduler.NewExpiryWorker(db, scheduler.NewQueue(client), delivery.NewStream(db, client))
+	worker.RunSessionExpiryCycle(ctx)
+
+	_, err := state.GetActiveAgentAssignment(ctx, db, "sess-hold-release")
+	if !errors.Is(err, state.ErrAgentAssignmentNotFound) {
+		t.Fatalf("GetActiveAgentAssignment: expected ErrAgentAssignmentNotFound, got %v", err)
+	}
+
+	assignments, err := state.ListAgentAssignments(ctx, db, "sess-hold-release")
+	if err != nil {
+		t.Fatalf("ListAgentAssignments: %v", err)
+	}
+	if len(assignments) != 1 {
+		t.Fatalf("assignments count: got %d, want 1", len(assignments))
+	}
+	if assignments[0].EndReason != "hold_ttl_exceeded" {
+		t.Fatalf("end_reason: got %q, want %q", assignments[0].EndReason, "hold_ttl_exceeded")
+	}
+
+	check, err := state.GetAssignmentRuleCheck(ctx, db, "assign-hold-release", "RULE-003")
+	if err != nil {
+		t.Fatalf("GetAssignmentRuleCheck: %v", err)
+	}
+	if check.Result != "fail" {
+		t.Fatalf("rule-003 result: got %q, want %q", check.Result, "fail")
+	}
+	if !check.ViolationRaised {
+		t.Fatal("rule-003 violation_raised: got false, want true")
+	}
+
+	branch, err := state.GetBranch(db, "owner/repo", "feat/COD-301-hold-release")
+	if err != nil {
+		t.Fatalf("GetBranch: %v", err)
+	}
+	if branch.OwnerSessionID != "" {
+		t.Fatalf("owner_session_id: got %q, want empty", branch.OwnerSessionID)
+	}
+
+	session, err := state.GetAgentSession(ctx, db, "sess-hold-release")
+	if err != nil {
+		t.Fatalf("GetAgentSession: %v", err)
+	}
+	if session.EndedAt != nil {
+		t.Fatalf("session ended_at: got %v, want nil", session.EndedAt)
+	}
+
+	events, err := state.ListAgentEvents(ctx, db, "sess-hold-release", 0)
+	if err != nil {
+		t.Fatalf("ListAgentEvents: %v", err)
+	}
+	if events[len(events)-1].EventType != "assignment_hold_released" {
+		t.Fatalf("event_type: got %q, want %q", events[len(events)-1].EventType, "assignment_hold_released")
+	}
+}
+
 func TestExpiryWorker_LeaseAudit_Requeue(t *testing.T) {
 	db, client, _ := setupExpiryDeps(t)
 

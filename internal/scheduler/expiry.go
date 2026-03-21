@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -23,6 +24,14 @@ const (
 
 	// SessionExpiryInterval is how often the session expiry goroutine runs.
 	SessionExpiryInterval = 60 * time.Second
+
+	// BranchHoldWarningTTL is the default age where Codero warns on prolonged
+	// branch ownership.
+	BranchHoldWarningTTL = 72 * time.Hour
+
+	// BranchHoldReleaseTTL is the default hard cutoff where Codero cancels the
+	// active assignment and releases branch ownership.
+	BranchHoldReleaseTTL = BranchHoldWarningTTL + (BranchHoldWarningTTL / 2)
 )
 
 // ExpiryWorker runs two background routines:
@@ -119,6 +128,13 @@ func (w *ExpiryWorker) runSessionExpiry(ctx context.Context) {
 				}
 			}
 		}
+
+		if err := w.auditAssignmentHolds(ctx); err != nil {
+			loglib.Error("expiry: assignment hold audit failed",
+				loglib.FieldComponent, "expiry",
+				"error", err,
+			)
+		}
 	}
 
 	expired, err := state.ListExpiredSessions(w.db, SessionHeartbeatTTL)
@@ -142,6 +158,31 @@ func (w *ExpiryWorker) runSessionExpiry(ctx context.Context) {
 	}
 }
 
+func (w *ExpiryWorker) auditAssignmentHolds(ctx context.Context) error {
+	assignments, err := state.ListActiveAgentAssignments(ctx, w.db)
+	if err != nil {
+		return fmt.Errorf("audit assignment holds: list active assignments: %w", err)
+	}
+
+	now := time.Now().UTC()
+	for _, assignment := range assignments {
+		age := now.Sub(assignment.StartedAt)
+		if age >= BranchHoldReleaseTTL {
+			if err := w.releaseHeldAssignment(ctx, &assignment, age); err != nil {
+				return fmt.Errorf("audit assignment holds: release %s: %w", assignment.ID, err)
+			}
+			continue
+		}
+		if age >= BranchHoldWarningTTL {
+			if err := w.warnHeldAssignment(ctx, &assignment, age); err != nil {
+				return fmt.Errorf("audit assignment holds: warn %s: %w", assignment.ID, err)
+			}
+		}
+	}
+
+	return nil
+}
+
 // expireAgentSession marks a durable agent session and its active assignment
 // as expired in the new session tables.
 func (w *ExpiryWorker) expireAgentSession(ctx context.Context, session state.AgentSession) error {
@@ -158,6 +199,75 @@ func (w *ExpiryWorker) expireAgentSession(ctx context.Context, session state.Age
 	)
 
 	return nil
+}
+
+func (w *ExpiryWorker) warnHeldAssignment(ctx context.Context, assignment *state.AgentAssignment, age time.Duration) error {
+	check, err := state.GetAssignmentRuleCheck(ctx, w.db, assignment.ID, "RULE-003")
+	if err != nil {
+		return fmt.Errorf("warn held assignment: get rule check: %w", err)
+	}
+	if check.Result == "warn" || check.Result == "fail" {
+		return nil
+	}
+
+	detail, err := marshalHoldTTLDetail("hold_ttl_warning", age, BranchHoldWarningTTL, BranchHoldReleaseTTL)
+	if err != nil {
+		return fmt.Errorf("warn held assignment: marshal detail: %w", err)
+	}
+	if err := state.WarnAssignmentHoldTTL(ctx, w.db, assignment, detail); err != nil {
+		return fmt.Errorf("warn held assignment: %w", err)
+	}
+
+	loglib.Warn("expiry: assignment hold ttl warning",
+		loglib.FieldComponent, "expiry",
+		loglib.FieldSession, assignment.SessionID,
+		loglib.FieldRepo, assignment.Repo,
+		loglib.FieldBranch, assignment.Branch,
+		"assignment_id", assignment.ID,
+		"age_hours", age.Hours(),
+	)
+	return nil
+}
+
+func (w *ExpiryWorker) releaseHeldAssignment(ctx context.Context, assignment *state.AgentAssignment, age time.Duration) error {
+	check, err := state.GetAssignmentRuleCheck(ctx, w.db, assignment.ID, "RULE-003")
+	if err != nil {
+		return fmt.Errorf("release held assignment: get rule check: %w", err)
+	}
+	if check.Result == "fail" {
+		return nil
+	}
+
+	detail, err := marshalHoldTTLDetail("hold_ttl_released", age, BranchHoldWarningTTL, BranchHoldReleaseTTL)
+	if err != nil {
+		return fmt.Errorf("release held assignment: marshal detail: %w", err)
+	}
+	if err := state.ReleaseAssignmentForHoldTTL(ctx, w.db, assignment, detail); err != nil {
+		return fmt.Errorf("release held assignment: %w", err)
+	}
+
+	loglib.Warn("expiry: assignment released after hold ttl exceeded",
+		loglib.FieldComponent, "expiry",
+		loglib.FieldSession, assignment.SessionID,
+		loglib.FieldRepo, assignment.Repo,
+		loglib.FieldBranch, assignment.Branch,
+		"assignment_id", assignment.ID,
+		"age_hours", age.Hours(),
+	)
+	return nil
+}
+
+func marshalHoldTTLDetail(source string, age, warningTTL, releaseTTL time.Duration) (string, error) {
+	payload, err := json.Marshal(map[string]any{
+		"source":              source,
+		"age_seconds":         int(age.Seconds()),
+		"warning_ttl_seconds": int(warningTTL.Seconds()),
+		"release_ttl_seconds": int(releaseTTL.Seconds()),
+	})
+	if err != nil {
+		return "", err
+	}
+	return string(payload), nil
 }
 
 // expireSession transitions one branch to abandoned (T14) and delivers a system event.

@@ -348,6 +348,23 @@ func UpdateSessionHeartbeat(db *DB, repo, branch string) error {
 	return nil
 }
 
+// ClearBranchOwnership clears the branch-level session ownership markers.
+func ClearBranchOwnership(ctx context.Context, db *DB, repo, branch string) error {
+	_, err := db.sql.ExecContext(ctx, `
+		UPDATE branch_states
+		SET owner_session_id = '',
+		    owner_session_last_seen = NULL,
+		    owner_agent = '',
+		    updated_at = datetime('now')
+		WHERE repo = ? AND branch = ?`,
+		repo, branch,
+	)
+	if err != nil {
+		return fmt.Errorf("clear branch ownership: %w", err)
+	}
+	return nil
+}
+
 // UpdateMergeReadiness updates the four merge-readiness fields atomically.
 func UpdateMergeReadiness(db *DB, id string, approved, ciGreen bool, pendingEvents, unresolvedThreads int) error {
 	_, err := db.sql.Exec(

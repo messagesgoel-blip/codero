@@ -385,6 +385,35 @@ func ListAgentAssignments(ctx context.Context, db *DB, sessionID string) ([]Agen
 	return assignments, nil
 }
 
+// ListActiveAgentAssignments returns all active assignments across sessions.
+func ListActiveAgentAssignments(ctx context.Context, db *DB) ([]AgentAssignment, error) {
+	const q = `
+		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id,
+		       started_at, ended_at, end_reason, superseded_by
+		FROM agent_assignments
+		WHERE ended_at IS NULL
+		ORDER BY started_at ASC`
+
+	rows, err := db.sql.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("list active agent assignments: %w", err)
+	}
+	defer rows.Close()
+
+	var assignments []AgentAssignment
+	for rows.Next() {
+		a, err := scanAgentAssignmentRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("list active agent assignments: %w", err)
+		}
+		assignments = append(assignments, *a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list active agent assignments: %w", err)
+	}
+	return assignments, nil
+}
+
 // AppendAgentEvent appends an event for the given session.
 func AppendAgentEvent(ctx context.Context, db *DB, ev *AgentEvent) (int64, error) {
 	if ev == nil {

@@ -19,6 +19,16 @@ type defaultAgentRule struct {
 	RuleVersion     int
 }
 
+type AssignmentRuleCheck struct {
+	CheckID         string
+	AssignmentID    string
+	SessionID       string
+	RuleID          string
+	Result          string
+	ViolationRaised bool
+	Detail          string
+}
+
 var baselineAgentRules = []defaultAgentRule{
 	{
 		RuleID:          "RULE-001",
@@ -170,13 +180,158 @@ func UpdateRule004Check(ctx context.Context, db *DB, assignment *AgentAssignment
 	return nil
 }
 
+func GetAssignmentRuleCheck(ctx context.Context, db *DB, assignmentID, ruleID string) (*AssignmentRuleCheck, error) {
+	row := db.sql.QueryRowContext(ctx, `
+		SELECT check_id, assignment_id, session_id, rule_id, result, violation_raised, detail
+		FROM assignment_rule_checks
+		WHERE assignment_id = ? AND rule_id = ?`,
+		assignmentID, ruleID,
+	)
+
+	var check AssignmentRuleCheck
+	var violationRaised int
+	if err := row.Scan(
+		&check.CheckID,
+		&check.AssignmentID,
+		&check.SessionID,
+		&check.RuleID,
+		&check.Result,
+		&violationRaised,
+		&check.Detail,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrAgentAssignmentNotFound
+		}
+		return nil, fmt.Errorf("get assignment rule check: %w", err)
+	}
+	check.ViolationRaised = violationRaised != 0
+	return &check, nil
+}
+
+func UpdateRule003Check(ctx context.Context, db *DB, assignment *AgentAssignment, result string, violationRaised bool, detail string) error {
+	if assignment == nil {
+		return fmt.Errorf("update rule-003 check: nil assignment")
+	}
+	tx, err := db.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("update rule-003 check: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	actions := []string{}
+	if violationRaised {
+		actions = []string{"block", "notify"}
+	}
+	if err := updateRuleCheckTx(ctx, tx, assignment.ID, "RULE-003", result, violationRaised, actions, detail, false); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("update rule-003 check: commit: %w", err)
+	}
+	return nil
+}
+
+func WarnAssignmentHoldTTL(ctx context.Context, db *DB, assignment *AgentAssignment, detail string) error {
+	if assignment == nil {
+		return fmt.Errorf("warn assignment hold ttl: nil assignment")
+	}
+	tx, err := db.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("warn assignment hold ttl: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := updateRuleCheckTx(ctx, tx, assignment.ID, "RULE-003", "warn", false, []string{"notify"}, detail, false); err != nil {
+		return err
+	}
+	payload, err := json.Marshal(map[string]string{
+		"assignment_id": assignment.ID,
+		"repo":          assignment.Repo,
+		"branch":        assignment.Branch,
+		"detail":        detail,
+	})
+	if err != nil {
+		return fmt.Errorf("warn assignment hold ttl: marshal event payload: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO agent_events (session_id, agent_id, event_type, payload)
+		VALUES (?, ?, ?, ?)`,
+		assignment.SessionID, assignment.AgentID, "assignment_hold_warning", string(payload),
+	); err != nil {
+		return fmt.Errorf("warn assignment hold ttl: append event: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("warn assignment hold ttl: commit: %w", err)
+	}
+	return nil
+}
+
+func ReleaseAssignmentForHoldTTL(ctx context.Context, db *DB, assignment *AgentAssignment, detail string) error {
+	if assignment == nil {
+		return fmt.Errorf("release assignment hold ttl: nil assignment")
+	}
+	tx, err := db.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("release assignment hold ttl: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE agent_assignments
+		SET ended_at = datetime('now'), end_reason = 'hold_ttl_exceeded'
+		WHERE assignment_id = ? AND ended_at IS NULL`,
+		assignment.ID,
+	); err != nil {
+		return fmt.Errorf("release assignment hold ttl: end assignment: %w", err)
+	}
+	if err := updateRuleCheckTx(ctx, tx, assignment.ID, "RULE-003", "fail", true, []string{"block", "notify"}, detail, false); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE branch_states
+		SET owner_session_id = '',
+		    owner_session_last_seen = NULL,
+		    owner_agent = '',
+		    updated_at = datetime('now')
+		WHERE repo = ? AND branch = ?`,
+		assignment.Repo, assignment.Branch,
+	); err != nil {
+		return fmt.Errorf("release assignment hold ttl: clear branch ownership: %w", err)
+	}
+
+	payload, err := json.Marshal(map[string]string{
+		"assignment_id": assignment.ID,
+		"repo":          assignment.Repo,
+		"branch":        assignment.Branch,
+		"detail":        detail,
+	})
+	if err != nil {
+		return fmt.Errorf("release assignment hold ttl: marshal event payload: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO agent_events (session_id, agent_id, event_type, payload)
+		VALUES (?, ?, ?, ?)`,
+		assignment.SessionID, assignment.AgentID, "assignment_hold_released", string(payload),
+	); err != nil {
+		return fmt.Errorf("release assignment hold ttl: append event: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("release assignment hold ttl: commit: %w", err)
+	}
+	return nil
+}
+
 func updateRule004CheckTx(ctx context.Context, tx *sql.Tx, assignment *AgentAssignment, result string, violationRaised bool, detail string, resolved bool) error {
 	actions := []string{}
-	resolvedBy := ""
-	var resolvedAt any = nil
 	if violationRaised {
 		actions = []string{"block", "log", "notify"}
 	}
+	return updateRuleCheckTx(ctx, tx, assignment.ID, "RULE-004", result, violationRaised, actions, detail, resolved)
+}
+
+func updateRuleCheckTx(ctx context.Context, tx *sql.Tx, assignmentID, ruleID, result string, violationRaised bool, actions []string, detail string, resolved bool) error {
+	resolvedBy := ""
+	var resolvedAt any = nil
 	if resolved {
 		resolvedBy = "codero"
 		resolvedAt = time.Now().UTC()
@@ -184,7 +339,7 @@ func updateRule004CheckTx(ctx context.Context, tx *sql.Tx, assignment *AgentAssi
 
 	violationActionTaken, err := json.Marshal(actions)
 	if err != nil {
-		return fmt.Errorf("update rule-004 check: marshal actions: %w", err)
+		return fmt.Errorf("update %s check: marshal actions: %w", ruleID, err)
 	}
 	_, err = tx.ExecContext(ctx, `
 		UPDATE assignment_rule_checks
@@ -195,11 +350,11 @@ func updateRule004CheckTx(ctx context.Context, tx *sql.Tx, assignment *AgentAssi
 		    detail = ?,
 		    resolved_at = ?,
 		    resolved_by = ?
-		WHERE assignment_id = ? AND rule_id = 'RULE-004'`,
-		result, boolToInt(violationRaised), string(violationActionTaken), detail, resolvedAt, resolvedBy, assignment.ID,
+		WHERE assignment_id = ? AND rule_id = ?`,
+		result, boolToInt(violationRaised), string(violationActionTaken), detail, resolvedAt, resolvedBy, assignmentID, ruleID,
 	)
 	if err != nil {
-		return fmt.Errorf("update rule-004 check: update: %w", err)
+		return fmt.Errorf("update %s check: update: %w", ruleID, err)
 	}
 	return nil
 }
