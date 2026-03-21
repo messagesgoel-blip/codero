@@ -139,6 +139,11 @@ func writeSessionBootstrap(cfg *sessionBootstrapConfig) (*sessionBootstrapResult
 	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
 		return nil, fmt.Errorf("bootstrap session runtime dir: %w", err)
 	}
+	if cfg.Worktree != "" {
+		if err := os.MkdirAll(cfg.Worktree, 0o755); err != nil {
+			return nil, fmt.Errorf("bootstrap session worktree dir: %w", err)
+		}
+	}
 
 	agentPath := filepath.Join(runtimeDir, "AGENT.md")
 	sessionPath := filepath.Join(runtimeDir, "SESSION.md")
@@ -194,7 +199,6 @@ Use these values unchanged when attaching or heartbeating.
 		"CODERO_SESSION_ID":         cfg.SessionID,
 		"CODERO_SESSION_MODE":       cfg.Mode,
 		"CODERO_WORKTREE":           cfg.Worktree,
-		"TEST_WORKTREE":             cfg.Worktree,
 		"CODERO_RUNTIME_ROOT":       cfg.RuntimeRoot,
 		"CODERO_RUNTIME_DIR":        runtimeDir,
 		"CODERO_RUNTIME_AGENT_MD":   agentPath,
@@ -214,6 +218,9 @@ Use these values unchanged when attaching or heartbeating.
 	}
 	if cfg.TaskID != "" {
 		exports["TEST_TASK_ID"] = cfg.TaskID
+	}
+	if cfg.Worktree != "" {
+		exports["TEST_WORKTREE"] = cfg.Worktree
 	}
 	if cfg.ConfigPath != "" {
 		exports["CODERO_PILOT_CONFIG"] = cfg.ConfigPath

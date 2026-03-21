@@ -39,7 +39,21 @@ func sessionHeartbeatTTLFromEnv() time.Duration {
 	}
 
 	seconds, err := strconv.Atoi(raw)
-	if err != nil || seconds <= 0 {
+	if err != nil {
+		loglib.Warn("expiry: invalid session heartbeat ttl override; using default",
+			loglib.FieldComponent, "expiry",
+			"env_var", "CODERO_SESSION_HEARTBEAT_TTL_SECONDS",
+			"raw_value", raw,
+			"error", err,
+		)
+		return defaultSeconds * time.Second
+	}
+	if seconds <= 0 {
+		loglib.Warn("expiry: non-positive session heartbeat ttl override; using default",
+			loglib.FieldComponent, "expiry",
+			"env_var", "CODERO_SESSION_HEARTBEAT_TTL_SECONDS",
+			"raw_value", raw,
+		)
 		return defaultSeconds * time.Second
 	}
 
