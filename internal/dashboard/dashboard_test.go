@@ -1064,6 +1064,87 @@ func TestAssignments_WithAgentAssignments(t *testing.T) {
 	}
 }
 
+func TestCompliance_Empty(t *testing.T) {
+	h, _ := newTestHandler(t)
+
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/compliance", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.ComplianceResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Rules) != 0 {
+		t.Fatalf("rules len = %d, want 0", len(resp.Rules))
+	}
+	if len(resp.Checks) != 0 {
+		t.Fatalf("checks len = %d, want 0", len(resp.Checks))
+	}
+}
+
+func TestCompliance_WithRulesAndChecks(t *testing.T) {
+	h, db := newTestHandler(t)
+	startedAt := time.Now().Add(-15 * time.Minute).UTC()
+	lastSeen := time.Now().Add(-1 * time.Minute).UTC()
+	checkedAt := time.Now().Add(-2 * time.Minute).UTC()
+
+	seedAgentSession(t, db, "sess-comp-1", "agent-comp-1", "cli", startedAt, lastSeen)
+	seedAgentAssignment(t, db, "assign-comp-1", "sess-comp-1", "agent-comp-1", "acme/api", "task-compliance", "", "COD-200", startedAt)
+
+	_, err := db.Exec(`
+		INSERT INTO agent_rules
+			(rule_id, rule_name, rule_kind, description, enforcement, violation_action, routing_target, rule_version, active)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"RULE-001", "Gate must pass before merge", "gate", "test rule", "hard", `["block","notify"]`, "routing_team", 1, 1,
+	)
+	if err != nil {
+		t.Fatalf("insert agent rule: %v", err)
+	}
+
+	_, err = db.Exec(`
+		INSERT INTO assignment_rule_checks
+			(check_id, assignment_id, session_id, rule_id, rule_version, checked_at, result, violation_raised, violation_action_taken, detail, resolved_at, resolved_by)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, '')`,
+		"chk-comp-1", "assign-comp-1", "sess-comp-1", "RULE-001", 1, checkedAt, "fail", 1, `["block","notify"]`, `{"reason":"ci red"}`,
+	)
+	if err != nil {
+		t.Fatalf("insert assignment rule check: %v", err)
+	}
+
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/compliance", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.ComplianceResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Rules) != 1 {
+		t.Fatalf("rules len = %d, want 1", len(resp.Rules))
+	}
+	if len(resp.Checks) != 1 {
+		t.Fatalf("checks len = %d, want 1", len(resp.Checks))
+	}
+	if resp.Rules[0].RuleID != "RULE-001" {
+		t.Fatalf("rule_id = %q, want RULE-001", resp.Rules[0].RuleID)
+	}
+	if len(resp.Rules[0].ViolationAction) != 2 {
+		t.Fatalf("rule violation_action len = %d, want 2", len(resp.Rules[0].ViolationAction))
+	}
+	if resp.Checks[0].AssignmentID != "assign-comp-1" {
+		t.Fatalf("assignment_id = %q, want assign-comp-1", resp.Checks[0].AssignmentID)
+	}
+	if !resp.Checks[0].ViolationRaised {
+		t.Fatal("violation_raised = false, want true")
+	}
+	if len(resp.Checks[0].ViolationActionTaken) != 2 {
+		t.Fatalf("violation_action_taken len = %d, want 2", len(resp.Checks[0].ViolationActionTaken))
+	}
+}
+
 func TestAgentEvents_WithRows(t *testing.T) {
 	h, db := newTestHandler(t)
 	ts := time.Now().Add(-2 * time.Minute).UTC()
