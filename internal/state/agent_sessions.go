@@ -100,7 +100,11 @@ func GetAgentSession(ctx context.Context, db *DB, sessionID string) (*AgentSessi
 		WHERE session_id = ?`
 
 	row := db.sql.QueryRowContext(ctx, q, sessionID)
-	return scanAgentSession(row)
+	s, err := scanAgentSession(row)
+	if err != nil && !errors.Is(err, ErrAgentSessionNotFound) {
+		return nil, fmt.Errorf("get agent session %q: %w", sessionID, err)
+	}
+	return s, err
 }
 
 // ListActiveAgentSessions returns all sessions without ended_at set.
@@ -287,7 +291,7 @@ func ListAgentAssignments(ctx context.Context, db *DB, sessionID string) ([]Agen
 	for rows.Next() {
 		a, err := scanAgentAssignmentRow(rows)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("list agent assignments: %w", err)
 		}
 		assignments = append(assignments, *a)
 	}
