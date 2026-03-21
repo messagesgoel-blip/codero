@@ -83,6 +83,7 @@ type ActiveSession struct {
 	Task            *ActiveTask `json:"task,omitempty"`
 	StartedAt       time.Time   `json:"started_at"`
 	LastHeartbeatAt time.Time   `json:"last_heartbeat_at"`
+	ProgressAt      *time.Time  `json:"progress_at,omitempty"`
 	ElapsedSec      int64       `json:"elapsed_sec"`
 }
 
@@ -135,6 +136,42 @@ type AgentEventsResponse struct {
 	Count       int             `json:"count"`
 	Events      []AgentEventRow `json:"events"`
 	GeneratedAt time.Time       `json:"generated_at"`
+}
+
+// AgentRuleRow is one dashboard-facing compliance rule definition.
+type AgentRuleRow struct {
+	RuleID          string   `json:"rule_id"`
+	RuleName        string   `json:"rule_name"`
+	RuleKind        string   `json:"rule_kind"`
+	Description     string   `json:"description"`
+	Enforcement     string   `json:"enforcement"`
+	ViolationAction []string `json:"violation_action"`
+	RoutingTarget   string   `json:"routing_target"`
+	RuleVersion     int      `json:"rule_version"`
+	Active          bool     `json:"active"`
+}
+
+// AssignmentRuleCheckRow is one per-assignment compliance evaluation row.
+type AssignmentRuleCheckRow struct {
+	CheckID              string     `json:"check_id"`
+	AssignmentID         string     `json:"assignment_id"`
+	SessionID            string     `json:"session_id"`
+	RuleID               string     `json:"rule_id"`
+	RuleVersion          int        `json:"rule_version"`
+	CheckedAt            time.Time  `json:"checked_at"`
+	Result               string     `json:"result"`
+	ViolationRaised      bool       `json:"violation_raised"`
+	ViolationActionTaken []string   `json:"violation_action_taken"`
+	Detail               string     `json:"detail,omitempty"`
+	ResolvedAt           *time.Time `json:"resolved_at,omitempty"`
+	ResolvedBy           string     `json:"resolved_by,omitempty"`
+}
+
+// ComplianceResponse is the response for GET /api/v1/dashboard/compliance.
+type ComplianceResponse struct {
+	Rules       []AgentRuleRow           `json:"rules"`
+	Checks      []AssignmentRuleCheckRow `json:"checks"`
+	GeneratedAt time.Time                `json:"generated_at"`
 }
 
 // RunRow is one row in the runs table.

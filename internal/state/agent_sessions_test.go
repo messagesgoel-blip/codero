@@ -36,7 +36,7 @@ func TestRegisterAgentSession_UpsertAndHeartbeat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetAgentSession before heartbeat: %v", err)
 	}
-	if err := UpdateAgentSessionHeartbeat(ctx, db, "sess-1"); err != nil {
+	if err := UpdateAgentSessionHeartbeat(ctx, db, "sess-1", false); err != nil {
 		t.Fatalf("UpdateAgentSessionHeartbeat: %v", err)
 	}
 	after, err := GetAgentSession(ctx, db, "sess-1")
@@ -45,6 +45,9 @@ func TestRegisterAgentSession_UpsertAndHeartbeat(t *testing.T) {
 	}
 	if !after.LastSeenAt.After(before.LastSeenAt) {
 		t.Errorf("last_seen_at not updated: before=%s after=%s", before.LastSeenAt, after.LastSeenAt)
+	}
+	if after.LastProgressAt != nil {
+		t.Errorf("last_progress_at: got %v, want nil when progress not marked", after.LastProgressAt)
 	}
 
 	if err := RegisterAgentSession(ctx, db, "sess-1", "agent-2", "cli"); err != nil {
@@ -94,7 +97,7 @@ func TestRegisterAgentSession_RevivesEndedSession(t *testing.T) {
 		t.Fatalf("mode after revive: got %q, want %q", s.Mode, "cli")
 	}
 
-	if err := UpdateAgentSessionHeartbeat(ctx, db, "sess-revive"); err != nil {
+	if err := UpdateAgentSessionHeartbeat(ctx, db, "sess-revive", false); err != nil {
 		t.Fatalf("UpdateAgentSessionHeartbeat after revive: %v", err)
 	}
 }
@@ -103,12 +106,33 @@ func TestUpdateAgentSessionHeartbeat_NotFound(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	err := UpdateAgentSessionHeartbeat(ctx, db, "missing")
+	err := UpdateAgentSessionHeartbeat(ctx, db, "missing", false)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
 	if !errors.Is(err, ErrAgentSessionNotFound) {
 		t.Fatalf("expected ErrAgentSessionNotFound, got %v", err)
+	}
+}
+
+func TestUpdateAgentSessionHeartbeat_MarkProgress(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	if err := RegisterAgentSession(ctx, db, "sess-progress", "agent-1", ""); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+
+	if err := UpdateAgentSessionHeartbeat(ctx, db, "sess-progress", true); err != nil {
+		t.Fatalf("UpdateAgentSessionHeartbeat: %v", err)
+	}
+
+	s, err := GetAgentSession(ctx, db, "sess-progress")
+	if err != nil {
+		t.Fatalf("GetAgentSession: %v", err)
+	}
+	if s.LastProgressAt == nil {
+		t.Fatal("last_progress_at should be set when progress is marked")
 	}
 }
 

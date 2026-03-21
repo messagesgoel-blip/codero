@@ -70,6 +70,8 @@ func TestOpen_TablesCreated(t *testing.T) {
 		"agent_sessions",
 		"agent_assignments",
 		"agent_events",
+		"agent_rules",
+		"assignment_rule_checks",
 		"schema_migrations",
 	} {
 		var name string

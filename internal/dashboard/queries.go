@@ -342,7 +342,7 @@ func queryActiveSessions(ctx context.Context, db *sql.DB, limit int) ([]ActiveSe
 func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]ActiveSession, error) {
 	threshold := time.Now().UTC().Add(-scheduler.SessionHeartbeatTTL)
 	rows, err := db.QueryContext(ctx, `
-		SELECT session_id, agent_id, mode, started_at, last_seen_at
+		SELECT session_id, agent_id, mode, started_at, last_seen_at, last_progress_at
 		FROM agent_sessions
 		WHERE ended_at IS NULL
 		ORDER BY last_seen_at DESC`)
@@ -352,18 +352,19 @@ func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]Ac
 	defer rows.Close()
 
 	type sessionRow struct {
-		SessionID  string
-		AgentID    string
-		Mode       string
-		StartedAt  time.Time
-		LastSeenAt time.Time
+		SessionID      string
+		AgentID        string
+		Mode           string
+		StartedAt      time.Time
+		LastSeenAt     time.Time
+		LastProgressAt sql.NullTime
 	}
 
 	var sessions []sessionRow
 	seenSessions := map[string]bool{}
 	for rows.Next() {
 		var s sessionRow
-		if err := rows.Scan(&s.SessionID, &s.AgentID, &s.Mode, &s.StartedAt, &s.LastSeenAt); err != nil {
+		if err := rows.Scan(&s.SessionID, &s.AgentID, &s.Mode, &s.StartedAt, &s.LastSeenAt, &s.LastProgressAt); err != nil {
 			return nil, fmt.Errorf("queryActiveSessions: agent_sessions scan row: %w", err)
 		}
 		if s.SessionID == "" {
@@ -428,6 +429,7 @@ func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]Ac
 			Task:            task,
 			StartedAt:       startedAt,
 			LastHeartbeatAt: s.LastSeenAt,
+			ProgressAt:      nullTimePtr(s.LastProgressAt),
 			ElapsedSec:      int64(elapsed.Seconds()),
 		})
 	}
@@ -493,6 +495,7 @@ func queryActiveSessionsFromBranchStates(ctx context.Context, db *sql.DB) ([]Act
 			Task:            resolveTaskFromBranch(branch, state),
 			StartedAt:       startedAt,
 			LastHeartbeatAt: lastSeen.Time,
+			ProgressAt:      nil,
 			ElapsedSec:      int64(elapsed.Seconds()),
 		})
 	}
@@ -617,6 +620,91 @@ func queryAssignments(ctx context.Context, db *sql.DB, limit int) ([]AssignmentS
 	return out, nil
 }
 
+func queryCompliance(ctx context.Context, db *sql.DB, limit int) ([]AgentRuleRow, []AssignmentRuleCheckRow, error) {
+	hasRules, err := tableExists(ctx, db, "agent_rules")
+	if err != nil {
+		return nil, nil, fmt.Errorf("queryCompliance: check agent_rules: %w", err)
+	}
+	hasChecks, err := tableExists(ctx, db, "assignment_rule_checks")
+	if err != nil {
+		return nil, nil, fmt.Errorf("queryCompliance: check assignment_rule_checks: %w", err)
+	}
+	if !hasRules || !hasChecks {
+		return []AgentRuleRow{}, []AssignmentRuleCheckRow{}, nil
+	}
+
+	ruleRows, err := db.QueryContext(ctx, `
+		SELECT rule_id, rule_name, rule_kind, description, enforcement,
+		       violation_action, routing_target, rule_version, active
+		FROM agent_rules
+		ORDER BY rule_id ASC`)
+	if err != nil {
+		return nil, nil, fmt.Errorf("queryCompliance: rules query failed: %w", err)
+	}
+	defer ruleRows.Close()
+
+	var rules []AgentRuleRow
+	for ruleRows.Next() {
+		var rule AgentRuleRow
+		var violationAction string
+		var active int
+		if err := ruleRows.Scan(
+			&rule.RuleID, &rule.RuleName, &rule.RuleKind, &rule.Description, &rule.Enforcement,
+			&violationAction, &rule.RoutingTarget, &rule.RuleVersion, &active,
+		); err != nil {
+			return nil, nil, fmt.Errorf("queryCompliance: scan rule row: %w", err)
+		}
+		if violationAction != "" {
+			if err := json.Unmarshal([]byte(violationAction), &rule.ViolationAction); err != nil {
+				return nil, nil, fmt.Errorf("queryCompliance: decode rule %s actions: %w", rule.RuleID, err)
+			}
+		}
+		rule.Active = active != 0
+		rules = append(rules, rule)
+	}
+	if err := ruleRows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("queryCompliance: rules rows error: %w", err)
+	}
+
+	checkRows, err := db.QueryContext(ctx, `
+		SELECT check_id, assignment_id, session_id, rule_id, rule_version, checked_at,
+		       result, violation_raised, violation_action_taken, detail, resolved_at, resolved_by
+		FROM assignment_rule_checks
+		ORDER BY checked_at DESC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, nil, fmt.Errorf("queryCompliance: checks query failed: %w", err)
+	}
+	defer checkRows.Close()
+
+	var checks []AssignmentRuleCheckRow
+	for checkRows.Next() {
+		var check AssignmentRuleCheckRow
+		var violationRaised int
+		var violationAction string
+		var resolvedAt sql.NullTime
+		if err := checkRows.Scan(
+			&check.CheckID, &check.AssignmentID, &check.SessionID, &check.RuleID, &check.RuleVersion, &check.CheckedAt,
+			&check.Result, &violationRaised, &violationAction, &check.Detail, &resolvedAt, &check.ResolvedBy,
+		); err != nil {
+			return nil, nil, fmt.Errorf("queryCompliance: scan check row: %w", err)
+		}
+		if violationAction != "" {
+			if err := json.Unmarshal([]byte(violationAction), &check.ViolationActionTaken); err != nil {
+				return nil, nil, fmt.Errorf("queryCompliance: decode check %s actions: %w", check.CheckID, err)
+			}
+		}
+		check.ViolationRaised = violationRaised != 0
+		check.ResolvedAt = nullTimePtr(resolvedAt)
+		checks = append(checks, check)
+	}
+	if err := checkRows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("queryCompliance: checks rows error: %w", err)
+	}
+
+	return rules, checks, nil
+}
+
 func assignmentStateFromSummary(summary AssignmentSummary) string {
 	if summary.EndedAt == nil {
 		switch summary.ActivityState {
@@ -640,6 +728,14 @@ func assignmentStateFromSummary(summary AssignmentSummary) string {
 	default:
 		return "ended"
 	}
+}
+
+func nullTimePtr(value sql.NullTime) *time.Time {
+	if !value.Valid {
+		return nil
+	}
+	t := value.Time
+	return &t
 }
 
 func queryAgentEvents(ctx context.Context, db *sql.DB, limit int) ([]AgentEventRow, error) {

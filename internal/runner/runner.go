@@ -535,7 +535,7 @@ func (r *ReviewRunner) emitSessionHeartbeat(ctx context.Context) {
 	if r.sessionStore == nil || r.sessionID == "" {
 		return
 	}
-	if err := r.sessionStore.Heartbeat(ctx, r.sessionID); err != nil {
+	if err := r.sessionStore.Heartbeat(ctx, r.sessionID, false); err != nil {
 		loglib.Warn("runner: session heartbeat failed",
 			loglib.FieldComponent, "runner",
 			"session_id", r.sessionID,

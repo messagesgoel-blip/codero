@@ -81,9 +81,9 @@ func seedAgentSession(t *testing.T, db *sql.DB, sessionID, agentID, mode string,
 	}
 	// nosemgrep: go.lang.security.audit.sqli.gosql-sqli.gosql-sqli
 	_, err := db.Exec(`INSERT INTO agent_sessions
-		(session_id, agent_id, mode, started_at, last_seen_at, ended_at, end_reason)
-		VALUES (?,?,?,?,?,NULL,'')`,
-		sessionID, agentID, mode, startedAt, lastSeen)
+		(session_id, agent_id, mode, started_at, last_seen_at, last_progress_at, ended_at, end_reason)
+		VALUES (?,?,?,?,?,?,NULL,'')`,
+		sessionID, agentID, mode, startedAt, lastSeen, lastSeen)
 	if err != nil {
 		t.Fatalf("seedAgentSession: %v", err)
 	}
@@ -922,6 +922,59 @@ func TestActiveSessions_WithFreshSession(t *testing.T) {
 	if s.LastHeartbeatAt.IsZero() {
 		t.Fatalf("last_heartbeat_at must be set")
 	}
+	if s.ProgressAt == nil || s.ProgressAt.IsZero() {
+		t.Fatalf("progress_at must be set for seeded agent sessions")
+	}
+}
+
+func TestActiveSessions_OmitsNilProgressAt(t *testing.T) {
+	h, db := newTestHandler(t)
+	startedAt := time.Now().Add(-30 * time.Minute).UTC()
+	lastSeen := time.Now().Add(-1 * time.Minute).UTC()
+
+	_, err := db.Exec(`INSERT INTO agent_sessions
+		(session_id, agent_id, mode, started_at, last_seen_at, last_progress_at, ended_at, end_reason)
+		VALUES (?,?,?,?,?,NULL,NULL,'')`,
+		"sess-noprogress", "agent-noprogress", "cli", startedAt, lastSeen)
+	if err != nil {
+		t.Fatalf("seedAgentSession without progress: %v", err)
+	}
+
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/active-sessions", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.ActiveSessionsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.ActiveCount != 1 {
+		t.Fatalf("active_count = %d, want 1", resp.ActiveCount)
+	}
+	if len(resp.Sessions) != 1 {
+		t.Fatalf("sessions length = %d, want 1", len(resp.Sessions))
+	}
+	s := resp.Sessions[0]
+	if s.ProgressAt != nil {
+		t.Fatalf("progress_at = %v, want nil", s.ProgressAt)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode raw body: %v", err)
+	}
+	sessions, ok := body["sessions"].([]any)
+	if !ok || len(sessions) != 1 {
+		t.Fatalf("raw sessions = %#v, want 1 row", body["sessions"])
+	}
+	session, ok := sessions[0].(map[string]any)
+	if !ok {
+		t.Fatalf("raw session row = %#v, want object", sessions[0])
+	}
+	if _, exists := session["progress_at"]; exists {
+		t.Fatalf("progress_at should be omitted from response JSON: %#v", session)
+	}
 }
 
 func TestActiveSessions_DuplicateOwnerSession(t *testing.T) {
@@ -1008,6 +1061,87 @@ func TestAssignments_WithAgentAssignments(t *testing.T) {
 	}
 	if resp.Assignments[0].TaskID != "COD-100" {
 		t.Fatalf("task_id = %q, want COD-100", resp.Assignments[0].TaskID)
+	}
+}
+
+func TestCompliance_Empty(t *testing.T) {
+	h, _ := newTestHandler(t)
+
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/compliance", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.ComplianceResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Rules) != 0 {
+		t.Fatalf("rules len = %d, want 0", len(resp.Rules))
+	}
+	if len(resp.Checks) != 0 {
+		t.Fatalf("checks len = %d, want 0", len(resp.Checks))
+	}
+}
+
+func TestCompliance_WithRulesAndChecks(t *testing.T) {
+	h, db := newTestHandler(t)
+	startedAt := time.Now().Add(-15 * time.Minute).UTC()
+	lastSeen := time.Now().Add(-1 * time.Minute).UTC()
+	checkedAt := time.Now().Add(-2 * time.Minute).UTC()
+
+	seedAgentSession(t, db, "sess-comp-1", "agent-comp-1", "cli", startedAt, lastSeen)
+	seedAgentAssignment(t, db, "assign-comp-1", "sess-comp-1", "agent-comp-1", "acme/api", "task-compliance", "", "COD-200", startedAt)
+
+	_, err := db.Exec(`
+		INSERT INTO agent_rules
+			(rule_id, rule_name, rule_kind, description, enforcement, violation_action, routing_target, rule_version, active)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"RULE-001", "Gate must pass before merge", "gate", "test rule", "hard", `["block","notify"]`, "routing_team", 1, 1,
+	)
+	if err != nil {
+		t.Fatalf("insert agent rule: %v", err)
+	}
+
+	_, err = db.Exec(`
+		INSERT INTO assignment_rule_checks
+			(check_id, assignment_id, session_id, rule_id, rule_version, checked_at, result, violation_raised, violation_action_taken, detail, resolved_at, resolved_by)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, '')`,
+		"chk-comp-1", "assign-comp-1", "sess-comp-1", "RULE-001", 1, checkedAt, "fail", 1, `["block","notify"]`, `{"reason":"ci red"}`,
+	)
+	if err != nil {
+		t.Fatalf("insert assignment rule check: %v", err)
+	}
+
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/compliance", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.ComplianceResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Rules) != 1 {
+		t.Fatalf("rules len = %d, want 1", len(resp.Rules))
+	}
+	if len(resp.Checks) != 1 {
+		t.Fatalf("checks len = %d, want 1", len(resp.Checks))
+	}
+	if resp.Rules[0].RuleID != "RULE-001" {
+		t.Fatalf("rule_id = %q, want RULE-001", resp.Rules[0].RuleID)
+	}
+	if len(resp.Rules[0].ViolationAction) != 2 {
+		t.Fatalf("rule violation_action len = %d, want 2", len(resp.Rules[0].ViolationAction))
+	}
+	if resp.Checks[0].AssignmentID != "assign-comp-1" {
+		t.Fatalf("assignment_id = %q, want assign-comp-1", resp.Checks[0].AssignmentID)
+	}
+	if !resp.Checks[0].ViolationRaised {
+		t.Fatal("violation_raised = false, want true")
+	}
+	if len(resp.Checks[0].ViolationActionTaken) != 2 {
+		t.Fatalf("violation_action_taken len = %d, want 2", len(resp.Checks[0].ViolationActionTaken))
 	}
 }
 

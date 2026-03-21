@@ -54,6 +54,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/dashboard/active-sessions", h.handleActiveSessions)
 	mux.HandleFunc("/api/v1/dashboard/assignments", h.handleAssignments)
 	mux.HandleFunc("/api/v1/dashboard/agent-events", h.handleAgentEvents)
+	mux.HandleFunc("/api/v1/dashboard/compliance", h.handleCompliance)
 	mux.HandleFunc("/api/v1/dashboard/gate-checks", h.handleGateChecks)
 	mux.HandleFunc("/api/v1/dashboard/health", h.handleDashboardHealth)
 	mux.HandleFunc("/api/v1/dashboard/settings", h.handleSettings)
@@ -338,6 +339,34 @@ func (h *Handler) handleAgentEvents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, AgentEventsResponse{
 		Count:       len(events),
 		Events:      events,
+		GeneratedAt: time.Now().UTC(),
+	})
+}
+
+// handleCompliance serves GET /api/v1/dashboard/compliance.
+func (h *Handler) handleCompliance(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "")
+		return
+	}
+	setCORSHeaders(w)
+
+	rules, checks, err := queryCompliance(r.Context(), h.db, activeSessionsPageSize*8)
+	if err != nil {
+		loglib.Error("dashboard: compliance query failed",
+			loglib.FieldComponent, "dashboard", "error", err)
+		writeError(w, http.StatusInternalServerError, "compliance query failed", "db_error")
+		return
+	}
+	if rules == nil {
+		rules = []AgentRuleRow{}
+	}
+	if checks == nil {
+		checks = []AssignmentRuleCheckRow{}
+	}
+	writeJSON(w, http.StatusOK, ComplianceResponse{
+		Rules:       rules,
+		Checks:      checks,
 		GeneratedAt: time.Now().UTC(),
 	})
 }

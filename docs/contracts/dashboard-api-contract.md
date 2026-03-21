@@ -252,6 +252,7 @@ assumptions. It mirrors `agent_id` and should not be treated as an independent i
       },
       "started_at": "2026-03-18T14:10:00Z",
       "last_heartbeat_at": "2026-03-18T14:40:30Z",
+      "progress_at": "2026-03-18T14:37:12Z",
       "elapsed_sec": 1830
     },
     {
@@ -285,6 +286,10 @@ assumptions. It mirrors `agent_id` and should not be treated as an independent i
 - `task` is omitted entirely when neither `task_id` nor a matching branch pattern exists.
   Clients MUST render a missing `task` field gracefully — typically by showing `branch`
   instead — and must not depend on a JSON `null`.
+- `progress_at` is optional. It is set only when the session explicitly reports work
+  progress or when assignment attachment records a new active work claim. Clients must
+  render a missing `progress_at` gracefully and must not substitute `last_heartbeat_at`
+  as if it were equivalent progress.
 - `owner_agent` mirrors `agent_id` for dashboard/TUI parity; treat it as a legacy alias.
 - The response MUST NOT expose secrets, tokens, raw prompts, or file contents.
 
