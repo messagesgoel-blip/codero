@@ -83,6 +83,7 @@ type ActiveSession struct {
 	Task            *ActiveTask `json:"task,omitempty"`
 	StartedAt       time.Time   `json:"started_at"`
 	LastHeartbeatAt time.Time   `json:"last_heartbeat_at"`
+	ProgressAt      *time.Time  `json:"progress_at,omitempty"`
 	ElapsedSec      int64       `json:"elapsed_sec"`
 }
 

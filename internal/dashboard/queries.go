@@ -342,7 +342,7 @@ func queryActiveSessions(ctx context.Context, db *sql.DB, limit int) ([]ActiveSe
 func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]ActiveSession, error) {
 	threshold := time.Now().UTC().Add(-scheduler.SessionHeartbeatTTL)
 	rows, err := db.QueryContext(ctx, `
-		SELECT session_id, agent_id, mode, started_at, last_seen_at
+		SELECT session_id, agent_id, mode, started_at, last_seen_at, last_progress_at
 		FROM agent_sessions
 		WHERE ended_at IS NULL
 		ORDER BY last_seen_at DESC`)
@@ -352,18 +352,19 @@ func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]Ac
 	defer rows.Close()
 
 	type sessionRow struct {
-		SessionID  string
-		AgentID    string
-		Mode       string
-		StartedAt  time.Time
-		LastSeenAt time.Time
+		SessionID      string
+		AgentID        string
+		Mode           string
+		StartedAt      time.Time
+		LastSeenAt     time.Time
+		LastProgressAt sql.NullTime
 	}
 
 	var sessions []sessionRow
 	seenSessions := map[string]bool{}
 	for rows.Next() {
 		var s sessionRow
-		if err := rows.Scan(&s.SessionID, &s.AgentID, &s.Mode, &s.StartedAt, &s.LastSeenAt); err != nil {
+		if err := rows.Scan(&s.SessionID, &s.AgentID, &s.Mode, &s.StartedAt, &s.LastSeenAt, &s.LastProgressAt); err != nil {
 			return nil, fmt.Errorf("queryActiveSessions: agent_sessions scan row: %w", err)
 		}
 		if s.SessionID == "" {
@@ -428,6 +429,7 @@ func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]Ac
 			Task:            task,
 			StartedAt:       startedAt,
 			LastHeartbeatAt: s.LastSeenAt,
+			ProgressAt:      nullTimePtr(s.LastProgressAt),
 			ElapsedSec:      int64(elapsed.Seconds()),
 		})
 	}
@@ -493,6 +495,7 @@ func queryActiveSessionsFromBranchStates(ctx context.Context, db *sql.DB) ([]Act
 			Task:            resolveTaskFromBranch(branch, state),
 			StartedAt:       startedAt,
 			LastHeartbeatAt: lastSeen.Time,
+			ProgressAt:      nil,
 			ElapsedSec:      int64(elapsed.Seconds()),
 		})
 	}
@@ -640,6 +643,14 @@ func assignmentStateFromSummary(summary AssignmentSummary) string {
 	default:
 		return "ended"
 	}
+}
+
+func nullTimePtr(value sql.NullTime) *time.Time {
+	if !value.Valid {
+		return nil
+	}
+	t := value.Time
+	return &t
 }
 
 func queryAgentEvents(ctx context.Context, db *sql.DB, limit int) ([]AgentEventRow, error) {

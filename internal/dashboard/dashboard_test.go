@@ -81,9 +81,9 @@ func seedAgentSession(t *testing.T, db *sql.DB, sessionID, agentID, mode string,
 	}
 	// nosemgrep: go.lang.security.audit.sqli.gosql-sqli.gosql-sqli
 	_, err := db.Exec(`INSERT INTO agent_sessions
-		(session_id, agent_id, mode, started_at, last_seen_at, ended_at, end_reason)
-		VALUES (?,?,?,?,?,NULL,'')`,
-		sessionID, agentID, mode, startedAt, lastSeen)
+		(session_id, agent_id, mode, started_at, last_seen_at, last_progress_at, ended_at, end_reason)
+		VALUES (?,?,?,?,?,?,NULL,'')`,
+		sessionID, agentID, mode, startedAt, lastSeen, lastSeen)
 	if err != nil {
 		t.Fatalf("seedAgentSession: %v", err)
 	}
@@ -921,6 +921,9 @@ func TestActiveSessions_WithFreshSession(t *testing.T) {
 	}
 	if s.LastHeartbeatAt.IsZero() {
 		t.Fatalf("last_heartbeat_at must be set")
+	}
+	if s.ProgressAt == nil || s.ProgressAt.IsZero() {
+		t.Fatalf("progress_at must be set for seeded agent sessions")
 	}
 }
 

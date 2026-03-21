@@ -44,11 +44,12 @@ func (s *Store) Register(ctx context.Context, sessionID, agentID, mode string) e
 }
 
 // Heartbeat updates last_seen for the session and any attached branch assignment.
-func (s *Store) Heartbeat(ctx context.Context, sessionID string) error {
+// When markProgress is true, it also refreshes the durable progress timestamp.
+func (s *Store) Heartbeat(ctx context.Context, sessionID string, markProgress bool) error {
 	if sessionID == "" {
 		return ErrMissingSessionID
 	}
-	if err := state.UpdateAgentSessionHeartbeat(ctx, s.db, sessionID); err != nil {
+	if err := state.UpdateAgentSessionHeartbeat(ctx, s.db, sessionID, markProgress); err != nil {
 		return err
 	}
 

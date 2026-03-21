@@ -680,7 +680,10 @@ func sessionRegisterCmd(configPath *string) *cobra.Command {
 }
 
 func sessionHeartbeatCmd(configPath *string) *cobra.Command {
-	var sessionID string
+	var (
+		sessionID    string
+		markProgress bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "heartbeat",
@@ -699,11 +702,12 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 				return fmt.Errorf("session-id is required")
 			}
 
-			return store.Heartbeat(cmd.Context(), sessionID)
+			return store.Heartbeat(cmd.Context(), sessionID, markProgress)
 		},
 	}
 
 	cmd.Flags().StringVar(&sessionID, "session-id", "", "session identifier (defaults to CODERO_SESSION_ID)")
+	cmd.Flags().BoolVar(&markProgress, "progress", false, "also refresh session progress_at for active work")
 
 	return cmd
 }
