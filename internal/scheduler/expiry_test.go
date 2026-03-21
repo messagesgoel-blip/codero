@@ -2,6 +2,7 @@ package scheduler_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -136,6 +137,80 @@ func TestExpiryWorker_SessionExpiry_SkipsRecent(t *testing.T) {
 	// State should remain unchanged.
 	if got := getBranchState(t, db, id); got != state.StateCoding {
 		t.Errorf("state: got %q, want %q (should not expire recent session)", got, state.StateCoding)
+	}
+}
+
+func TestExpiryWorker_AgentSessionExpiry_EndsSessionAndAssignment(t *testing.T) {
+	db, client, _ := setupExpiryDeps(t)
+
+	ctx := context.Background()
+	if err := state.RegisterAgentSession(ctx, db, "sess-agent", "agent-1", "cli"); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	if err := state.AttachAgentAssignment(ctx, db, &state.AgentAssignment{
+		ID:        "assign-agent",
+		SessionID: "sess-agent",
+		AgentID:   "agent-1",
+		Repo:      "owner/repo",
+		Branch:    "feat/COD-123-expiry",
+		Worktree:  "/worktrees/codero/wt-agent",
+		TaskID:    "COD-123",
+	}); err != nil {
+		t.Fatalf("AttachAgentAssignment: %v", err)
+	}
+	_, err := db.Unwrap().Exec(
+		`UPDATE agent_sessions SET last_seen_at = datetime('now','-2 hours') WHERE session_id = ?`,
+		"sess-agent",
+	)
+	if err != nil {
+		t.Fatalf("seed last_seen_at: %v", err)
+	}
+
+	q := scheduler.NewQueue(client)
+	stream := delivery.NewStream(db, client)
+	worker := scheduler.NewExpiryWorker(db, q, stream)
+
+	worker.RunSessionExpiryCycle(ctx)
+
+	session, err := state.GetAgentSession(ctx, db, "sess-agent")
+	if err != nil {
+		t.Fatalf("GetAgentSession: %v", err)
+	}
+	if session.EndedAt == nil {
+		t.Fatal("ended_at should be set")
+	}
+	if session.EndReason != "expired" {
+		t.Errorf("end_reason: got %q, want %q", session.EndReason, "expired")
+	}
+
+	_, err = state.GetActiveAgentAssignment(ctx, db, "sess-agent")
+	if !errors.Is(err, state.ErrAgentAssignmentNotFound) {
+		t.Fatalf("GetActiveAgentAssignment: expected ErrAgentAssignmentNotFound, got %v", err)
+	}
+
+	assignments, err := state.ListAgentAssignments(ctx, db, "sess-agent")
+	if err != nil {
+		t.Fatalf("ListAgentAssignments: %v", err)
+	}
+	if len(assignments) != 1 {
+		t.Fatalf("assignments count: got %d, want 1", len(assignments))
+	}
+	if assignments[0].EndedAt == nil {
+		t.Fatal("assignment ended_at should be set")
+	}
+	if assignments[0].EndReason != "expired" {
+		t.Errorf("assignment end_reason: got %q, want %q", assignments[0].EndReason, "expired")
+	}
+
+	events, err := state.ListAgentEvents(ctx, db, "sess-agent", 0)
+	if err != nil {
+		t.Fatalf("ListAgentEvents: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events count: got %d, want 1", len(events))
+	}
+	if events[0].EventType != "session_expired" {
+		t.Errorf("event_type: got %q, want %q", events[0].EventType, "session_expired")
 	}
 }
 

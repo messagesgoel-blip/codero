@@ -3,7 +3,6 @@ package dashboard
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -25,18 +24,27 @@ func openDashboardQueryTestDB(t *testing.T) *sql.DB {
 	return db.Unwrap()
 }
 
-func seedBranchSessionForQueryTest(t *testing.T, db *sql.DB, repo, branch, st, sessionID string, lastSeen, submittedAt time.Time) {
+func seedAgentSessionForQueryTest(t *testing.T, db *sql.DB, sessionID, agentID string, lastSeen, startedAt time.Time) {
 	t.Helper()
 	// nosemgrep: go.lang.security.audit.sqli.gosql-sqli.gosql-sqli
-	_, err := db.Exec(`INSERT INTO branch_states
-		(id, repo, branch, head_hash, state, retry_count, max_retries, approved, ci_green,
-		 pending_events, unresolved_threads, owner_session_id, owner_session_last_seen,
-		 queue_priority, submission_time, created_at, updated_at)
-		VALUES (?,?,?,?,?,0,3,0,0,0,0,?,?,?,?,?,?)`,
-		fmt.Sprintf("id-%s-%s", repo, branch), repo, branch, "abc123", st,
-		sessionID, lastSeen, 0, submittedAt, submittedAt, submittedAt)
+	_, err := db.Exec(`INSERT INTO agent_sessions
+		(session_id, agent_id, mode, started_at, last_seen_at, ended_at, end_reason)
+		VALUES (?,?,?,?,?,NULL,'')`,
+		sessionID, agentID, "cli", startedAt, lastSeen)
 	if err != nil {
-		t.Fatalf("seedBranchSessionForQueryTest: %v", err)
+		t.Fatalf("seedAgentSessionForQueryTest: %v", err)
+	}
+}
+
+func seedAgentAssignmentForQueryTest(t *testing.T, db *sql.DB, assignmentID, sessionID, agentID, repo, branch string, startedAt time.Time) {
+	t.Helper()
+	// nosemgrep: go.lang.security.audit.sqli.gosql-sqli.gosql-sqli
+	_, err := db.Exec(`INSERT INTO agent_assignments
+		(assignment_id, session_id, agent_id, repo, branch, worktree, task_id, started_at, ended_at, end_reason, superseded_by)
+		VALUES (?,?,?,?,?,?,?,?,NULL,'',NULL)`,
+		assignmentID, sessionID, agentID, repo, branch, "", "", startedAt)
+	if err != nil {
+		t.Fatalf("seedAgentAssignmentForQueryTest: %v", err)
 	}
 }
 
@@ -44,11 +52,10 @@ func TestActiveSessions_DedupeBeforeLimit(t *testing.T) {
 	db := openDashboardQueryTestDB(t)
 	now := time.Now().UTC()
 
-	// Two rows share the same owner_session_id and are the freshest rows.
-	seedBranchSessionForQueryTest(t, db, "acme/api", "feat/COD-001-first", "coding", "sess-dup", now, now.Add(-20*time.Minute))
-	seedBranchSessionForQueryTest(t, db, "acme/api", "feat/COD-001-second", "queued_cli", "sess-dup", now.Add(-1*time.Second), now.Add(-20*time.Minute))
-	// Distinct session follows behind them in the sort order.
-	seedBranchSessionForQueryTest(t, db, "acme/web", "feat/COD-002-unique", "coding", "sess-unique", now.Add(-10*time.Second), now.Add(-30*time.Minute))
+	seedAgentSessionForQueryTest(t, db, "sess-dup", "agent-a", now, now.Add(-20*time.Minute))
+	seedAgentSessionForQueryTest(t, db, "sess-unique", "agent-b", now.Add(-10*time.Second), now.Add(-30*time.Minute))
+	seedAgentAssignmentForQueryTest(t, db, "assign-1", "sess-dup", "agent-a", "acme/api", "feat/COD-001-first", now.Add(-20*time.Minute))
+	seedAgentAssignmentForQueryTest(t, db, "assign-2", "sess-unique", "agent-b", "acme/web", "feat/COD-002-unique", now.Add(-30*time.Minute))
 
 	sessions, err := queryActiveSessions(context.Background(), db, 2)
 	if err != nil {
@@ -63,9 +70,8 @@ func TestActiveSessions_DedupeBeforeLimit(t *testing.T) {
 	if sessions[1].SessionID != "sess-unique" {
 		t.Fatalf("sessions[1].session_id = %q, want sess-unique", sessions[1].SessionID)
 	}
-	// No owner_agent in DB; expect branch-name fallback per resolveOwnerAgent.
-	if sessions[0].OwnerAgent != "feat/COD-001-first" || sessions[1].OwnerAgent != "feat/COD-002-unique" {
-		t.Fatalf("owner_agent values must fall back to branch name: %+v", sessions)
+	if sessions[0].OwnerAgent != "agent-a" || sessions[1].OwnerAgent != "agent-b" {
+		t.Fatalf("owner_agent values must match agent_id: %+v", sessions)
 	}
 }
 

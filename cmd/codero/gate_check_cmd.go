@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -34,6 +35,7 @@ func gateCheckCmd() *cobra.Command {
 		profile     string
 		outputJSON  bool
 		tuiSnapshot bool
+		loadReport  string
 		reportPath  string
 		timeout     int
 	)
@@ -76,41 +78,57 @@ Additional output modes:
   --json          Emit the canonical JSON report to stdout
   --tui-snapshot  Emit a deterministic plain-text TUI-style snapshot to stdout`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg := gatecheck.LoadEngineConfig()
-
-			// Flag overrides (flags win over env)
-			if repoPath != "" {
-				cfg.RepoPath = repoPath
-			}
-			if profile != "" {
-				parsed, ok := parseGateCheckProfile(profile)
-				if !ok {
-					return usageErrorf("gate-check: unknown profile %q (want strict|portable|off; fast aliases portable)", profile)
-				}
-				cfg.Profile = parsed
-			}
-			if timeout > 0 {
-				cfg.GateTimeout = time.Duration(timeout) * time.Second
-			}
 			if outputJSON && tuiSnapshot {
 				return usageErrorf("gate-check: --json cannot be combined with --tui-snapshot")
 			}
-
-			ctx := cmd.Context()
-			cancel := func() {}
-			if cfg.GateTimeout > 0 {
-				ctx, cancel = context.WithTimeout(ctx, cfg.GateTimeout)
-			} else {
-				ctx, cancel = context.WithCancel(ctx)
+			if loadReport != "" && profile != "" {
+				return usageErrorf("gate-check: --profile cannot be combined with --load-report")
 			}
-			defer cancel()
+			if loadReport != "" && timeout > 0 {
+				return usageErrorf("gate-check: --timeout cannot be combined with --load-report")
+			}
 
-			engine := gatecheck.NewEngine(cfg)
-			report := engine.Run(ctx)
+			var report gatecheck.Report
+			if loadReport != "" {
+				loaded, err := loadGateCheckReport(loadReport)
+				if err != nil {
+					return err
+				}
+				report = loaded
+			} else {
+				cfg := gatecheck.LoadEngineConfig()
 
-			reportPath = resolveGateCheckReportPath(reportPath)
-			if err := saveGateCheckReport(report, reportPath); err != nil {
-				fmt.Fprintf(os.Stderr, "gate-check: warning: could not save report to %s: %v\n", reportPath, err)
+				// Flag overrides (flags win over env)
+				if repoPath != "" {
+					cfg.RepoPath = repoPath
+				}
+				if profile != "" {
+					parsed, ok := parseGateCheckProfile(profile)
+					if !ok {
+						return usageErrorf("gate-check: unknown profile %q (want strict|portable|off; fast aliases portable)", profile)
+					}
+					cfg.Profile = parsed
+				}
+				if timeout > 0 {
+					cfg.GateTimeout = time.Duration(timeout) * time.Second
+				}
+
+				ctx := cmd.Context()
+				cancel := func() {}
+				if cfg.GateTimeout > 0 {
+					ctx, cancel = context.WithTimeout(ctx, cfg.GateTimeout)
+				} else {
+					ctx, cancel = context.WithCancel(ctx)
+				}
+				defer cancel()
+
+				engine := gatecheck.NewEngine(cfg)
+				report = engine.Run(ctx)
+
+				reportPath = resolveGateCheckReportPath(reportPath)
+				if err := saveGateCheckReport(report, reportPath); err != nil {
+					fmt.Fprintf(os.Stderr, "gate-check: warning: could not save report to %s: %v\n", reportPath, err)
+				}
 			}
 
 			if outputJSON {
@@ -134,6 +152,7 @@ Additional output modes:
 	cmd.Flags().StringVarP(&profile, "profile", "p", "", "gate profile: strict|portable|off (fast aliases portable; default: from env or portable)")
 	cmd.Flags().BoolVar(&outputJSON, "json", false, "emit canonical JSON report to stdout")
 	cmd.Flags().BoolVar(&tuiSnapshot, "tui-snapshot", false, "emit deterministic plain-text TUI-style snapshot to stdout")
+	cmd.Flags().StringVar(&loadReport, "load-report", "", "read an existing canonical JSON report from this file instead of running gate checks")
 	cmd.Flags().StringVar(&reportPath, "report-path", "", "write JSON report to this file (also: CODERO_GATE_CHECK_REPORT_PATH)")
 	cmd.Flags().IntVar(&timeout, "timeout", 0, "engine timeout in seconds (0 = use env/default)")
 
@@ -201,6 +220,57 @@ func parseGateCheckProfile(raw string) (gatecheck.Profile, bool) {
 		return gatecheck.ProfilePortable, true
 	default:
 		return "", false
+	}
+}
+
+func loadGateCheckReport(path string) (gatecheck.Report, error) {
+	var report gatecheck.Report
+	data, err := os.ReadFile(path) //nolint:gosec
+	if err != nil {
+		return report, fmt.Errorf("gate-check: read report %s: %w", path, err)
+	}
+	var compat struct {
+		SchemaVersion string `json:"schema_version"`
+		Profile       string `json:"profile"`
+	}
+	if err := json.Unmarshal(data, &compat); err != nil {
+		return report, fmt.Errorf("gate-check: parse report %s: %w", path, err)
+	}
+	if err := json.Unmarshal(data, &report); err != nil {
+		return report, fmt.Errorf("gate-check: parse report %s: %w", path, err)
+	}
+	normalizeLoadedGateCheckReport(&report, gatecheck.Profile(strings.ToLower(compat.Profile)), compat.SchemaVersion)
+	return report, nil
+}
+
+func normalizeLoadedGateCheckReport(report *gatecheck.Report, topLevelProfile gatecheck.Profile, topLevelSchema string) {
+	if report == nil {
+		return
+	}
+	if report.Summary.Profile == "" && topLevelProfile != "" {
+		report.Summary.Profile = topLevelProfile
+	}
+	if report.Summary.SchemaVersion == "" && topLevelSchema != "" {
+		report.Summary.SchemaVersion = topLevelSchema
+	}
+	report.Summary.OverallStatus = canonicalCheckStatus(string(report.Summary.OverallStatus))
+	for i := range report.Checks {
+		report.Checks[i].Status = canonicalCheckStatus(string(report.Checks[i].Status))
+	}
+}
+
+func canonicalCheckStatus(raw string) gatecheck.CheckStatus {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "pass", "passed":
+		return gatecheck.StatusPass
+	case "fail", "failed":
+		return gatecheck.StatusFail
+	case "skip", "skipped":
+		return gatecheck.StatusSkip
+	case "disabled":
+		return gatecheck.StatusDisabled
+	default:
+		return gatecheck.CheckStatus(strings.ToLower(strings.TrimSpace(raw)))
 	}
 }
 

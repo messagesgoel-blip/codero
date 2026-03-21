@@ -27,6 +27,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/codero/codero/internal/daemon"
+	dashboardpkg "github.com/codero/codero/internal/dashboard"
 	"github.com/codero/codero/internal/gatecheck"
 	redislib "github.com/codero/codero/internal/redis"
 	"github.com/codero/codero/internal/state"
@@ -40,6 +41,7 @@ func dashboardCmd(configPath *string) *cobra.Command {
 		port             int
 		repoPath         string
 		reportPath       string
+		fixtureDirPath   string
 		openBrws         bool
 		checkMode        bool
 		serveFixtureMode bool
@@ -56,7 +58,9 @@ Examples:
   codero dashboard --open            # open dashboard in default browser (interactive only)
   codero dashboard --port 9090       # override port (useful when testing non-default setups)
   codero dashboard --serve-fixture --report-path .codero/gate-check/last-report.json
-  codero dashboard --serve-fixture --report-path .codero/gate-check/last-report.json --check`,
+  codero dashboard --serve-fixture --report-path .codero/gate-check/last-report.json --check
+  codero dashboard --serve-fixture --fixture-dir scripts/evidence/fixtures/v8
+  codero dashboard --serve-fixture --fixture-dir scripts/evidence/fixtures/v8 --check`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, cfgErr := loadConfig(*configPath) // best-effort; fall back to defaults on error
 			reportPathSet := reportPath != ""
@@ -85,6 +89,9 @@ Examples:
 			if cfgErr != nil {
 				fmt.Fprintf(os.Stderr, "note: config load error (%v); using defaults where needed\n", cfgErr)
 			}
+			if fixtureDirPath != "" && !serveFixtureMode {
+				return fmt.Errorf("--fixture-dir can only be used with --serve-fixture")
+			}
 
 			// Determine base URL: prefer explicit public URL from config.
 			baseURL := fmt.Sprintf("http://%s:%d", effectiveHost, effectivePort)
@@ -106,7 +113,7 @@ Examples:
 				if openBrws {
 					return fmt.Errorf("--open cannot be combined with --serve-fixture")
 				}
-				return runDashboardFixture(effectiveHost, effectivePort, normalizedBasePath, repoPath, reportPath, checkMode, reportPathSet)
+				return runDashboardFixture(effectiveHost, effectivePort, normalizedBasePath, repoPath, reportPath, fixtureDirPath, checkMode, reportPathSet)
 			}
 
 			if checkMode {
@@ -129,6 +136,7 @@ Examples:
 	cmd.Flags().IntVar(&port, "port", 0, "daemon port (default: from config or 8080)")
 	cmd.Flags().StringVarP(&repoPath, "repo-path", "r", "", "path to repository root when serving a local fixture (default: current directory)")
 	cmd.Flags().StringVar(&reportPath, "report-path", "", "gate-check report file to expose from /api/v1/dashboard/gate-checks in fixture mode")
+	cmd.Flags().StringVar(&fixtureDirPath, "fixture-dir", "", "directory containing fixture data files (report.json, sessions.json, activity.json) for --serve-fixture mode")
 	cmd.Flags().BoolVar(&openBrws, "open", false, "open dashboard in default browser (interactive only)")
 	cmd.Flags().BoolVar(&checkMode, "check", false, "validate dashboard and API endpoints; exit non-zero on failure")
 	cmd.Flags().BoolVar(&serveFixtureMode, "serve-fixture", false, "start a local dashboard fixture server backed by an empty temp state DB")
@@ -213,7 +221,7 @@ func validateGateChecksBody(body []byte) error {
 	return nil
 }
 
-func runDashboardFixture(bindHost string, bindPort int, basePath, repoPath, reportPath string, checkMode, reportPathSet bool) error {
+func runDashboardFixture(bindHost string, bindPort int, basePath, repoPath, reportPath, fixtureDirPath string, checkMode, reportPathSet bool) error {
 	basePath = normalizeDashboardBasePath(basePath)
 	if repoPath == "" {
 		wd, err := os.Getwd()
@@ -236,6 +244,28 @@ func runDashboardFixture(bindHost string, bindPort int, basePath, repoPath, repo
 			return fmt.Errorf("resolve report path: %w", err)
 		}
 		reportPath = absReportPath
+	}
+
+	// When --fixture-dir is provided, load report.json from it if --report-path
+	// was not explicitly set. Sessions and activity are always seeded from the dir.
+	var resolvedFixtureDir string
+	if fixtureDirPath != "" {
+		resolvedPath := fixtureDirPath
+		if !filepath.IsAbs(resolvedPath) {
+			resolvedPath = filepath.Join(repoPath, fixtureDirPath)
+		}
+		abs, err := filepath.Abs(resolvedPath)
+		if err != nil {
+			return fmt.Errorf("resolve fixture-dir: %w", err)
+		}
+		resolvedFixtureDir = abs
+		if !reportPathSet {
+			candidate := filepath.Join(resolvedFixtureDir, "report.json")
+			if _, statErr := os.Stat(candidate); statErr == nil {
+				reportPath = candidate
+				reportPathSet = true
+			}
+		}
 	}
 
 	requireGateCheckReport := reportPathSet
@@ -263,6 +293,13 @@ func runDashboardFixture(bindHost string, bindPort int, basePath, repoPath, repo
 		return fmt.Errorf("open fixture db: %w", err)
 	}
 	defer db.Close()
+
+	// Seed fixture data (sessions, activity) from --fixture-dir when provided.
+	if resolvedFixtureDir != "" {
+		if _, loadErr := dashboardpkg.LoadFixtureDir(db.Unwrap(), resolvedFixtureDir); loadErr != nil {
+			return fmt.Errorf("load fixture dir %q: %w", resolvedFixtureDir, loadErr)
+		}
+	}
 
 	restoreRepoPath := withEnv("CODERO_REPO_PATH", repoPath)
 	defer restoreRepoPath()

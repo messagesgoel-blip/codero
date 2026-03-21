@@ -62,7 +62,7 @@ That last change is deliberate. Repo-qualified identity, fairness, and delivery 
 - Operator actions must have identical semantics across CLI, TUI, and web UI.
 - Multi-repo correctness is a Phase 1 proving requirement. Multi-tenant isolation is Phase 2.
 - No phase is complete without tests, observability, runbooks, and recovery drills.
-- The roadmap does not own agent lifecycle. codero manages review orchestration, not agent scheduling.
+- The roadmap does not own agent process launch or graceful shutdown. codero does own session registration, assignment attachment, heartbeat tracking, and reconciliation once a session exists.
 
 ### 2.1 Product thesis and anti-goals
 
@@ -95,6 +95,7 @@ Anti-goals:
 codero owns:
 
 - branch registration and submission
+- agent session registration, liveness tracking, and assignment attachment
 - queue scoring, lease issuance, and retry handling
 - PR review execution and finding normalization
 - pre-commit local review orchestration
@@ -108,6 +109,7 @@ codero does not own:
 
 - starting agent sessions
 - deciding when a human or cron launches an agent
+- guaranteeing graceful termination when a human closes a window
 - creating worktrees unless the operator explicitly runs the setup command
 - external scheduler behavior
 - direct merge decisions outside the deterministic state rules
@@ -120,7 +122,19 @@ The intended automation loop is:
 
 operator or external orchestration starts agent -> agent works in isolated worktree -> agent requests pre-commit review -> shared gate-heartbeat runs Copilot then LiteLLM (with Semgrep as deterministic blocker in the same pipeline) -> pre-commit hook allows commit on PASS -> agent submits branch -> codero queues and dispatches PR review -> findings are delivered -> operator or orchestration re-triggers agent with findings -> agent fixes and re-submits -> codero confirms approval, CI green, zero pending events, and no unresolved review threads -> branch becomes merge_ready -> repo auto-merge completes the cycle.
 
-### 3.4 Data layer by phase
+### 3.4 Session registration and tracking
+
+codero treats session registration as a minimal identity handshake, not a task claim.
+
+- `session.register` emits `session_id` and `agent_id` only.
+- `session.heartbeat` updates liveness and may use Redis TTL as the fast path, with durable sync for audit and recovery.
+- `task.claim` or `task.assign` attaches `repo`, `branch`, `worktree`, and optional `task_id`.
+- a session may receive multiple assignments over time, but only one active assignment is allowed at once.
+- if a window closes or the agent loses context, Codero marks the session expired or lost when heartbeats stop.
+- missing webhooks or stale `waiting_*` states are repaired by reconciliation, not by trusting the agent to re-signal.
+- assignment creation and compliance check creation must be atomic.
+
+### 3.5 Data layer by phase
 
 | Phase | Layer | Role | Owns |
 |---|---|---|---|
@@ -131,7 +145,7 @@ operator or external orchestration starts agent -> agent works in isolated workt
 | Phase 2+ | Managed Redis (non-cluster baseline) | Coordination and job primitives | Phase 1 coordination roles plus Asynq queues, per-tenant rate limits, pub/sub |
 | Phase 2+ | Object-store backed delivery streams | Append-only delivery | Per-tenant or per-repo delivery streams, with seq semantics preserved |
 
-### 3.5 System invariants
+### 3.6 System invariants
 
 - Branch identity is **repo + branch + HEAD**, never branch name alone.
 - `merge_ready` is computed deterministically, never inferred by model output.
@@ -151,7 +165,7 @@ Core entities and relationships:
 - **review run**: one execution attempt against a branch instance or PR, with backend, timing, and outcome.
 - **lease**: exclusive dispatch claim for a branch instance with TTL and heartbeat semantics.
 - **feedback bundle**: normalized review findings and system events delivered to agents/operators with seq ordering.
-- **agent session**: external actor context linked to one active task branch at a time.
+- **agent session**: external actor context for a live agent instance; may be unattached until a task is claimed or assigned, then linked to one active task branch at a time.
 - **operator action**: explicit human control action with actor, reason, and audit trace.
 - **policy set**: hierarchical configuration for queue, review, gating, and merge semantics.
 - **suppression/waiver**: time-scoped acceptance of noisy or intentionally accepted findings, with owner and expiry.
@@ -250,6 +264,16 @@ This is another intentional conceptual correction. Multi-repo identity and fairn
 - Unresolved review thread cross-check tests.
 - readiness sign-off with explicit activity thresholds and recovery evidence.
 
+#### 1G. Agent session registration and task attachment
+
+- Minimal `session.register` handshake: emit `session_id` and `agent_id` only.
+- Durable `agent_sessions` row with `started_at`, `last_seen_at`, and presence state.
+- `session.heartbeat` as the liveness path, with Redis TTL as the fast presence layer and durable sync for audit/recovery.
+- `task.claim` and `task.assign` attach `repo`, `branch`, `worktree`, and optional `task_id`.
+- Reconciliation for missed webhooks and stale `waiting_*` assignment states.
+- Atomic creation of assignments and their compliance checks.
+- Dashboard/TUI session views that show active, waiting, blocked, expired, and lost states without requiring graceful shutdown.
+
 ### Out of scope
 
 - Tenant billing and metering
@@ -267,6 +291,7 @@ All of the following must be true:
 - Zero missed feedback deliveries.
 - Zero silent queue stalls.
 - Zero undetected stale branches.
+- Agent session registration, heartbeat expiry, and assignment attachment are exercised end to end in at least one live pilot.
 - Recovery tests pass for Redis restart, daemon restart, SIGKILL aftermath, and duplicate webhook delivery.
 - Pre-commit loops are enforced by hook, not policy alone.
 

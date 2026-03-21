@@ -1,0 +1,115 @@
+package session
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/google/uuid"
+
+	"github.com/codero/codero/internal/state"
+)
+
+var (
+	ErrMissingSessionID  = errors.New("session_id is required")
+	ErrMissingAgentID    = errors.New("agent_id is required")
+	ErrMissingAssignment = errors.New("repo and branch are required to attach assignment")
+	ErrSessionNotFound   = errors.New("session not found")
+)
+
+// Store persists agent session registration and assignment metadata.
+// It uses the durable state DB owned by internal/state.
+type Store struct {
+	db *state.DB
+}
+
+// NewStore constructs a session Store for the given state DB.
+func NewStore(db *state.DB) *Store {
+	return &Store{db: db}
+}
+
+// Register records a session with session_id + agent_id only.
+// If the session already exists, it refreshes agent_id, mode, and last_seen.
+func (s *Store) Register(ctx context.Context, sessionID, agentID, mode string) error {
+	if sessionID == "" {
+		return ErrMissingSessionID
+	}
+	if agentID == "" {
+		return ErrMissingAgentID
+	}
+	if err := state.RegisterAgentSession(ctx, s.db, sessionID, agentID, mode); err != nil {
+		return err
+	}
+	return nil
+}
+
+// Heartbeat updates last_seen for the session and any attached branch assignment.
+func (s *Store) Heartbeat(ctx context.Context, sessionID string) error {
+	if sessionID == "" {
+		return ErrMissingSessionID
+	}
+	if err := state.UpdateAgentSessionHeartbeat(ctx, s.db, sessionID); err != nil {
+		return err
+	}
+
+	active, err := state.GetActiveAgentAssignment(ctx, s.db, sessionID)
+	if err != nil {
+		if errors.Is(err, state.ErrAgentAssignmentNotFound) {
+			return nil
+		}
+		return err
+	}
+	if active.Repo != "" && active.Branch != "" {
+		if err := state.UpdateSessionHeartbeat(s.db, active.Repo, active.Branch); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// AttachAssignment fills in repo/branch/worktree/task_id when a task is claimed or assigned.
+// It also updates the branch session tracking fields for dashboard visibility.
+func (s *Store) AttachAssignment(
+	ctx context.Context,
+	sessionID, agentID, repo, branch, worktree, mode, taskID string,
+) error {
+	if sessionID == "" {
+		return ErrMissingSessionID
+	}
+	if agentID == "" {
+		return ErrMissingAgentID
+	}
+	if repo == "" || branch == "" {
+		return ErrMissingAssignment
+	}
+	if err := state.RegisterAgentSession(ctx, s.db, sessionID, agentID, mode); err != nil {
+		return err
+	}
+
+	assignment := &state.AgentAssignment{
+		ID:        uuid.New().String(),
+		SessionID: sessionID,
+		AgentID:   agentID,
+		Repo:      repo,
+		Branch:    branch,
+		Worktree:  worktree,
+		TaskID:    taskID,
+	}
+	if err := state.AttachAgentAssignment(ctx, s.db, assignment); err != nil {
+		return err
+	}
+	res, err := s.db.Unwrap().ExecContext(ctx, `
+		UPDATE branch_states
+		SET owner_session_id = ?, owner_session_last_seen = datetime('now'),
+		    owner_agent = ?, updated_at = datetime('now')
+		WHERE repo = ? AND branch = ?`,
+		sessionID, agentID, repo, branch)
+	if err != nil {
+		return fmt.Errorf("attach assignment: sync branch state: %w", err)
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		return state.ErrBranchNotFound
+	}
+	return nil
+}

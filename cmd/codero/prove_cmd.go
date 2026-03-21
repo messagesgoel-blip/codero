@@ -9,6 +9,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -412,7 +413,7 @@ func checkNonTTYWatchFallback(repoPath string) ProveCheck {
 		_ = wr.Close()
 	}()
 	os.Stdout = wr
-	watchErr := runGateStatusWatch(tmpRepo, 5)
+	watchErr := runGateStatusWatch(context.Background(), tmpRepo, 5)
 	if err := wr.Close(); err != nil && watchErr == nil {
 		watchErr = err
 	}

@@ -72,10 +72,13 @@ type ActiveTask struct {
 // ActiveSession is one row in the active-sessions panel.
 type ActiveSession struct {
 	SessionID       string      `json:"session_id"`
+	AgentID         string      `json:"agent_id"`
 	Repo            string      `json:"repo"`
 	Branch          string      `json:"branch"`
+	Worktree        string      `json:"worktree,omitempty"`
 	PRNumber        int         `json:"pr_number"`
 	OwnerAgent      string      `json:"owner_agent"`
+	Mode            string      `json:"mode,omitempty"`
 	ActivityState   string      `json:"activity_state"`
 	Task            *ActiveTask `json:"task,omitempty"`
 	StartedAt       time.Time   `json:"started_at"`
@@ -216,13 +219,16 @@ type SecurityScoreStats struct {
 // It reports DB connectivity, per-feed freshness, live agent count, and
 // best-effort metrics derived from local files (security score, coverage, ETA).
 type DashboardHealth struct {
-	Database         ServiceStatus       `json:"database"`
-	Feeds            DashboardFeeds      `json:"feeds"`
-	ActiveAgentCount int                 `json:"active_agent_count"`
-	SecurityScore    *SecurityScoreStats `json:"security_score,omitempty"`
-	CoveragePct      *float64            `json:"coverage_pct,omitempty"`
-	ETAMin           *int                `json:"eta_min,omitempty"`
-	GeneratedAt      time.Time           `json:"generated_at"`
+	Database             ServiceStatus       `json:"database"`
+	Feeds                DashboardFeeds      `json:"feeds"`
+	ActiveAgentCount     int                 `json:"active_agent_count"`
+	StaleSessionCount    int                 `json:"stale_session_count"`
+	ExpiredSessionCount  int                 `json:"expired_session_count"`
+	ReconciliationStatus string              `json:"reconciliation_status"`
+	SecurityScore        *SecurityScoreStats `json:"security_score,omitempty"`
+	CoveragePct          *float64            `json:"coverage_pct,omitempty"`
+	ETAMin               *int                `json:"eta_min,omitempty"`
+	GeneratedAt          time.Time           `json:"generated_at"`
 }
 
 // GateCheckStatus mirrors gatecheck.CheckStatus for dashboard JSON.

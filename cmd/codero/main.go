@@ -20,8 +20,10 @@ import (
 	redislib "github.com/codero/codero/internal/redis"
 	"github.com/codero/codero/internal/runner"
 	"github.com/codero/codero/internal/scheduler"
+	"github.com/codero/codero/internal/session"
 	"github.com/codero/codero/internal/state"
 	"github.com/codero/codero/internal/webhook"
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
@@ -49,6 +51,7 @@ func main() {
 		gateStatusCmd(),
 		gateCheckCmd(),
 		registerCmd(),
+		sessionCmd(&configPath),
 		queueCmd(&configPath),
 		branchCmd(&configPath),
 		eventsCmd(&configPath),
@@ -613,6 +616,229 @@ If no branch is provided, uses the current git branch.`,
 	cmd.Flags().BoolVar(&skipLocal, "skip-local", false, "skip local_review and go directly to queue")
 
 	return cmd
+}
+
+// sessionCmd manages agent session registration, heartbeats, and assignment attachment.
+func sessionCmd(configPath *string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "session",
+		Short: "Manage agent sessions",
+	}
+
+	cmd.AddCommand(
+		sessionRegisterCmd(configPath),
+		sessionHeartbeatCmd(configPath),
+		sessionAttachCmd(configPath),
+	)
+
+	return cmd
+}
+
+func sessionRegisterCmd(configPath *string) *cobra.Command {
+	var (
+		sessionID string
+		agentID   string
+		mode      string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "register",
+		Short: "Register a new agent session",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, cleanup, err := openSessionStore(*configPathForCmd(cmd))
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+
+			if sessionID == "" {
+				sessionID = resolveSessionIDFromEnv()
+			}
+			if sessionID == "" {
+				sessionID = uuid.New().String()
+			}
+			if agentID == "" {
+				agentID = resolveAgentIDFromEnv()
+			}
+			if mode == "" {
+				mode = resolveSessionModeFromEnv("agent")
+			}
+
+			if err := store.Register(cmd.Context(), sessionID, agentID, mode); err != nil {
+				return err
+			}
+			fmt.Printf("session_id: %s\n", sessionID)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&sessionID, "session-id", "", "session identifier (defaults to CODERO_SESSION_ID or auto-generated)")
+	cmd.Flags().StringVar(&agentID, "agent-id", "", "agent identifier (defaults to CODERO_AGENT_ID)")
+	cmd.Flags().StringVar(&mode, "mode", "", "session mode label (default: agent)")
+
+	return cmd
+}
+
+func sessionHeartbeatCmd(configPath *string) *cobra.Command {
+	var sessionID string
+
+	cmd := &cobra.Command{
+		Use:   "heartbeat",
+		Short: "Emit a session heartbeat",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, cleanup, err := openSessionStore(*configPathForCmd(cmd))
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+
+			if sessionID == "" {
+				sessionID = resolveSessionIDFromEnv()
+			}
+			if sessionID == "" {
+				return fmt.Errorf("session-id is required")
+			}
+
+			return store.Heartbeat(cmd.Context(), sessionID)
+		},
+	}
+
+	cmd.Flags().StringVar(&sessionID, "session-id", "", "session identifier (defaults to CODERO_SESSION_ID)")
+
+	return cmd
+}
+
+func sessionAttachCmd(configPath *string) *cobra.Command {
+	var (
+		sessionID string
+		agentID   string
+		repo      string
+		branch    string
+		worktree  string
+		mode      string
+		taskID    string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "attach",
+		Short: "Attach assignment context to a session",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfig(*configPathForCmd(cmd))
+			if err != nil {
+				return fmt.Errorf("codero: config: %w", err)
+			}
+
+			store, cleanup, err := openSessionStore(*configPathForCmd(cmd))
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+
+			if sessionID == "" {
+				sessionID = resolveSessionIDFromEnv()
+			}
+			if sessionID == "" {
+				return fmt.Errorf("session-id is required")
+			}
+			if agentID == "" {
+				agentID = resolveAgentIDFromEnv()
+			}
+			if mode == "" {
+				mode = resolveSessionModeFromEnv("agent")
+			}
+			if worktree == "" {
+				worktree = resolveWorktreeFromEnv()
+			}
+			if worktree == "" {
+				if cwd, err := os.Getwd(); err == nil {
+					worktree = cwd
+				}
+			}
+			if repo == "" {
+				if len(cfg.Repos) == 0 {
+					return fmt.Errorf("no repositories configured")
+				}
+				repo = cfg.Repos[0]
+			}
+			if branch == "" {
+				var err error
+				branch, err = getCurrentBranch()
+				if err != nil {
+					return fmt.Errorf("get current branch: %w", err)
+				}
+			}
+
+			if err := store.AttachAssignment(cmd.Context(), sessionID, agentID, repo, branch, worktree, mode, taskID); err != nil {
+				return err
+			}
+			fmt.Printf("session %s attached to %s/%s\n", sessionID, repo, branch)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&sessionID, "session-id", "", "session identifier (defaults to CODERO_SESSION_ID)")
+	cmd.Flags().StringVar(&agentID, "agent-id", "", "agent identifier (defaults to CODERO_AGENT_ID)")
+	cmd.Flags().StringVarP(&repo, "repo", "R", "", "repository (owner/repo)")
+	cmd.Flags().StringVarP(&branch, "branch", "b", "", "branch name (default: current git branch)")
+	cmd.Flags().StringVar(&worktree, "worktree", "", "worktree path (default: CODERO_WORKTREE or cwd)")
+	cmd.Flags().StringVar(&mode, "mode", "", "session mode label (default: agent)")
+	cmd.Flags().StringVar(&taskID, "task-id", "", "optional task identifier")
+
+	return cmd
+}
+
+func openSessionStore(configPath string) (*session.Store, func(), error) {
+	cfg, err := loadConfig(configPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("codero: config: %w", err)
+	}
+
+	db, err := state.Open(cfg.DBPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open state store: %w", err)
+	}
+	cleanup := func() {
+		_ = db.Close()
+	}
+
+	return session.NewStore(db), cleanup, nil
+}
+
+func resolveAgentIDFromEnv() string {
+	if v := os.Getenv("CODERO_AGENT_ID"); v != "" {
+		return v
+	}
+	if v := os.Getenv("USER"); v != "" {
+		return v
+	}
+	if host, err := os.Hostname(); err == nil {
+		return host
+	}
+	return ""
+}
+
+func resolveSessionIDFromEnv() string {
+	if v := os.Getenv("CODERO_SESSION_ID"); v != "" {
+		return v
+	}
+	if v := os.Getenv("CODERO_AGENT_SESSION_ID"); v != "" {
+		return v
+	}
+	return ""
+}
+
+func resolveSessionModeFromEnv(fallback string) string {
+	if v := os.Getenv("CODERO_SESSION_MODE"); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func resolveWorktreeFromEnv() string {
+	if v := os.Getenv("CODERO_WORKTREE"); v != "" {
+		return v
+	}
+	return ""
 }
 
 // configPathForCmd extracts the config path from cobra command flags.

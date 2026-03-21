@@ -20,8 +20,7 @@ type logEntry struct {
 	arrow bool   // show ← pointer
 }
 
-// LogsArchPane renders the center pane: event log on the left and a static
-// architecture node diagram + code-snippet box on the right.
+// LogsArchPane renders the live event stream pane.
 type LogsArchPane struct {
 	events []logEntry
 	theme  Theme
@@ -76,7 +75,11 @@ func deliveryEventsToLog(events []state.DeliveryEvent) []logEntry {
 // defaultLogEntries returns an empty slice; the pane renders an idle-state
 // message when there are no live events to display.
 func defaultLogEntries() []logEntry {
-	return []logEntry{}
+	return []logEntry{
+		{ts: "--:--:--", msg: "Waiting for event stream...", level: "normal"},
+		{ts: "--:--:--", msg: "SSE connection establishing...", level: "normal"},
+		{ts: "--:--:--", msg: "Dashboard relay standby...", level: "normal"},
+	}
 }
 
 func (p LogsArchPane) View() string {
@@ -84,39 +87,37 @@ func (p LogsArchPane) View() string {
 		return ""
 	}
 
-	w := maxInt(0, p.width)
-
-	// Split: 60% log, 40% arch
-	archW := w * 4 / 10
-	if archW < 22 {
-		archW = 22
-	}
-	logW := w - archW
-	if logW < 12 {
-		// Not enough room for arch on narrow terminals — log only
-		logW = w
-		archW = 0
-	}
-
 	// Header row spans full width
-	header := p.theme.ListHeader.Render("  INTERACTIVE LOGS & ARCHITECTURE VISUALIZATION")
-	sep := p.theme.Muted.Render(strings.Repeat("─", maxInt(0, w-2)))
+	w := maxInt(0, p.width)
+	header := p.theme.PaneHeader.Width(w).Render("EVENT STREAM & ARCHITECTURE")
+	sep := p.theme.Muted.Render(strings.Repeat("─", w))
 
-	// Content height below header + sep
 	contentH := maxInt(0, p.height-2)
 
-	// Render the two columns
-	logCol := p.renderLogColumn(logW, contentH)
+	// If we have many events, just show logs.
+	// If few or none, show logs and arch diagram.
 	var body string
-	if archW > 0 {
-		archCol := p.renderArchColumn(archW, contentH)
-		body = lipgloss.JoinHorizontal(lipgloss.Top, logCol, archCol)
+	if len(p.events) > contentH/2 {
+		body = p.renderLogColumn(w, contentH)
 	} else {
-		body = logCol
+		logH := 0
+		if contentH < 3 {
+			logH = contentH
+		} else {
+			logH = minInt(contentH, maxInt(3, contentH/2))
+		}
+		archH := maxInt(0, contentH-logH)
+		logs := p.renderLogColumn(w, logH)
+		if archH == 0 {
+			body = logs
+		} else {
+			arch := p.renderArchColumn(w, archH)
+			body = lipgloss.JoinVertical(lipgloss.Left, logs, p.theme.Muted.Render(strings.Repeat("─", w)), arch)
+		}
 	}
 
 	full := lipgloss.JoinVertical(lipgloss.Left, header, sep, body)
-	return lipgloss.NewStyle().Width(w).Height(p.height).Render(full)
+	return lipgloss.NewStyle().Width(w).Render(full)
 }
 
 // renderLogColumn builds the scrollable event-log column.
@@ -144,7 +145,7 @@ func (p LogsArchPane) renderLogColumn(w, h int) string {
 		msgW := maxInt(0, w-3-tsLen-sufLen)
 		msgStr := truncStr(e.msg, msgW)
 
-		raw := fmt.Sprintf("  %-*s %s%s", msgW, msgStr, ts, suffix)
+		raw := fmt.Sprintf("  %-*s %s%s", msgW, msgStr, p.theme.Muted.Render(ts), suffix)
 
 		var line string
 		switch e.level {
@@ -153,7 +154,7 @@ func (p LogsArchPane) renderLogColumn(w, h int) string {
 		case "alert":
 			line = p.theme.Warning.Render(raw)
 		default:
-			line = p.theme.Muted.Render(raw)
+			line = p.theme.Base.Render(raw)
 		}
 		lines = append(lines, line)
 		// Blank separator between entries (matching the mockup spacing)

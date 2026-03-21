@@ -28,26 +28,24 @@ func tuiCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "tui",
 		Short: "Launch the interactive Codero terminal UI",
-		Long: `Launch the Bubble Tea operator shell with queue, gate, events, and findings views.
+		Long: `Launch the Bubble Tea operator shell with agents, logs, pipeline, findings, and review prompt panes.
 
 The TUI provides a full-screen interactive overview of the codero control plane:
-  - Left pane:   branch list with state and queue position
-  - Center pane: tabbed views — output / events / queue / findings
-  - Right pane:  gate status, progress bar, blocker comments
+  - Left pane:   agents and relay orchestration
+  - Middle panes: live logs, pipeline progress, and findings
+  - Bottom pane: review prompt and local review commands
 
 Refreshes automatically at --interval seconds. Press q or Ctrl+C to quit.
 
 Keyboard shortcuts:
   h / ?          toggle help
-  Tab / Shift+Tab  cycle center tabs
-  1-4            jump to tab by number
   H/J/K/L        move focus between panes
   r              force refresh
   q / Ctrl+C     quit
 
 Examples:
   codero tui
-  codero tui --view gate --interval 3
+  codero tui --view queue --interval 3
   codero tui --theme dracula
   codero tui --no-alt-screen          # useful in tmux or terminals that don't support alt screen`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -73,6 +71,7 @@ Examples:
 			initialVM := tui.AdapterFromPath(repoPath)
 			cfg := tui.Config{
 				RepoPath:   repoPath,
+				Context:    cmd.Context(),
 				Interval:   time.Duration(intervalSec) * time.Second,
 				Theme:      theme,
 				WatchMode:  true,
@@ -80,7 +79,7 @@ Examples:
 				InitialTab: initialTab,
 			}
 
-			opts := []tea.ProgramOption{}
+			opts := []tea.ProgramOption{tea.WithContext(cmd.Context())}
 			if !noAltScreen {
 				opts = append(opts, tea.WithAltScreen())
 			}
@@ -96,7 +95,7 @@ Examples:
 	cmd.Flags().StringVar(&themeName, "theme", "dark",
 		"UI theme: dark (default), light, system, dracula, vscode")
 	cmd.Flags().StringVar(&viewName, "view", "gate",
-		"initial center-pane view: gate, logs, queue, events, output")
+		"review context for the assistant prompt: gate, logs, queue, events, output")
 	cmd.Flags().BoolVar(&noAltScreen, "no-alt-screen", false,
 		"disable alt-screen mode (useful in tmux or CI-adjacent terminals)")
 

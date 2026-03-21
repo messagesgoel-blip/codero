@@ -18,33 +18,8 @@ func TestLogsArchPane_View_ShowsHeader(t *testing.T) {
 	p.SetSize(100, 30)
 
 	view := p.View()
-	if !strings.Contains(view, "INTERACTIVE LOGS & ARCHITECTURE VISUALIZATION") {
-		t.Error("LogsArchPane should show the INTERACTIVE LOGS & ARCHITECTURE VISUALIZATION header")
-	}
-}
-
-func TestLogsArchPane_View_ShowsArchNodes(t *testing.T) {
-	p := tui.NewLogsArchPane(tui.DefaultTheme)
-	p.SetSize(100, 30)
-
-	view := p.View()
-	for _, want := range []string{"Auth Service", "Token Flow", "Auth Middleware"} {
-		if !strings.Contains(view, want) {
-			t.Errorf("LogsArchPane architecture diagram should contain %q", want)
-		}
-	}
-}
-
-func TestLogsArchPane_View_ShowsCodeSnippet(t *testing.T) {
-	p := tui.NewLogsArchPane(tui.DefaultTheme)
-	p.SetSize(100, 40)
-
-	view := p.View()
-	if !strings.Contains(view, "config.yaml") {
-		t.Error("LogsArchPane should show code snippet box with config.yaml")
-	}
-	if !strings.Contains(view, "secret_loc") {
-		t.Error("LogsArchPane should show secret_loc in code snippet")
+	if !strings.Contains(view, "EVENT STREAM") {
+		t.Error("LogsArchPane should show the EVENT STREAM header")
 	}
 }
 
@@ -53,10 +28,14 @@ func TestLogsArchPane_View_ShowsDefaultLogEntries(t *testing.T) {
 	p.SetSize(100, 30)
 
 	view := p.View()
-	// Default (no events) state: pane should still render without panic.
-	// The arch diagram header is always visible.
-	if !strings.Contains(view, "INTERACTIVE LOGS") {
-		t.Error("LogsArchPane default view should render header without panic")
+	for _, want := range []string{
+		"Waiting for event stream...",
+		"SSE connection establishing...",
+		"Dashboard relay standby...",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("LogsArchPane default view should contain %q", want)
+		}
 	}
 }
 
@@ -70,13 +49,11 @@ func TestLogsArchPane_View_EmptyAtZeroWidth(t *testing.T) {
 }
 
 func TestLogsArchPane_View_NarrowHidesArch(t *testing.T) {
-	// Very narrow — arch column should be suppressed
 	p := tui.NewLogsArchPane(tui.DefaultTheme)
 	p.SetSize(25, 20)
 
 	view := p.View()
-	// Must still render without panic; header should still appear
-	if !strings.Contains(view, "INTERACTIVE LOGS") {
+	if !strings.Contains(view, "EVENT STREAM") {
 		t.Error("narrow LogsArchPane should still render header without panic")
 	}
 }
@@ -103,27 +80,22 @@ func TestChecksPane_View_ShowsTotalLinesAnalyzed(t *testing.T) {
 	}
 }
 
-func TestBottomBar_ReviewFindingsButton(t *testing.T) {
+func TestTerminalCLI_ShowsPrompt(t *testing.T) {
 	cfg := makeCfg(false)
 	m := tui.New(cfg)
 
-	// Apply a layout so View() renders fully
 	newModel, _ := m.Update(makeWindowSize(120, 40))
 	view := newModel.(tui.Model).View()
 
-	if !strings.Contains(view, "Review Findings") {
-		t.Error("bottom bar should contain 'Review Findings' button")
+	if !strings.Contains(view, "REVIEW ASSISTANT") {
+		t.Error("terminal area should contain 'REVIEW ASSISTANT'")
 	}
-}
-
-func TestBottomBar_MergeStatus(t *testing.T) {
-	cfg := makeCfg(false)
-	m := tui.New(cfg)
-
-	newModel, _ := m.Update(makeWindowSize(120, 40))
-	view := newModel.(tui.Model).View()
-
-	if !strings.Contains(view, "Merge Status") {
-		t.Error("bottom bar should contain 'Merge Status'")
+	if !strings.Contains(strings.ToLower(view), "type a command or message…") {
+		t.Error("terminal area should contain the command prompt placeholder")
+	}
+	for _, want := range []string{"status", "help", "run gate", "queue"} {
+		if !strings.Contains(strings.ToLower(view), want) {
+			t.Fatalf("terminal area should contain %q\nfull view:\n%s", want, view)
+		}
 	}
 }

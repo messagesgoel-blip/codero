@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -636,7 +637,7 @@ Examples:
 			}
 
 			if watchMode {
-				return runGateStatusWatch(repoPath, intervalSec)
+				return runGateStatusWatch(cmd.Context(), repoPath, intervalSec)
 			}
 
 			result := readProgressEnvAsResult(repoPath)
@@ -706,11 +707,14 @@ func printGateStatusJSON(r gate.Result) error {
 // cannot be initialised safely.  In that case the function falls back to
 // emitting a single JSON object using the same schema as gate-status --json
 // and returns immediately.
-func runGateStatusWatch(repoPath string, intervalSec int) error {
+func runGateStatusWatch(ctx context.Context, repoPath string, intervalSec int) error {
 	if !tui.IsInteractiveTTY() {
 		// Non-TTY fallback: emit one JSON snapshot and exit cleanly.
 		result := readProgressEnvAsResult(repoPath)
 		return printGateStatusJSON(result)
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
 	if intervalSec < 1 {
@@ -721,12 +725,13 @@ func runGateStatusWatch(repoPath string, intervalSec int) error {
 	initialVM := tui.AdapterFromPath(repoPath)
 	cfg := tui.Config{
 		RepoPath:  repoPath,
+		Context:   ctx,
 		Interval:  interval,
 		Theme:     tui.DefaultTheme,
 		WatchMode: true,
 		InitialVM: initialVM,
 	}
-	p := tea.NewProgram(tui.New(cfg), tea.WithAltScreen())
+	p := tea.NewProgram(tui.New(cfg), tea.WithContext(ctx), tea.WithAltScreen())
 	_, err := p.Run()
 	return err
 }

@@ -1,0 +1,38 @@
+[
+  {
+    "repo": "acme/api",
+    "branch": "feat/auth-refactor",
+    "event_type": "state_transition",
+    "payload": "{\"from\":\"queued_cli\",\"to\":\"coding\",\"trigger\":\"lease_acquired\"}"
+  },
+  {
+    "repo": "acme/api",
+    "branch": "feat/auth-refactor",
+    "event_type": "finding_bundle",
+    "payload": "{\"provider\":\"gitleaks\",\"count\":1,\"severity\":\"critical\"}"
+  },
+  {
+    "repo": "acme/api",
+    "branch": "feat/auth-refactor",
+    "event_type": "finding_bundle",
+    "payload": "{\"provider\":\"semgrep\",\"count\":1,\"severity\":\"critical\"}"
+  },
+  {
+    "repo": "acme/api",
+    "branch": "feat/db-migration",
+    "event_type": "state_transition",
+    "payload": "{\"from\":\"coding\",\"to\":\"local_review\",\"trigger\":\"review_submitted\"}"
+  },
+  {
+    "repo": "acme/api",
+    "branch": "feat/db-migration",
+    "event_type": "system",
+    "payload": "{\"msg\":\"LiteLLM review queued\"}"
+  },
+  {
+    "repo": "acme/api",
+    "branch": "feat/auth-refactor",
+    "event_type": "state_transition",
+    "payload": "{\"from\":\"cli_reviewing\",\"to\":\"blocked\",\"trigger\":\"required_checks_failed\"}"
+  }
+]

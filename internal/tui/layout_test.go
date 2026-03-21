@@ -14,8 +14,8 @@ func TestCompute_Standard(t *testing.T) {
 	if l.TotalH != 24 {
 		t.Errorf("TotalH: want 24, got %d", l.TotalH)
 	}
-	if l.LeftW+l.CenterW+l.RightW != l.TotalW {
-		t.Errorf("pane widths %d+%d+%d != %d", l.LeftW, l.CenterW, l.RightW, l.TotalW)
+	if l.LeftW+l.CenterW+l.PipelineW+l.RightW != l.TotalW {
+		t.Errorf("pane widths %d+%d+%d+%d != %d", l.LeftW, l.CenterW, l.PipelineW, l.RightW, l.TotalW)
 	}
 	if l.ContentH != l.TotalH-l.TopBarH-l.BottomBarH {
 		t.Errorf("ContentH mismatch: %d vs %d", l.ContentH, l.TotalH-l.TopBarH-l.BottomBarH)
@@ -24,18 +24,21 @@ func TestCompute_Standard(t *testing.T) {
 
 func TestCompute_Wide(t *testing.T) {
 	l := tui.Compute(160, 50)
-	if l.LeftW+l.CenterW+l.RightW != l.TotalW {
-		t.Errorf("pane widths %d+%d+%d != %d", l.LeftW, l.CenterW, l.RightW, l.TotalW)
+	if l.LeftW+l.CenterW+l.PipelineW+l.RightW != l.TotalW {
+		t.Errorf("pane widths %d+%d+%d+%d != %d", l.LeftW, l.CenterW, l.PipelineW, l.RightW, l.TotalW)
 	}
 }
 
 func TestCompute_MinimumWidths(t *testing.T) {
-	l := tui.Compute(80, 24)
-	if l.CenterW < 28 {
-		t.Errorf("CenterW %d < minCenterW 28", l.CenterW)
+	l := tui.Compute(160, 50)
+	if l.CenterW < 34 {
+		t.Errorf("CenterW %d < minCenterW 34", l.CenterW)
 	}
-	if l.LeftW < 20 {
-		t.Errorf("LeftW %d < minLeftW 20", l.LeftW)
+	if l.LeftW < 24 {
+		t.Errorf("LeftW %d < minLeftW 24", l.LeftW)
+	}
+	if l.PipelineW < 18 {
+		t.Errorf("PipelineW %d < minPipelineW 18", l.PipelineW)
 	}
 	if l.RightW < 22 {
 		t.Errorf("RightW %d < minRightW 22", l.RightW)
@@ -50,11 +53,24 @@ func TestCompute_Narrow(t *testing.T) {
 	if l.CenterW < 1 {
 		t.Errorf("CenterW: expected >=1, got %d", l.CenterW)
 	}
+	if l.PipelineW < 1 {
+		t.Errorf("PipelineW: expected >=1, got %d", l.PipelineW)
+	}
 	if l.RightW < 1 {
 		t.Errorf("RightW: expected >=1, got %d", l.RightW)
 	}
-	if l.LeftW+l.CenterW+l.RightW != l.TotalW {
-		t.Errorf("pane widths %d+%d+%d != %d", l.LeftW, l.CenterW, l.RightW, l.TotalW)
+	if l.LeftW+l.CenterW+l.PipelineW+l.RightW != l.TotalW {
+		t.Errorf("pane widths %d+%d+%d+%d != %d", l.LeftW, l.CenterW, l.PipelineW, l.RightW, l.TotalW)
+	}
+}
+
+func TestCompute_TinyWidthCollapsesLowerPriorityPanes(t *testing.T) {
+	l := tui.Compute(2, 24)
+	if got := l.LeftW + l.CenterW + l.PipelineW + l.RightW; got != l.TotalW {
+		t.Fatalf("pane widths %d+%d+%d+%d != %d", l.LeftW, l.CenterW, l.PipelineW, l.RightW, l.TotalW)
+	}
+	if l.CenterW != 1 || l.LeftW != 1 || l.RightW != 0 || l.PipelineW != 0 {
+		t.Fatalf("unexpected tiny-width allocation: %+v", l)
 	}
 }
 

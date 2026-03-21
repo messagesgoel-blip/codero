@@ -16,6 +16,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/codero/codero/internal/dashboard"
 	"github.com/codero/codero/internal/gate"
 	"github.com/codero/codero/internal/state"
 	"github.com/codero/codero/internal/tui/adapters"
@@ -38,10 +39,15 @@ var tabLabels = [tabCount]string{"logs & arch", "output", "events", "queue"}
 type FocusedPane int
 
 const (
-	PaneLeft   FocusedPane = iota
-	PaneCenter FocusedPane = iota
-	PaneRight  FocusedPane = iota
+	PaneLeft FocusedPane = iota
+	PaneCenter
+	PanePipeline
+	PaneRight
 )
+
+const paneCount = int(PaneRight) + 1
+const maxCLIHistoryMessages = 8
+const cliHistoryTruncatedNotice = "Earlier conversation truncated for brevity."
 
 // internal Bubble Tea messages
 type (
@@ -57,6 +63,7 @@ type (
 // Config is provided by the command layer to configure the TUI program.
 type Config struct {
 	RepoPath  string
+	Context   context.Context
 	Interval  time.Duration
 	Theme     Theme
 	WatchMode bool
@@ -87,6 +94,8 @@ type Model struct {
 	rightVP    viewport.Model
 	rightReady bool
 
+	pipelinePane PipelinePane
+
 	focused   FocusedPane
 	activeTab Tab
 	gateVM    adapters.GateViewModel
@@ -97,6 +106,14 @@ type Model struct {
 	searchActive bool
 	searchInput  textinput.Model
 
+	cliMessages    []terminalMessage
+	cliInput       textinput.Model
+	cliBusy        bool
+	cliHistory     []string
+	cliHistoryIdx  int
+	cliSuggestions []dashboard.ChatSuggestion
+	cliActions     []dashboard.ChatAction
+
 	lastUpdated time.Time
 	statusMsg   string
 	err         error
@@ -104,6 +121,9 @@ type Model struct {
 
 // New constructs the root TUI model from a Config.
 func New(cfg Config) Model {
+	if cfg.Context == nil {
+		cfg.Context = context.Background()
+	}
 	theme := cfg.Theme
 	keys := DefaultKeyMap()
 
@@ -114,26 +134,39 @@ func New(cfg Config) Model {
 	search := textinput.New()
 	search.Placeholder = "search…"
 	search.CharLimit = 64
+	cli := textinput.New()
+	cli.Prompt = ""
+	cli.Placeholder = "type a command or message…"
+	cli.CharLimit = 256
+	cli.Focus()
 
 	m := Model{
-		cfg:          cfg,
-		keys:         keys,
-		theme:        theme,
-		gatePane:     NewGatePane(theme),
-		branchPane:   NewBranchPane(theme),
-		queuePane:    NewQueuePane(theme),
-		eventsPane:   NewEventsPane(theme),
-		checksPane:   NewChecksPane(theme),
-		logsArchPane: NewLogsArchPane(theme),
-		gateVM:       cfg.InitialVM,
-		paletteInput: palette,
-		searchInput:  search,
-		activeTab:    cfg.InitialTab,
+		cfg:           cfg,
+		keys:          keys,
+		theme:         theme,
+		gatePane:      NewGatePane(theme),
+		branchPane:    NewBranchPane(theme),
+		queuePane:     NewQueuePane(theme),
+		eventsPane:    NewEventsPane(theme),
+		checksPane:    NewChecksPane(theme),
+		logsArchPane:  NewLogsArchPane(theme),
+		pipelinePane:  NewPipelinePane(theme),
+		gateVM:        cfg.InitialVM,
+		paletteInput:  palette,
+		searchInput:   search,
+		cliInput:      cli,
+		cliHistoryIdx: -1,
+		activeTab:     cfg.InitialTab,
+		cliMessages: []terminalMessage{
+			{Role: "system", Meta: "codero", Content: "Type help, status, gate, queue, or ask a review question."},
+		},
 	}
 	m.gatePane.SetVM(cfg.InitialVM)
 	// Pre-populate checksPane so the right pane isn't blank on first render.
 	if report, err := adapters.LoadCheckReport(cfg.RepoPath); err == nil {
-		m.checksPane.SetVM(adapters.FromCheckReport(*report))
+		vm := adapters.FromCheckReport(*report)
+		m.checksPane.SetVM(vm)
+		m.pipelinePane.SetVM(vm)
 	}
 	return m
 }
@@ -171,6 +204,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if report, err := adapters.LoadCheckReport(m.cfg.RepoPath); err == nil {
 			checksVM := adapters.FromCheckReport(*report)
 			m.checksPane.SetVM(checksVM)
+			m.pipelinePane.SetVM(checksVM)
 		}
 		if !vm.IsFinal || !m.cfg.WatchMode {
 			cmds = append(cmds, tickCmd(m.cfg.Interval))
@@ -182,7 +216,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.gateVM = msg.vm
 		m.gatePane.SetVM(msg.vm)
 		if report, err := adapters.LoadCheckReport(m.cfg.RepoPath); err == nil {
-			m.checksPane.SetVM(adapters.FromCheckReport(*report))
+			vm := adapters.FromCheckReport(*report)
+			m.checksPane.SetVM(vm)
+			m.pipelinePane.SetVM(vm)
 		}
 
 	case queueRefreshMsg:
@@ -206,6 +242,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		m.statusMsg = "⚠  " + msg.err.Error()
 
+	case terminalChatResultMsg:
+		m.cliBusy = false
+		m.cliSuggestions = msg.response.Suggestions
+		m.cliActions = msg.response.Actions
+		content := strings.TrimSpace(msg.response.Reply)
+		if content == "" {
+			content = "No assistant response was returned."
+		}
+		meta := assistantMeta(msg.response.Provider, msg.response.Model)
+		if len(m.cliMessages) > 0 && m.cliMessages[len(m.cliMessages)-1].Role == "assistant" && m.cliMessages[len(m.cliMessages)-1].Content == "…" {
+			m.cliMessages[len(m.cliMessages)-1] = terminalMessage{Role: "assistant", Meta: meta, Content: content}
+		} else {
+			m.cliMessages = append(m.cliMessages, terminalMessage{Role: "assistant", Meta: meta, Content: content})
+		}
+		m.truncateCLIHistory()
+
+	case terminalChatErrorMsg:
+		m.cliBusy = false
+		m.cliSuggestions = nil
+		m.cliActions = nil
+		errText := "Review assistant unavailable: " + msg.err.Error()
+		if len(m.cliMessages) > 0 && m.cliMessages[len(m.cliMessages)-1].Role == "assistant" && m.cliMessages[len(m.cliMessages)-1].Content == "…" {
+			m.cliMessages[len(m.cliMessages)-1] = terminalMessage{Role: "error", Meta: "fallback", Content: errText}
+		} else {
+			m.cliMessages = append(m.cliMessages, terminalMessage{Role: "error", Meta: "fallback", Content: errText})
+		}
+		m.truncateCLIHistory()
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -224,6 +288,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 	m.logsArchPane, cmd = m.logsArchPane.Update(msg)
 	cmds = append(cmds, cmd)
+	m.pipelinePane, cmd = m.pipelinePane.Update(msg)
+	cmds = append(cmds, cmd)
 
 	if m.outputReady {
 		m.outputVP, cmd = m.outputVP.Update(msg)
@@ -234,46 +300,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.paletteActive {
-		return m.handlePaletteKey(msg)
-	}
-	if m.searchActive {
-		return m.handleSearchKey(msg)
-	}
-
 	switch {
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
 
-	case key.Matches(msg, m.keys.Palette):
-		m.paletteActive = true
-		m.paletteInput.SetValue("")
-		cmd := m.paletteInput.Focus()
-		return m, cmd
-
-	case key.Matches(msg, m.keys.Search):
-		m.searchActive = true
-		m.searchInput.SetValue("")
-		cmd := m.searchInput.Focus()
-		return m, cmd
-
 	case key.Matches(msg, m.keys.NextPane):
-		m.focused = (m.focused + 1) % 3
+		m.focused = FocusedPane((int(m.focused) + 1) % paneCount)
 
-	case key.Matches(msg, m.keys.NextTab):
-		m.activeTab = (m.activeTab + 1) % tabCount
-
-	case key.Matches(msg, m.keys.PrevTab):
-		m.activeTab = (m.activeTab + tabCount - 1) % tabCount
-
-	case key.Matches(msg, m.keys.Tab1):
-		m.activeTab = TabLogs
-	case key.Matches(msg, m.keys.Tab2):
-		m.activeTab = TabOutput
-	case key.Matches(msg, m.keys.Tab3):
-		m.activeTab = TabEvents
-	case key.Matches(msg, m.keys.Tab4):
-		m.activeTab = TabQueue
+	case key.Matches(msg, m.keys.PrevPane):
+		m.focused = FocusedPane((int(m.focused) - 1 + paneCount) % paneCount)
 
 	case key.Matches(msg, m.keys.Refresh):
 		vm := adapters.FromProgressEnv(m.cfg.RepoPath)
@@ -290,68 +325,130 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, openLogsCmd(m.cfg.RepoPath)
 	}
 
-	return m, nil
+	return m.handleTerminalKey(msg)
 }
 
-func (m Model) handlePaletteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleTerminalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "esc":
-		m.paletteActive = false
-		m.paletteInput.Blur()
-		return m, nil
 	case "enter":
-		cmd := strings.ToLower(strings.TrimSpace(m.paletteInput.Value()))
-		m.paletteActive = false
-		m.paletteInput.Blur()
-		return m, m.executePaletteCmd(cmd)
-	}
-	var teaCmd tea.Cmd
-	m.paletteInput, teaCmd = m.paletteInput.Update(msg)
-	return m, teaCmd
-}
+		cmd := strings.TrimSpace(m.cliInput.Value())
+		if cmd == "" {
+			return m, nil
+		}
+		m.cliHistory = append([]string{cmd}, m.cliHistory...)
+		if len(m.cliHistory) > 50 {
+			m.cliHistory = m.cliHistory[:50]
+		}
+		m.cliHistoryIdx = -1
+		m.cliInput.SetValue("")
+		m.cliMessages = append(m.cliMessages, terminalMessage{Role: "user", Content: cmd})
+		m.cliMessages = append(m.cliMessages, terminalMessage{Role: "assistant", Meta: "streaming", Content: "…"})
+		m.truncateCLIHistory()
+		if handled, msgs, suggestions, actions := m.localTerminalCommand(cmd); handled {
+			if strings.EqualFold(cmd, "clear") {
+				m.cliMessages = nil
+				m.cliSuggestions = nil
+				m.cliActions = nil
+				return m, nil
+			}
+			if len(msgs) == 0 {
+				if len(m.cliMessages) > 0 && m.cliMessages[len(m.cliMessages)-1].Content == "…" {
+					m.cliMessages = m.cliMessages[:len(m.cliMessages)-1]
+				}
+				return m, nil
+			}
+			m.cliMessages = m.cliMessages[:len(m.cliMessages)-1]
+			m.cliMessages = append(m.cliMessages, msgs...)
+			m.cliSuggestions = suggestions
+			m.cliActions = actions
+			m.truncateCLIHistory()
+			return m, nil
+		}
+		m.cliBusy = true
+		m.cliSuggestions = nil
+		m.cliActions = nil
+		return m, dashboardChatCmd(m.cfg.Context, cmd, m.chatContextTab())
 
-func (m Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc", "enter":
-		m.searchActive = false
-		m.searchInput.Blur()
+	case "esc":
+		m.cliInput.SetValue("")
+		m.cliHistoryIdx = -1
+		return m, nil
+
+	case "up", "k":
+		input := m.cliInput.Value()
+		if input != "" && m.cliInput.Position() > 0 {
+			break
+		}
+		if len(m.cliHistory) == 0 {
+			break
+		}
+		if m.cliHistoryIdx < len(m.cliHistory)-1 {
+			m.cliHistoryIdx++
+		}
+		if m.cliHistoryIdx >= 0 && m.cliHistoryIdx < len(m.cliHistory) {
+			m.cliInput.SetValue(m.cliHistory[m.cliHistoryIdx])
+			m.cliInput.CursorEnd()
+		}
+		return m, nil
+
+	case "down", "j":
+		input := m.cliInput.Value()
+		if input != "" && m.cliInput.Position() < len([]rune(input)) {
+			break
+		}
+		if len(m.cliHistory) == 0 {
+			break
+		}
+		if m.cliHistoryIdx > 0 {
+			m.cliHistoryIdx--
+			m.cliInput.SetValue(m.cliHistory[m.cliHistoryIdx])
+			m.cliInput.CursorEnd()
+		} else {
+			m.cliHistoryIdx = -1
+			m.cliInput.SetValue("")
+		}
 		return m, nil
 	}
+
 	var teaCmd tea.Cmd
-	m.searchInput, teaCmd = m.searchInput.Update(msg)
+	m.cliInput, teaCmd = m.cliInput.Update(msg)
 	return m, teaCmd
 }
 
-func (m *Model) executePaletteCmd(cmd string) tea.Cmd {
-	switch cmd {
-	case "status":
-		m.statusMsg = fmt.Sprintf("%s / %s / %s",
-			strings.ToLower(m.gateVM.CopilotStatus),
-			strings.ToLower(m.gateVM.LiteLLMStatus),
-			strings.ToLower(m.gateVM.StatusLabel))
-		return nil
-	case "help":
-		m.statusMsg = "commands: status, help, run gate, queue, logs, retry, quit"
-		return nil
-	case "run gate":
-		if m.gateVM.IsFinal {
-			return retryGateCmd(m.cfg.RepoPath)
-		}
-		m.statusMsg = "gate is already running"
-		return nil
-	case "queue":
-		m.statusMsg = "queue view is available from the center pane controls"
-		return nil
-	case "retry", "r":
-		if m.gateVM.IsFinal {
-			return retryGateCmd(m.cfg.RepoPath)
-		}
-	case "logs", "l":
-		return openLogsCmd(m.cfg.RepoPath)
-	case "quit", "q":
-		return tea.Quit
+func (m *Model) truncateCLIHistory() {
+	if len(m.cliMessages) > maxCLIHistoryMessages {
+		retained := append([]terminalMessage(nil), m.cliMessages[len(m.cliMessages)-maxCLIHistoryMessages:]...)
+		notice := terminalMessage{Role: "system", Meta: "codero", Content: cliHistoryTruncatedNotice}
+		m.cliMessages = append([]terminalMessage{notice}, retained...)
 	}
-	return nil
+}
+
+func assistantMeta(provider, model string) string {
+	provider = strings.TrimSpace(provider)
+	model = strings.TrimSpace(model)
+	switch {
+	case provider != "" && model != "":
+		return provider + " / " + model
+	case provider != "":
+		return provider
+	case model != "":
+		return model
+	default:
+		return "assistant"
+	}
+}
+
+func (m Model) chatContextTab() string {
+	switch m.activeTab {
+	case TabEvents:
+		return "events"
+	case TabQueue:
+		return "queue"
+	case TabOutput:
+		return "overview"
+	default:
+		return "review"
+	}
 }
 
 func (m Model) View() string {
@@ -362,37 +459,37 @@ func (m Model) View() string {
 	top := m.renderTopBar()
 	left := m.renderLeft()
 	center := m.renderCenter()
+	pipeline := m.renderPipeline()
 	right := m.renderRight()
-	body := lipgloss.JoinHorizontal(lipgloss.Top, left, center, right)
-	bottom := m.renderBottomBar()
-	full := lipgloss.JoinVertical(lipgloss.Left, top, body, bottom)
-	return full
+	body := lipgloss.JoinHorizontal(lipgloss.Top, left, center, pipeline, right)
+	bottom := renderTerminalCLI(m)
+	return lipgloss.JoinVertical(lipgloss.Left, top, body, bottom)
 }
 
 func (m Model) renderTopBar() string {
 	l := m.layout
-	title := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#A9AEBF")).
-		Bold(true).
-		Render("COMMAND TERMINAL - CODERO")
-
+	title := m.theme.Title.Render(" COMMAND TERMINAL — CODERO")
 	dots := lipgloss.JoinHorizontal(
 		lipgloss.Left,
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5F56")).Render("●"),
-		" ",
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#FFBD2E")).Render("●"),
-		" ",
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#27C93F")).Render("●"),
 	)
 
-	leftPad := 3
-	rightPad := 3
-	titlePad := l.TotalW - lipgloss.Width(dots) - lipgloss.Width(title) - leftPad - rightPad
-	if titlePad < 1 {
-		titlePad = 1
+	currentTime := time.Now().Format("15:04:05")
+	right := m.theme.Muted.Render(currentTime + " ")
+
+	spacerW := l.TotalW - lipgloss.Width(dots) - lipgloss.Width(title) - lipgloss.Width(right) - 2
+	if spacerW < 0 {
+		spacerW = 0
 	}
-	bar := " " + dots + strings.Repeat(" ", leftPad) + strings.Repeat(" ", titlePad/2) + title
-	return lipgloss.NewStyle().Width(l.TotalW).Background(lipgloss.Color("#1E1F2E")).Render(bar)
+	spacer := strings.Repeat(" ", spacerW)
+
+	bar := lipgloss.JoinHorizontal(lipgloss.Left, " ", dots, title, spacer, right)
+	return lipgloss.NewStyle().
+		Width(l.TotalW).
+		Background(lipgloss.Color("#1E1F2E")).
+		Render(bar)
 }
 
 func (m Model) renderLeft() string {
@@ -400,7 +497,7 @@ func (m Model) renderLeft() string {
 
 	// GatePane takes the full left pane height: PROCESSES & AGENTS +
 	// RELAY ORCHESTRATION, matching the mockup layout.
-	m.gatePane.SetSize(l.LeftW-2, l.ContentH)
+	m.gatePane.SetSize(l.LeftW-2, l.ContentH-2)
 
 	border := m.theme.PaneBorder
 	if m.focused == PaneLeft {
@@ -411,7 +508,7 @@ func (m Model) renderLeft() string {
 
 func (m Model) renderCenter() string {
 	l := m.layout
-	m.logsArchPane.SetSize(l.CenterW-2, l.ContentH)
+	m.logsArchPane.SetSize(l.CenterW-2, l.ContentH-2)
 	content := m.logsArchPane.View()
 
 	border := m.theme.PaneBorder
@@ -421,11 +518,22 @@ func (m Model) renderCenter() string {
 	return border.Width(l.CenterW).Height(l.ContentH).Render(content)
 }
 
+func (m Model) renderPipeline() string {
+	l := m.layout
+	m.pipelinePane.SetSize(l.PipelineW-2, l.ContentH-2)
+
+	border := m.theme.PaneBorder
+	if m.focused == PanePipeline {
+		border = m.theme.ActiveBorder
+	}
+	return border.Width(l.PipelineW).Height(l.ContentH).Render(m.pipelinePane.View())
+}
+
 func (m Model) renderRight() string {
 	l := m.layout
 
 	// Right pane is the FINDINGS & ROUTING DASHBOARD, rendered by ChecksPane.
-	m.checksPane.SetSize(l.RightW-2, l.ContentH)
+	m.checksPane.SetSize(l.RightW-2, l.ContentH-2)
 
 	border := m.theme.PaneBorder
 	if m.focused == PaneRight {
@@ -434,126 +542,31 @@ func (m Model) renderRight() string {
 	return border.Width(l.RightW).Height(l.ContentH).Render(m.checksPane.View())
 }
 
-func (m Model) renderBottomBar() string {
-	l := m.layout
-	t := m.theme
-
-	// Build merge-status line from gate + checks pane data (mirrors the mockup).
-	mergeStatus := m.buildMergeStatus()
-
-	// "Review Findings" button — green, right-aligned (matches mockup).
-	reviewBtn := lipgloss.NewStyle().
-		Background(lipgloss.Color("#50FA7B")).
-		Foreground(lipgloss.Color("#1E1F2E")).
-		Bold(true).
-		Padding(0, 1).
-		Render("Review Findings")
-
-	// Left: merge status.  Right: Review Findings button.
-	leftPart := t.Base.Render(mergeStatus + "  ")
-	if m.statusMsg != "" {
-		leftPart += t.Muted.Render(m.statusMsg + "  ")
-	}
-	// Pad between left and button.
-	leftVisible := lipgloss.Width(leftPart)
-	btnVisible := lipgloss.Width(reviewBtn)
-	pad := l.TotalW - leftVisible - btnVisible - 2
-	if pad < 1 {
-		pad = 1
-	}
-	firstRow := leftPart + strings.Repeat(" ", pad) + reviewBtn
-
-	m.paletteInput.Width = maxInt(24, l.TotalW-48)
-	prompt := t.Accent.Render(">") + " " + t.PaletteInput.Render(m.paletteInput.View())
-	chips := []string{
-		commandChip("status"),
-		commandChip("help"),
-		commandChip("run gate"),
-		commandChip("queue"),
-	}
-	chipLine := strings.Join(chips, " ")
-	secondRow := prompt
-	if chipLine != "" {
-		spacer := l.TotalW - lipgloss.Width(prompt) - lipgloss.Width(chipLine) - 2
-		if spacer < 1 {
-			spacer = 1
-		}
-		secondRow = prompt + strings.Repeat(" ", spacer) + chipLine
-	}
-
-	bar := firstRow + "\n" + secondRow
-	return t.BottomBar.Width(l.TotalW).Render(bar)
-}
-
-// buildMergeStatus returns a concise merge status string for the bottom bar.
-// Format mirrors the mockup: "Merge Status: MERGE BLOCKED – [N Critical, N High] → Review Needed"
-func (m Model) buildMergeStatus() string {
-	t := m.theme
-	s := m.checksPane.vm.Summary
-
-	// Count severity buckets.
-	buckets := m.checksPane.bucketChecks()
-	critCount := len(buckets[0].checks)
-	highCount := len(buckets[1].checks)
-
-	switch m.gateVM.Status {
-	case gate.StatusPass:
-		return t.Pass.Render("Merge Status: MERGE READY — all gates passed")
-	case gate.StatusFail:
-		detail := ""
-		if critCount > 0 || highCount > 0 {
-			detail = fmt.Sprintf(" – [%d Critical, %d High Findings] → Review Needed by Security and Tech Lead",
-				critCount, highCount)
-		} else if s.Failed > 0 {
-			detail = fmt.Sprintf(" – [%d Failed Checks] → Fix required before merge", s.Failed)
-		}
-		return t.Fail.Render("Merge Status: MERGE BLOCKED" + detail)
-	default:
-		return t.Muted.Render("Merge Status: PENDING — gate review in progress")
-	}
-}
-
-func (m Model) renderPalette() string {
-	t := m.theme
-	title := t.Accent.Render("  Command Palette  ")
-	input := t.PaletteInput.Render(m.paletteInput.View())
-	help := t.Muted.Render("  retry · logs · quit  (esc to close)")
-	inner := lipgloss.JoinVertical(lipgloss.Left, title, "  "+input, help)
-	return t.Palette.Width(40).Render(inner)
-}
-
 func (m *Model) applyLayout() {
 	l := m.layout
-	m.gatePane.SetSize(l.LeftW-2, l.ContentH)
-	m.logsArchPane.SetSize(l.CenterW-2, l.ContentH)
+	m.gatePane.SetSize(l.LeftW-2, l.ContentH-2)
+	m.logsArchPane.SetSize(l.CenterW-2, l.ContentH-2)
+	m.pipelinePane.SetSize(l.PipelineW-2, l.ContentH-2)
 	m.paletteInput.Width = maxInt(24, l.TotalW-48)
-	m.queuePane.SetSize(l.CenterW-2, l.ContentH-3)
-	m.eventsPane.SetSize(l.CenterW-2, l.ContentH-3)
-	m.checksPane.SetSize(l.RightW-2, l.ContentH)
+	m.cliInput.Width = maxInt(24, l.TotalW-48)
+	m.queuePane.SetSize(l.CenterW-2, l.ContentH-5)
+	m.eventsPane.SetSize(l.CenterW-2, l.ContentH-5)
+	m.checksPane.SetSize(l.RightW-2, l.ContentH-2)
 	if !m.outputReady {
-		m.outputVP = viewport.New(l.CenterW-2, l.ContentH-3)
+		m.outputVP = viewport.New(l.CenterW-2, l.ContentH-5)
 		m.outputReady = true
 		m.outputVP.SetContent(m.buildOutputContent())
 	} else {
 		m.outputVP.Width = l.CenterW - 2
-		m.outputVP.Height = l.ContentH - 3
+		m.outputVP.Height = l.ContentH - 5
 	}
 	if !m.rightReady {
-		m.rightVP = viewport.New(l.RightW-2, l.ContentH-1)
+		m.rightVP = viewport.New(l.RightW-2, l.ContentH-3)
 		m.rightReady = true
 	} else {
 		m.rightVP.Width = l.RightW - 2
-		m.rightVP.Height = l.ContentH - 1
+		m.rightVP.Height = l.ContentH - 3
 	}
-}
-
-func commandChip(label string) string {
-	return lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#2F3648")).
-		Foreground(lipgloss.Color("#A3A6B8")).
-		Padding(0, 1).
-		Render(label)
 }
 
 func (m Model) buildOutputContent() string {

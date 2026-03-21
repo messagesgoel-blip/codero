@@ -17,6 +17,7 @@ type KeyMap struct {
 	FocusCenter key.Binding
 	FocusRight  key.Binding
 	NextPane    key.Binding
+	PrevPane    key.Binding
 
 	NextTab key.Binding
 	PrevTab key.Binding
@@ -51,6 +52,7 @@ func DefaultKeyMap() KeyMap {
 		FocusLeft:   key.NewBinding(key.WithKeys("ctrl+left", "ctrl+h"), key.WithHelp("C-←", "focus left")),
 		FocusCenter: key.NewBinding(key.WithKeys("ctrl+right", "ctrl+l"), key.WithHelp("C-→", "focus center")),
 		NextPane:    key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next pane")),
+		PrevPane:    key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev pane")),
 
 		NextTab: key.NewBinding(key.WithKeys("shift+right", "]"), key.WithHelp("]/S-→", "next tab")),
 		PrevTab: key.NewBinding(key.WithKeys("shift+left", "["), key.WithHelp("[/S-←", "prev tab")),

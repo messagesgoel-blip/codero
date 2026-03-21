@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +30,21 @@ func gateCheckReportPath() string {
 }
 
 const activeSessionStatesSQL = "('coding', 'local_review', 'queued_cli', 'cli_reviewing', 'reviewed', 'merge_ready', 'blocked', 'paused')"
+
+func tableExists(ctx context.Context, db *sql.DB, table string) (bool, error) {
+	row := db.QueryRowContext(ctx,
+		`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`,
+		table,
+	)
+	var exists int
+	if err := row.Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
 
 // queryOverview returns today's aggregate run stats.
 func queryOverview(ctx context.Context, db *sql.DB) (runsToday, passedToday int, blockedCount int, avgGateSec float64, err error) {
@@ -277,6 +293,148 @@ func queryGateHealth(ctx context.Context, db *sql.DB) ([]GateHealth, error) {
 // Deduplication by session ID is performed in Go before the page-size limit
 // is applied, so callers receive the first `limit` *unique* sessions.
 func queryActiveSessions(ctx context.Context, db *sql.DB, limit int) ([]ActiveSession, error) {
+	hasAgentSessions, err := tableExists(ctx, db, "agent_sessions")
+	if err != nil {
+		return nil, fmt.Errorf("queryActiveSessions: check agent_sessions: %w", err)
+	}
+
+	var out []ActiveSession
+	seenSessions := map[string]bool{}
+	if hasAgentSessions {
+		live, err := queryActiveSessionsFromAgentSessions(ctx, db)
+		if err != nil {
+			return nil, err
+		}
+		for _, session := range live {
+			if seenSessions[session.SessionID] {
+				continue
+			}
+			seenSessions[session.SessionID] = true
+			out = append(out, session)
+		}
+	}
+
+	legacy, err := queryActiveSessionsFromBranchStates(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	for _, session := range legacy {
+		if seenSessions[session.SessionID] {
+			continue
+		}
+		seenSessions[session.SessionID] = true
+		out = append(out, session)
+	}
+
+	sort.SliceStable(out, func(i, j int) bool {
+		if !out[i].LastHeartbeatAt.Equal(out[j].LastHeartbeatAt) {
+			return out[i].LastHeartbeatAt.After(out[j].LastHeartbeatAt)
+		}
+		return out[i].SessionID < out[j].SessionID
+	})
+
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]ActiveSession, error) {
+	threshold := time.Now().UTC().Add(-scheduler.SessionHeartbeatTTL)
+	rows, err := db.QueryContext(ctx, `
+		SELECT session_id, agent_id, mode, started_at, last_seen_at
+		FROM agent_sessions
+		WHERE ended_at IS NULL
+		ORDER BY last_seen_at DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("queryActiveSessions: agent_sessions query failed: %w", err)
+	}
+	defer rows.Close()
+
+	type sessionRow struct {
+		SessionID  string
+		AgentID    string
+		Mode       string
+		StartedAt  time.Time
+		LastSeenAt time.Time
+	}
+
+	var sessions []sessionRow
+	seenSessions := map[string]bool{}
+	for rows.Next() {
+		var s sessionRow
+		if err := rows.Scan(&s.SessionID, &s.AgentID, &s.Mode, &s.StartedAt, &s.LastSeenAt); err != nil {
+			return nil, fmt.Errorf("queryActiveSessions: agent_sessions scan row: %w", err)
+		}
+		if s.SessionID == "" {
+			continue
+		}
+		if s.LastSeenAt.Before(threshold) {
+			continue
+		}
+		if seenSessions[s.SessionID] {
+			continue
+		}
+		seenSessions[s.SessionID] = true
+		sessions = append(sessions, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("queryActiveSessions: agent_sessions rows error: %w", err)
+	}
+
+	assignments, err := loadActiveAssignments(ctx, db, threshold)
+	if err != nil {
+		return nil, err
+	}
+
+	var out []ActiveSession
+	for _, s := range sessions {
+		assignment, hasAssignment := assignments[s.SessionID]
+		activityState := "waiting"
+		if hasAssignment {
+			activityState = "active"
+		}
+		task := resolveTaskFromAssignment(assignment.TaskID, assignment.Branch)
+		if task != nil && task.Phase == "" {
+			task.Phase = activityState
+		}
+
+		startedAt := startedAtForSession(
+			sql.NullTime{Time: s.StartedAt, Valid: !s.StartedAt.IsZero()},
+			sql.NullTime{},
+			sql.NullTime{Time: s.LastSeenAt, Valid: !s.LastSeenAt.IsZero()},
+		)
+		elapsed := time.Since(startedAt)
+		if elapsed < 0 {
+			elapsed = 0
+		}
+
+		prNumber := 0
+		if assignment.Repo != "" && assignment.Branch != "" {
+			prNumber = lookupPRNumber(ctx, db, assignment.Repo, assignment.Branch)
+		}
+
+		agentID := resolveOwnerAgent(s.AgentID, "")
+		out = append(out, ActiveSession{
+			SessionID:       s.SessionID,
+			AgentID:         agentID,
+			Repo:            assignment.Repo,
+			Branch:          assignment.Branch,
+			Worktree:        assignment.Worktree,
+			PRNumber:        prNumber,
+			OwnerAgent:      agentID,
+			Mode:            s.Mode,
+			ActivityState:   activityState,
+			Task:            task,
+			StartedAt:       startedAt,
+			LastHeartbeatAt: s.LastSeenAt,
+			ElapsedSec:      int64(elapsed.Seconds()),
+		})
+	}
+	return out, nil
+}
+
+func queryActiveSessionsFromBranchStates(ctx context.Context, db *sql.DB) ([]ActiveSession, error) {
 	// Fresh heartbeats only: stale sessions are filtered out so the panel mirrors
 	// live activity rather than historical branch ownership.
 	threshold := time.Now().Add(-scheduler.SessionHeartbeatTTL)
@@ -323,27 +481,80 @@ func queryActiveSessions(ctx context.Context, db *sql.DB, limit int) ([]ActiveSe
 			elapsed = 0
 		}
 
+		agentID := resolveOwnerAgent(ownerAgent, branch)
 		out = append(out, ActiveSession{
 			SessionID:       sessionID,
+			AgentID:         agentID,
 			Repo:            repo,
 			Branch:          branch,
 			PRNumber:        prNumber,
-			OwnerAgent:      resolveOwnerAgent(ownerAgent, branch),
+			OwnerAgent:      agentID,
 			ActivityState:   sessionActivityState(state),
 			Task:            resolveTaskFromBranch(branch, state),
 			StartedAt:       startedAt,
 			LastHeartbeatAt: lastSeen.Time,
 			ElapsedSec:      int64(elapsed.Seconds()),
 		})
-
-		// Apply the page-size limit only after dedup so callers get the first
-		// N unique sessions, not the first N rows that may share session IDs.
-		if limit > 0 && len(out) >= limit {
-			break
-		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("queryActiveSessions: rows error: %w", err)
+	}
+	return out, nil
+}
+
+type activeAssignment struct {
+	Repo     string
+	Branch   string
+	Worktree string
+	TaskID   string
+}
+
+func loadActiveAssignments(ctx context.Context, db *sql.DB, threshold time.Time) (map[string]activeAssignment, error) {
+	out := make(map[string]activeAssignment)
+	hasAssignments, err := tableExists(ctx, db, "agent_assignments")
+	if err != nil {
+		return nil, fmt.Errorf("queryActiveSessions: check agent_assignments: %w", err)
+	}
+	if !hasAssignments {
+		return out, nil
+	}
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id, started_at
+		FROM agent_assignments
+		WHERE ended_at IS NULL
+		  AND session_id IN (
+			  SELECT session_id
+			  FROM agent_sessions
+			  WHERE ended_at IS NULL AND last_seen_at >= ?
+		  )
+		ORDER BY session_id, started_at DESC`, threshold)
+	if err != nil {
+		return nil, fmt.Errorf("queryActiveSessions: agent_assignments query failed: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var assignmentID, sessionID, agentID, repo, branch, worktree, taskID string
+		var startedAt time.Time
+		if err := rows.Scan(&assignmentID, &sessionID, &agentID, &repo, &branch, &worktree, &taskID, &startedAt); err != nil {
+			return nil, fmt.Errorf("queryActiveSessions: agent_assignments scan row: %w", err)
+		}
+		if sessionID == "" {
+			continue
+		}
+		if _, exists := out[sessionID]; exists {
+			continue
+		}
+		out[sessionID] = activeAssignment{
+			Repo:     repo,
+			Branch:   branch,
+			Worktree: worktree,
+			TaskID:   taskID,
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("queryActiveSessions: agent_assignments rows error: %w", err)
 	}
 	return out, nil
 }
@@ -476,17 +687,37 @@ func resolveTaskFromBranch(branch, state string) *ActiveTask {
 	}
 	taskID := parts[0] + "-" + parts[1]
 	title := strings.ReplaceAll(parts[2], "-", " ")
+	phase := ""
+	if state != "" {
+		phase = sessionPhaseLabel(state)
+	}
 	return &ActiveTask{
 		ID:    taskID,
 		Title: title,
-		Phase: sessionPhaseLabel(state),
+		Phase: phase,
 	}
 }
 
+func resolveTaskFromAssignment(taskID, branch string) *ActiveTask {
+	branchTask := resolveTaskFromBranch(branch, "")
+	if taskID == "" {
+		return branchTask
+	}
+	if branchTask == nil {
+		return &ActiveTask{
+			ID:    taskID,
+			Title: strings.ReplaceAll(taskID, "-", " "),
+		}
+	}
+	branchTask.ID = taskID
+	if branchTask.Title == "" {
+		branchTask.Title = strings.ReplaceAll(taskID, "-", " ")
+	}
+	return branchTask
+}
+
 // resolveOwnerAgent returns the agent label for a session. When agentFromDB is
-// non-empty (populated by UpdateOwnerAgent), it is returned directly. Otherwise
-// the branch name is used as a best-effort fallback, still returning "unknown"
-// when no useful signal is available.
+// non-empty it is returned directly. Otherwise returns "unknown".
 func resolveOwnerAgent(agentFromDB, branch string) string {
 	if agentFromDB != "" {
 		return agentFromDB
@@ -495,6 +726,17 @@ func resolveOwnerAgent(agentFromDB, branch string) string {
 		return branch
 	}
 	return "unknown"
+}
+
+func lookupPRNumber(ctx context.Context, db *sql.DB, repo, branch string) int {
+	var pr sql.NullInt64
+	if err := db.QueryRowContext(ctx,
+		`SELECT pr_number FROM branch_states WHERE repo = ? AND branch = ?`,
+		repo, branch,
+	).Scan(&pr); err == nil && pr.Valid {
+		return int(pr.Int64)
+	}
+	return 0
 }
 
 // sessionPhaseLabel maps a raw branch state to a human-readable phase label.
@@ -544,32 +786,36 @@ func queryDashboardHealth(ctx context.Context, db *sql.DB) (DashboardHealth, err
 
 	// Active-sessions feed freshness: age of the most recent heartbeat.
 	if dbHealthy {
-		var lastHeartbeat sql.NullTime
-		if err := db.QueryRowContext(ctx,
-			`SELECT owner_session_last_seen FROM branch_states
-			 WHERE owner_session_id <> '' AND owner_session_last_seen IS NOT NULL
-			 ORDER BY owner_session_last_seen DESC LIMIT 1`,
-		).Scan(&lastHeartbeat); err != nil {
-			if !errors.Is(err, sql.ErrNoRows) {
-				return h, fmt.Errorf("queryDashboardHealth: active sessions freshness query: %w", err)
-			}
-			h.Feeds.ActiveSessions = FeedStatus{Status: "unavailable"}
-		} else if lastHeartbeat.Valid {
-			age := time.Since(lastHeartbeat.Time)
+		sessions, err := queryActiveSessions(ctx, db, 0)
+		if err != nil {
+			return h, fmt.Errorf("queryDashboardHealth: active sessions query: %w", err)
+		}
+		h.ActiveAgentCount = len(sessions)
+		if len(sessions) > 0 {
+			age := time.Since(sessions[0].LastHeartbeatAt)
 			status := "ok"
 			if age > staleFeedThreshold {
 				status = "stale"
 			}
 			h.Feeds.ActiveSessions = FeedStatus{
 				Status:       status,
-				LastRefresh:  lastHeartbeat.Time.UTC(),
+				LastRefresh:  sessions[0].LastHeartbeatAt.UTC(),
 				FreshnessSec: int64(age.Seconds()),
 			}
 		} else {
 			h.Feeds.ActiveSessions = FeedStatus{Status: "unavailable"}
 		}
+
+		staleCount, expiredCount, reconStatus, err := querySessionMonitoring(ctx, db)
+		if err != nil {
+			return h, fmt.Errorf("queryDashboardHealth: session monitoring query: %w", err)
+		}
+		h.StaleSessionCount = staleCount
+		h.ExpiredSessionCount = expiredCount
+		h.ReconciliationStatus = reconStatus
 	} else {
 		h.Feeds.ActiveSessions = FeedStatus{Status: "unavailable"}
+		h.ReconciliationStatus = "unavailable"
 	}
 
 	// Gate-checks feed freshness: mod time of the last report file.
@@ -593,23 +839,6 @@ func queryDashboardHealth(ctx context.Context, db *sql.DB) (DashboardHealth, err
 		h.Feeds.GateChecks = FeedStatus{Status: "unavailable"}
 	}
 
-	// Count currently active (non-stale) agent sessions.
-	if dbHealthy {
-		threshold := time.Now().Add(-scheduler.SessionHeartbeatTTL)
-		var count int
-		if err := db.QueryRowContext(ctx,
-			`SELECT COUNT(DISTINCT owner_session_id) FROM branch_states
-			 WHERE owner_session_id <> ''
-			   AND owner_session_last_seen IS NOT NULL
-			   AND owner_session_last_seen >= ?
-			   AND state IN `+activeSessionStatesSQL,
-			threshold,
-		).Scan(&count); err != nil {
-			return h, fmt.Errorf("queryDashboardHealth: active agent count query: %w", err)
-		}
-		h.ActiveAgentCount = count
-	}
-
 	// Best-effort metrics derived from local files and DB history.
 	// Failures are silently ignored so a missing coverage file or empty
 	// review_runs table does not degrade the DB/feed health report.
@@ -629,6 +858,66 @@ func queryDashboardHealth(ctx context.Context, db *sql.DB) (DashboardHealth, err
 	h.ETAMin = queryETAMinutes(ctx, db, "")
 
 	return h, nil
+}
+
+func querySessionMonitoring(ctx context.Context, db *sql.DB) (staleCount, expiredCount int, status string, err error) {
+	now := time.Now().UTC()
+	staleThreshold := now.Add(-staleFeedThreshold)
+	expiredThreshold := now.Add(-scheduler.SessionHeartbeatTTL)
+
+	hasAgentSessions, err := tableExists(ctx, db, "agent_sessions")
+	if err != nil {
+		return 0, 0, "", err
+	}
+
+	if hasAgentSessions {
+		if err := db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM agent_sessions
+			 WHERE ended_at IS NULL AND last_seen_at < ? AND last_seen_at >= ?`,
+			staleThreshold, expiredThreshold,
+		).Scan(&staleCount); err != nil {
+			return 0, 0, "", err
+		}
+		if err := db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM agent_sessions
+			 WHERE ended_at IS NULL AND last_seen_at < ?`,
+			expiredThreshold,
+		).Scan(&expiredCount); err != nil {
+			return 0, 0, "", err
+		}
+	} else {
+		if err := db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM branch_states
+			 WHERE owner_session_id <> ''
+			   AND owner_session_last_seen IS NOT NULL
+			   AND owner_session_last_seen < ?
+			   AND owner_session_last_seen >= ?
+			   AND state IN `+activeSessionStatesSQL,
+			staleThreshold, expiredThreshold,
+		).Scan(&staleCount); err != nil {
+			return 0, 0, "", err
+		}
+		if err := db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM branch_states
+			 WHERE owner_session_id <> ''
+			   AND owner_session_last_seen IS NOT NULL
+			   AND owner_session_last_seen < ?
+			   AND state IN `+activeSessionStatesSQL,
+			expiredThreshold,
+		).Scan(&expiredCount); err != nil {
+			return 0, 0, "", err
+		}
+	}
+
+	switch {
+	case expiredCount > 0:
+		status = "attention"
+	case staleCount > 0:
+		status = "stale"
+	default:
+		status = "ok"
+	}
+	return staleCount, expiredCount, status, nil
 }
 
 // computeSecurityScore derives a 0–10 score from the gate-check report.
