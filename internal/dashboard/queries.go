@@ -502,6 +502,179 @@ func queryActiveSessionsFromBranchStates(ctx context.Context, db *sql.DB) ([]Act
 	return out, nil
 }
 
+func queryAssignments(ctx context.Context, db *sql.DB, limit int) ([]AssignmentSummary, error) {
+	hasAssignments, err := tableExists(ctx, db, "agent_assignments")
+	if err != nil {
+		return nil, fmt.Errorf("queryAssignments: check agent_assignments: %w", err)
+	}
+	if !hasAssignments {
+		return []AssignmentSummary{}, nil
+	}
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id,
+		       started_at, ended_at, end_reason, superseded_by
+		FROM agent_assignments
+		ORDER BY started_at DESC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("queryAssignments: query failed: %w", err)
+	}
+	defer rows.Close()
+
+	type assignmentRow struct {
+		AssignmentID string
+		SessionID    string
+		AgentID      string
+		Repo         string
+		Branch       string
+		Worktree     string
+		TaskID       string
+		StartedAt    time.Time
+		EndedAt      sql.NullTime
+		EndReason    string
+		SupersededBy sql.NullString
+	}
+
+	var raw []assignmentRow
+	for rows.Next() {
+		var row assignmentRow
+		if err := rows.Scan(
+			&row.AssignmentID, &row.SessionID, &row.AgentID, &row.Repo, &row.Branch, &row.Worktree, &row.TaskID,
+			&row.StartedAt, &row.EndedAt, &row.EndReason, &row.SupersededBy,
+		); err != nil {
+			return nil, fmt.Errorf("queryAssignments: scan row: %w", err)
+		}
+		raw = append(raw, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("queryAssignments: rows error: %w", err)
+	}
+
+	liveSessions, err := queryActiveSessions(ctx, db, 0)
+	if err != nil {
+		return nil, fmt.Errorf("queryAssignments: load live sessions: %w", err)
+	}
+	liveBySessionID := make(map[string]ActiveSession, len(liveSessions))
+	for _, session := range liveSessions {
+		liveBySessionID[session.SessionID] = session
+	}
+
+	branchStateByRepoBranch := map[string]string{}
+	branchRows, err := db.QueryContext(ctx, `
+		SELECT repo, branch, state
+		FROM branch_states
+		ORDER BY updated_at DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("queryAssignments: branch_states query failed: %w", err)
+	}
+	defer branchRows.Close()
+	for branchRows.Next() {
+		var repo, branch, state string
+		if scanErr := branchRows.Scan(&repo, &branch, &state); scanErr != nil {
+			return nil, fmt.Errorf("queryAssignments: scan branch row: %w", scanErr)
+		}
+		key := repo + "::" + branch
+		if _, exists := branchStateByRepoBranch[key]; !exists {
+			branchStateByRepoBranch[key] = state
+		}
+	}
+	if err := branchRows.Err(); err != nil {
+		return nil, fmt.Errorf("queryAssignments: branch rows error: %w", err)
+	}
+
+	var out []AssignmentSummary
+	for _, row := range raw {
+		summary := AssignmentSummary{
+			AssignmentID: row.AssignmentID,
+			SessionID:    row.SessionID,
+			AgentID:      row.AgentID,
+			Repo:         row.Repo,
+			Branch:       row.Branch,
+			Worktree:     row.Worktree,
+			TaskID:       row.TaskID,
+			StartedAt:    row.StartedAt,
+			EndReason:    row.EndReason,
+			PRNumber:     lookupPRNumber(ctx, db, row.Repo, row.Branch),
+		}
+		if row.EndedAt.Valid {
+			endedAt := row.EndedAt.Time
+			summary.EndedAt = &endedAt
+		}
+		if row.SupersededBy.Valid {
+			summary.SupersededBy = row.SupersededBy.String
+		}
+		if session, ok := liveBySessionID[row.SessionID]; ok {
+			summary.Mode = session.Mode
+			summary.ActivityState = session.ActivityState
+		}
+		if branchState, ok := branchStateByRepoBranch[row.Repo+"::"+row.Branch]; ok {
+			summary.BranchState = branchState
+		}
+		summary.State = assignmentStateFromSummary(summary)
+		out = append(out, summary)
+	}
+	return out, nil
+}
+
+func assignmentStateFromSummary(summary AssignmentSummary) string {
+	if summary.EndedAt == nil {
+		switch summary.ActivityState {
+		case "blocked":
+			return "blocked"
+		case "waiting":
+			return "waiting"
+		default:
+			return "active"
+		}
+	}
+	switch summary.EndReason {
+	case "superseded":
+		return "superseded"
+	case "expired", "lost":
+		return "lost"
+	case "cancelled":
+		return "cancelled"
+	case "completed":
+		return "completed"
+	default:
+		return "ended"
+	}
+}
+
+func queryAgentEvents(ctx context.Context, db *sql.DB, limit int) ([]AgentEventRow, error) {
+	hasAgentEvents, err := tableExists(ctx, db, "agent_events")
+	if err != nil {
+		return nil, fmt.Errorf("queryAgentEvents: check agent_events: %w", err)
+	}
+	if !hasAgentEvents {
+		return []AgentEventRow{}, nil
+	}
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT id, session_id, agent_id, event_type, payload, created_at
+		FROM agent_events
+		ORDER BY created_at DESC, id DESC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("queryAgentEvents: query failed: %w", err)
+	}
+	defer rows.Close()
+
+	var out []AgentEventRow
+	for rows.Next() {
+		var event AgentEventRow
+		if err := rows.Scan(&event.ID, &event.SessionID, &event.AgentID, &event.EventType, &event.Payload, &event.CreatedAt); err != nil {
+			return nil, fmt.Errorf("queryAgentEvents: scan row: %w", err)
+		}
+		out = append(out, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("queryAgentEvents: rows error: %w", err)
+	}
+	return out, nil
+}
+
 type activeAssignment struct {
 	Repo     string
 	Branch   string

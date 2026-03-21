@@ -1,6 +1,7 @@
 package dashboard_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -16,7 +17,7 @@ import (
 func TestLoadFixtureDir_EmptyDir(t *testing.T) {
 	db := openTestDB(t)
 	dir := t.TempDir()
-	result, err := dashboard.LoadFixtureDir(db, dir)
+	result, err := dashboard.LoadFixtureDir(context.Background(), db, dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -32,7 +33,7 @@ func TestLoadFixtureDir_WithReportJSON(t *testing.T) {
 	if err := os.WriteFile(reportFile, []byte(`{"schema_version":"1.0.0"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	result, err := dashboard.LoadFixtureDir(db, dir)
+	result, err := dashboard.LoadFixtureDir(context.Background(), db, dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -59,7 +60,7 @@ func TestLoadFixtureDir_WithSessions(t *testing.T) {
 	}
 	writeJSON(t, filepath.Join(dir, "sessions.json"), sessions)
 
-	if _, err := dashboard.LoadFixtureDir(db, dir); err != nil {
+	if _, err := dashboard.LoadFixtureDir(context.Background(), db, dir); err != nil {
 		t.Fatalf("LoadFixtureDir: %v", err)
 	}
 
@@ -96,7 +97,7 @@ func TestLoadFixtureDir_WithActivity(t *testing.T) {
 	}
 	writeJSON(t, filepath.Join(dir, "activity.json"), events)
 
-	if _, err := dashboard.LoadFixtureDir(db, dir); err != nil {
+	if _, err := dashboard.LoadFixtureDir(context.Background(), db, dir); err != nil {
 		t.Fatalf("LoadFixtureDir: %v", err)
 	}
 
@@ -124,7 +125,7 @@ func TestLoadFixtureDir_InvalidSessionsMissingSessionID(t *testing.T) {
 	}
 	writeJSON(t, filepath.Join(dir, "sessions.json"), sessions)
 
-	if _, err := dashboard.LoadFixtureDir(db, dir); err == nil {
+	if _, err := dashboard.LoadFixtureDir(context.Background(), db, dir); err == nil {
 		t.Fatal("expected error for missing session_id, got nil")
 	}
 }
@@ -135,7 +136,7 @@ func TestLoadFixtureDir_InvalidActivityMalformedJSON(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "activity.json"), []byte(`not json`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := dashboard.LoadFixtureDir(db, dir); err == nil {
+	if _, err := dashboard.LoadFixtureDir(context.Background(), db, dir); err == nil {
 		t.Fatal("expected error for malformed JSON, got nil")
 	}
 }
@@ -146,10 +147,10 @@ func TestSeedFixtureSessions_IdempotentOnReplace(t *testing.T) {
 		{SessionID: "sess-abc", AgentID: "agent-abc", Repo: "acme/api", Branch: "feat/x", State: "coding"},
 	}
 	// Seeding twice should not error (INSERT OR REPLACE).
-	if err := dashboard.SeedFixtureSessions(db, entries); err != nil {
+	if err := dashboard.SeedFixtureSessions(context.Background(), db, entries); err != nil {
 		t.Fatalf("first seed: %v", err)
 	}
-	if err := dashboard.SeedFixtureSessions(db, entries); err != nil {
+	if err := dashboard.SeedFixtureSessions(context.Background(), db, entries); err != nil {
 		t.Fatalf("second seed (replace): %v", err)
 	}
 }

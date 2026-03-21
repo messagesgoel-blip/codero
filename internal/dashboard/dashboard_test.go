@@ -102,6 +102,21 @@ func seedAgentAssignment(t *testing.T, db *sql.DB, assignmentID, sessionID, agen
 	}
 }
 
+// seedAgentEvent inserts one agent_events row.
+func seedAgentEvent(t *testing.T, db *sql.DB, sessionID, agentID, eventType, payload string, createdAt time.Time) {
+	t.Helper()
+	if payload == "" {
+		payload = "{}"
+	}
+	_, err := db.Exec(`INSERT INTO agent_events
+		(session_id, agent_id, event_type, payload, created_at)
+		VALUES (?,?,?,?,?)`,
+		sessionID, agentID, eventType, payload, createdAt)
+	if err != nil {
+		t.Fatalf("seedAgentEvent: %v", err)
+	}
+}
+
 // seedRun inserts one review_runs row.
 func seedRun(t *testing.T, db *sql.DB, id, repo, branch, provider, status string, dur time.Duration) {
 	t.Helper()
@@ -966,6 +981,57 @@ func TestActiveSessions_MethodNotAllowed(t *testing.T) {
 	rec := doRequest(t, h, http.MethodPost, "/api/v1/dashboard/active-sessions", nil)
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("want 405, got %d", rec.Code)
+	}
+}
+
+func TestAssignments_WithAgentAssignments(t *testing.T) {
+	h, db := newTestHandler(t)
+	startedAt := time.Now().Add(-15 * time.Minute).UTC()
+	lastSeen := time.Now().Add(-30 * time.Second).UTC()
+	seedAgentSession(t, db, "sess-assign-1", "agent-assign-1", "cli", startedAt, lastSeen)
+	seedAgentAssignment(t, db, "assign-1", "sess-assign-1", "agent-assign-1", "acme/api", "feat/live", "", "COD-100", startedAt)
+
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/assignments", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.AssignmentsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Count != 1 || len(resp.Assignments) != 1 {
+		t.Fatalf("assignments count = %d len=%d, want 1", resp.Count, len(resp.Assignments))
+	}
+	if resp.Assignments[0].State != "active" {
+		t.Fatalf("state = %q, want active", resp.Assignments[0].State)
+	}
+	if resp.Assignments[0].TaskID != "COD-100" {
+		t.Fatalf("task_id = %q, want COD-100", resp.Assignments[0].TaskID)
+	}
+}
+
+func TestAgentEvents_WithRows(t *testing.T) {
+	h, db := newTestHandler(t)
+	ts := time.Now().Add(-2 * time.Minute).UTC()
+	seedAgentSession(t, db, "sess-evt-1", "agent-evt-1", "cli", ts, ts)
+	seedAgentEvent(t, db, "sess-evt-1", "agent-evt-1", "session_registered", `{"mode":"cli"}`, ts)
+	seedAgentEvent(t, db, "sess-evt-1", "agent-evt-1", "assignment_attached", `{"assignment_id":"assign-evt-1"}`, ts.Add(30*time.Second))
+
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/agent-events", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.AgentEventsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Count != 2 || len(resp.Events) != 2 {
+		t.Fatalf("events count = %d len=%d, want 2", resp.Count, len(resp.Events))
+	}
+	if resp.Events[0].EventType != "assignment_attached" {
+		t.Fatalf("latest event_type = %q, want assignment_attached", resp.Events[0].EventType)
 	}
 }
 
