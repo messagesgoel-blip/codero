@@ -102,6 +102,35 @@ func TestRegisterAgentSession_RevivesEndedSession(t *testing.T) {
 	}
 }
 
+func TestRegisterAgentSession_RejectsEndedUUIDSession(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	sessionID := "0e22cb0b-80b9-4af7-b824-a6164fefe3cd"
+	if err := RegisterAgentSession(ctx, db, sessionID, "agent-1", ""); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	if err := ExpireAgentSession(ctx, db, sessionID, "expired"); err != nil {
+		t.Fatalf("ExpireAgentSession: %v", err)
+	}
+
+	err := RegisterAgentSession(ctx, db, sessionID, "agent-2", "cli")
+	if !errors.Is(err, ErrAgentSessionAlreadyEnded) {
+		t.Fatalf("RegisterAgentSession should reject ended UUID session: got %v", err)
+	}
+
+	s, err := GetAgentSession(ctx, db, sessionID)
+	if err != nil {
+		t.Fatalf("GetAgentSession: %v", err)
+	}
+	if s.EndedAt == nil {
+		t.Fatal("ended_at should remain set for rejected UUID session reuse")
+	}
+	if s.AgentID != "agent-1" {
+		t.Fatalf("agent_id should remain unchanged after rejected reuse: got %q", s.AgentID)
+	}
+}
+
 func TestUpdateAgentSessionHeartbeat_NotFound(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()

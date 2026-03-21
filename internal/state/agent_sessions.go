@@ -7,10 +7,16 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // ErrAgentSessionNotFound is returned when an agent session record is missing.
 var ErrAgentSessionNotFound = errors.New("agent session not found")
+
+// ErrAgentSessionAlreadyEnded is returned when a single-use session ID is
+// re-registered after its historical row already ended.
+var ErrAgentSessionAlreadyEnded = errors.New("agent session already ended")
 
 // ErrAgentAssignmentNotFound is returned when an agent assignment record is missing.
 var ErrAgentAssignmentNotFound = errors.New("agent assignment not found")
@@ -62,6 +68,20 @@ func RegisterAgentSession(ctx context.Context, db *DB, sessionID, agentID, mode 
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	var endedAt sql.NullTime
+	err = tx.QueryRowContext(ctx, `
+		SELECT ended_at
+		FROM agent_sessions
+		WHERE session_id = ?`,
+		sessionID,
+	).Scan(&endedAt)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("register agent session: check existing row: %w", err)
+	}
+	if err == nil && endedAt.Valid && isSingleUseSessionID(sessionID) {
+		return ErrAgentSessionAlreadyEnded
+	}
+
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO agent_sessions (session_id, agent_id, mode, started_at, last_seen_at)
 		VALUES (?, ?, ?, datetime('now'), datetime('now'))
@@ -93,6 +113,11 @@ func RegisterAgentSession(ctx context.Context, db *DB, sessionID, agentID, mode 
 		return fmt.Errorf("register agent session: commit: %w", err)
 	}
 	return nil
+}
+
+func isSingleUseSessionID(sessionID string) bool {
+	_, err := uuid.Parse(sessionID)
+	return err == nil
 }
 
 // UpdateAgentSessionHeartbeat updates the last_seen_at timestamp for a session.
