@@ -242,14 +242,12 @@ Use these values unchanged when attaching or heartbeating.
 	if cfg.Worktree != "" {
 		exports["TEST_WORKTREE"] = cfg.Worktree
 	}
-	if cfg.ConfigPath != "" {
-		exports["CODERO_PILOT_CONFIG"] = cfg.ConfigPath
-	}
-	if cfg.CLIPath != "" {
+		if cfg.ConfigPath != "" {
+			exports["CODERO_PILOT_CONFIG"] = cfg.ConfigPath
+		}
 		exports["CODERO_PILOT_CLI"] = cfg.CLIPath
-	}
 
-	return &sessionBootstrapResult{
+		return &sessionBootstrapResult{
 		RuntimeDir:       runtimeDir,
 		RuntimeAgentMD:   agentPath,
 		RuntimeSessionMD: sessionPath,
