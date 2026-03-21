@@ -20,6 +20,7 @@ type sessionBootstrapConfig struct {
 	RuntimeRoot    string
 	BaseURL        string
 	TailnetBaseURL string
+	CLIPath        string
 	ConfigPath     string
 	Repo           string
 	Branch         string
@@ -121,6 +122,15 @@ func (c *sessionBootstrapConfig) resolve() (*sessionBootstrapConfig, error) {
 	if out.TailnetBaseURL == "" {
 		out.TailnetBaseURL = os.Getenv("CODERO_TAILNET_BASE_URL")
 	}
+	if out.CLIPath == "" {
+		out.CLIPath = os.Getenv("CODERO_PILOT_CLI")
+	}
+	if out.CLIPath == "" {
+		exe, err := os.Executable()
+		if err == nil {
+			out.CLIPath = exe
+		}
+	}
 	if out.Repo == "" {
 		out.Repo = os.Getenv("TEST_REPO")
 	}
@@ -160,6 +170,9 @@ all future Codero actions in this window.
 
 This session is already claimed and registered for this window before startup.
 
+First confirm that Codero sees the same session:
+- "$CODERO_PILOT_CLI" --config "$CODERO_PILOT_CONFIG" session confirm --session-id "$CODERO_SESSION_ID" --agent-id "$CODERO_AGENT_ID"
+
 When you claim or are assigned work, resend:
 - CODERO_AGENT_ID
 - CODERO_SESSION_ID
@@ -176,6 +189,7 @@ Do not reuse this session id in a future window after this session ends.
 - CODERO_SESSION_MODE=%s
 - CODERO_BASE_URL=%s
 - CODERO_TAILNET_BASE_URL=%s
+- CODERO_PILOT_CLI=%s
 - CODERO_PILOT_CONFIG=%s
 - CODERO_WORKTREE=%s
 - TEST_REPO=%s
@@ -184,8 +198,11 @@ Do not reuse this session id in a future window after this session ends.
 
 This session is already registered by the launcher.
 This session is already claimed for this window.
+Do not use the codero binary from PATH for this session.
+Before doing any other work in this window, run exactly this command and stop if it fails:
+- "$CODERO_PILOT_CLI" --config "$CODERO_PILOT_CONFIG" session confirm --session-id "$CODERO_SESSION_ID" --agent-id "$CODERO_AGENT_ID"
 Use these values unchanged when attaching or heartbeating.
-`, cfg.AgentID, cfg.SessionID, cfg.Mode, cfg.BaseURL, cfg.TailnetBaseURL, cfg.ConfigPath, cfg.Worktree, cfg.Repo, cfg.Branch, cfg.TaskID)
+`, cfg.AgentID, cfg.SessionID, cfg.Mode, cfg.BaseURL, cfg.TailnetBaseURL, cfg.CLIPath, cfg.ConfigPath, cfg.Worktree, cfg.Repo, cfg.Branch, cfg.TaskID)
 
 	if err := os.WriteFile(agentPath, []byte(agentBody), 0o644); err != nil {
 		return nil, fmt.Errorf("bootstrap write AGENT.md: %w", err)
@@ -224,6 +241,9 @@ Use these values unchanged when attaching or heartbeating.
 	}
 	if cfg.ConfigPath != "" {
 		exports["CODERO_PILOT_CONFIG"] = cfg.ConfigPath
+	}
+	if cfg.CLIPath != "" {
+		exports["CODERO_PILOT_CLI"] = cfg.CLIPath
 	}
 
 	return &sessionBootstrapResult{
