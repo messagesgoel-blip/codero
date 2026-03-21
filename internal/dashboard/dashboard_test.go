@@ -927,6 +927,56 @@ func TestActiveSessions_WithFreshSession(t *testing.T) {
 	}
 }
 
+func TestActiveSessions_OmitsNilProgressAt(t *testing.T) {
+	h, db := newTestHandler(t)
+	startedAt := time.Now().Add(-30 * time.Minute).UTC()
+	lastSeen := time.Now().Add(-1 * time.Minute).UTC()
+
+	_, err := db.Exec(`INSERT INTO agent_sessions
+		(session_id, agent_id, mode, started_at, last_seen_at, last_progress_at, ended_at, end_reason)
+		VALUES (?,?,?,?,?,NULL,NULL,'')`,
+		"sess-noprogress", "agent-noprogress", "cli", startedAt, lastSeen)
+	if err != nil {
+		t.Fatalf("seedAgentSession without progress: %v", err)
+	}
+
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/active-sessions", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.ActiveSessionsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.ActiveCount != 1 {
+		t.Fatalf("active_count = %d, want 1", resp.ActiveCount)
+	}
+	if len(resp.Sessions) != 1 {
+		t.Fatalf("sessions length = %d, want 1", len(resp.Sessions))
+	}
+	s := resp.Sessions[0]
+	if s.ProgressAt != nil {
+		t.Fatalf("progress_at = %v, want nil", s.ProgressAt)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode raw body: %v", err)
+	}
+	sessions, ok := body["sessions"].([]any)
+	if !ok || len(sessions) != 1 {
+		t.Fatalf("raw sessions = %#v, want 1 row", body["sessions"])
+	}
+	session, ok := sessions[0].(map[string]any)
+	if !ok {
+		t.Fatalf("raw session row = %#v, want object", sessions[0])
+	}
+	if _, exists := session["progress_at"]; exists {
+		t.Fatalf("progress_at should be omitted from response JSON: %#v", session)
+	}
+}
+
 func TestActiveSessions_DuplicateOwnerSession(t *testing.T) {
 	h, db := newTestHandler(t)
 	startedAt := time.Now().Add(-20 * time.Minute).UTC()
