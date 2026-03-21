@@ -33,6 +33,10 @@ CREATE TABLE IF NOT EXISTS agent_assignments (
 CREATE INDEX IF NOT EXISTS idx_agent_assignments_session_active
     ON agent_assignments (session_id, ended_at);
 
+CREATE INDEX IF NOT EXISTS idx_agent_assignments_active_only
+    ON agent_assignments (session_id)
+    WHERE ended_at IS NULL;
+
 CREATE INDEX IF NOT EXISTS idx_agent_assignments_agent_id
     ON agent_assignments (agent_id);
 

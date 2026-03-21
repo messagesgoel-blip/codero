@@ -7,6 +7,7 @@ DROP INDEX IF EXISTS idx_agent_assignments_task_id;
 DROP INDEX IF EXISTS idx_agent_assignments_repo_branch;
 DROP INDEX IF EXISTS idx_agent_assignments_agent_id;
 DROP INDEX IF EXISTS idx_agent_assignments_session_active;
+DROP INDEX IF EXISTS idx_agent_assignments_active_only;
 DROP TABLE IF EXISTS agent_assignments;
 
 DROP INDEX IF EXISTS idx_agent_sessions_last_seen;
