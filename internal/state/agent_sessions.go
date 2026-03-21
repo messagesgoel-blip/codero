@@ -289,6 +289,12 @@ func AttachAgentAssignment(ctx context.Context, db *DB, assignment *AgentAssignm
 	if err != nil {
 		return fmt.Errorf("attach agent assignment: insert: %w", err)
 	}
+	if err := ensureBaselineAgentRulesTx(ctx, tx); err != nil {
+		return fmt.Errorf("attach agent assignment: ensure baseline rules: %w", err)
+	}
+	if err := createInitialAssignmentRuleChecksTx(ctx, tx, assignment); err != nil {
+		return fmt.Errorf("attach agent assignment: create initial rule checks: %w", err)
+	}
 
 	payload, err := json.Marshal(map[string]string{
 		"assignment_id": assignment.ID,

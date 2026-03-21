@@ -2,6 +2,7 @@ package state
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -211,6 +212,57 @@ func TestAttachAgentAssignment_Supersede(t *testing.T) {
 	}
 	if superseded.SupersededBy == nil || *superseded.SupersededBy != "assign-2" {
 		t.Errorf("superseded_by: got %v, want %q", superseded.SupersededBy, "assign-2")
+	}
+
+	var ruleCount int
+	if err := db.sql.QueryRow(`SELECT COUNT(*) FROM agent_rules`).Scan(&ruleCount); err != nil {
+		t.Fatalf("count agent_rules: %v", err)
+	}
+	if ruleCount != len(baselineAgentRules) {
+		t.Fatalf("agent_rules count: got %d, want %d", ruleCount, len(baselineAgentRules))
+	}
+
+	rows, err := db.sql.Query(`
+		SELECT rule_id, result, violation_action_taken, detail
+		FROM assignment_rule_checks
+		WHERE assignment_id = ?
+		ORDER BY rule_id ASC`,
+		"assign-2",
+	)
+	if err != nil {
+		t.Fatalf("query assignment_rule_checks: %v", err)
+	}
+	defer rows.Close()
+
+	gotChecks := map[string]string{}
+	for rows.Next() {
+		var ruleID, result, violationActionTaken, detail string
+		if err := rows.Scan(&ruleID, &result, &violationActionTaken, &detail); err != nil {
+			t.Fatalf("scan assignment_rule_checks: %v", err)
+		}
+		var actions []string
+		if err := json.Unmarshal([]byte(violationActionTaken), &actions); err != nil {
+			t.Fatalf("decode violation_action_taken for %s: %v", ruleID, err)
+		}
+		gotChecks[ruleID] = result
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("assignment_rule_checks rows: %v", err)
+	}
+
+	wantChecks := map[string]string{
+		"RULE-001": "pending",
+		"RULE-002": "pass",
+		"RULE-003": "pass",
+		"RULE-004": "pass",
+	}
+	if len(gotChecks) != len(wantChecks) {
+		t.Fatalf("assignment_rule_checks count: got %d, want %d", len(gotChecks), len(wantChecks))
+	}
+	for ruleID, want := range wantChecks {
+		if got := gotChecks[ruleID]; got != want {
+			t.Fatalf("assignment_rule_checks[%s]: got %q, want %q", ruleID, got, want)
+		}
 	}
 }
 
