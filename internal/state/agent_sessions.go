@@ -246,7 +246,10 @@ func AttachAgentAssignment(ctx context.Context, db *DB, assignment *AgentAssignm
 		return fmt.Errorf("attach agent assignment: insert: %w", err)
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("attach agent assignment: commit: %w", err)
+	}
+	return nil
 }
 
 // GetActiveAgentAssignment returns the most recent active assignment for a session.

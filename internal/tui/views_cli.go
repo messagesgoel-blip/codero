@@ -67,24 +67,24 @@ func dashboardChatCmd(ctx context.Context, prompt, tab string) tea.Cmd {
 		}
 		body, err := json.Marshal(reqBody)
 		if err != nil {
-			return terminalChatErrorMsg{prompt: prompt, err: fmt.Errorf("marshal dashboard chat request: %w", err)}
+			return terminalChatErrorMsg{prompt: prompt, err: fmt.Errorf("marshal request body: %w", err)}
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, dashboardChatEndpoint(), bytes.NewReader(body))
 		if err != nil {
-			return terminalChatErrorMsg{prompt: prompt, err: fmt.Errorf("build dashboard chat request: %w", err)}
+			return terminalChatErrorMsg{prompt: prompt, err: fmt.Errorf("create HTTP request: %w", err)}
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json")
 
 		resp, err := dashboardChatHTTPClient.Do(req)
 		if err != nil {
-			return terminalChatErrorMsg{prompt: prompt, err: fmt.Errorf("send dashboard chat request: %w", err)}
+			return terminalChatErrorMsg{prompt: prompt, err: fmt.Errorf("send chat request: %w", err)}
 		}
 		defer resp.Body.Close()
 
 		raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
 		if err != nil {
-			return terminalChatErrorMsg{prompt: prompt, err: fmt.Errorf("read dashboard chat response: %w", err)}
+			return terminalChatErrorMsg{prompt: prompt, err: fmt.Errorf("read response body: %w", err)}
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			msg := strings.TrimSpace(string(raw))
@@ -96,7 +96,7 @@ func dashboardChatCmd(ctx context.Context, prompt, tab string) tea.Cmd {
 
 		var out dashboard.ChatResponse
 		if err := json.Unmarshal(raw, &out); err != nil {
-			return terminalChatErrorMsg{prompt: prompt, err: fmt.Errorf("decode dashboard chat response: %w", err)}
+			return terminalChatErrorMsg{prompt: prompt, err: fmt.Errorf("unmarshal chat response: %w", err)}
 		}
 		return terminalChatResultMsg{prompt: prompt, response: out}
 	}
