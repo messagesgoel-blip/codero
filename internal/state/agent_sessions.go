@@ -168,7 +168,7 @@ func GetAgentSession(ctx context.Context, db *DB, sessionID string) (*AgentSessi
 func ConfirmAgentSession(ctx context.Context, db *DB, sessionID, agentID string) error {
 	s, err := GetAgentSession(ctx, db, sessionID)
 	if err != nil {
-		return err
+		return fmt.Errorf("confirm agent session %q: %w", sessionID, err)
 	}
 	if s.EndedAt != nil {
 		return ErrAgentSessionAlreadyEnded

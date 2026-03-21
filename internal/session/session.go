@@ -60,7 +60,7 @@ func (s *Store) Confirm(ctx context.Context, sessionID, agentID string) error {
 		if errors.Is(err, state.ErrAgentSessionAgentMismatch) {
 			return ErrSessionMismatch
 		}
-		return err
+		return fmt.Errorf("Store.Confirm: confirm agent session %s for agent %s: %w", sessionID, agentID, err)
 	}
 	return nil
 }

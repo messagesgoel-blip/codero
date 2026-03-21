@@ -131,6 +131,9 @@ func (c *sessionBootstrapConfig) resolve() (*sessionBootstrapConfig, error) {
 			out.CLIPath = exe
 		}
 	}
+	if out.CLIPath == "" {
+		return nil, fmt.Errorf("resolve bootstrap CLI path: CODERO_PILOT_CLI could not be resolved; mandatory session confirm command would be unusable")
+	}
 	if out.Repo == "" {
 		out.Repo = os.Getenv("TEST_REPO")
 	}
