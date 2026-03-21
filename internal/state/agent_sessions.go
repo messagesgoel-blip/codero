@@ -131,6 +131,64 @@ func ListExpiredAgentSessions(ctx context.Context, db *DB, ttl time.Duration) ([
 	return scanAgentSessions(rows)
 }
 
+// ExpireAgentSession marks a session and any active assignment as expired.
+// It is idempotent at the database level: if the session has already ended,
+// the call returns ErrAgentSessionNotFound.
+func ExpireAgentSession(ctx context.Context, db *DB, sessionID, reason string) error {
+	if reason == "" {
+		reason = "expired"
+	}
+
+	tx, err := db.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("expire agent session: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET ended_at = datetime('now'), end_reason = ?
+		WHERE session_id = ? AND ended_at IS NULL`,
+		reason, sessionID,
+	)
+	if err != nil {
+		return fmt.Errorf("expire agent session: update session: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("expire agent session: rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrAgentSessionNotFound
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE agent_assignments
+		SET ended_at = datetime('now'), end_reason = ?
+		WHERE session_id = ? AND ended_at IS NULL`,
+		reason, sessionID,
+	); err != nil {
+		return fmt.Errorf("expire agent session: end assignments: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO agent_events (session_id, agent_id, event_type, payload)
+		SELECT session_id, agent_id, ?, ?
+		FROM agent_sessions
+		WHERE session_id = ?`,
+		"session_expired",
+		fmt.Sprintf(`{"reason":%q}`, reason),
+		sessionID,
+	); err != nil {
+		return fmt.Errorf("expire agent session: append event: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("expire agent session: commit: %w", err)
+	}
+	return nil
+}
+
 // AttachAgentAssignment inserts a new assignment and supersedes any active
 // assignments for the same session.
 func AttachAgentAssignment(ctx context.Context, db *DB, assignment *AgentAssignment) error {

@@ -2,6 +2,8 @@ package scheduler
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -24,7 +26,8 @@ const (
 )
 
 // ExpiryWorker runs two background routines:
-//  1. Session heartbeat expiry: transitions abandoned sessions (T14).
+//  1. Session heartbeat expiry: expires agent sessions and legacy branch
+//     ownership records (T14).
 //  2. Lease audit: detects cli_reviewing branches with expired durable leases
 //     and re-queues them (T07), acting as a safety net when Redis lease key
 //     expiry events are missed.
@@ -84,9 +87,40 @@ func (w *ExpiryWorker) RunLeaseAuditCycle(ctx context.Context) {
 	w.runLeaseAudit(ctx)
 }
 
-// runSessionExpiry detects branches whose owner_session_last_seen has passed
-// SessionHeartbeatTTL and transitions them to abandoned (T14).
+// runSessionExpiry expires agent sessions when the new table exists, then
+// falls back to the legacy branch ownership expiry path so old fixtures and
+// branch-state-only deployments still behave correctly.
 func (w *ExpiryWorker) runSessionExpiry(ctx context.Context) {
+	hasAgentSessions, err := hasTable(ctx, w.db, "agent_sessions")
+	if err != nil {
+		loglib.Error("expiry: table lookup failed",
+			loglib.FieldComponent, "expiry",
+			"error", err,
+		)
+		return
+	}
+
+	if hasAgentSessions {
+		expired, err := state.ListExpiredAgentSessions(ctx, w.db, SessionHeartbeatTTL)
+		if err != nil {
+			loglib.Error("expiry: list expired agent sessions failed",
+				loglib.FieldComponent, "expiry",
+				"error", err,
+			)
+			return
+		}
+		for _, session := range expired {
+			if err := w.expireAgentSession(ctx, session); err != nil {
+				loglib.Error("expiry: expire agent session failed",
+					loglib.FieldComponent, "expiry",
+					"session_id", session.SessionID,
+					"agent_id", session.AgentID,
+					"error", err,
+				)
+			}
+		}
+	}
+
 	expired, err := state.ListExpiredSessions(w.db, SessionHeartbeatTTL)
 	if err != nil {
 		loglib.Error("expiry: list expired sessions failed",
@@ -106,6 +140,24 @@ func (w *ExpiryWorker) runSessionExpiry(ctx context.Context) {
 			)
 		}
 	}
+}
+
+// expireAgentSession marks a durable agent session and its active assignment
+// as expired in the new session tables.
+func (w *ExpiryWorker) expireAgentSession(ctx context.Context, session state.AgentSession) error {
+	if err := state.ExpireAgentSession(ctx, w.db, session.SessionID, "expired"); err != nil {
+		return fmt.Errorf("expire agent session %s: %w", session.SessionID, err)
+	}
+
+	loglib.Warn("expiry: agent session expired",
+		loglib.FieldEventType, loglib.EventTransition,
+		loglib.FieldComponent, "expiry",
+		loglib.FieldSession, session.SessionID,
+		"agent_id", session.AgentID,
+		"mode", session.Mode,
+	)
+
+	return nil
 }
 
 // expireSession transitions one branch to abandoned (T14) and delivers a system event.
@@ -135,6 +187,21 @@ func (w *ExpiryWorker) expireSession(ctx context.Context, b state.BranchRecord) 
 		)
 	}
 	return nil
+}
+
+func hasTable(ctx context.Context, db *state.DB, name string) (bool, error) {
+	var found string
+	err := db.Unwrap().QueryRowContext(ctx,
+		`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`,
+		name,
+	).Scan(&found)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("check table %s: %w", name, err)
+	}
+	return true, nil
 }
 
 // runLeaseAudit scans for cli_reviewing branches whose durable lease_expires_at

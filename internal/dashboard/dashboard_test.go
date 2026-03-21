@@ -1055,6 +1055,9 @@ func TestDashboardHealth_OK(t *testing.T) {
 	if resp.GeneratedAt.IsZero() {
 		t.Error("generated_at must not be zero")
 	}
+	if resp.ReconciliationStatus == "" {
+		t.Error("reconciliation_status must not be empty")
+	}
 	// Feeds must be populated (status may be "unavailable" in empty test DB).
 	if resp.Feeds.ActiveSessions.Status == "" {
 		t.Error("feeds.active_sessions.status must not be empty")
@@ -1093,6 +1096,15 @@ func TestDashboardHealth_ActiveAgentCount(t *testing.T) {
 	}
 	if resp.ActiveAgentCount != 1 {
 		t.Errorf("active_agent_count = %d, want 1", resp.ActiveAgentCount)
+	}
+	if resp.StaleSessionCount != 0 {
+		t.Errorf("stale_session_count = %d, want 0", resp.StaleSessionCount)
+	}
+	if resp.ExpiredSessionCount != 0 {
+		t.Errorf("expired_session_count = %d, want 0", resp.ExpiredSessionCount)
+	}
+	if resp.ReconciliationStatus != "ok" {
+		t.Errorf("reconciliation_status = %q, want ok", resp.ReconciliationStatus)
 	}
 	// Sessions feed must be "ok" (fresh heartbeat within threshold).
 	if resp.Feeds.ActiveSessions.Status != "ok" {
@@ -1137,6 +1149,15 @@ func TestDashboardHealth_StaleFeedDetected(t *testing.T) {
 	// Sessions feed should be "stale" since the last heartbeat is > 5 min ago.
 	if resp.Feeds.ActiveSessions.Status != "stale" {
 		t.Errorf("feeds.active_sessions.status = %q, want stale", resp.Feeds.ActiveSessions.Status)
+	}
+	if resp.StaleSessionCount != 1 {
+		t.Errorf("stale_session_count = %d, want 1", resp.StaleSessionCount)
+	}
+	if resp.ExpiredSessionCount != 0 {
+		t.Errorf("expired_session_count = %d, want 0", resp.ExpiredSessionCount)
+	}
+	if resp.ReconciliationStatus != "stale" {
+		t.Errorf("reconciliation_status = %q, want stale", resp.ReconciliationStatus)
 	}
 }
 
