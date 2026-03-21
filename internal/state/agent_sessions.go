@@ -211,6 +211,25 @@ func ExpireAgentSession(ctx context.Context, db *DB, sessionID, reason string) e
 	); err != nil {
 		return fmt.Errorf("expire agent session: end assignments: %w", err)
 	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE assignment_rule_checks
+		SET checked_at = datetime('now'),
+		    result = 'fail',
+		    violation_raised = 1,
+		    violation_action_taken = '["block","log","notify"]',
+		    detail = ?,
+		    resolved_at = NULL,
+		    resolved_by = ''
+		WHERE assignment_id IN (
+			SELECT assignment_id
+			FROM agent_assignments
+			WHERE session_id = ?
+		) AND rule_id = 'RULE-004'`,
+		`{"source":"session_expired","reason":"heartbeat_expired"}`,
+		sessionID,
+	); err != nil {
+		return fmt.Errorf("expire agent session: fail rule-004 checks: %w", err)
+	}
 
 	payload, err := json.Marshal(map[string]string{
 		"reason": reason,

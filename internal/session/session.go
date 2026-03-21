@@ -65,6 +65,13 @@ func (s *Store) Heartbeat(ctx context.Context, sessionID string, markProgress bo
 			return err
 		}
 	}
+	detail := `{"source":"heartbeat","progress":"fresh"}`
+	if !markProgress {
+		detail = `{"source":"heartbeat","progress":"unchanged"}`
+	}
+	if err := state.UpdateRule004Check(ctx, s.db, active, "pass", false, detail, false); err != nil {
+		return err
+	}
 	return nil
 }
 

@@ -202,6 +202,30 @@ func TestExpiryWorker_AgentSessionExpiry_EndsSessionAndAssignment(t *testing.T) 
 		t.Errorf("assignment end_reason: got %q, want %q", assignments[0].EndReason, "expired")
 	}
 
+	var (
+		result          string
+		violationRaised int
+		detail          string
+	)
+	err = db.Unwrap().QueryRowContext(ctx, `
+		SELECT result, violation_raised, detail
+		FROM assignment_rule_checks
+		WHERE assignment_id = ? AND rule_id = 'RULE-004'`,
+		"assign-agent",
+	).Scan(&result, &violationRaised, &detail)
+	if err != nil {
+		t.Fatalf("query rule-004 check: %v", err)
+	}
+	if result != "fail" {
+		t.Fatalf("rule-004 result: got %q, want %q", result, "fail")
+	}
+	if violationRaised != 1 {
+		t.Fatalf("rule-004 violation_raised: got %d, want 1", violationRaised)
+	}
+	if detail != `{"source":"session_expired","reason":"heartbeat_expired"}` {
+		t.Fatalf("rule-004 detail: got %q", detail)
+	}
+
 	events, err := state.ListAgentEvents(ctx, db, "sess-agent", 0)
 	if err != nil {
 		t.Fatalf("ListAgentEvents: %v", err)

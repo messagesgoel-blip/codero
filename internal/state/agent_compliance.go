@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 type defaultAgentRule struct {
@@ -148,4 +149,64 @@ func createInitialAssignmentRuleChecksTx(ctx context.Context, tx *sql.Tx, assign
 	}
 
 	return nil
+}
+
+func UpdateRule004Check(ctx context.Context, db *DB, assignment *AgentAssignment, result string, violationRaised bool, detail string, resolved bool) error {
+	if assignment == nil {
+		return fmt.Errorf("update rule-004 check: nil assignment")
+	}
+	tx, err := db.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("update rule-004 check: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := updateRule004CheckTx(ctx, tx, assignment, result, violationRaised, detail, resolved); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("update rule-004 check: commit: %w", err)
+	}
+	return nil
+}
+
+func updateRule004CheckTx(ctx context.Context, tx *sql.Tx, assignment *AgentAssignment, result string, violationRaised bool, detail string, resolved bool) error {
+	actions := []string{}
+	resolvedBy := ""
+	var resolvedAt any = nil
+	if violationRaised {
+		actions = []string{"block", "log", "notify"}
+	}
+	if resolved {
+		resolvedBy = "codero"
+		resolvedAt = time.Now().UTC()
+	}
+
+	violationActionTaken, err := json.Marshal(actions)
+	if err != nil {
+		return fmt.Errorf("update rule-004 check: marshal actions: %w", err)
+	}
+	_, err = tx.ExecContext(ctx, `
+		UPDATE assignment_rule_checks
+		SET checked_at = datetime('now'),
+		    result = ?,
+		    violation_raised = ?,
+		    violation_action_taken = ?,
+		    detail = ?,
+		    resolved_at = ?,
+		    resolved_by = ?
+		WHERE assignment_id = ? AND rule_id = 'RULE-004'`,
+		result, boolToInt(violationRaised), string(violationActionTaken), detail, resolvedAt, resolvedBy, assignment.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("update rule-004 check: update: %w", err)
+	}
+	return nil
+}
+
+func boolToInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }
