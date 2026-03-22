@@ -6,6 +6,7 @@ Status: proposed
 Owner: you  
 Horizon: 6-12 months  
 Revision intent: preserve the cleaner program structure of v5 while restoring the implementation contracts, failure semantics, and operator model that v4 captured well.
+Near-term execution after the merged v3 closeout now lives in `../roadmap.md`; treat this file as architecture and historical sequencing context unless a PR explicitly updates it.
 
 ---
 
@@ -425,25 +426,16 @@ Module intake is a permanent process used whenever codero adopts proven behavior
 - no adopted module without a rollback note
 - no silent semantic changes during import
 
-### Initial priority intake queue
+### Historical initial priority intake queue
 
-Priority A:
+The original MI-001 through MI-004 queue is no longer the active next-step plan:
 
-- MI-001 lease semantics and transition safety
-- MI-002 webhook ingestion and dedup
-- MI-003 relay / claim / ack / resolve delivery model
-- MI-004 session heartbeat and stale-session handling
+- MI-001 lease semantics and transition safety is already implemented.
+- MI-002 webhook ingestion and dedup is already implemented.
+- MI-004 session heartbeat and stale-session handling is already implemented.
+- MI-003 relay / claim / ack / resolve delivery work is superseded by the Task Layer v2 feedback and polling roadmap unless a concrete gap remains after that work lands.
 
-Priority B:
-
-- review routing policy engine
-- active agent relay worker model
-- overview and documentation surfaces
-
-Priority C:
-
-- LLM-assisted routing
-- advanced watchdog heuristics
+Current near-term execution is tracked in `../roadmap.md` as TL-001 through TL-008.
 
 ### Registry fields
 

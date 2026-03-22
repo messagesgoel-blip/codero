@@ -90,57 +90,53 @@ Exit gate:
 
 ---
 
-## Phase 2 — Multi-Repo and Module Intake from ghwatcher (Weeks 6-12)
+## Phase 2 — Task Layer and GitHub Abstraction (Weeks 6-12)
 
-Goal: achieve true multi-repo orchestration while reusing proven parts of ghwatcher deliberately.
+Goal: implement the Task Layer v2 contract on top of the merged v3 session/compliance layer before broader platformization work.
 
-Sequencing note: MI-001 lease semantics contract/parity artifacts are produced in Phase 1 and consumed at Phase 2 start.
+Sequencing note: Phase 1 session startup and assignment/compliance tracking are complete through PR `#86` on `main`. Phase 2 is the second handshake: task registration, stage emits, feedback polling, handoff, and task-scoped GitHub abstraction.
 
-### 2.1 Module Intake Workflow (for every module)
+### 2.1 Binding inputs
 
-1. Define target contract in codero (input/output/errors).
-2. Identify source module in ghwatcher.
-3. Write parity tests in codero before integration.
-4. Integrate as adapter or direct port (smallest change first).
-5. Validate parity + load behavior + failure behavior.
-6. Record decision in ADR and registry.
+- Canonical contributor roadmap: `docs/roadmap.md`
+- Binding task-layer contract: `/srv/storage/local/Specifications/Codero/Tasks/codero_task_layer_v2.docx`
+- Guardrail: keep the no-bulk-copy ghwatcher rule, but do not reopen already-implemented lease/webhook/session-liveness work as fresh Phase 2 backlog.
 
-Guardrail: no bulk copy from ghwatcher. Intake is module-by-module only.
+### 2.2 Task Layer v2 roadmap
 
-No module is "adopted" without all 6 steps complete.
+| Task ID | Scope | Spec anchors | Expected outcome |
+|---|---|---|---|
+| TL-001 | Atomic task acceptance | `§4.2`, `I-37` | Add durable `codero task accept` semantics with compare-and-swap assignment, same-session idempotency, and cross-session conflict handling. |
+| TL-002 | Assignment-versioned stage emits | `§3`, `§4.3` | Introduce `assignment_version`, reject stale or out-of-order emits, and enforce valid substatus/state-group transitions on every emit. |
+| TL-003 | Task registry and GitHub link abstraction | `§6.1`, `§6.2`, `§7` | Persist task-scoped GitHub linkage in `codero_github_links`, keep PR/issue/SHA values out of agent-facing contracts, and make task ID the authoritative resolver. |
+| TL-004 | Feedback polling contract and cache | `§5`, `§6.3` | Extend `codero poll` to return normalized per-source `source_status`, bounded `context_block`, and durable task feedback cache semantics. |
+| TL-005 | Handoff and recovery semantics | `§4.4`, `§9` | Implement push-by-default successor nomination, pull-based fallback, and handoff TTL recovery back to the queue. |
+| TL-006 | Codero-outage buffering and replay | `§4.5` | Add bounded local emit buffering with idempotency keys and replay-on-reconnect behavior without breaking the durable task contract. |
+| TL-007 | Feedback precedence and truncation rules | `§5.4`, `§5.5`, `§10` | Enforce explicit source precedence, ensure compliance blockers are never truncated out of context, and keep feedback reduction deterministic. |
+| TL-008 | End-to-end pilot and regression pack | `§9`, `§10` | Cover `accept -> emit -> poll -> handoff/retry -> finalize` in integration tests and validate one live operator loop without manual DB repair. |
 
-### 2.2 Priority Intake Queue
+### 2.3 Carry-forward platform outcomes
 
-Priority A (required for core value):
+- Repo registry and per-repo state isolation stay required.
+- Repo-qualified API routes and queries remain `owner/repo + branch`, never `branch` alone.
+- Delivery continues to avoid a single local inbox-file assumption.
+- Task-layer feedback and handoff flows must work across multiple repositories without state collision.
+- Cross-repo fairness and starvation protection should be validated after TL-001 through TL-008 land.
 
-- Event lease semantics and transition safety
-- Webhook ingestion + dedup path
-- Relay/claim/ack/resolve event delivery model
-- Session heartbeat and stale session handling
+Removed from the active roadmap as duplicates or superseded work:
 
-Priority B (operator leverage):
-
-- Review routing policy engine
-- Active agent relay worker model
-- Overview/docs generation surfaces
-
-Priority C (advanced):
-
-- LLM-assisted routing
-- Advanced watchdog heuristics
-
-### 2.3 Multi-Repo Required Outcomes
-
-- Repo registry and per-repo state isolation.
-- Repo-qualified API routes and queries (`owner/repo + branch`, never `branch` alone).
-- Delivery model that does not assume a single local inbox file.
-- Cross-repo fairness + starvation protection validated by simulation.
+- MI-001 lease semantics and transition safety is already implemented.
+- MI-002 webhook ingestion and dedup path is already implemented.
+- MI-004 session heartbeat and stale-session handling is already implemented.
+- MI-003 relay/claim/ack/resolve delivery work is superseded by TL-004 unless a concrete gap remains after the task-layer polling contract lands.
 
 Exit gate:
 
-- At least 3 real repositories running concurrently with validated end-to-end review cycles.
-- No cross-repo state collision incidents.
-- p95 event delivery latency and queue wait SLOs defined and met.
+- `codero task accept` enforces `I-37` and idempotency in durable tests.
+- Stage emits reject stale `assignment_version` values and invalid substatus transitions.
+- Poll responses always include per-source status, precedence-safe context, and deterministic truncation behavior.
+- Handoff TTL recovery and outage replay are covered by integration tests.
+- At least one live repository completes `accept -> emit -> poll -> retry/handoff -> finalize` with no manual DB repair.
 
 ---
 
@@ -266,10 +262,10 @@ Sprint 3 (Phase 1):
 
 Sprint 4 (Phase 2 start):
 
-- integrate MI-001 lease semantics using the prepared Phase 1 contract + parity harness
-- execute parity tests and rollout checklist
+- TL-001 atomic task acceptance and idempotent claim path
+- TL-002 assignment-versioned emits and substatus-validity enforcement
 
-### Current Implementation Snapshot (2026-03-16)
+### Current Implementation Snapshot (2026-03-22)
 
 - `local_review` state transitions are implemented in `internal/state` (T02/T03/T04).
 - `codero commit-gate` is implemented and wired to the shared heartbeat gate contract.
@@ -279,10 +275,26 @@ Sprint 4 (Phase 2 start):
 - Proving-period metrics commands (`scorecard`, `record-event`, `record-precommit`) are implemented and `commit-gate` now auto-records provider outcomes.
 - TUI v2-alpha is shipped for `codero gate-status --watch` with Bubble Tea 3-pane layout, keyboard-first controls, and authoritative/non-authoritative gate separation.
 - TUI architecture and operator quickstart are documented in `docs/tui-v2-architecture.md`.
+- PR `#86` is merged on `main`, closing the remaining v3 gaps with versioned `agent_rules` rows and blocked routing for `waiting_for_merge_approval`.
 
 ---
 
-## 6.1) Deferred Post-v3 Hardening Backlog
+## 6.1) Task Layer v2 Near-Term Execution Backlog
+
+This is the next active execution track after the merged v3 closeout. Use TL-001 through TL-008 as the task IDs for planning, issue creation, and sequencing.
+
+- TL-001: atomic task acceptance
+- TL-002: assignment-versioned stage emits
+- TL-003: task registry and GitHub link abstraction
+- TL-004: feedback polling contract and cache
+- TL-005: handoff and recovery semantics
+- TL-006: Codero-outage buffering and replay
+- TL-007: feedback precedence and truncation enforcement
+- TL-008: end-to-end pilot and regression pack
+
+---
+
+## 6.2) Deferred Post-v3 Hardening Backlog
 
 These items are explicitly deferred for later implementation. They are not blockers for v3 session/compliance acceptance or the current PR `#86` closeout path.
 
