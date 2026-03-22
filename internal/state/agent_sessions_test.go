@@ -1038,3 +1038,259 @@ func TestGetActiveAgentAssignment_NotFound(t *testing.T) {
 		t.Fatalf("expected ErrAgentAssignmentNotFound, got %v", err)
 	}
 }
+
+// ─── AcceptTask tests ──────────────────────────────────────────────────────
+
+func mustRegisterSession(t *testing.T, db *DB, sessionID, agentID string) {
+	t.Helper()
+	if err := RegisterAgentSession(context.Background(), db, sessionID, agentID, ""); err != nil {
+		t.Fatalf("RegisterAgentSession(%q): %v", sessionID, err)
+	}
+}
+
+// TestAcceptTask_HappyPath verifies that a new assignment row is created with
+// correct field values and assignment_version initialized to 1.
+func TestAcceptTask_HappyPath(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	before := time.Now().UTC().Add(-2 * time.Second)
+
+	mustRegisterSession(t, db, "sess-accept-1", "agent-a")
+
+	a, err := AcceptTask(ctx, db, "sess-accept-1", "TASK-001")
+	if err != nil {
+		t.Fatalf("AcceptTask: %v", err)
+	}
+	if a == nil {
+		t.Fatal("AcceptTask: returned nil assignment")
+	}
+	if a.ID == "" {
+		t.Error("assignment_id should be non-empty")
+	}
+	if a.SessionID != "sess-accept-1" {
+		t.Errorf("session_id: got %q, want %q", a.SessionID, "sess-accept-1")
+	}
+	if a.TaskID != "TASK-001" {
+		t.Errorf("task_id: got %q, want %q", a.TaskID, "TASK-001")
+	}
+	if a.State != string(assignmentStateActive) {
+		t.Errorf("state: got %q, want %q", a.State, assignmentStateActive)
+	}
+	if a.Substatus != AssignmentSubstatusInProgress {
+		t.Errorf("substatus: got %q, want %q", a.Substatus, AssignmentSubstatusInProgress)
+	}
+	if a.EndedAt != nil {
+		t.Errorf("ended_at: expected nil, got %v", a.EndedAt)
+	}
+
+	// Verify assignment_version = 1 directly in the DB.
+	var version int
+	if err := db.sql.QueryRow(
+		`SELECT assignment_version FROM agent_assignments WHERE assignment_id = ?`, a.ID,
+	).Scan(&version); err != nil {
+		t.Fatalf("query assignment_version: %v", err)
+	}
+	if version != 1 {
+		t.Errorf("assignment_version: got %d, want 1", version)
+	}
+
+	var (
+		lastSeen     time.Time
+		lastProgress sql.NullTime
+	)
+	if err := db.sql.QueryRow(
+		`SELECT last_seen_at, last_progress_at FROM agent_sessions WHERE session_id = ?`,
+		"sess-accept-1",
+	).Scan(&lastSeen, &lastProgress); err != nil {
+		t.Fatalf("query session heartbeat fields: %v", err)
+	}
+	if lastSeen.Before(before) {
+		t.Errorf("last_seen_at not updated by AcceptTask: got %s, want after %s", lastSeen, before)
+	}
+	if !lastProgress.Valid {
+		t.Fatal("last_progress_at should be set by AcceptTask")
+	}
+	if lastProgress.Time.Before(before) {
+		t.Errorf("last_progress_at not updated by AcceptTask: got %s, want after %s", lastProgress.Time, before)
+	}
+}
+
+// TestAcceptTask_Idempotent verifies that calling AcceptTask twice with the
+// same session_id and task_id returns the same assignment without duplicating rows.
+func TestAcceptTask_Idempotent(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	mustRegisterSession(t, db, "sess-idem", "agent-a")
+
+	a1, err := AcceptTask(ctx, db, "sess-idem", "TASK-002")
+	if err != nil {
+		t.Fatalf("first AcceptTask: %v", err)
+	}
+
+	a2, err := AcceptTask(ctx, db, "sess-idem", "TASK-002")
+	if err != nil {
+		t.Fatalf("second AcceptTask (idempotent): %v", err)
+	}
+
+	if a1.ID != a2.ID {
+		t.Errorf("idempotent calls returned different assignment IDs: %q vs %q", a1.ID, a2.ID)
+	}
+
+	// Only one row must exist for this task.
+	var count int
+	if err := db.sql.QueryRow(
+		`SELECT COUNT(*) FROM agent_assignments WHERE task_id = 'TASK-002' AND session_id = 'sess-idem'`,
+	).Scan(&count); err != nil {
+		t.Fatalf("count assignments: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("row count: got %d, want 1", count)
+	}
+}
+
+// TestAcceptTask_ConflictDifferentSession verifies that a second session cannot
+// claim a task that is already held by a live assignment of another session.
+func TestAcceptTask_ConflictDifferentSession(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	mustRegisterSession(t, db, "sess-owner", "agent-a")
+	mustRegisterSession(t, db, "sess-rival", "agent-b")
+
+	if _, err := AcceptTask(ctx, db, "sess-owner", "TASK-003"); err != nil {
+		t.Fatalf("first AcceptTask: %v", err)
+	}
+
+	_, err := AcceptTask(ctx, db, "sess-rival", "TASK-003")
+	if err == nil {
+		t.Fatal("expected ErrTaskAlreadyClaimed, got nil")
+	}
+	if !errors.Is(err, ErrTaskAlreadyClaimed) {
+		t.Errorf("expected ErrTaskAlreadyClaimed; got: %v", err)
+	}
+}
+
+// TestAcceptTask_TerminalAllowsReuse verifies that a task whose prior assignment
+// has been ended (terminal) can be re-claimed by any session.
+func TestAcceptTask_TerminalAllowsReuse(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	mustRegisterSession(t, db, "sess-first", "agent-a")
+	mustRegisterSession(t, db, "sess-second", "agent-b")
+
+	a, err := AcceptTask(ctx, db, "sess-first", "TASK-004")
+	if err != nil {
+		t.Fatalf("first AcceptTask: %v", err)
+	}
+
+	// End the assignment (simulating a completed/expired session).
+	if _, err := db.sql.Exec(
+		`UPDATE agent_assignments SET ended_at = datetime('now'), end_reason = 'done' WHERE assignment_id = ?`,
+		a.ID,
+	); err != nil {
+		t.Fatalf("end assignment: %v", err)
+	}
+
+	// A different session should now be able to claim the task.
+	a2, err := AcceptTask(ctx, db, "sess-second", "TASK-004")
+	if err != nil {
+		t.Fatalf("AcceptTask after terminal: %v", err)
+	}
+	if a2.ID == a.ID {
+		t.Error("expected a new assignment ID after terminal reuse")
+	}
+	if a2.SessionID != "sess-second" {
+		t.Errorf("session_id: got %q, want %q", a2.SessionID, "sess-second")
+	}
+}
+
+func TestAcceptTask_SupersedesPriorLiveAssignmentForSameSession(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	mustRegisterSession(t, db, "sess-supersede", "agent-a")
+
+	first, err := AcceptTask(ctx, db, "sess-supersede", "TASK-OLD")
+	if err != nil {
+		t.Fatalf("first AcceptTask: %v", err)
+	}
+
+	second, err := AcceptTask(ctx, db, "sess-supersede", "TASK-NEW")
+	if err != nil {
+		t.Fatalf("second AcceptTask: %v", err)
+	}
+	if second.ID == first.ID {
+		t.Fatal("expected a new assignment for the second task claim")
+	}
+
+	assignments, err := ListAgentAssignments(ctx, db, "sess-supersede")
+	if err != nil {
+		t.Fatalf("ListAgentAssignments: %v", err)
+	}
+	if len(assignments) != 2 {
+		t.Fatalf("assignments count: got %d, want 2", len(assignments))
+	}
+
+	var superseded *AgentAssignment
+	var active *AgentAssignment
+	for i := range assignments {
+		if assignments[i].ID == first.ID {
+			superseded = &assignments[i]
+		}
+		if assignments[i].ID == second.ID {
+			active = &assignments[i]
+		}
+	}
+	if superseded == nil || active == nil {
+		t.Fatalf("expected both prior and new assignments to exist; got %#v", assignments)
+	}
+	if superseded.EndedAt == nil {
+		t.Fatal("prior assignment should be ended when a new task is accepted for the same session")
+	}
+	if superseded.EndReason != "superseded" {
+		t.Fatalf("prior assignment end_reason: got %q, want superseded", superseded.EndReason)
+	}
+	if superseded.State != string(assignmentStateSuperseded) {
+		t.Fatalf("prior assignment state: got %q, want %q", superseded.State, assignmentStateSuperseded)
+	}
+	if superseded.SupersededBy == nil || *superseded.SupersededBy != second.ID {
+		t.Fatalf("prior assignment superseded_by: got %v, want %q", superseded.SupersededBy, second.ID)
+	}
+	if active.EndedAt != nil {
+		t.Fatalf("new assignment should remain live, got ended_at=%v", active.EndedAt)
+	}
+	if active.TaskID != "TASK-NEW" {
+		t.Fatalf("new assignment task_id: got %q, want %q", active.TaskID, "TASK-NEW")
+	}
+}
+
+// TestAcceptTask_SessionNotFound verifies that AcceptTask returns
+// ErrAgentSessionNotFound when the session does not exist.
+func TestAcceptTask_SessionNotFound(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	_, err := AcceptTask(ctx, db, "nonexistent-session", "TASK-005")
+	if !errors.Is(err, ErrAgentSessionNotFound) {
+		t.Errorf("expected ErrAgentSessionNotFound; got: %v", err)
+	}
+}
+
+// TestAcceptTask_EndedSessionRejected verifies that AcceptTask returns
+// ErrAgentSessionAlreadyEnded when the session has ended.
+func TestAcceptTask_EndedSessionRejected(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	mustRegisterSession(t, db, "sess-ended", "agent-a")
+	if err := ExpireAgentSession(ctx, db, "sess-ended", "expired"); err != nil {
+		t.Fatalf("ExpireAgentSession: %v", err)
+	}
+
+	_, err := AcceptTask(ctx, db, "sess-ended", "TASK-006")
+	if !errors.Is(err, ErrAgentSessionAlreadyEnded) {
+		t.Errorf("expected ErrAgentSessionAlreadyEnded; got: %v", err)
+	}
+}

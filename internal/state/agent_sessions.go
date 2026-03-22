@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	sqlite3 "github.com/mattn/go-sqlite3"
 )
 
 // ErrAgentSessionNotFound is returned when an agent session record is missing.
@@ -21,6 +23,10 @@ var ErrAgentSessionAgentMismatch = errors.New("agent session agent mismatch")
 
 // ErrAgentAssignmentNotFound is returned when an agent assignment record is missing.
 var ErrAgentAssignmentNotFound = errors.New("agent assignment not found")
+
+// ErrTaskAlreadyClaimed is returned when a live assignment for the requested
+// task_id already belongs to a different session.
+var ErrTaskAlreadyClaimed = errors.New("task already claimed by another live session")
 
 // AgentSession is a row from agent_sessions.
 type AgentSession struct {
@@ -1116,6 +1122,206 @@ func appendAgentEventTx(ctx context.Context, tx *sql.Tx, sessionID, agentID, eve
 		return err
 	}
 	return nil
+}
+
+// AcceptTask atomically claims task_id for sessionID.
+//
+// Idempotency: repeated calls with the same session_id+task_id return the
+// existing live assignment without modifying any state.
+//
+// Conflict: a different session that already holds a live (ended_at IS NULL)
+// assignment for the same task_id causes ErrTaskAlreadyClaimed.
+//
+// Terminal reuse: assignments whose ended_at IS NOT NULL are considered
+// complete; they do not block a new claim from any session.
+//
+// The inserted row inherits assignment_version=1 from the schema default and
+// starts in state=active / substatus=in_progress.  The caller must ensure the
+// session is already registered via RegisterAgentSession before calling Accept.
+func AcceptTask(ctx context.Context, db *DB, sessionID, taskID string) (*AgentAssignment, error) {
+	if sessionID == "" {
+		return nil, fmt.Errorf("accept task: session_id is required")
+	}
+	if taskID == "" {
+		return nil, fmt.Errorf("accept task: task_id is required")
+	}
+
+	now := time.Now().UTC().Truncate(time.Second)
+
+	tx, err := db.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("accept task: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Verify the session exists and is still live.
+	var agentID string
+	var sessionEndedAt sql.NullTime
+	err = tx.QueryRowContext(ctx,
+		`SELECT agent_id, ended_at FROM agent_sessions WHERE session_id = ?`,
+		sessionID,
+	).Scan(&agentID, &sessionEndedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrAgentSessionNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("accept task: load session: %w", err)
+	}
+	if sessionEndedAt.Valid {
+		return nil, ErrAgentSessionAlreadyEnded
+	}
+
+	// Check for a live (ended_at IS NULL) assignment for this task.
+	var existingID, existingSession string
+	err = tx.QueryRowContext(ctx,
+		`SELECT assignment_id, session_id
+		 FROM agent_assignments
+		 WHERE task_id = ? AND ended_at IS NULL
+		 LIMIT 1`,
+		taskID,
+	).Scan(&existingID, &existingSession)
+
+	if err == nil {
+		// A live assignment exists.
+		if existingSession != sessionID {
+			return nil, fmt.Errorf("%w: assignment %s held by session %s",
+				ErrTaskAlreadyClaimed, existingID, existingSession)
+		}
+		// Same session — idempotent: return the existing row without committing.
+		row := tx.QueryRowContext(ctx,
+			`SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id,
+			        state, blocked_reason, assignment_substatus,
+			        started_at, ended_at, end_reason, superseded_by
+			 FROM agent_assignments WHERE assignment_id = ?`,
+			existingID,
+		)
+		a, scanErr := scanAgentAssignment(row)
+		if scanErr != nil {
+			return nil, fmt.Errorf("accept task: reload idempotent row: %w", scanErr)
+		}
+		return a, nil // tx rolled back by defer
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("accept task: check existing claim: %w", err)
+	}
+
+	assignmentID := uuid.New().String()
+
+	// A session may hold only one live assignment at a time. Supersede any
+	// other live row for this session before inserting the new claim.
+	var priorAssignmentID string
+	err = tx.QueryRowContext(ctx,
+		`SELECT assignment_id
+		 FROM agent_assignments
+		 WHERE session_id = ? AND ended_at IS NULL AND task_id <> ?
+		 LIMIT 1`,
+		sessionID, taskID,
+	).Scan(&priorAssignmentID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("accept task: check existing live session assignment: %w", err)
+	}
+	if err == nil {
+		if _, err = tx.ExecContext(ctx, `
+			UPDATE agent_assignments
+			SET ended_at = ?,
+			    end_reason = 'superseded',
+			    state = ?,
+			    blocked_reason = '',
+			    assignment_substatus = ?,
+			    superseded_by = ?
+			WHERE assignment_id = ? AND ended_at IS NULL`,
+			now, string(assignmentStateSuperseded), AssignmentSubstatusTerminalWaitingNextTask, assignmentID, priorAssignmentID,
+		); err != nil {
+			return nil, fmt.Errorf("accept task: supersede prior assignment: %w", err)
+		}
+	}
+
+	// No live claim — insert a new assignment.
+	// assignment_version defaults to 1 via the schema CHECK (assignment_version >= 1)
+	// and DEFAULT 1 added by migration 000011.
+	if _, err = tx.ExecContext(ctx, `
+		INSERT INTO agent_assignments (
+			assignment_id, session_id, agent_id, task_id,
+			state, blocked_reason, assignment_substatus, started_at,
+			repo, branch, worktree
+		) VALUES (?, ?, ?, ?, ?, '', ?, ?, '', '', '')`,
+		assignmentID, sessionID, agentID, taskID,
+		string(assignmentStateActive), AssignmentSubstatusInProgress, now,
+	); err != nil {
+		if isLiveTaskConstraintError(err) {
+			conflictAssignment, conflictSession, lookupErr := loadLiveTaskClaimTx(ctx, tx, taskID)
+			if lookupErr != nil {
+				return nil, fmt.Errorf("accept task: reload unique-constraint conflict: %w", lookupErr)
+			}
+			if conflictSession == sessionID {
+				row := tx.QueryRowContext(ctx, `
+					SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id,
+					       state, blocked_reason, assignment_substatus,
+					       started_at, ended_at, end_reason, superseded_by
+					FROM agent_assignments
+					WHERE assignment_id = ?`,
+					conflictAssignment,
+				)
+				a, scanErr := scanAgentAssignment(row)
+				if scanErr != nil {
+					return nil, fmt.Errorf("accept task: reload same-session unique-constraint row: %w", scanErr)
+				}
+				return a, nil
+			}
+			return nil, fmt.Errorf("%w: assignment %s held by session %s",
+				ErrTaskAlreadyClaimed, conflictAssignment, conflictSession)
+		}
+		return nil, fmt.Errorf("accept task: insert: %w", err)
+	}
+
+	// Touch session heartbeat so last_seen reflects the claim instant.
+	if _, err = tx.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET last_seen_at = ?, last_progress_at = ?
+		WHERE session_id = ?`,
+		now, now, sessionID,
+	); err != nil {
+		return nil, fmt.Errorf("accept task: touch session: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("accept task: commit: %w", err)
+	}
+
+	return &AgentAssignment{
+		ID:        assignmentID,
+		SessionID: sessionID,
+		AgentID:   agentID,
+		TaskID:    taskID,
+		State:     string(assignmentStateActive),
+		Substatus: AssignmentSubstatusInProgress,
+		StartedAt: now,
+	}, nil
+}
+
+func loadLiveTaskClaimTx(ctx context.Context, tx *sql.Tx, taskID string) (assignmentID, sessionID string, err error) {
+	err = tx.QueryRowContext(ctx, `
+		SELECT assignment_id, session_id
+		FROM agent_assignments
+		WHERE task_id = ? AND ended_at IS NULL
+		LIMIT 1`,
+		taskID,
+	).Scan(&assignmentID, &sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", ErrAgentAssignmentNotFound
+	}
+	if err != nil {
+		return "", "", err
+	}
+	return assignmentID, sessionID, nil
+}
+
+func isLiveTaskConstraintError(err error) bool {
+	var sqliteErr sqlite3.Error
+	if errors.As(err, &sqliteErr) {
+		return sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique || sqliteErr.ExtendedCode == sqlite3.ErrConstraintPrimaryKey
+	}
+	return strings.Contains(err.Error(), "idx_agent_assignments_live_task_id")
 }
 
 func scanAgentSession(row *sql.Row) (*AgentSession, error) {

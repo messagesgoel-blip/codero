@@ -1,4 +1,9 @@
 
+## Handoff — 2026-03-22T18:40:00Z
+Summary: Agents v3 is merged on `main` via PR `#86` (`c964987`). Task Layer v2 schema alignment is now started on branch `feat/TL-001-task-layer-schema-clean` at commit `c1a2070`. Migration `000011_task_layer_schema` adds the task-layer `agent_assignments` fields plus `codero_github_links` and `task_feedback_cache`, with DB tests covering table creation, defaults, and key constraints. Validation passed: `go test ./internal/state`, `go test ./...`, `scripts/review/two-pass-review.sh`, staged pre-commit, and pre-push `go test ./...`.
+Pending: Open or merge the roadmap branch as needed, then continue TL-001 runtime work on top of `000011`: atomic task acceptance, same-session idempotency/different-session conflict, assignment-versioned emits, and task feedback polling/cache population.
+Open Questions: Whether `chore/COD-task-layer-roadmap` should be merged before opening a PR from `feat/TL-001-task-layer-schema-clean`, or whether the schema branch should supersede the roadmap branch directly.
+
 ## Handoff — 2026-03-16T03:49:27Z
 Summary: Updated roadmap to remove fixed 30-day phase gap and drafted prompts for next 3 Sprint 6 tasks
 Pending: (agent fills this before calling)
