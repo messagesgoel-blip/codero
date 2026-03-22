@@ -235,6 +235,8 @@ func assignmentStateFromSubstatus(substatus string) string {
 	switch {
 	case normalized == "":
 		return ""
+	case normalized == AssignmentSubstatusWaitingForMergeApproval:
+		return string(assignmentStateBlocked)
 	case strings.HasPrefix(normalized, "blocked_"):
 		return string(assignmentStateBlocked)
 	case normalized == AssignmentSubstatusTerminalCancelled:
@@ -280,7 +282,7 @@ func listActiveAgentRuleDefinitionsTx(ctx context.Context, tx *sql.Tx) ([]agentR
 		       violation_action, routing_target, rule_version, active
 		FROM agent_rules
 		WHERE active = 1
-		ORDER BY rule_id ASC`)
+		ORDER BY rule_id ASC, rule_version DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("list active agent rules: %w", err)
 	}
@@ -331,7 +333,9 @@ func loadAgentRuleDefinitionTx(ctx context.Context, tx *sql.Tx, ruleID string) (
 		SELECT rule_id, rule_name, rule_kind, description, enforcement,
 		       violation_action, routing_target, rule_version, active
 		FROM agent_rules
-		WHERE rule_id = ?`,
+		WHERE rule_id = ?
+		ORDER BY active DESC, rule_version DESC
+		LIMIT 1`,
 		ruleID,
 	)
 	var (
@@ -403,8 +407,8 @@ func recordAssignmentRuleCheckTx(
 			    detail = ?,
 			    resolved_at = datetime('now'),
 			    resolved_by = ?
-			WHERE assignment_id = ? AND rule_id = ?`,
-			result, string(actionsJSON), detailJSON, resolvedBy, assignmentID, ruleID,
+			WHERE assignment_id = ? AND rule_id = ? AND rule_version = ?`,
+			result, string(actionsJSON), detailJSON, resolvedBy, assignmentID, ruleID, rule.RuleVersion,
 		)
 	case "fail":
 		res, err = tx.ExecContext(ctx, `
@@ -416,8 +420,8 @@ func recordAssignmentRuleCheckTx(
 			    detail = ?,
 			    resolved_at = NULL,
 			    resolved_by = ''
-			WHERE assignment_id = ? AND rule_id = ?`,
-			result, string(actionsJSON), detailJSON, assignmentID, ruleID,
+			WHERE assignment_id = ? AND rule_id = ? AND rule_version = ?`,
+			result, string(actionsJSON), detailJSON, assignmentID, ruleID, rule.RuleVersion,
 		)
 	default:
 		return fmt.Errorf("record assignment rule check %s: invalid result %q", ruleID, result)
@@ -623,7 +627,9 @@ func activeRuleBlockersTx(ctx context.Context, tx *sql.Tx, assignmentID string) 
 	rows, err := tx.QueryContext(ctx, `
 		SELECT arc.rule_id, arc.result
 		FROM assignment_rule_checks arc
-		JOIN agent_rules ar ON ar.rule_id = arc.rule_id
+		JOIN agent_rules ar
+		  ON ar.rule_id = arc.rule_id
+		 AND ar.rule_version = arc.rule_version
 		WHERE arc.assignment_id = ?
 		  AND ar.active = 1
 		  AND arc.result <> 'pass'

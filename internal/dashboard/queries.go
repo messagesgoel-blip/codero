@@ -656,7 +656,7 @@ func queryCompliance(ctx context.Context, db *sql.DB, limit int) ([]AgentRuleRow
 		SELECT rule_id, rule_name, rule_kind, description, enforcement,
 		       violation_action, routing_target, rule_version, active
 		FROM agent_rules
-		ORDER BY rule_id ASC`)
+		ORDER BY rule_id ASC, rule_version DESC`)
 	if err != nil {
 		return nil, nil, fmt.Errorf("queryCompliance: rules query failed: %w", err)
 	}
@@ -776,6 +776,8 @@ func assignmentStateFromSubstatus(substatus string) string {
 	switch {
 	case normalized == "":
 		return ""
+	case normalized == "waiting_for_merge_approval":
+		return "blocked"
 	case strings.HasPrefix(normalized, "blocked_"):
 		return "blocked"
 	case normalized == "terminal_cancelled":
