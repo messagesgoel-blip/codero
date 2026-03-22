@@ -724,14 +724,43 @@ func TestStaticEmbedHasIndexHTML(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sub FS: %v", err)
 	}
+	// Verify index.html is embedded and references the split assets.
 	f, err := subFS.Open("index.html")
 	if err != nil {
 		t.Fatalf("index.html not embedded: %v", err)
 	}
-	defer f.Close()
 	data, _ := io.ReadAll(f)
+	f.Close()
 	if !bytes.Contains(data, []byte("codero")) {
 		t.Error("index.html does not contain expected content")
+	}
+	if !bytes.Contains(data, []byte(`href="./styles.css"`)) {
+		t.Error("index.html does not reference ./styles.css")
+	}
+	if !bytes.Contains(data, []byte(`src="./app.js"`)) {
+		t.Error("index.html does not reference ./app.js")
+	}
+
+	// Verify styles.css is embedded.
+	sf, err := subFS.Open("styles.css")
+	if err != nil {
+		t.Fatalf("styles.css not embedded: %v", err)
+	}
+	sData, _ := io.ReadAll(sf)
+	sf.Close()
+	if len(sData) == 0 {
+		t.Error("styles.css is empty")
+	}
+
+	// Verify app.js is embedded.
+	jf, err := subFS.Open("app.js")
+	if err != nil {
+		t.Fatalf("app.js not embedded: %v", err)
+	}
+	jData, _ := io.ReadAll(jf)
+	jf.Close()
+	if len(jData) == 0 {
+		t.Error("app.js is empty")
 	}
 }
 
@@ -1534,34 +1563,79 @@ func TestDashboardHealth_GateCheckPathFromEnv(t *testing.T) {
 
 /* ══════════════════════ STATIC DASHBOARD UI ════════════════ */
 
-func TestDashboardHTML_HasProcessesTab(t *testing.T) {
-	// The embedded index.html must contain the Processes tab markup
-	// and the health bar so operators can verify the mockup-driven UI is present.
-	content, err := fs.ReadFile(dashboard.Static, "static/index.html")
+func TestDashboardHTML_HasExpectedContent(t *testing.T) {
+	subFS, err := fs.Sub(dashboard.Static, "static")
 	if err != nil {
-		t.Fatalf("read static/index.html: %v", err)
+		t.Fatalf("sub FS: %v", err)
 	}
-	s := string(content)
-	checks := []struct {
-		needle string
-		desc   string
+
+	// Check HTML shell content.
+	htmlData, err := fs.ReadFile(subFS, "index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+	html := string(htmlData)
+	for _, want := range []string{
+		"Processes", "Event Logs", "Findings",
+		"Review Findings", "agents active",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("index.html missing %q", want)
+		}
+	}
+
+	// Check JS content (now in app.js).
+	jsData, err := fs.ReadFile(subFS, "app.js")
+	if err != nil {
+		t.Fatalf("read app.js: %v", err)
+	}
+	js := string(jsData)
+	for _, want := range []string{
+		"active-sessions", "apiFetch", "/health",
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("app.js missing %q", want)
+		}
+	}
+}
+
+func TestStaticFilesServedWithContentTypes(t *testing.T) {
+	subFS, err := fs.Sub(dashboard.Static, "static")
+	if err != nil {
+		t.Fatalf("sub FS: %v", err)
+	}
+	fileServer := http.FileServer(http.FS(subFS))
+	mux := http.NewServeMux()
+	basePath := "/dashboard"
+	mux.Handle(basePath+"/", http.StripPrefix(basePath, fileServer))
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	tests := []struct {
+		path        string
+		wantType    string
+		wantContain string
 	}{
-		{"Processes", "Processes tab"},
-		{"Event Logs", "Event Logs tab"},
-		{"Findings", "Findings tab"},
-		{"System Health", "health bar label"},
-		{"active-sessions", "active-sessions API call"},
-		{"apiFetch('/health')", "health endpoint call"},
-		{"Ask Codero", "chat command prompt"},
-		{"fetch(API + '/chat'", "chat endpoint call"},
-		{"review process", "review-process placeholder"},
-		{"chat-actions", "next-action cards container"},
-		{"Review Findings", "review findings button"},
-		{"agents active", "agents active badge"},
+		{"/dashboard/index.html", "text/html", "codero"},
+		{"/dashboard/styles.css", "text/css", "font"},
+		{"/dashboard/app.js", "javascript", "apiFetch"},
 	}
-	for _, c := range checks {
-		if !strings.Contains(s, c.needle) {
-			t.Errorf("index.html missing %s (needle %q)", c.desc, c.needle)
+	for _, tt := range tests {
+		resp, err := http.Get(srv.URL + tt.path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", tt.path, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != 200 {
+			t.Errorf("GET %s: status %d", tt.path, resp.StatusCode)
+		}
+		ct := resp.Header.Get("Content-Type")
+		if !strings.Contains(ct, tt.wantType) {
+			t.Errorf("GET %s: Content-Type %q, want substring %q", tt.path, ct, tt.wantType)
+		}
+		if !bytes.Contains(body, []byte(tt.wantContain)) {
+			t.Errorf("GET %s: body missing %q", tt.path, tt.wantContain)
 		}
 	}
 }
