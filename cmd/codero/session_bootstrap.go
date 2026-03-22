@@ -134,7 +134,11 @@ func (c *sessionBootstrapConfig) resolve() (*sessionBootstrapConfig, error) {
 	if out.CLIPath == "" {
 		exe, err := os.Executable()
 		if err == nil {
-			out.CLIPath = exe
+			if resolved, resolveErr := filepath.EvalSymlinks(exe); resolveErr == nil {
+				out.CLIPath = resolved
+			} else {
+				out.CLIPath = exe
+			}
 		}
 	}
 	if out.CLIPath == "" {
