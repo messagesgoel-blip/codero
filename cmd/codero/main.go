@@ -628,6 +628,7 @@ func sessionCmd(configPath *string) *cobra.Command {
 	cmd.AddCommand(
 		sessionBootstrapCmd(configPath),
 		sessionRegisterCmd(configPath),
+		sessionConfirmCmd(configPath),
 		sessionHeartbeatCmd(configPath),
 		sessionAttachCmd(configPath),
 	)
@@ -676,6 +677,45 @@ func sessionRegisterCmd(configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&sessionID, "session-id", "", "session identifier (defaults to CODERO_SESSION_ID or auto-generated)")
 	cmd.Flags().StringVar(&agentID, "agent-id", "", "agent identifier (defaults to CODERO_AGENT_ID)")
 	cmd.Flags().StringVar(&mode, "mode", "", "session mode label (default: agent)")
+
+	return cmd
+}
+
+func sessionConfirmCmd(configPath *string) *cobra.Command {
+	var (
+		sessionID string
+		agentID   string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "confirm",
+		Short: "Confirm that Codero has the injected live session",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, cleanup, err := openSessionStore(*configPathForCmd(cmd))
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+
+			if sessionID == "" {
+				sessionID = resolveSessionIDFromEnv()
+			}
+			if sessionID == "" {
+				return fmt.Errorf("session-id is required")
+			}
+			if agentID == "" {
+				agentID = resolveAgentIDFromEnv()
+			}
+			if err := store.Confirm(cmd.Context(), sessionID, agentID); err != nil {
+				return err
+			}
+			fmt.Printf("session_id: %s\n", sessionID)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&sessionID, "session-id", "", "session identifier (defaults to CODERO_SESSION_ID)")
+	cmd.Flags().StringVar(&agentID, "agent-id", "", "agent identifier (defaults to CODERO_AGENT_ID)")
 
 	return cmd
 }

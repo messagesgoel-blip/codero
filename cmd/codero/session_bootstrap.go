@@ -20,6 +20,7 @@ type sessionBootstrapConfig struct {
 	RuntimeRoot    string
 	BaseURL        string
 	TailnetBaseURL string
+	CLIPath        string
 	ConfigPath     string
 	Repo           string
 	Branch         string
@@ -121,6 +122,28 @@ func (c *sessionBootstrapConfig) resolve() (*sessionBootstrapConfig, error) {
 	if out.TailnetBaseURL == "" {
 		out.TailnetBaseURL = os.Getenv("CODERO_TAILNET_BASE_URL")
 	}
+	if out.CLIPath == "" {
+		if v := os.Getenv("CODERO_PILOT_CLI"); v != "" {
+			resolved, err := resolveBootstrapCLIPath(v)
+			if err != nil {
+				return nil, err
+			}
+			out.CLIPath = resolved
+		}
+	}
+	if out.CLIPath == "" {
+		exe, err := os.Executable()
+		if err == nil {
+			if resolved, resolveErr := filepath.EvalSymlinks(exe); resolveErr == nil {
+				out.CLIPath = resolved
+			} else {
+				out.CLIPath = exe
+			}
+		}
+	}
+	if out.CLIPath == "" {
+		return nil, fmt.Errorf("resolve bootstrap CLI path: CODERO_PILOT_CLI could not be resolved; mandatory session confirm command would be unusable")
+	}
 	if out.Repo == "" {
 		out.Repo = os.Getenv("TEST_REPO")
 	}
@@ -132,6 +155,31 @@ func (c *sessionBootstrapConfig) resolve() (*sessionBootstrapConfig, error) {
 	}
 
 	return &out, nil
+}
+
+func resolveBootstrapCLIPath(raw string) (string, error) {
+	if !filepath.IsAbs(raw) && !strings.ContainsRune(raw, os.PathSeparator) {
+		return "", fmt.Errorf("resolve bootstrap CLI path: CODERO_PILOT_CLI must be an absolute or explicit relative path, got %q", raw)
+	}
+	absPath, err := filepath.Abs(raw)
+	if err != nil {
+		return "", fmt.Errorf("resolve bootstrap CLI path %q: %w", raw, err)
+	}
+	resolvedPath, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve bootstrap CLI path %q: %w", raw, err)
+	}
+	info, err := os.Stat(resolvedPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve bootstrap CLI path %q: %w", raw, err)
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("resolve bootstrap CLI path %q: target is a directory", raw)
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		return "", fmt.Errorf("resolve bootstrap CLI path %q: target is not executable", raw)
+	}
+	return resolvedPath, nil
 }
 
 func writeSessionBootstrap(cfg *sessionBootstrapConfig) (*sessionBootstrapResult, error) {
@@ -147,6 +195,11 @@ func writeSessionBootstrap(cfg *sessionBootstrapConfig) (*sessionBootstrapResult
 
 	agentPath := filepath.Join(runtimeDir, "AGENT.md")
 	sessionPath := filepath.Join(runtimeDir, "SESSION.md")
+	confirmCmd := `"$CODERO_PILOT_CLI"`
+	if cfg.ConfigPath != "" {
+		confirmCmd += ` --config "$CODERO_PILOT_CONFIG"`
+	}
+	confirmCmd += ` session confirm --session-id "$CODERO_SESSION_ID" --agent-id "$CODERO_AGENT_ID"`
 
 	agentBody := fmt.Sprintf(`# Runtime Agent Note
 
@@ -160,6 +213,9 @@ all future Codero actions in this window.
 
 This session is already claimed and registered for this window before startup.
 
+First confirm that Codero sees the same session:
+- %s
+
 When you claim or are assigned work, resend:
 - CODERO_AGENT_ID
 - CODERO_SESSION_ID
@@ -167,7 +223,7 @@ When you claim or are assigned work, resend:
 
 Do not invent a new session id for this window.
 Do not reuse this session id in a future window after this session ends.
-`, cfg.AgentID, cfg.SessionID, cfg.Mode, cfg.BaseURL)
+`, cfg.AgentID, cfg.SessionID, cfg.Mode, cfg.BaseURL, confirmCmd)
 
 	sessionBody := fmt.Sprintf(`# Runtime Session Note
 
@@ -176,6 +232,7 @@ Do not reuse this session id in a future window after this session ends.
 - CODERO_SESSION_MODE=%s
 - CODERO_BASE_URL=%s
 - CODERO_TAILNET_BASE_URL=%s
+- CODERO_PILOT_CLI=%s
 - CODERO_PILOT_CONFIG=%s
 - CODERO_WORKTREE=%s
 - TEST_REPO=%s
@@ -184,8 +241,11 @@ Do not reuse this session id in a future window after this session ends.
 
 This session is already registered by the launcher.
 This session is already claimed for this window.
+Do not use the codero binary from PATH for this session.
+Before doing any other work in this window, run exactly this command and stop if it fails:
+- %s
 Use these values unchanged when attaching or heartbeating.
-`, cfg.AgentID, cfg.SessionID, cfg.Mode, cfg.BaseURL, cfg.TailnetBaseURL, cfg.ConfigPath, cfg.Worktree, cfg.Repo, cfg.Branch, cfg.TaskID)
+`, cfg.AgentID, cfg.SessionID, cfg.Mode, cfg.BaseURL, cfg.TailnetBaseURL, cfg.CLIPath, cfg.ConfigPath, cfg.Worktree, cfg.Repo, cfg.Branch, cfg.TaskID, confirmCmd)
 
 	if err := os.WriteFile(agentPath, []byte(agentBody), 0o644); err != nil {
 		return nil, fmt.Errorf("bootstrap write AGENT.md: %w", err)
@@ -225,6 +285,7 @@ Use these values unchanged when attaching or heartbeating.
 	if cfg.ConfigPath != "" {
 		exports["CODERO_PILOT_CONFIG"] = cfg.ConfigPath
 	}
+	exports["CODERO_PILOT_CLI"] = cfg.CLIPath
 
 	return &sessionBootstrapResult{
 		RuntimeDir:       runtimeDir,

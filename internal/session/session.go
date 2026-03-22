@@ -15,6 +15,7 @@ var (
 	ErrMissingAgentID    = errors.New("agent_id is required")
 	ErrMissingAssignment = errors.New("repo and branch are required to attach assignment")
 	ErrSessionNotFound   = errors.New("session not found")
+	ErrSessionMismatch   = errors.New("session agent mismatch")
 )
 
 // Store persists agent session registration and assignment metadata.
@@ -39,6 +40,27 @@ func (s *Store) Register(ctx context.Context, sessionID, agentID, mode string) e
 	}
 	if err := state.RegisterAgentSession(ctx, s.db, sessionID, agentID, mode); err != nil {
 		return err
+	}
+	return nil
+}
+
+// Confirm verifies that Codero has the same live session identity the agent was
+// injected with at startup.
+func (s *Store) Confirm(ctx context.Context, sessionID, agentID string) error {
+	if sessionID == "" {
+		return ErrMissingSessionID
+	}
+	if agentID == "" {
+		return ErrMissingAgentID
+	}
+	if err := state.ConfirmAgentSession(ctx, s.db, sessionID, agentID); err != nil {
+		if errors.Is(err, state.ErrAgentSessionNotFound) || errors.Is(err, state.ErrAgentSessionAlreadyEnded) {
+			return ErrSessionNotFound
+		}
+		if errors.Is(err, state.ErrAgentSessionAgentMismatch) {
+			return ErrSessionMismatch
+		}
+		return fmt.Errorf("Store.Confirm: confirm agent session %s for agent %s: %w", sessionID, agentID, err)
 	}
 	return nil
 }

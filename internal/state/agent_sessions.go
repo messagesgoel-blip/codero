@@ -17,6 +17,7 @@ var ErrAgentSessionNotFound = errors.New("agent session not found")
 // ErrAgentSessionAlreadyEnded is returned when a single-use session ID is
 // re-registered after its historical row already ended.
 var ErrAgentSessionAlreadyEnded = errors.New("agent session already ended")
+var ErrAgentSessionAgentMismatch = errors.New("agent session agent mismatch")
 
 // ErrAgentAssignmentNotFound is returned when an agent assignment record is missing.
 var ErrAgentAssignmentNotFound = errors.New("agent assignment not found")
@@ -160,6 +161,22 @@ func GetAgentSession(ctx context.Context, db *DB, sessionID string) (*AgentSessi
 		return nil, fmt.Errorf("get agent session %q: %w", sessionID, err)
 	}
 	return s, err
+}
+
+// ConfirmAgentSession verifies that a live session exists and belongs to the
+// expected agent ID.
+func ConfirmAgentSession(ctx context.Context, db *DB, sessionID, agentID string) error {
+	s, err := GetAgentSession(ctx, db, sessionID)
+	if err != nil {
+		return fmt.Errorf("confirm agent session %q: %w", sessionID, err)
+	}
+	if s.EndedAt != nil {
+		return ErrAgentSessionAlreadyEnded
+	}
+	if agentID != "" && s.AgentID != agentID {
+		return ErrAgentSessionAgentMismatch
+	}
+	return nil
 }
 
 // ListActiveAgentSessions returns all sessions without ended_at set.

@@ -24,7 +24,6 @@ func TestRegisterAgentSession_UpsertAndHeartbeat(t *testing.T) {
 	if s.Mode != "" {
 		t.Errorf("mode: got %q, want empty", s.Mode)
 	}
-
 	_, err = db.sql.Exec(
 		`UPDATE agent_sessions SET last_seen_at = datetime('now','-2 hours') WHERE session_id = ?`,
 		"sess-1",
@@ -128,6 +127,31 @@ func TestRegisterAgentSession_RejectsEndedUUIDSession(t *testing.T) {
 	}
 	if s.AgentID != "agent-1" {
 		t.Fatalf("agent_id should remain unchanged after rejected reuse: got %q", s.AgentID)
+	}
+}
+
+func TestConfirmAgentSession(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	if err := RegisterAgentSession(ctx, db, "sess-confirm", "agent-1", ""); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	if err := ConfirmAgentSession(ctx, db, "sess-confirm", "agent-1"); err != nil {
+		t.Fatalf("ConfirmAgentSession: %v", err)
+	}
+
+	err := ConfirmAgentSession(ctx, db, "sess-confirm", "agent-2")
+	if !errors.Is(err, ErrAgentSessionAgentMismatch) {
+		t.Fatalf("ConfirmAgentSession mismatch: got %v", err)
+	}
+
+	if err := ExpireAgentSession(ctx, db, "sess-confirm", "expired"); err != nil {
+		t.Fatalf("ExpireAgentSession: %v", err)
+	}
+	err = ConfirmAgentSession(ctx, db, "sess-confirm", "agent-1")
+	if !errors.Is(err, ErrAgentSessionAlreadyEnded) {
+		t.Fatalf("ConfirmAgentSession ended session: got %v", err)
 	}
 }
 

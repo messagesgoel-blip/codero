@@ -71,6 +71,9 @@ func TestWriteSessionBootstrapWritesRuntimeNotes(t *testing.T) {
 	if !strings.Contains(string(agentBody), "already claimed and registered for this window") {
 		t.Fatalf("AGENT.md missing claimed wording: %s", string(agentBody))
 	}
+	if !strings.Contains(string(agentBody), "session confirm") {
+		t.Fatalf("AGENT.md missing session confirm command: %s", string(agentBody))
+	}
 
 	sessionBody, err := os.ReadFile(result.RuntimeSessionMD)
 	if err != nil {
@@ -78,6 +81,9 @@ func TestWriteSessionBootstrapWritesRuntimeNotes(t *testing.T) {
 	}
 	if !strings.Contains(string(sessionBody), "CODERO_SESSION_ID=0e22cb0b-80b9-4af7-b824-a6164fefe3cd") {
 		t.Fatalf("SESSION.md missing session id: %s", string(sessionBody))
+	}
+	if !strings.Contains(string(sessionBody), "session confirm") {
+		t.Fatalf("SESSION.md missing session confirm command: %s", string(sessionBody))
 	}
 	if got := result.Exports["CODERO_RUNTIME_DIR"]; got != filepath.Join(root, cfg.SessionID) {
 		t.Fatalf("runtime dir export: got %q", got)
