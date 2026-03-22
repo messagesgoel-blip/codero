@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -14,9 +15,18 @@ var (
 	ErrMissingSessionID  = errors.New("session_id is required")
 	ErrMissingAgentID    = errors.New("agent_id is required")
 	ErrMissingAssignment = errors.New("repo and branch are required to attach assignment")
+	ErrMissingStatus     = errors.New("status is required")
 	ErrSessionNotFound   = errors.New("session not found")
 	ErrSessionMismatch   = errors.New("session agent mismatch")
 )
+
+type Completion struct {
+	TaskID     string
+	Status     string
+	Summary    string
+	Tests      []string
+	FinishedAt time.Time
+}
 
 // Store persists agent session registration and assignment metadata.
 // It uses the durable state DB owned by internal/state.
@@ -135,4 +145,24 @@ func (s *Store) AttachAssignment(
 		return state.ErrBranchNotFound
 	}
 	return nil
+}
+
+// Finalize marks a session complete using a machine-readable completion record.
+func (s *Store) Finalize(ctx context.Context, sessionID, agentID string, completion Completion) error {
+	if sessionID == "" {
+		return ErrMissingSessionID
+	}
+	if agentID == "" {
+		return ErrMissingAgentID
+	}
+	if completion.Status == "" {
+		return ErrMissingStatus
+	}
+	return state.FinalizeAgentSession(ctx, s.db, sessionID, agentID, state.AgentSessionCompletion{
+		TaskID:     completion.TaskID,
+		Status:     completion.Status,
+		Summary:    completion.Summary,
+		Tests:      completion.Tests,
+		FinishedAt: completion.FinishedAt,
+	})
 }

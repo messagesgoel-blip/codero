@@ -267,6 +267,82 @@ func TestAttachAgentAssignment_Supersede(t *testing.T) {
 	}
 }
 
+func TestFinalizeAgentSession(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	if err := RegisterAgentSession(ctx, db, "sess-final", "agent-1", "agent"); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	_, err := db.sql.ExecContext(ctx, `
+		INSERT INTO branch_states (id, repo, branch, state, owner_agent, owner_session_id, owner_session_last_seen)
+		VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
+		"branch-final", "acme/api", "feat/final", "queued_cli", "agent-1", "sess-final",
+	)
+	if err != nil {
+		t.Fatalf("seed branch state: %v", err)
+	}
+	if err := AttachAgentAssignment(ctx, db, &AgentAssignment{
+		ID:        "assign-final",
+		SessionID: "sess-final",
+		AgentID:   "agent-1",
+		Repo:      "acme/api",
+		Branch:    "feat/final",
+		Worktree:  "/srv/storage/repo/codero/.worktrees/COD-066-cozy-tui-port/.tmp-tests/finalize-wt",
+		TaskID:    "TASK-9",
+	}); err != nil {
+		t.Fatalf("AttachAgentAssignment: %v", err)
+	}
+
+	finishedAt := time.Date(2026, 3, 21, 20, 0, 0, 0, time.UTC)
+	if err := FinalizeAgentSession(ctx, db, "sess-final", "agent-1", AgentSessionCompletion{
+		Status:     "done",
+		Summary:    "completed",
+		Tests:      []string{"go test ./cmd/codero"},
+		FinishedAt: finishedAt,
+	}); err != nil {
+		t.Fatalf("FinalizeAgentSession: %v", err)
+	}
+
+	sessionRow, err := GetAgentSession(ctx, db, "sess-final")
+	if err != nil {
+		t.Fatalf("GetAgentSession: %v", err)
+	}
+	if sessionRow.EndedAt == nil || sessionRow.EndReason != "done" {
+		t.Fatalf("session finalize state = %#v", sessionRow)
+	}
+
+	assignments, err := ListAgentAssignments(ctx, db, "sess-final")
+	if err != nil {
+		t.Fatalf("ListAgentAssignments: %v", err)
+	}
+	if len(assignments) != 1 || assignments[0].EndedAt == nil || assignments[0].EndReason != "done" {
+		t.Fatalf("finalized assignments = %#v", assignments)
+	}
+
+	var ownerSessionID string
+	if err := db.sql.QueryRowContext(ctx, `
+		SELECT owner_session_id FROM branch_states WHERE repo = ? AND branch = ?`,
+		"acme/api", "feat/final",
+	).Scan(&ownerSessionID); err != nil {
+		t.Fatalf("read branch state: %v", err)
+	}
+	if ownerSessionID != "" {
+		t.Fatalf("owner_session_id = %q, want cleared", ownerSessionID)
+	}
+
+	events, err := ListAgentEvents(ctx, db, "sess-final", 0)
+	if err != nil {
+		t.Fatalf("ListAgentEvents: %v", err)
+	}
+	if len(events) == 0 {
+		t.Fatal("expected agent events, got none")
+	}
+	if events[len(events)-1].EventType != "session_finalized" {
+		t.Fatalf("latest event_type = %q, want session_finalized", events[len(events)-1].EventType)
+	}
+}
+
 func TestListExpiredAgentSessions(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
