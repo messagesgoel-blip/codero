@@ -147,6 +147,9 @@ Terminal substatuses (terminal_*) also set ended_at on the assignment.`,
 
 			a, err := state.EmitAssignmentUpdate(cmd.Context(), db, assignmentID, version, substatus)
 			if err != nil {
+				if errors.Is(err, state.ErrAgentAssignmentNotFound) {
+					return fmt.Errorf("agent assignment not found: %w", err)
+				}
 				if errors.Is(err, state.ErrVersionConflict) {
 					return fmt.Errorf("version conflict: %w", err)
 				}

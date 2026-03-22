@@ -1313,23 +1313,23 @@ func AcceptTask(ctx context.Context, db *DB, sessionID, taskID string) (*AgentAs
 // recognized or not valid for an emit transition.
 var ErrInvalidEmitSubstatus = errors.New("invalid emit substatus")
 
-// validateEmitSubstatus checks that the given substatus is a recognized value
-// for an emit update. It accepts active, blocked, and terminal substatuses.
-func validateEmitSubstatus(substatus string) error {
-	normalized := normalizeAssignmentSubstatus(substatus)
-	if normalized == "" {
+// validateEmitSubstatusNormalized checks that the given normalized substatus is
+// a recognized value for an emit update. It accepts active, blocked, and
+// terminal substatuses.
+func validateEmitSubstatusNormalized(substatus string) error {
+	if substatus == "" {
 		return fmt.Errorf("%w: substatus must not be empty", ErrInvalidEmitSubstatus)
 	}
-	if _, ok := activeAssignmentSubstatusSet[normalized]; ok {
+	if _, ok := activeAssignmentSubstatusSet[substatus]; ok {
 		return nil
 	}
-	if _, ok := blockedAssignmentSubstatusSet[normalized]; ok {
+	if _, ok := blockedAssignmentSubstatusSet[substatus]; ok {
 		return nil
 	}
-	if _, ok := terminalAssignmentSubstatusSet[normalized]; ok {
+	if _, ok := terminalAssignmentSubstatusSet[substatus]; ok {
 		return nil
 	}
-	return fmt.Errorf("%w: %q", ErrInvalidEmitSubstatus, normalized)
+	return fmt.Errorf("%w: %q", ErrInvalidEmitSubstatus, substatus)
 }
 
 // EmitAssignmentUpdate atomically applies a state/substatus transition to an
@@ -1351,7 +1351,7 @@ func validateEmitSubstatus(substatus string) error {
 //   - ErrInvalidEmitSubstatus: the substatus is unrecognized.
 func EmitAssignmentUpdate(ctx context.Context, db *DB, assignmentID string, currentVersion int, newSubstatus string) (*AgentAssignment, error) {
 	normalized := normalizeAssignmentSubstatus(newSubstatus)
-	if err := validateEmitSubstatus(normalized); err != nil {
+	if err := validateEmitSubstatusNormalized(normalized); err != nil {
 		return nil, err
 	}
 
@@ -1403,7 +1403,7 @@ func EmitAssignmentUpdate(ctx context.Context, db *DB, assignmentID string, curr
 	}
 
 	if isTerminal {
-		_, err = tx.ExecContext(ctx, `
+		res, execErr := tx.ExecContext(ctx, `
 			UPDATE agent_assignments
 			SET state = ?, assignment_substatus = ?, blocked_reason = ?,
 			    assignment_version = ?, last_emit_at = ?,
@@ -1414,8 +1414,19 @@ func EmitAssignmentUpdate(ctx context.Context, db *DB, assignmentID string, curr
 			now, endReason,
 			assignmentID, currentVersion,
 		)
+		if execErr != nil {
+			err = execErr
+		} else {
+			affected, rowsErr := res.RowsAffected()
+			if rowsErr != nil {
+				return nil, fmt.Errorf("emit assignment update: rows affected: %w", rowsErr)
+			}
+			if affected != 1 {
+				return nil, fmt.Errorf("emit assignment update: unexpected rows affected: %d", affected)
+			}
+		}
 	} else {
-		_, err = tx.ExecContext(ctx, `
+		res, execErr := tx.ExecContext(ctx, `
 			UPDATE agent_assignments
 			SET state = ?, assignment_substatus = ?, blocked_reason = ?,
 			    assignment_version = ?, last_emit_at = ?
@@ -1424,6 +1435,17 @@ func EmitAssignmentUpdate(ctx context.Context, db *DB, assignmentID string, curr
 			nextVersion, now,
 			assignmentID, currentVersion,
 		)
+		if execErr != nil {
+			err = execErr
+		} else {
+			affected, rowsErr := res.RowsAffected()
+			if rowsErr != nil {
+				return nil, fmt.Errorf("emit assignment update: rows affected: %w", rowsErr)
+			}
+			if affected != 1 {
+				return nil, fmt.Errorf("emit assignment update: unexpected rows affected: %d", affected)
+			}
+		}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("emit assignment update: update row: %w", err)
