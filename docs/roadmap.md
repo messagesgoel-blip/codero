@@ -1,24 +1,26 @@
 # codero
 
-## Implementation Roadmap v5 — Repo-First, Module-Intake Driven
+## Implementation Roadmap — Agents Complete, Task Layer Active
 
-Status: proposed
+Status: active
 Owner: you
 Horizon: 6-12 months
+Focus: finish the merged Agents v3 work with Task Layer v2 before broader platformization
 
 ---
 
-## 1) Why v5
+## 1) Why this roadmap
 
-v4 has strong engineering detail, but it mixes implementation tasks, product scope, and long-term commercialization in one stream.
-For disciplined execution, we need:
+The session/compliance layer from the Agents v3 spec is now merged on `main` through PR `#85` and PR `#86`.
+The next execution priority is finishing the Task Layer v2 contract, not reopening older sequencing debates.
 
-- a clean repo bootstrap phase first
-- hard entry/exit gates per phase
-- a formal process for importing modules from ghwatcher one-by-one
-- explicit structure decision checkpoints
+The archived detailed v5 roadmap remains available at `docs/roadmaps/archive/codero-roadmap-v5.md` as historical context for appendices, long-range structure, and prior planning notes.
 
-v5 keeps the core architecture direction from v4 (durable store + Redis coordination + explicit state machine), but changes execution order.
+For current execution, the order is simpler:
+
+- Agents v3: complete on `main`
+- Task Layer v2: active roadmap with `TL-001` through `TL-008`
+- broader platform, tenant, and hardening work: deferred until the agent/task contract is complete
 
 ---
 
@@ -29,6 +31,13 @@ v5 keeps the core architecture direction from v4 (durable store + Redis coordina
 - Durable state is source of truth; Redis is coordination only.
 - Multi-repo support is a required Phase 2 outcome, not a future wish.
 - No phase is complete without operations readiness: tests, observability, runbooks.
+
+## 2.1) Current Execution Boundary
+
+- The Agents v3 work is treated as merged baseline, not open backlog.
+- The only active execution track is Task Layer v2 (`TL-001` through `TL-008`).
+- The archived v5 plan is reference material only; it does not set next-step priority.
+- Module-intake work outside the Task Layer is deferred unless the Task Layer exposes a concrete missing dependency.
 
 ---
 
@@ -332,7 +341,7 @@ A roadmap is accepted only if:
 - repo structure decision point is explicit
 - next 2-4 sprints are immediately executable
 
-This v5 satisfies those conditions.
+This roadmap satisfies those conditions.
 
 ---
 

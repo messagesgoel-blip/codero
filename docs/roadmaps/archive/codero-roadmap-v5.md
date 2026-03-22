@@ -1,12 +1,12 @@
 # codero
 
-## Implementation Roadmap v5 — Repo-First, Contract-Bound, Module-Intake Driven
+## Archived Implementation Roadmap v5 — Repo-First, Contract-Bound, Module-Intake Driven
 
 Status: proposed  
 Owner: you  
 Horizon: 6-12 months  
 Revision intent: preserve the cleaner program structure of v5 while restoring the implementation contracts, failure semantics, and operator model that v4 captured well.
-Near-term execution after the merged v3 closeout now lives in `../roadmap.md`; treat this file as architecture and historical sequencing context unless a PR explicitly updates it.
+Archive status: historical reference only. Active execution moved to `../../roadmap.md`; use this file only for historical appendices, prior sequencing context, and older runbook links.
 
 ---
 
@@ -435,7 +435,7 @@ The original MI-001 through MI-004 queue is no longer the active next-step plan:
 - MI-004 session heartbeat and stale-session handling is already implemented.
 - MI-003 relay / claim / ack / resolve delivery work is superseded by the Task Layer v2 feedback and polling roadmap unless a concrete gap remains after that work lands.
 
-Current near-term execution is tracked in `../roadmap.md` as TL-001 through TL-008.
+Current near-term execution is tracked in `../../roadmap.md` as TL-001 through TL-008.
 
 ### Registry fields
 
@@ -1092,4 +1092,4 @@ This roadmap is acceptable only if:
 - failure and recovery behavior is testable and named
 - deferred items are recorded with reasons and revisit triggers
 
-This revised v5 is meant to be the program document you actually execute, while the appendices preserve the implementation truths that v4 got right.
+This archived v5 document preserves the implementation truths that v4 got right, but it is no longer the program document for current execution.

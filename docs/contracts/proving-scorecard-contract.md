@@ -113,7 +113,7 @@ If this contract changes:
 
 ## Phase 1 Exit Gate Thresholds
 
-Per `docs/roadmaps/codero-roadmap-v5.md`:
+Per `docs/roadmaps/archive/codero-roadmap-v5.md`:
 
 | Metric | Threshold |
 |--------|-----------|

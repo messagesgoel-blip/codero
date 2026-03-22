@@ -188,7 +188,7 @@
 - Sprint 6 Hardening Matrix: `docs/runbooks/sprint6-hardening-matrix.md`
 - Proving Scorecard Contract: `docs/contracts/proving-scorecard-contract.md`
 - Gate Heartbeat Contract: `docs/contracts/gate-heartbeat-contract.md`
-- Exit Gate Requirements: `docs/roadmaps/codero-roadmap-v5.md` Section 1F
+- Exit Gate Requirements: `docs/roadmaps/archive/codero-roadmap-v5.md` Section 1F
 
 
 ---
@@ -362,4 +362,4 @@
 
 - Sprint 6 Hardening Matrix: `docs/runbooks/sprint6-hardening-matrix.md`
 - Proving Scorecard Contract: `docs/contracts/proving-scorecard-contract.md`
-- Exit Gate Requirements: `docs/roadmaps/codero-roadmap-v5.md` Section 1F
+- Exit Gate Requirements: `docs/roadmaps/archive/codero-roadmap-v5.md` Section 1F

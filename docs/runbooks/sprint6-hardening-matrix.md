@@ -4,7 +4,7 @@
 
 This document provides executable validation steps for all Sprint 6 failure and recovery scenarios. Each scenario includes preconditions, fault injection methods, expected behavior, and rollback steps.
 
-**Related Roadmap Section**: `docs/roadmaps/codero-roadmap-v5.md` Appendix G — Failure and Recovery Contract
+**Related Roadmap Section**: `docs/roadmaps/archive/codero-roadmap-v5.md` Appendix G — Failure and Recovery Contract
 
 ---
 
@@ -593,7 +593,7 @@ WHERE branch = 'test-branch';"
 
 ### Related Code
 - `internal/state/repository.go:UpdateMergeReadiness`
-- `docs/roadmaps/codero-roadmap-v5.md` Appendix A, T10
+- `docs/roadmaps/archive/codero-roadmap-v5.md` Appendix A, T10
 
 ---
 
@@ -643,4 +643,4 @@ For detailed layout and keymap, see `docs/tui-v2-architecture.md`.
 | T15 | abandoned | queued_cli | Reactivate |
 | T16 | any active | blocked | Max retries |
 
-Full state machine: `docs/roadmaps/codero-roadmap-v5.md` Appendix A
+Full state machine: `docs/roadmaps/archive/codero-roadmap-v5.md` Appendix A

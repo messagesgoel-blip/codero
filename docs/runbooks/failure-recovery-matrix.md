@@ -143,7 +143,7 @@ Result: 15/15 tests PASS
 
 ## References
 
-- Appendix G: Failure and recovery contract (`docs/roadmaps/codero-roadmap-v5.md`)
+- Appendix G: Failure and recovery contract (`docs/roadmaps/archive/codero-roadmap-v5.md`)
 - Sprint 6 hardening matrix (`docs/runbooks/sprint6-hardening-matrix.md`)
 - Observability contract (`docs/contracts/observability-v1.md`)
 - Proving evidence: `docs/runbooks/proving-evidence-2026-03.md`

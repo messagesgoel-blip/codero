@@ -75,5 +75,5 @@ tests/parity/mi-000-pilot/
 ## References
 
 - Module intake registry (`docs/module-intake-registry.md`)
-- Roadmap v5 module intake section (`docs/roadmaps/codero-roadmap-v5.md`)
+- Roadmap v5 module intake section (`docs/roadmaps/archive/codero-roadmap-v5.md`)
 - MI-001 lease semantics contract (`docs/contracts/mi-001-lease-semantics.md`)

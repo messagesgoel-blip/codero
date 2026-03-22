@@ -5,7 +5,7 @@
 This runbook describes how to run the daily proving period scorecard for Phase 1F sign-off evidence collection.
 
 **Related Contract:** `docs/contracts/proving-scorecard-contract.md`  
-**Related Roadmap:** `docs/roadmaps/codero-roadmap-v5.md` (Section 1F)
+**Related Roadmap:** `docs/roadmaps/archive/codero-roadmap-v5.md` (Section 1F)
 
 ---
 
@@ -342,7 +342,7 @@ git commit -m "chore: weekly Phase 1F exit-gate snapshot $(date +%Y-%m-%d)"
 
 ## Related Documents
 
-- `docs/roadmaps/codero-roadmap-v5.md` - Phase 1F requirements
+- `docs/roadmaps/archive/codero-roadmap-v5.md` - Phase 1F requirements
 - `docs/runbooks/sprint6-hardening-matrix.md` - Recovery drills
 - `docs/contracts/proving-scorecard-contract.md` - Scorecard schema
 - `docs/contracts/delivery-replay-contract.md` - Delivery semantics

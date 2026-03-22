@@ -164,7 +164,7 @@ Changes to this contract require:
 
 ## Related Documents
 
-- Appendix F: Observability contract (`docs/roadmaps/codero-roadmap-v5.md`)
+- Appendix F: Observability contract (`docs/roadmaps/archive/codero-roadmap-v5.md`)
 - Health endpoint implementation (`internal/daemon/observability.go`)
 - Metrics exports (`internal/daemon/prometheus.go`)
 - Sprint 6 hardening matrix (`docs/runbooks/sprint6-hardening-matrix.md`)

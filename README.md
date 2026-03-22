@@ -2,18 +2,15 @@
 
 Codero is a code review orchestration control plane.
 
-This repository starts as a clean scaffold and follows a module-intake roadmap:
-no bulk copying from prior projects. Capabilities are imported only with contracts,
-parity tests, and rollback notes.
+The current execution focus is no longer repo bootstrap or generic module intake.
+The Agents v3 session/compliance layer is merged on `main`, and the next active work is finishing Task Layer v2 on top of that baseline.
 
-## Current Scope (Phase 0)
+## Current Scope
 
-- Repository governance and contribution standards
-- ADR process and initial architecture decisions
-- Module intake registry
-- CI quality gates: lint, unit, contract
-- Minimal CLI surface for contract testing
-- Reusable two-pass local review gate scripts (LiteLLM first pass + CodeRabbit second pass)
+- Agents v3 session, assignment, compliance, and dashboard baseline on `main`
+- Task Layer v2 roadmap tracked in `docs/roadmap.md` as `TL-001` through `TL-008`
+- Two-pass local review gate scripts and operator surfaces
+- Broader platformization, tenant work, and scale/failover hardening deferred until agent/task work is complete
 
 ## Quick Start
 
@@ -40,7 +37,8 @@ Install pre-commit hook for a repo:
 
 ## Core Docs
 
-- `docs/roadmaps/codero-roadmap-v5.md`
+- `docs/roadmap.md`
+- `docs/roadmaps/archive/codero-roadmap-v5.md` (archived detailed roadmap)
 - `docs/architecture.md`
 - `docs/module-intake-registry.md`
 - `AGENTS.md`
@@ -110,5 +108,5 @@ CODERO_DASHBOARD_PUBLIC_BASE_URL=https://ops.example.com
 ## Canonical roadmap source
 
 The canonical roadmap for Codero is `docs/roadmap.md`.
-The detailed v5 execution roadmap is `docs/roadmaps/codero-roadmap-v5.md`.
+The detailed v5 roadmap is archived at `docs/roadmaps/archive/codero-roadmap-v5.md`.
 If these files ever differ, treat `docs/roadmap.md` as the source of truth unless a PR explicitly states that another file supersedes it.
