@@ -78,6 +78,7 @@ async function fetchSection(id, path) {
 
 /* ── DOM HELPERS ───────────────────────────────────────── */
 function esc(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+function escAttr(s) { return esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function clearEl(id) { var e = document.getElementById(id); if (e) e.innerHTML = ''; return e; } // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method
 function $(id) { return document.getElementById(id); }
 
@@ -352,7 +353,7 @@ function renderAgentsSessions(c) {
       '</tr></thead><tbody>';
     rows.forEach(function(r) {
       var eid = 'expand-sess-'+r.session_id.replace(/[^a-z0-9]/gi,'-');
-      html += '<tr class="expandable" onclick="toggleExpand(\'sess\',\''+esc(r.session_id)+'\');renderAgentsTab()">' +
+      html += '<tr class="expandable" onclick="toggleExpand(\'sess\',\''+escAttr(r.session_id)+'\');renderAgentsTab()">' +
         '<td class="chevron">'+chevron('sess',r.session_id)+'</td>' +
         '<td>'+statusChip(r.activity_state)+' '+esc(r.agent_id||r.owner_agent||'\u2014') +
           (r.mode ? ' <span class="enforcement-badge soft">'+esc(r.mode)+'</span>':'')+
@@ -389,7 +390,7 @@ function renderAgentsAssignments(c) {
       '<th>Substatus</th><th>Blocked</th><th>Started</th><th>Ended</th></tr></thead><tbody>';
     rows.forEach(function(a) {
       var eid = 'expand-assign-'+a.assignment_id.replace(/[^a-z0-9]/gi,'-');
-      html += '<tr class="expandable" onclick="toggleExpand(\'assign\',\''+esc(a.assignment_id)+'\');renderAgentsTab()">' +
+      html += '<tr class="expandable" onclick="toggleExpand(\'assign\',\''+escAttr(a.assignment_id)+'\');renderAgentsTab()">' +
         '<td class="chevron">'+chevron('assign',a.assignment_id)+'</td>' +
         '<td>'+statusChip(a.state)+'</td>' +
         '<td>'+truncId(a.assignment_id)+'</td>' +
