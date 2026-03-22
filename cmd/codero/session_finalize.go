@@ -30,6 +30,18 @@ type parsedSessionNote struct {
 	Completion sessionCompletionRecord
 }
 
+type archivedSessionMetadata struct {
+	SessionID  string                  `json:"session_id"`
+	AgentID    string                  `json:"agent_id"`
+	Repo       string                  `json:"repo,omitempty"`
+	Branch     string                  `json:"branch,omitempty"`
+	Worktree   string                  `json:"worktree,omitempty"`
+	TaskID     string                  `json:"task_id,omitempty"`
+	ArchivedMD string                  `json:"archived_md"`
+	ArchivedAt string                  `json:"archived_at"`
+	Completion sessionCompletionRecord `json:"completion"`
+}
+
 func sessionFinalizeCmd(configPath *string) *cobra.Command {
 	var (
 		sessionMDPath string
@@ -69,7 +81,7 @@ func sessionFinalizeCmd(configPath *string) *cobra.Command {
 			}); err != nil {
 				return err
 			}
-			archivedPath, err := archiveSessionNote(sessionMDPath, note.SessionID, archiveDir)
+			archivedPath, err := archiveSessionNote(sessionMDPath, note, archiveDir)
 			if err != nil {
 				return err
 			}
@@ -152,7 +164,8 @@ func extractCompletionJSON(text string) (string, error) {
 	return strings.TrimSpace(rest[:endFence]), nil
 }
 
-func archiveSessionNote(path, sessionID, archiveDir string) (string, error) {
+func archiveSessionNote(path string, note *parsedSessionNote, archiveDir string) (string, error) {
+	sessionID := note.SessionID
 	if archiveDir == "" {
 		parent := filepath.Dir(path)
 		if filepath.Base(parent) == sessionID {
@@ -167,6 +180,25 @@ func archiveSessionNote(path, sessionID, archiveDir string) (string, error) {
 	target := filepath.Join(archiveDir, sessionID+".md")
 	if err := os.Rename(path, target); err != nil {
 		return "", fmt.Errorf("archive session note: rename: %w", err)
+	}
+	meta := archivedSessionMetadata{
+		SessionID:  note.SessionID,
+		AgentID:    note.AgentID,
+		Repo:       note.Repo,
+		Branch:     note.Branch,
+		Worktree:   note.Worktree,
+		TaskID:     note.TaskID,
+		ArchivedMD: target,
+		ArchivedAt: time.Now().UTC().Format(time.RFC3339),
+		Completion: note.Completion,
+	}
+	metaPath := filepath.Join(archiveDir, sessionID+".json")
+	metaBody, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("archive session note: marshal metadata: %w", err)
+	}
+	if err := os.WriteFile(metaPath, metaBody, 0o644); err != nil {
+		return "", fmt.Errorf("archive session note: write metadata: %w", err)
 	}
 	return target, nil
 }
