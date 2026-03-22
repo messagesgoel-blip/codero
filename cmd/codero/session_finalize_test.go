@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -56,7 +57,23 @@ func TestArchiveSessionNote(t *testing.T) {
 		t.Fatalf("write session note: %v", err)
 	}
 
-	archived, err := archiveSessionNote(path, sessionID, "")
+	note := &parsedSessionNote{
+		SessionID: sessionID,
+		AgentID:   "agent-1",
+		Repo:      "acme/api",
+		Branch:    "feat/test",
+		Worktree:  "/srv/storage/repo/codero/.worktrees/COD-066-cozy-tui-port/.tmp-tests/archive-wt",
+		TaskID:    "TASK-1",
+		Completion: sessionCompletionRecord{
+			TaskID:     "TASK-1",
+			Status:     "done",
+			Summary:    "finished",
+			Tests:      []string{"go test ./cmd/codero"},
+			FinishedAt: "2026-03-21T20:00:00Z",
+		},
+	}
+
+	archived, err := archiveSessionNote(path, note, "")
 	if err != nil {
 		t.Fatalf("archiveSessionNote: %v", err)
 	}
@@ -66,5 +83,17 @@ func TestArchiveSessionNote(t *testing.T) {
 	}
 	if _, err := os.Stat(archived); err != nil {
 		t.Fatalf("archived file missing: %v", err)
+	}
+	metaPath := filepath.Join(runtimeRoot, "archive", sessionID+".json")
+	metaBody, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatalf("read metadata: %v", err)
+	}
+	var meta archivedSessionMetadata
+	if err := json.Unmarshal(metaBody, &meta); err != nil {
+		t.Fatalf("unmarshal metadata: %v", err)
+	}
+	if meta.SessionID != sessionID || meta.ArchivedMD != archived {
+		t.Fatalf("metadata = %#v", meta)
 	}
 }
