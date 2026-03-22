@@ -1294,3 +1294,214 @@ func TestAcceptTask_EndedSessionRejected(t *testing.T) {
 		t.Errorf("expected ErrAgentSessionAlreadyEnded; got: %v", err)
 	}
 }
+
+// --- EmitAssignmentUpdate tests ---
+
+// mustAcceptTask is a test helper that registers a session and accepts a task.
+func mustAcceptTask(t *testing.T, db *DB, sessionID, agentID, taskID string) *AgentAssignment {
+	t.Helper()
+	mustRegisterSession(t, db, sessionID, agentID)
+	a, err := AcceptTask(context.Background(), db, sessionID, taskID)
+	if err != nil {
+		t.Fatalf("AcceptTask(%q, %q): %v", sessionID, taskID, err)
+	}
+	return a
+}
+
+func TestEmitAssignmentUpdate_HappyPath(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	a := mustAcceptTask(t, db, "sess-emit-1", "agent-a", "TASK-E01")
+	if a.Version != 1 {
+		t.Fatalf("initial version: got %d, want 1", a.Version)
+	}
+
+	updated, err := EmitAssignmentUpdate(ctx, db, a.ID, 1, AssignmentSubstatusWaitingForCI)
+	if err != nil {
+		t.Fatalf("EmitAssignmentUpdate: %v", err)
+	}
+	if updated.Version != 2 {
+		t.Fatalf("version after emit: got %d, want 2", updated.Version)
+	}
+	if updated.State != string(assignmentStateActive) {
+		t.Fatalf("state: got %q, want %q", updated.State, assignmentStateActive)
+	}
+	if updated.Substatus != AssignmentSubstatusWaitingForCI {
+		t.Fatalf("substatus: got %q, want %q", updated.Substatus, AssignmentSubstatusWaitingForCI)
+	}
+	if updated.EndedAt != nil {
+		t.Fatalf("ended_at should be nil for active substatus; got %v", updated.EndedAt)
+	}
+}
+
+func TestEmitAssignmentUpdate_StaleVersion(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	a := mustAcceptTask(t, db, "sess-emit-2", "agent-a", "TASK-E02")
+
+	// Advance to version 2.
+	_, err := EmitAssignmentUpdate(ctx, db, a.ID, 1, AssignmentSubstatusWaitingForCI)
+	if err != nil {
+		t.Fatalf("first emit: %v", err)
+	}
+
+	// Attempt to emit with stale version 1 again.
+	_, err = EmitAssignmentUpdate(ctx, db, a.ID, 1, AssignmentSubstatusInProgress)
+	if !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("expected ErrVersionConflict for stale version; got: %v", err)
+	}
+}
+
+func TestEmitAssignmentUpdate_OutOfOrderVersion(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	a := mustAcceptTask(t, db, "sess-emit-3", "agent-a", "TASK-E03")
+
+	// Try version 5 when row is at 1.
+	_, err := EmitAssignmentUpdate(ctx, db, a.ID, 5, AssignmentSubstatusWaitingForCI)
+	if !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("expected ErrVersionConflict for out-of-order version; got: %v", err)
+	}
+}
+
+func TestEmitAssignmentUpdate_EndedAssignment(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	a := mustAcceptTask(t, db, "sess-emit-4", "agent-a", "TASK-E04")
+
+	// Terminate the assignment.
+	_, err := EmitAssignmentUpdate(ctx, db, a.ID, 1, AssignmentSubstatusTerminalFinished)
+	if err != nil {
+		t.Fatalf("terminal emit: %v", err)
+	}
+
+	// Now try to emit again — assignment is ended.
+	_, err = EmitAssignmentUpdate(ctx, db, a.ID, 2, AssignmentSubstatusInProgress)
+	if !errors.Is(err, ErrAssignmentEnded) {
+		t.Fatalf("expected ErrAssignmentEnded; got: %v", err)
+	}
+}
+
+func TestEmitAssignmentUpdate_InvalidSubstatus(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	a := mustAcceptTask(t, db, "sess-emit-5", "agent-a", "TASK-E05")
+
+	_, err := EmitAssignmentUpdate(ctx, db, a.ID, 1, "invalid_garbage")
+	if !errors.Is(err, ErrInvalidEmitSubstatus) {
+		t.Fatalf("expected ErrInvalidEmitSubstatus; got: %v", err)
+	}
+}
+
+func TestEmitAssignmentUpdate_EmptySubstatus(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	a := mustAcceptTask(t, db, "sess-emit-6", "agent-a", "TASK-E06")
+
+	_, err := EmitAssignmentUpdate(ctx, db, a.ID, 1, "")
+	if !errors.Is(err, ErrInvalidEmitSubstatus) {
+		t.Fatalf("expected ErrInvalidEmitSubstatus for empty substatus; got: %v", err)
+	}
+}
+
+func TestEmitAssignmentUpdate_VersionAdvances(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	a := mustAcceptTask(t, db, "sess-emit-7", "agent-a", "TASK-E07")
+
+	// Chain of valid emits: 1→2→3→4.
+	for i := 1; i <= 3; i++ {
+		updated, err := EmitAssignmentUpdate(ctx, db, a.ID, i, AssignmentSubstatusInProgress)
+		if err != nil {
+			t.Fatalf("emit at version %d: %v", i, err)
+		}
+		if updated.Version != i+1 {
+			t.Fatalf("version after emit %d: got %d, want %d", i, updated.Version, i+1)
+		}
+	}
+}
+
+func TestEmitAssignmentUpdate_BlockedTransition(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	a := mustAcceptTask(t, db, "sess-emit-8", "agent-a", "TASK-E08")
+
+	updated, err := EmitAssignmentUpdate(ctx, db, a.ID, 1, AssignmentSubstatusBlockedCIFailure)
+	if err != nil {
+		t.Fatalf("blocked emit: %v", err)
+	}
+	if updated.State != string(assignmentStateBlocked) {
+		t.Fatalf("state: got %q, want %q", updated.State, assignmentStateBlocked)
+	}
+	if updated.BlockedReason != "ci_failure" {
+		t.Fatalf("blocked_reason: got %q, want %q", updated.BlockedReason, "ci_failure")
+	}
+	if updated.Version != 2 {
+		t.Fatalf("version: got %d, want 2", updated.Version)
+	}
+}
+
+func TestEmitAssignmentUpdate_TerminalSetsEndedAt(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	before := time.Now().UTC().Add(-time.Second)
+	a := mustAcceptTask(t, db, "sess-emit-9", "agent-a", "TASK-E09")
+
+	updated, err := EmitAssignmentUpdate(ctx, db, a.ID, 1, AssignmentSubstatusTerminalCancelled)
+	if err != nil {
+		t.Fatalf("terminal emit: %v", err)
+	}
+	if updated.State != string(assignmentStateCancelled) {
+		t.Fatalf("state: got %q, want %q", updated.State, assignmentStateCancelled)
+	}
+	if updated.EndedAt == nil {
+		t.Fatal("ended_at should be set for terminal substatus")
+	}
+	if updated.EndedAt.Before(before) {
+		t.Fatalf("ended_at %v is before test start %v", updated.EndedAt, before)
+	}
+	if updated.EndReason != AssignmentSubstatusTerminalCancelled {
+		t.Fatalf("end_reason: got %q, want %q", updated.EndReason, AssignmentSubstatusTerminalCancelled)
+	}
+	if updated.Version != 2 {
+		t.Fatalf("version: got %d, want 2", updated.Version)
+	}
+}
+
+func TestEmitAssignmentUpdate_DuplicateStrictRejection(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	a := mustAcceptTask(t, db, "sess-emit-10", "agent-a", "TASK-E10")
+
+	// First emit succeeds.
+	_, err := EmitAssignmentUpdate(ctx, db, a.ID, 1, AssignmentSubstatusWaitingForCI)
+	if err != nil {
+		t.Fatalf("first emit: %v", err)
+	}
+
+	// Exact same emit (same version, same substatus) is rejected — strict mode.
+	_, err = EmitAssignmentUpdate(ctx, db, a.ID, 1, AssignmentSubstatusWaitingForCI)
+	if !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("duplicate emit should fail with ErrVersionConflict; got: %v", err)
+	}
+}
+
+func TestEmitAssignmentUpdate_NotFound(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	_, err := EmitAssignmentUpdate(ctx, db, "nonexistent-assignment", 1, AssignmentSubstatusInProgress)
+	if !errors.Is(err, ErrAgentAssignmentNotFound) {
+		t.Fatalf("expected ErrAgentAssignmentNotFound; got: %v", err)
+	}
+}

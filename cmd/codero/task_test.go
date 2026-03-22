@@ -190,3 +190,130 @@ func extractField(output, key string) string {
 	}
 	return ""
 }
+
+// --- task emit CLI tests ---
+
+// runTaskEmit invokes the taskEmitCmd cobra command in-process and returns
+// (stdout output, error). CODERO_DB_PATH must be set by the caller.
+func runTaskEmit(t *testing.T, flags ...string) (string, error) {
+	t.Helper()
+
+	origStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdout = w
+
+	cfgPath := "codero.yaml"
+	cmd := taskEmitCmd(&cfgPath)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs(flags)
+
+	execErr := cmd.ExecuteContext(context.Background())
+
+	w.Close()
+	os.Stdout = origStdout
+
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, r)
+
+	return buf.String(), execErr
+}
+
+func TestTaskEmitCmd_HappyPath(t *testing.T) {
+	dbPath := openTaskTestDB(t)
+	t.Setenv("CODERO_DB_PATH", dbPath)
+
+	db, err := state.Open(dbPath)
+	if err != nil {
+		t.Fatalf("state.Open: %v", err)
+	}
+	ctx := context.Background()
+	if err := state.RegisterAgentSession(ctx, db, "emit-cli-1", "agent-a", ""); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	a, err := state.AcceptTask(ctx, db, "emit-cli-1", "EMIT-CLI-T1")
+	if err != nil {
+		t.Fatalf("AcceptTask: %v", err)
+	}
+	_ = db.Close()
+
+	out, err := runTaskEmit(t, "--assignment", a.ID, "--version", "1", "--substatus", "waiting_for_ci")
+	if err != nil {
+		t.Fatalf("expected success, got: %v\noutput: %s", err, out)
+	}
+	for _, want := range []string{
+		"assignment_id: " + a.ID,
+		"state: active",
+		"substatus: waiting_for_ci",
+		"version: 2",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q\nfull output:\n%s", want, out)
+		}
+	}
+}
+
+func TestTaskEmitCmd_VersionConflict(t *testing.T) {
+	dbPath := openTaskTestDB(t)
+	t.Setenv("CODERO_DB_PATH", dbPath)
+
+	db, err := state.Open(dbPath)
+	if err != nil {
+		t.Fatalf("state.Open: %v", err)
+	}
+	ctx := context.Background()
+	if err := state.RegisterAgentSession(ctx, db, "emit-cli-2", "agent-a", ""); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	a, err := state.AcceptTask(ctx, db, "emit-cli-2", "EMIT-CLI-T2")
+	if err != nil {
+		t.Fatalf("AcceptTask: %v", err)
+	}
+	// Advance to version 2 via state layer.
+	if _, err := state.EmitAssignmentUpdate(ctx, db, a.ID, 1, "waiting_for_ci"); err != nil {
+		t.Fatalf("advance version: %v", err)
+	}
+	_ = db.Close()
+
+	// CLI call with stale version 1.
+	_, err = runTaskEmit(t, "--assignment", a.ID, "--version", "1", "--substatus", "in_progress")
+	if err == nil {
+		t.Fatal("expected version conflict error, got nil")
+	}
+	if !strings.Contains(err.Error(), "version conflict") {
+		t.Errorf("error should mention 'version conflict'; got: %v", err)
+	}
+}
+
+func TestTaskEmitCmd_MissingFlags(t *testing.T) {
+	dbPath := openTaskTestDB(t)
+	t.Setenv("CODERO_DB_PATH", dbPath)
+
+	tests := []struct {
+		name  string
+		flags []string
+		want  string
+	}{
+		{"no assignment", []string{"--version", "1", "--substatus", "in_progress"}, "--assignment is required"},
+		{"no version", []string{"--assignment", "abc", "--substatus", "in_progress"}, "--version is required"},
+		{"no substatus", []string{"--assignment", "abc", "--version", "1"}, "--substatus is required"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := runTaskEmit(t, tc.flags...)
+			if err == nil {
+				t.Fatal("expected usage error, got nil")
+			}
+			var usageErr *UsageError
+			if !errors.As(err, &usageErr) {
+				t.Fatalf("expected UsageError, got %T: %v", err, err)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error %q should contain %q", err, tc.want)
+			}
+		})
+	}
+}

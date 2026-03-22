@@ -28,6 +28,14 @@ var ErrAgentAssignmentNotFound = errors.New("agent assignment not found")
 // task_id already belongs to a different session.
 var ErrTaskAlreadyClaimed = errors.New("task already claimed by another live session")
 
+// ErrVersionConflict is returned when an emit provides a stale
+// assignment_version that does not match the durable row.
+var ErrVersionConflict = errors.New("assignment version conflict")
+
+// ErrAssignmentEnded is returned when an emit targets an assignment whose
+// ended_at is already set (terminal/superseded/lost).
+var ErrAssignmentEnded = errors.New("assignment already ended")
+
 // AgentSession is a row from agent_sessions.
 type AgentSession struct {
 	SessionID      string
@@ -52,6 +60,7 @@ type AgentAssignment struct {
 	State         string
 	BlockedReason string
 	Substatus     string
+	Version       int
 	StartedAt     time.Time
 	EndedAt       *time.Time
 	EndReason     string
@@ -518,7 +527,7 @@ func AttachAgentAssignment(ctx context.Context, db *DB, assignment *AgentAssignm
 func GetActiveAgentAssignment(ctx context.Context, db *DB, sessionID string) (*AgentAssignment, error) {
 	const q = `
 		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id, state, blocked_reason, assignment_substatus,
-		       started_at, ended_at, end_reason, superseded_by
+		       assignment_version, started_at, ended_at, end_reason, superseded_by
 		FROM agent_assignments
 		WHERE session_id = ? AND ended_at IS NULL
 		ORDER BY started_at DESC
@@ -532,7 +541,7 @@ func GetActiveAgentAssignment(ctx context.Context, db *DB, sessionID string) (*A
 func ListAgentAssignments(ctx context.Context, db *DB, sessionID string) ([]AgentAssignment, error) {
 	const q = `
 		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id, state, blocked_reason, assignment_substatus,
-		       started_at, ended_at, end_reason, superseded_by
+		       assignment_version, started_at, ended_at, end_reason, superseded_by
 		FROM agent_assignments
 		WHERE session_id = ?
 		ORDER BY started_at ASC`
@@ -621,7 +630,7 @@ func FinalizeAgentSession(ctx context.Context, db *DB, sessionID, agentID string
 	var active *AgentAssignment
 	row := tx.QueryRowContext(ctx, `
 		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id, state, blocked_reason, assignment_substatus,
-		       started_at, ended_at, end_reason, superseded_by
+		       assignment_version, started_at, ended_at, end_reason, superseded_by
 		FROM agent_assignments
 		WHERE session_id = ? AND ended_at IS NULL
 		ORDER BY started_at DESC
@@ -974,7 +983,7 @@ func ReconcileAgentAssignmentWaitingState(ctx context.Context, db *DB, repo, bra
 
 	row := tx.QueryRowContext(ctx, `
 		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id, state, blocked_reason, assignment_substatus,
-		       started_at, ended_at, end_reason, superseded_by
+		       assignment_version, started_at, ended_at, end_reason, superseded_by
 		FROM agent_assignments
 		WHERE repo = ? AND branch = ? AND ended_at IS NULL
 		ORDER BY started_at DESC
@@ -1191,7 +1200,7 @@ func AcceptTask(ctx context.Context, db *DB, sessionID, taskID string) (*AgentAs
 		row := tx.QueryRowContext(ctx,
 			`SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id,
 			        state, blocked_reason, assignment_substatus,
-			        started_at, ended_at, end_reason, superseded_by
+			        assignment_version, started_at, ended_at, end_reason, superseded_by
 			 FROM agent_assignments WHERE assignment_id = ?`,
 			existingID,
 		)
@@ -1257,7 +1266,7 @@ func AcceptTask(ctx context.Context, db *DB, sessionID, taskID string) (*AgentAs
 				row := tx.QueryRowContext(ctx, `
 					SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id,
 					       state, blocked_reason, assignment_substatus,
-					       started_at, ended_at, end_reason, superseded_by
+					       assignment_version, started_at, ended_at, end_reason, superseded_by
 					FROM agent_assignments
 					WHERE assignment_id = ?`,
 					conflictAssignment,
@@ -1295,8 +1304,145 @@ func AcceptTask(ctx context.Context, db *DB, sessionID, taskID string) (*AgentAs
 		TaskID:    taskID,
 		State:     string(assignmentStateActive),
 		Substatus: AssignmentSubstatusInProgress,
+		Version:   1,
 		StartedAt: now,
 	}, nil
+}
+
+// ErrInvalidEmitSubstatus is returned when the emitted substatus is not
+// recognized or not valid for an emit transition.
+var ErrInvalidEmitSubstatus = errors.New("invalid emit substatus")
+
+// validateEmitSubstatus checks that the given substatus is a recognized value
+// for an emit update. It accepts active, blocked, and terminal substatuses.
+func validateEmitSubstatus(substatus string) error {
+	normalized := normalizeAssignmentSubstatus(substatus)
+	if normalized == "" {
+		return fmt.Errorf("%w: substatus must not be empty", ErrInvalidEmitSubstatus)
+	}
+	if _, ok := activeAssignmentSubstatusSet[normalized]; ok {
+		return nil
+	}
+	if _, ok := blockedAssignmentSubstatusSet[normalized]; ok {
+		return nil
+	}
+	if _, ok := terminalAssignmentSubstatusSet[normalized]; ok {
+		return nil
+	}
+	return fmt.Errorf("%w: %q", ErrInvalidEmitSubstatus, normalized)
+}
+
+// EmitAssignmentUpdate atomically applies a state/substatus transition to an
+// assignment, guarded by optimistic concurrency on assignment_version.
+//
+// Contract:
+//   - assignmentID identifies the target row.
+//   - currentVersion is the version the caller believes the row currently has.
+//   - newSubstatus is the desired substatus after the emit.
+//
+// On success the row's state, substatus, blocked_reason, assignment_version,
+// and last_emit_at are updated atomically. The returned AgentAssignment
+// reflects the post-update row with Version = currentVersion + 1.
+//
+// Errors:
+//   - ErrAgentAssignmentNotFound: no row with that assignment_id.
+//   - ErrAssignmentEnded: the assignment already has a non-NULL ended_at.
+//   - ErrVersionConflict: the row's current version != currentVersion.
+//   - ErrInvalidEmitSubstatus: the substatus is unrecognized.
+func EmitAssignmentUpdate(ctx context.Context, db *DB, assignmentID string, currentVersion int, newSubstatus string) (*AgentAssignment, error) {
+	normalized := normalizeAssignmentSubstatus(newSubstatus)
+	if err := validateEmitSubstatus(normalized); err != nil {
+		return nil, err
+	}
+
+	newState := assignmentStateFromSubstatus(normalized)
+	newBlockedReason := blockedReasonFromSubstatus(normalized)
+	now := time.Now().UTC()
+
+	// Determine whether this substatus is terminal.
+	_, isTerminal := terminalAssignmentSubstatusSet[normalized]
+
+	tx, err := db.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("emit assignment update: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Load current row inside the transaction.
+	var rowVersion int
+	var endedAt sql.NullTime
+	err = tx.QueryRowContext(ctx, `
+		SELECT assignment_version, ended_at
+		FROM agent_assignments
+		WHERE assignment_id = ?`,
+		assignmentID,
+	).Scan(&rowVersion, &endedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrAgentAssignmentNotFound
+		}
+		return nil, fmt.Errorf("emit assignment update: load row: %w", err)
+	}
+
+	if endedAt.Valid {
+		return nil, fmt.Errorf("%w: assignment %s ended at %s",
+			ErrAssignmentEnded, assignmentID, endedAt.Time.Format(time.RFC3339))
+	}
+
+	if rowVersion != currentVersion {
+		return nil, fmt.Errorf("%w: expected version %d but row has %d",
+			ErrVersionConflict, currentVersion, rowVersion)
+	}
+
+	nextVersion := currentVersion + 1
+
+	// Build the UPDATE. If the emit is terminal, also set ended_at and end_reason.
+	var endReason string
+	if isTerminal {
+		endReason = normalized
+	}
+
+	if isTerminal {
+		_, err = tx.ExecContext(ctx, `
+			UPDATE agent_assignments
+			SET state = ?, assignment_substatus = ?, blocked_reason = ?,
+			    assignment_version = ?, last_emit_at = ?,
+			    ended_at = ?, end_reason = ?
+			WHERE assignment_id = ? AND assignment_version = ?`,
+			newState, normalized, newBlockedReason,
+			nextVersion, now,
+			now, endReason,
+			assignmentID, currentVersion,
+		)
+	} else {
+		_, err = tx.ExecContext(ctx, `
+			UPDATE agent_assignments
+			SET state = ?, assignment_substatus = ?, blocked_reason = ?,
+			    assignment_version = ?, last_emit_at = ?
+			WHERE assignment_id = ? AND assignment_version = ?`,
+			newState, normalized, newBlockedReason,
+			nextVersion, now,
+			assignmentID, currentVersion,
+		)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("emit assignment update: update row: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("emit assignment update: commit: %w", err)
+	}
+
+	// Re-read the committed row to return accurate data.
+	row := db.sql.QueryRowContext(ctx, `
+		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id,
+		       state, blocked_reason, assignment_substatus,
+		       assignment_version, started_at, ended_at, end_reason, superseded_by
+		FROM agent_assignments
+		WHERE assignment_id = ?`,
+		assignmentID,
+	)
+	return scanAgentAssignment(row)
 }
 
 func loadLiveTaskClaimTx(ctx context.Context, tx *sql.Tx, taskID string) (assignmentID, sessionID string, err error) {
@@ -1382,7 +1528,7 @@ func scanAgentAssignment(row *sql.Row) (*AgentAssignment, error) {
 
 	err := row.Scan(
 		&a.ID, &a.SessionID, &a.AgentID, &a.Repo, &a.Branch, &a.Worktree, &a.TaskID, &state, &blockedReason, &substatus,
-		&a.StartedAt, &endedAt, &a.EndReason, &supersededBy,
+		&a.Version, &a.StartedAt, &endedAt, &a.EndReason, &supersededBy,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1418,7 +1564,7 @@ func scanAgentAssignmentRow(rows *sql.Rows) (*AgentAssignment, error) {
 
 	if err := rows.Scan(
 		&a.ID, &a.SessionID, &a.AgentID, &a.Repo, &a.Branch, &a.Worktree, &a.TaskID, &state, &blockedReason, &substatus,
-		&a.StartedAt, &endedAt, &a.EndReason, &supersededBy,
+		&a.Version, &a.StartedAt, &endedAt, &a.EndReason, &supersededBy,
 	); err != nil {
 		return nil, fmt.Errorf("scan agent assignment row: %w", err)
 	}
