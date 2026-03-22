@@ -2,6 +2,7 @@ package state
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 	"time"
@@ -217,6 +218,12 @@ func TestAttachAgentAssignment_Supersede(t *testing.T) {
 	if active.ID != "assign-1" {
 		t.Errorf("active assignment id: got %q, want %q", active.ID, "assign-1")
 	}
+	if active.Substatus != AssignmentSubstatusInProgress {
+		t.Errorf("active substatus: got %q, want %q", active.Substatus, AssignmentSubstatusInProgress)
+	}
+	if active.State != string(assignmentStateActive) {
+		t.Errorf("active state: got %q, want %q", active.State, assignmentStateActive)
+	}
 
 	second := &AgentAssignment{
 		ID:        "assign-2",
@@ -262,8 +269,48 @@ func TestAttachAgentAssignment_Supersede(t *testing.T) {
 	if superseded.EndReason != "superseded" {
 		t.Errorf("end_reason: got %q, want %q", superseded.EndReason, "superseded")
 	}
+	if superseded.Substatus != AssignmentSubstatusTerminalWaitingNextTask {
+		t.Errorf("superseded substatus: got %q, want %q", superseded.Substatus, AssignmentSubstatusTerminalWaitingNextTask)
+	}
+	if superseded.State != string(assignmentStateSuperseded) {
+		t.Errorf("superseded state: got %q, want %q", superseded.State, assignmentStateSuperseded)
+	}
 	if superseded.SupersededBy == nil || *superseded.SupersededBy != "assign-2" {
 		t.Errorf("superseded_by: got %v, want %q", superseded.SupersededBy, "assign-2")
+	}
+
+	rows, err := db.sql.QueryContext(ctx, `
+		SELECT rule_id, result
+		FROM assignment_rule_checks
+		WHERE assignment_id = ?
+		ORDER BY rule_id ASC`, "assign-2")
+	if err != nil {
+		t.Fatalf("query assignment_rule_checks: %v", err)
+	}
+	defer rows.Close()
+
+	results := map[string]string{}
+	for rows.Next() {
+		var ruleID, result string
+		if err := rows.Scan(&ruleID, &result); err != nil {
+			t.Fatalf("scan assignment_rule_checks: %v", err)
+		}
+		results[ruleID] = result
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("assignment_rule_checks rows: %v", err)
+	}
+	if results[RuleIDGateMustPassBeforeMerge] != "pending" {
+		t.Fatalf("RULE-001 result = %q, want pending", results[RuleIDGateMustPassBeforeMerge])
+	}
+	if results[RuleIDNoSilentFailure] != "pass" {
+		t.Fatalf("RULE-002 result = %q, want pass", results[RuleIDNoSilentFailure])
+	}
+	if results[RuleIDBranchHoldTTL] != "pass" {
+		t.Fatalf("RULE-003 result = %q, want pass", results[RuleIDBranchHoldTTL])
+	}
+	if results[RuleIDHeartbeatProgress] != "pass" {
+		t.Fatalf("RULE-004 result = %q, want pass", results[RuleIDHeartbeatProgress])
 	}
 }
 
@@ -275,9 +322,12 @@ func TestFinalizeAgentSession(t *testing.T) {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	_, err := db.sql.ExecContext(ctx, `
-		INSERT INTO branch_states (id, repo, branch, state, owner_agent, owner_session_id, owner_session_last_seen)
-		VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
-		"branch-final", "acme/api", "feat/final", "queued_cli", "agent-1", "sess-final",
+		INSERT INTO branch_states (
+			id, repo, branch, state, approved, ci_green, pending_events, unresolved_threads,
+			owner_agent, owner_session_id, owner_session_last_seen
+		)
+		VALUES (?, ?, ?, ?, 1, 1, 0, 0, ?, ?, datetime('now'))`,
+		"branch-final", "acme/api", "feat/final", "merge_ready", "agent-1", "sess-final",
 	)
 	if err != nil {
 		t.Fatalf("seed branch state: %v", err)
@@ -297,6 +347,7 @@ func TestFinalizeAgentSession(t *testing.T) {
 	finishedAt := time.Date(2026, 3, 21, 20, 0, 0, 0, time.UTC)
 	if err := FinalizeAgentSession(ctx, db, "sess-final", "agent-1", AgentSessionCompletion{
 		Status:     "done",
+		Substatus:  AssignmentSubstatusTerminalFinished,
 		Summary:    "completed",
 		Tests:      []string{"go test ./cmd/codero"},
 		FinishedAt: finishedAt,
@@ -319,6 +370,12 @@ func TestFinalizeAgentSession(t *testing.T) {
 	if len(assignments) != 1 || assignments[0].EndedAt == nil || assignments[0].EndReason != "done" {
 		t.Fatalf("finalized assignments = %#v", assignments)
 	}
+	if assignments[0].State != string(assignmentStateCompleted) {
+		t.Fatalf("assignment state = %q, want %q", assignments[0].State, assignmentStateCompleted)
+	}
+	if assignments[0].Substatus != AssignmentSubstatusTerminalFinished {
+		t.Fatalf("assignment substatus = %q, want %q", assignments[0].Substatus, AssignmentSubstatusTerminalFinished)
+	}
 
 	var ownerSessionID string
 	if err := db.sql.QueryRowContext(ctx, `
@@ -340,6 +397,472 @@ func TestFinalizeAgentSession(t *testing.T) {
 	}
 	if events[len(events)-1].EventType != "session_finalized" {
 		t.Fatalf("latest event_type = %q, want session_finalized", events[len(events)-1].EventType)
+	}
+
+	rows, err := db.sql.QueryContext(ctx, `
+		SELECT rule_id, result
+		FROM assignment_rule_checks
+		WHERE assignment_id = ?
+		ORDER BY rule_id ASC`, "assign-final")
+	if err != nil {
+		t.Fatalf("query assignment_rule_checks: %v", err)
+	}
+	defer rows.Close()
+
+	results := map[string]string{}
+	for rows.Next() {
+		var ruleID, result string
+		if err := rows.Scan(&ruleID, &result); err != nil {
+			t.Fatalf("scan assignment_rule_checks: %v", err)
+		}
+		results[ruleID] = result
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("assignment_rule_checks rows: %v", err)
+	}
+	if results[RuleIDGateMustPassBeforeMerge] != "pass" {
+		t.Fatalf("RULE-001 result = %q, want pass", results[RuleIDGateMustPassBeforeMerge])
+	}
+	if results[RuleIDNoSilentFailure] != "pass" {
+		t.Fatalf("RULE-002 result = %q, want pass", results[RuleIDNoSilentFailure])
+	}
+	if results[RuleIDBranchHoldTTL] != "pass" {
+		t.Fatalf("RULE-003 result = %q, want pass", results[RuleIDBranchHoldTTL])
+	}
+	if results[RuleIDHeartbeatProgress] != "pass" {
+		t.Fatalf("RULE-004 result = %q, want pass", results[RuleIDHeartbeatProgress])
+	}
+}
+
+func TestFinalizeAgentSession_RejectsCompletionWhenMergeGateFails(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	if err := RegisterAgentSession(ctx, db, "sess-gate", "agent-1", "agent"); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	_, err := db.sql.ExecContext(ctx, `
+		INSERT INTO branch_states (
+			id, repo, branch, state, approved, ci_green, pending_events, unresolved_threads,
+			owner_agent, owner_session_id, owner_session_last_seen
+		)
+		VALUES (?, ?, ?, ?, 0, 0, 1, 1, ?, ?, datetime('now'))`,
+		"branch-gate", "acme/api", "feat/gate", "queued_cli", "agent-1", "sess-gate",
+	)
+	if err != nil {
+		t.Fatalf("seed branch state: %v", err)
+	}
+	if err := AttachAgentAssignment(ctx, db, &AgentAssignment{
+		ID:        "assign-gate",
+		SessionID: "sess-gate",
+		AgentID:   "agent-1",
+		Repo:      "acme/api",
+		Branch:    "feat/gate",
+		Worktree:  "/srv/storage/repo/codero/.worktrees/COD-071/.tmp-tests/gate",
+		TaskID:    "TASK-10",
+	}); err != nil {
+		t.Fatalf("AttachAgentAssignment: %v", err)
+	}
+
+	err = FinalizeAgentSession(ctx, db, "sess-gate", "agent-1", AgentSessionCompletion{
+		Status:     "done",
+		Substatus:  AssignmentSubstatusTerminalFinished,
+		Summary:    "completed",
+		FinishedAt: time.Now().UTC(),
+	})
+	if !errors.Is(err, ErrAssignmentGateNotPassed) {
+		t.Fatalf("FinalizeAgentSession error = %v, want %v", err, ErrAssignmentGateNotPassed)
+	}
+
+	sessionRow, err := GetAgentSession(ctx, db, "sess-gate")
+	if err != nil {
+		t.Fatalf("GetAgentSession: %v", err)
+	}
+	if sessionRow.EndedAt != nil {
+		t.Fatalf("session should remain live, got %#v", sessionRow)
+	}
+
+	active, err := GetActiveAgentAssignment(ctx, db, "sess-gate")
+	if err != nil {
+		t.Fatalf("GetActiveAgentAssignment: %v", err)
+	}
+	if active.EndedAt != nil {
+		t.Fatalf("assignment should remain active, got %#v", active)
+	}
+
+	var rule001Result string
+	if err := db.sql.QueryRowContext(ctx, `
+		SELECT result
+		FROM assignment_rule_checks
+		WHERE assignment_id = ? AND rule_id = ?`,
+		"assign-gate", RuleIDGateMustPassBeforeMerge,
+	).Scan(&rule001Result); err != nil {
+		t.Fatalf("read RULE-001 check: %v", err)
+	}
+	if rule001Result != "fail" {
+		t.Fatalf("RULE-001 result = %q, want fail", rule001Result)
+	}
+}
+
+func TestFinalizeAgentSession_RequiresSubstatus(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	if err := RegisterAgentSession(ctx, db, "sess-substatus", "agent-1", "agent"); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	if err := AttachAgentAssignment(ctx, db, &AgentAssignment{
+		ID:        "assign-substatus",
+		SessionID: "sess-substatus",
+		AgentID:   "agent-1",
+		Repo:      "acme/api",
+		Branch:    "feat/substatus",
+		Worktree:  "/srv/storage/repo/codero/.worktrees/COD-071/.tmp-tests/substatus",
+		TaskID:    "TASK-11",
+	}); err != nil {
+		t.Fatalf("AttachAgentAssignment: %v", err)
+	}
+
+	err := FinalizeAgentSession(ctx, db, "sess-substatus", "agent-1", AgentSessionCompletion{
+		Status:     "blocked",
+		Summary:    "waiting on credentials",
+		FinishedAt: time.Now().UTC(),
+	})
+	if !errors.Is(err, ErrAssignmentSubstatusRequired) {
+		t.Fatalf("FinalizeAgentSession error = %v, want %v", err, ErrAssignmentSubstatusRequired)
+	}
+
+	var result string
+	var detail sql.NullString
+	if err := db.sql.QueryRowContext(ctx, `
+		SELECT result, detail
+		FROM assignment_rule_checks
+		WHERE assignment_id = ? AND rule_id = ?`,
+		"assign-substatus", RuleIDNoSilentFailure,
+	).Scan(&result, &detail); err != nil {
+		t.Fatalf("read RULE-002 check: %v", err)
+	}
+	if result != "fail" {
+		t.Fatalf("RULE-002 result = %q, want fail", result)
+	}
+}
+
+func TestFinalizeAgentSession_RejectsCompletionWhenProtocolRuleFails(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	if err := RegisterAgentSession(ctx, db, "sess-protocol", "agent-1", "agent"); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	_, err := db.sql.ExecContext(ctx, `
+		INSERT INTO branch_states (
+			id, repo, branch, state, approved, ci_green, pending_events, unresolved_threads,
+			owner_agent, owner_session_id, owner_session_last_seen
+		)
+		VALUES (?, ?, ?, ?, 1, 1, 0, 0, ?, ?, datetime('now'))`,
+		"branch-protocol", "acme/api", "feat/protocol", "merge_ready", "agent-1", "sess-protocol",
+	)
+	if err != nil {
+		t.Fatalf("seed branch state: %v", err)
+	}
+	if err := AttachAgentAssignment(ctx, db, &AgentAssignment{
+		ID:        "assign-protocol",
+		SessionID: "sess-protocol",
+		AgentID:   "agent-1",
+		Repo:      "acme/api",
+		Branch:    "feat/protocol",
+		Worktree:  "/srv/storage/repo/codero/.worktrees/COD-071/.tmp-tests/protocol",
+		TaskID:    "TASK-12",
+	}); err != nil {
+		t.Fatalf("AttachAgentAssignment: %v", err)
+	}
+	_, err = db.sql.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET last_progress_at = datetime('now','-2 hours')
+		WHERE session_id = ?`,
+		"sess-protocol",
+	)
+	if err != nil {
+		t.Fatalf("seed stale progress: %v", err)
+	}
+
+	err = FinalizeAgentSession(ctx, db, "sess-protocol", "agent-1", AgentSessionCompletion{
+		Status:     "done",
+		Substatus:  AssignmentSubstatusTerminalFinished,
+		Summary:    "completed",
+		FinishedAt: time.Now().UTC(),
+	})
+	if !errors.Is(err, ErrAssignmentComplianceNotPassed) {
+		t.Fatalf("FinalizeAgentSession error = %v, want %v", err, ErrAssignmentComplianceNotPassed)
+	}
+
+	sessionRow, err := GetAgentSession(ctx, db, "sess-protocol")
+	if err != nil {
+		t.Fatalf("GetAgentSession: %v", err)
+	}
+	if sessionRow.EndedAt != nil {
+		t.Fatalf("session should remain live, got %#v", sessionRow)
+	}
+
+	var rule004Result string
+	if err := db.sql.QueryRowContext(ctx, `
+		SELECT result
+		FROM assignment_rule_checks
+		WHERE assignment_id = ? AND rule_id = ?`,
+		"assign-protocol", RuleIDHeartbeatProgress,
+	).Scan(&rule004Result); err != nil {
+		t.Fatalf("read RULE-004 check: %v", err)
+	}
+	if rule004Result != "fail" {
+		t.Fatalf("RULE-004 result = %q, want fail", rule004Result)
+	}
+}
+
+func TestMonitorAgentAssignmentRules_HeartbeatLostPath(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	if err := RegisterAgentSession(ctx, db, "sess-monitor-lost", "agent-1", "agent"); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	_, err := db.sql.ExecContext(ctx, `
+		INSERT INTO branch_states (
+			id, repo, branch, state, approved, ci_green, pending_events, unresolved_threads,
+			owner_agent, owner_session_id, owner_session_last_seen
+		)
+		VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?, ?, datetime('now'))`,
+		"branch-monitor-lost", "acme/api", "feat/monitor-lost", "coding", "agent-1", "sess-monitor-lost",
+	)
+	if err != nil {
+		t.Fatalf("seed branch state: %v", err)
+	}
+	if err := AttachAgentAssignment(ctx, db, &AgentAssignment{
+		ID:        "assign-monitor-lost",
+		SessionID: "sess-monitor-lost",
+		AgentID:   "agent-1",
+		Repo:      "acme/api",
+		Branch:    "feat/monitor-lost",
+		Worktree:  "/srv/storage/repo/codero/.worktrees/COD-071/.tmp-tests/monitor-lost",
+		TaskID:    "TASK-13",
+	}); err != nil {
+		t.Fatalf("AttachAgentAssignment: %v", err)
+	}
+	_, err = db.sql.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET last_seen_at = datetime('now','-2 minutes')
+		WHERE session_id = ?`,
+		"sess-monitor-lost",
+	)
+	if err != nil {
+		t.Fatalf("seed stale heartbeat: %v", err)
+	}
+
+	if err := MonitorAgentAssignmentRules(ctx, db, time.Now().UTC()); err != nil {
+		t.Fatalf("MonitorAgentAssignmentRules: %v", err)
+	}
+
+	sessionRow, err := GetAgentSession(ctx, db, "sess-monitor-lost")
+	if err != nil {
+		t.Fatalf("GetAgentSession: %v", err)
+	}
+	if sessionRow.EndReason != "lost" || sessionRow.EndedAt == nil {
+		t.Fatalf("session = %#v, want lost session", sessionRow)
+	}
+
+	assignments, err := ListAgentAssignments(ctx, db, "sess-monitor-lost")
+	if err != nil {
+		t.Fatalf("ListAgentAssignments: %v", err)
+	}
+	if len(assignments) != 1 {
+		t.Fatalf("assignments count = %d, want 1", len(assignments))
+	}
+	if assignments[0].EndReason != "lost" || assignments[0].Substatus != AssignmentSubstatusTerminalLost || assignments[0].State != string(assignmentStateLost) {
+		t.Fatalf("assignment = %#v, want lost assignment", assignments[0])
+	}
+
+	var ownerSessionID string
+	if err := db.sql.QueryRowContext(ctx, `
+		SELECT owner_session_id
+		FROM branch_states
+		WHERE repo = ? AND branch = ?`,
+		"acme/api", "feat/monitor-lost",
+	).Scan(&ownerSessionID); err != nil {
+		t.Fatalf("read branch state: %v", err)
+	}
+	if ownerSessionID != "" {
+		t.Fatalf("owner_session_id = %q, want cleared", ownerSessionID)
+	}
+}
+
+func TestMonitorAgentAssignmentRules_BranchHoldForceCancel(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	if err := RegisterAgentSession(ctx, db, "sess-monitor-cancel", "agent-1", "agent"); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	_, err := db.sql.ExecContext(ctx, `
+		INSERT INTO branch_states (
+			id, repo, branch, state, approved, ci_green, pending_events, unresolved_threads,
+			owner_agent, owner_session_id, owner_session_last_seen
+		)
+		VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?, ?, datetime('now'))`,
+		"branch-monitor-cancel", "acme/api", "feat/monitor-cancel", "coding", "agent-1", "sess-monitor-cancel",
+	)
+	if err != nil {
+		t.Fatalf("seed branch state: %v", err)
+	}
+	if err := AttachAgentAssignment(ctx, db, &AgentAssignment{
+		ID:        "assign-monitor-cancel",
+		SessionID: "sess-monitor-cancel",
+		AgentID:   "agent-1",
+		Repo:      "acme/api",
+		Branch:    "feat/monitor-cancel",
+		Worktree:  "/srv/storage/repo/codero/.worktrees/COD-071/.tmp-tests/monitor-cancel",
+		TaskID:    "TASK-14",
+	}); err != nil {
+		t.Fatalf("AttachAgentAssignment: %v", err)
+	}
+	_, err = db.sql.ExecContext(ctx, `
+		UPDATE agent_assignments
+		SET started_at = datetime('now','-109 hours')
+		WHERE assignment_id = ?`,
+		"assign-monitor-cancel",
+	)
+	if err != nil {
+		t.Fatalf("seed old assignment: %v", err)
+	}
+
+	if err := MonitorAgentAssignmentRules(ctx, db, time.Now().UTC()); err != nil {
+		t.Fatalf("MonitorAgentAssignmentRules: %v", err)
+	}
+
+	sessionRow, err := GetAgentSession(ctx, db, "sess-monitor-cancel")
+	if err != nil {
+		t.Fatalf("GetAgentSession: %v", err)
+	}
+	if sessionRow.EndedAt != nil {
+		t.Fatalf("session should remain live, got %#v", sessionRow)
+	}
+
+	assignments, err := ListAgentAssignments(ctx, db, "sess-monitor-cancel")
+	if err != nil {
+		t.Fatalf("ListAgentAssignments: %v", err)
+	}
+	if len(assignments) != 1 {
+		t.Fatalf("assignments count = %d, want 1", len(assignments))
+	}
+	if assignments[0].EndReason != "cancelled" || assignments[0].Substatus != AssignmentSubstatusTerminalCancelled || assignments[0].State != string(assignmentStateCancelled) {
+		t.Fatalf("assignment = %#v, want cancelled assignment", assignments[0])
+	}
+}
+
+func TestReconcileAgentAssignmentWaitingState(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	if err := RegisterAgentSession(ctx, db, "sess-wait-reconcile", "agent-1", "agent"); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	_, err := db.sql.ExecContext(ctx, `
+		INSERT INTO branch_states (
+			id, repo, branch, state, approved, ci_green, pending_events, unresolved_threads,
+			owner_agent, owner_session_id, owner_session_last_seen
+		)
+		VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?, ?, datetime('now'))`,
+		"branch-wait-reconcile", "acme/api", "feat/wait-reconcile", "reviewed", "agent-1", "sess-wait-reconcile",
+	)
+	if err != nil {
+		t.Fatalf("seed branch state: %v", err)
+	}
+	if err := AttachAgentAssignment(ctx, db, &AgentAssignment{
+		ID:        "assign-wait-reconcile",
+		SessionID: "sess-wait-reconcile",
+		AgentID:   "agent-1",
+		Repo:      "acme/api",
+		Branch:    "feat/wait-reconcile",
+		Worktree:  "/srv/storage/repo/codero/.worktrees/COD-071/.tmp-tests/wait-reconcile",
+		TaskID:    "TASK-15",
+		Substatus: AssignmentSubstatusWaitingForCI,
+	}); err != nil {
+		t.Fatalf("AttachAgentAssignment: %v", err)
+	}
+
+	if _, err := db.sql.ExecContext(ctx, `
+		UPDATE branch_states
+		SET ci_green = 1, approved = 0, pending_events = 0, unresolved_threads = 0
+		WHERE repo = ? AND branch = ?`,
+		"acme/api", "feat/wait-reconcile",
+	); err != nil {
+		t.Fatalf("update branch state to waiting_for_merge_approval: %v", err)
+	}
+	if err := ReconcileAgentAssignmentWaitingState(ctx, db, "acme/api", "feat/wait-reconcile"); err != nil {
+		t.Fatalf("ReconcileAgentAssignmentWaitingState waiting_for_merge_approval: %v", err)
+	}
+
+	active, err := GetActiveAgentAssignment(ctx, db, "sess-wait-reconcile")
+	if err != nil {
+		t.Fatalf("GetActiveAgentAssignment: %v", err)
+	}
+	if active.Substatus != AssignmentSubstatusWaitingForMergeApproval {
+		t.Fatalf("substatus after ci green = %q, want %q", active.Substatus, AssignmentSubstatusWaitingForMergeApproval)
+	}
+
+	if _, err := db.sql.ExecContext(ctx, `
+		UPDATE branch_states
+		SET state = ?, approved = 1, ci_green = 1, pending_events = 0, unresolved_threads = 0
+		WHERE repo = ? AND branch = ?`,
+		string(StateMergeReady), "acme/api", "feat/wait-reconcile",
+	); err != nil {
+		t.Fatalf("update branch state to merge_ready: %v", err)
+	}
+	if err := ReconcileAgentAssignmentWaitingState(ctx, db, "acme/api", "feat/wait-reconcile"); err != nil {
+		t.Fatalf("ReconcileAgentAssignmentWaitingState in_progress: %v", err)
+	}
+
+	active, err = GetActiveAgentAssignment(ctx, db, "sess-wait-reconcile")
+	if err != nil {
+		t.Fatalf("GetActiveAgentAssignment after merge_ready: %v", err)
+	}
+	if active.Substatus != AssignmentSubstatusInProgress {
+		t.Fatalf("substatus after merge_ready = %q, want %q", active.Substatus, AssignmentSubstatusInProgress)
+	}
+}
+
+func TestAssignmentActivityStateFromSubstatus_TerminalCompleted(t *testing.T) {
+	if got := assignmentActivityStateFromSubstatus(AssignmentSubstatusTerminalFinished); got != "completed" {
+		t.Fatalf("assignmentActivityStateFromSubstatus(terminal_finished) = %q, want completed", got)
+	}
+}
+
+func TestRecordAssignmentRuleCheckTx_RejectsInvalidResult(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	if err := RegisterAgentSession(ctx, db, "sess-invalid-result", "agent-1", "agent"); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	if err := AttachAgentAssignment(ctx, db, &AgentAssignment{
+		ID:        "assign-invalid-result",
+		SessionID: "sess-invalid-result",
+		AgentID:   "agent-1",
+		Repo:      "acme/api",
+		Branch:    "feat/invalid-result",
+		Worktree:  "/srv/storage/repo/codero/.worktrees/COD-071/.tmp-tests/invalid-result",
+		TaskID:    "TASK-16",
+	}); err != nil {
+		t.Fatalf("AttachAgentAssignment: %v", err)
+	}
+
+	tx, err := db.sql.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	err = recordAssignmentRuleCheckTx(ctx, tx, "assign-invalid-result", "sess-invalid-result", RuleIDGateMustPassBeforeMerge, "passed", false, nil, "codero")
+	if err == nil {
+		t.Fatal("expected invalid result error, got nil")
 	}
 }
 

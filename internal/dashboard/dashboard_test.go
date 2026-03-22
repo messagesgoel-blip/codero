@@ -92,13 +92,32 @@ func seedAgentSession(t *testing.T, db *sql.DB, sessionID, agentID, mode string,
 // seedAgentAssignment inserts one agent_assignments row.
 func seedAgentAssignment(t *testing.T, db *sql.DB, assignmentID, sessionID, agentID, repo, branch, worktree, taskID string, startedAt time.Time) {
 	t.Helper()
+	seedAgentAssignmentWithSubstatus(t, db, assignmentID, sessionID, agentID, repo, branch, worktree, taskID, "", startedAt)
+}
+
+// seedAgentAssignmentWithSubstatus inserts one agent_assignments row with an optional substatus.
+func seedAgentAssignmentWithSubstatus(t *testing.T, db *sql.DB, assignmentID, sessionID, agentID, repo, branch, worktree, taskID, substatus string, startedAt time.Time) {
+	t.Helper()
+	stateValue := "active"
+	blockedReason := ""
+	switch {
+	case strings.HasPrefix(substatus, "blocked_"):
+		stateValue = "blocked"
+		blockedReason = strings.TrimPrefix(substatus, "blocked_")
+	case substatus == "terminal_cancelled":
+		stateValue = "cancelled"
+	case substatus == "terminal_lost" || substatus == "terminal_stuck_abandoned":
+		stateValue = "lost"
+	case strings.HasPrefix(substatus, "terminal_"):
+		stateValue = "completed"
+	}
 	// nosemgrep: go.lang.security.audit.sqli.gosql-sqli.gosql-sqli
 	_, err := db.Exec(`INSERT INTO agent_assignments
-		(assignment_id, session_id, agent_id, repo, branch, worktree, task_id, started_at, ended_at, end_reason, superseded_by)
-		VALUES (?,?,?,?,?,?,?,?,NULL,'',NULL)`,
-		assignmentID, sessionID, agentID, repo, branch, worktree, taskID, startedAt)
+		(assignment_id, session_id, agent_id, repo, branch, worktree, task_id, state, blocked_reason, assignment_substatus, started_at, ended_at, end_reason, superseded_by)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL,'',NULL)`,
+		assignmentID, sessionID, agentID, repo, branch, worktree, taskID, stateValue, blockedReason, substatus, startedAt)
 	if err != nil {
-		t.Fatalf("seedAgentAssignment: %v", err)
+		t.Fatalf("seedAgentAssignmentWithSubstatus: %v", err)
 	}
 }
 
@@ -1006,6 +1025,34 @@ func TestActiveSessions_DuplicateOwnerSession(t *testing.T) {
 	}
 }
 
+func TestActiveSessions_AssignmentSubstatusWaiting(t *testing.T) {
+	h, db := newTestHandler(t)
+	startedAt := time.Now().Add(-20 * time.Minute).UTC()
+	lastSeen := time.Now().Add(-45 * time.Second).UTC()
+
+	seedAgentSession(t, db, "sess-wait", "agent-wait", "cli", startedAt, lastSeen)
+	seedAgentAssignmentWithSubstatus(t, db, "assign-wait", "sess-wait", "agent-wait", "acme/api", "feat/COD-071-waiting", "", "COD-071", "waiting_for_ci", startedAt)
+
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/active-sessions", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.ActiveSessionsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Sessions) != 1 {
+		t.Fatalf("sessions length = %d, want 1", len(resp.Sessions))
+	}
+	if resp.Sessions[0].ActivityState != "waiting" {
+		t.Fatalf("activity_state = %q, want waiting", resp.Sessions[0].ActivityState)
+	}
+	if resp.Sessions[0].Task == nil || resp.Sessions[0].Task.Phase != "waiting" {
+		t.Fatalf("task phase = %#v, want waiting", resp.Sessions[0].Task)
+	}
+}
+
 func TestActiveSessions_FiltersStale(t *testing.T) {
 	h, db := newTestHandler(t)
 	startedAt := time.Now().Add(-2 * time.Hour).UTC()
@@ -1064,6 +1111,100 @@ func TestAssignments_WithAgentAssignments(t *testing.T) {
 	}
 }
 
+func TestAssignments_SubstatusAndTerminalState(t *testing.T) {
+	h, db := newTestHandler(t)
+	startedAt := time.Now().Add(-15 * time.Minute).UTC()
+	lastSeen := time.Now().Add(-30 * time.Second).UTC()
+	endedAt := time.Now().Add(-2 * time.Minute).UTC()
+
+	seedAgentSession(t, db, "sess-assign-live", "agent-assign-live", "cli", startedAt, lastSeen)
+	seedAgentSession(t, db, "sess-assign-done", "agent-assign-done", "cli", startedAt.Add(-time.Minute), lastSeen.Add(-time.Minute))
+	seedAgentAssignmentWithSubstatus(t, db, "assign-live", "sess-assign-live", "agent-assign-live", "acme/api", "feat/live", "", "COD-101", "waiting_for_ci", startedAt)
+	seedAgentAssignmentWithSubstatus(t, db, "assign-done", "sess-assign-done", "agent-assign-done", "acme/api", "feat/done", "", "COD-102", "terminal_finished", startedAt.Add(-time.Minute))
+	if _, err := db.Exec(`UPDATE agent_assignments SET ended_at = ?, end_reason = 'done', state = 'completed' WHERE assignment_id = ?`, endedAt, "assign-done"); err != nil {
+		t.Fatalf("finalize seeded assignment: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE agent_sessions SET ended_at = ?, end_reason = 'done' WHERE session_id = ?`, endedAt, "sess-assign-done"); err != nil {
+		t.Fatalf("finalize seeded session: %v", err)
+	}
+
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/assignments", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.AssignmentsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Count != 2 || len(resp.Assignments) != 2 {
+		t.Fatalf("assignments count = %d len=%d, want 2", resp.Count, len(resp.Assignments))
+	}
+
+	var live, done *dashboard.AssignmentSummary
+	for i := range resp.Assignments {
+		switch resp.Assignments[i].AssignmentID {
+		case "assign-live":
+			live = &resp.Assignments[i]
+		case "assign-done":
+			done = &resp.Assignments[i]
+		}
+	}
+	if live == nil || done == nil {
+		t.Fatalf("missing assignments in response: %+v", resp.Assignments)
+	}
+	if live.Substatus != "waiting_for_ci" || live.ActivityState != "waiting" || live.State != "active" {
+		t.Fatalf("live assignment = %+v, want waiting substatus with active state", *live)
+	}
+	if done.Substatus != "terminal_finished" || done.State != "completed" {
+		t.Fatalf("done assignment = %+v, want completed terminal state", *done)
+	}
+	if done.ActivityState != "" {
+		t.Fatalf("done activity_state = %q, want empty", done.ActivityState)
+	}
+}
+
+func TestAssignments_EndedRowsDoNotInheritLiveSessionActivity(t *testing.T) {
+	h, db := newTestHandler(t)
+	startedAt := time.Now().Add(-30 * time.Minute).UTC()
+	lastSeen := time.Now().Add(-20 * time.Second).UTC()
+	endedAt := time.Now().Add(-5 * time.Minute).UTC()
+
+	seedAgentSession(t, db, "sess-assign-mixed", "agent-mixed", "cli", startedAt, lastSeen)
+	seedAgentAssignmentWithSubstatus(t, db, "assign-old", "sess-assign-mixed", "agent-mixed", "acme/api", "feat/old", "", "COD-201", "terminal_finished", startedAt)
+	if _, err := db.Exec(`UPDATE agent_assignments SET ended_at = ?, end_reason = 'done', state = 'completed' WHERE assignment_id = ?`, endedAt, "assign-old"); err != nil {
+		t.Fatalf("finalize old assignment: %v", err)
+	}
+	seedAgentAssignmentWithSubstatus(t, db, "assign-live", "sess-assign-mixed", "agent-mixed", "acme/api", "feat/live", "", "COD-202", "waiting_for_ci", startedAt.Add(10*time.Minute))
+
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/assignments", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.AssignmentsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	var ended *dashboard.AssignmentSummary
+	for i := range resp.Assignments {
+		if resp.Assignments[i].AssignmentID == "assign-old" {
+			ended = &resp.Assignments[i]
+			break
+		}
+	}
+	if ended == nil {
+		t.Fatalf("missing ended assignment in response: %+v", resp.Assignments)
+	}
+	if ended.ActivityState != "" {
+		t.Fatalf("ended activity_state = %q, want empty", ended.ActivityState)
+	}
+	if ended.Mode != "" {
+		t.Fatalf("ended mode = %q, want empty", ended.Mode)
+	}
+}
+
 func TestCompliance_Empty(t *testing.T) {
 	h, _ := newTestHandler(t)
 
@@ -1076,8 +1217,14 @@ func TestCompliance_Empty(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(resp.Rules) != 0 {
-		t.Fatalf("rules len = %d, want 0", len(resp.Rules))
+	if len(resp.Rules) != 4 {
+		t.Fatalf("rules len = %d, want 4 seeded rules", len(resp.Rules))
+	}
+	wantRuleIDs := []string{"RULE-001", "RULE-002", "RULE-003", "RULE-004"}
+	for i, want := range wantRuleIDs {
+		if resp.Rules[i].RuleID != want {
+			t.Fatalf("rules[%d].rule_id = %q, want %q", i, resp.Rules[i].RuleID, want)
+		}
 	}
 	if len(resp.Checks) != 0 {
 		t.Fatalf("checks len = %d, want 0", len(resp.Checks))
@@ -1094,16 +1241,6 @@ func TestCompliance_WithRulesAndChecks(t *testing.T) {
 	seedAgentAssignment(t, db, "assign-comp-1", "sess-comp-1", "agent-comp-1", "acme/api", "task-compliance", "", "COD-200", startedAt)
 
 	_, err := db.Exec(`
-		INSERT INTO agent_rules
-			(rule_id, rule_name, rule_kind, description, enforcement, violation_action, routing_target, rule_version, active)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		"RULE-001", "Gate must pass before merge", "gate", "test rule", "hard", `["block","notify"]`, "routing_team", 1, 1,
-	)
-	if err != nil {
-		t.Fatalf("insert agent rule: %v", err)
-	}
-
-	_, err = db.Exec(`
 		INSERT INTO assignment_rule_checks
 			(check_id, assignment_id, session_id, rule_id, rule_version, checked_at, result, violation_raised, violation_action_taken, detail, resolved_at, resolved_by)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, '')`,
@@ -1122,17 +1259,24 @@ func TestCompliance_WithRulesAndChecks(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(resp.Rules) != 1 {
-		t.Fatalf("rules len = %d, want 1", len(resp.Rules))
+	if len(resp.Rules) != 4 {
+		t.Fatalf("rules len = %d, want 4", len(resp.Rules))
 	}
 	if len(resp.Checks) != 1 {
 		t.Fatalf("checks len = %d, want 1", len(resp.Checks))
 	}
-	if resp.Rules[0].RuleID != "RULE-001" {
-		t.Fatalf("rule_id = %q, want RULE-001", resp.Rules[0].RuleID)
+	var rule001 *dashboard.AgentRuleRow
+	for i := range resp.Rules {
+		if resp.Rules[i].RuleID == "RULE-001" {
+			rule001 = &resp.Rules[i]
+			break
+		}
 	}
-	if len(resp.Rules[0].ViolationAction) != 2 {
-		t.Fatalf("rule violation_action len = %d, want 2", len(resp.Rules[0].ViolationAction))
+	if rule001 == nil {
+		t.Fatalf("missing RULE-001 in %+v", resp.Rules)
+	}
+	if len(rule001.ViolationAction) != 2 {
+		t.Fatalf("rule violation_action len = %d, want 2", len(rule001.ViolationAction))
 	}
 	if resp.Checks[0].AssignmentID != "assign-comp-1" {
 		t.Fatalf("assignment_id = %q, want assign-comp-1", resp.Checks[0].AssignmentID)

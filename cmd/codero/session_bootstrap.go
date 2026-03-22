@@ -259,6 +259,7 @@ Fill this JSON block before ending the session, then run:
 {
   "task_id": %q,
   "status": "",
+  "substatus": "",
   "summary": "",
   "tests": [],
   "finished_at": ""

@@ -136,6 +136,14 @@ func (w *ExpiryWorker) runSessionExpiry(ctx context.Context) {
 	}
 
 	if hasAgentSessions {
+		if err := state.MonitorAgentAssignmentRules(ctx, w.db, time.Now().UTC().Truncate(time.Second)); err != nil {
+			loglib.Error("expiry: monitor agent assignment rules failed",
+				loglib.FieldComponent, "expiry",
+				"error", err,
+			)
+			return
+		}
+
 		expired, err := state.ListExpiredAgentSessions(ctx, w.db, SessionHeartbeatTTL)
 		if err != nil {
 			loglib.Error("expiry: list expired agent sessions failed",

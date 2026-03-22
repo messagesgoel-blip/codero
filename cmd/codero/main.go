@@ -763,6 +763,7 @@ func sessionAttachCmd(configPath *string) *cobra.Command {
 		worktree  string
 		mode      string
 		taskID    string
+		substatus string
 	)
 
 	cmd := &cobra.Command{
@@ -814,7 +815,7 @@ func sessionAttachCmd(configPath *string) *cobra.Command {
 				}
 			}
 
-			if err := store.AttachAssignment(cmd.Context(), sessionID, agentID, repo, branch, worktree, mode, taskID); err != nil {
+			if err := store.AttachAssignment(cmd.Context(), sessionID, agentID, repo, branch, worktree, mode, taskID, substatus); err != nil {
 				return err
 			}
 			fmt.Printf("session %s attached to %s/%s\n", sessionID, repo, branch)
@@ -829,6 +830,7 @@ func sessionAttachCmd(configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&worktree, "worktree", "", "worktree path (default: CODERO_WORKTREE or cwd)")
 	cmd.Flags().StringVar(&mode, "mode", "", "session mode label (default: agent)")
 	cmd.Flags().StringVar(&taskID, "task-id", "", "optional task identifier")
+	cmd.Flags().StringVar(&substatus, "substatus", "in_progress", "assignment substatus")
 
 	return cmd
 }

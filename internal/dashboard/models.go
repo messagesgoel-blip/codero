@@ -103,6 +103,8 @@ type AssignmentSummary struct {
 	Branch        string     `json:"branch"`
 	Worktree      string     `json:"worktree,omitempty"`
 	TaskID        string     `json:"task_id,omitempty"`
+	BlockedReason string     `json:"blocked_reason,omitempty"`
+	Substatus     string     `json:"substatus,omitempty"`
 	Mode          string     `json:"mode,omitempty"`
 	State         string     `json:"state"`
 	ActivityState string     `json:"activity_state,omitempty"`

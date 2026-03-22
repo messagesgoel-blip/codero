@@ -220,6 +220,14 @@ func (r *Reconciler) reconcileBranch(ctx context.Context, b state.BranchRecord) 
 		)
 		return
 	}
+	if err := state.ReconcileAgentAssignmentWaitingState(ctx, r.db, b.Repo, b.Branch); err != nil {
+		loglib.Warn("reconciler: reconcile assignment waiting state failed",
+			loglib.FieldComponent, "reconciler",
+			loglib.FieldRepo, b.Repo,
+			loglib.FieldBranch, b.Branch,
+			"error", err,
+		)
+	}
 
 	// Detect: merge_ready conditions revoked → T11.
 	if b.State == state.StateMergeReady {

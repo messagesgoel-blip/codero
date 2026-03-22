@@ -23,6 +23,7 @@ func TestParseSessionNote(t *testing.T) {
 {
   "task_id": "TASK-1",
   "status": "done",
+  "substatus": "terminal_finished",
   "summary": "finished work",
   "tests": ["go test ./cmd/codero"],
   "finished_at": "2026-03-21T20:00:00Z"
@@ -42,6 +43,9 @@ func TestParseSessionNote(t *testing.T) {
 	}
 	if note.Completion.Status != "done" || note.Completion.TaskID != "TASK-1" {
 		t.Fatalf("parsed completion = %#v", note.Completion)
+	}
+	if note.Completion.Substatus != "terminal_finished" {
+		t.Fatalf("parsed completion substatus = %q, want terminal_finished", note.Completion.Substatus)
 	}
 }
 
@@ -67,6 +71,7 @@ func TestArchiveSessionNote(t *testing.T) {
 		Completion: sessionCompletionRecord{
 			TaskID:     "TASK-1",
 			Status:     "done",
+			Substatus:  "terminal_finished",
 			Summary:    "finished",
 			Tests:      []string{"go test ./cmd/codero"},
 			FinishedAt: "2026-03-21T20:00:00Z",

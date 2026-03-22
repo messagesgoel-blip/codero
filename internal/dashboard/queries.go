@@ -393,7 +393,7 @@ func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]Ac
 		assignment, hasAssignment := assignments[s.SessionID]
 		activityState := "waiting"
 		if hasAssignment {
-			activityState = "active"
+			activityState = assignmentActivityStateFromSubstatus(assignment.Substatus)
 		}
 		task := resolveTaskFromAssignment(assignment.TaskID, assignment.Branch)
 		if task != nil && task.Phase == "" {
@@ -515,7 +515,7 @@ func queryAssignments(ctx context.Context, db *sql.DB, limit int) ([]AssignmentS
 	}
 
 	rows, err := db.QueryContext(ctx, `
-		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id,
+		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id, state, blocked_reason, assignment_substatus,
 		       started_at, ended_at, end_reason, superseded_by
 		FROM agent_assignments
 		ORDER BY started_at DESC
@@ -526,24 +526,27 @@ func queryAssignments(ctx context.Context, db *sql.DB, limit int) ([]AssignmentS
 	defer rows.Close()
 
 	type assignmentRow struct {
-		AssignmentID string
-		SessionID    string
-		AgentID      string
-		Repo         string
-		Branch       string
-		Worktree     string
-		TaskID       string
-		StartedAt    time.Time
-		EndedAt      sql.NullTime
-		EndReason    string
-		SupersededBy sql.NullString
+		AssignmentID  string
+		SessionID     string
+		AgentID       string
+		Repo          string
+		Branch        string
+		Worktree      string
+		TaskID        string
+		State         sql.NullString
+		BlockedReason sql.NullString
+		Substatus     sql.NullString
+		StartedAt     time.Time
+		EndedAt       sql.NullTime
+		EndReason     string
+		SupersededBy  sql.NullString
 	}
 
 	var raw []assignmentRow
 	for rows.Next() {
 		var row assignmentRow
 		if err := rows.Scan(
-			&row.AssignmentID, &row.SessionID, &row.AgentID, &row.Repo, &row.Branch, &row.Worktree, &row.TaskID,
+			&row.AssignmentID, &row.SessionID, &row.AgentID, &row.Repo, &row.Branch, &row.Worktree, &row.TaskID, &row.State, &row.BlockedReason, &row.Substatus,
 			&row.StartedAt, &row.EndedAt, &row.EndReason, &row.SupersededBy,
 		); err != nil {
 			return nil, fmt.Errorf("queryAssignments: scan row: %w", err)
@@ -600,6 +603,15 @@ func queryAssignments(ctx context.Context, db *sql.DB, limit int) ([]AssignmentS
 			EndReason:    row.EndReason,
 			PRNumber:     lookupPRNumber(ctx, db, row.Repo, row.Branch),
 		}
+		if row.Substatus.Valid {
+			summary.Substatus = row.Substatus.String
+		}
+		if row.State.Valid {
+			summary.State = row.State.String
+		}
+		if row.BlockedReason.Valid {
+			summary.BlockedReason = row.BlockedReason.String
+		}
 		if row.EndedAt.Valid {
 			endedAt := row.EndedAt.Time
 			summary.EndedAt = &endedAt
@@ -607,14 +619,21 @@ func queryAssignments(ctx context.Context, db *sql.DB, limit int) ([]AssignmentS
 		if row.SupersededBy.Valid {
 			summary.SupersededBy = row.SupersededBy.String
 		}
-		if session, ok := liveBySessionID[row.SessionID]; ok {
-			summary.Mode = session.Mode
-			summary.ActivityState = session.ActivityState
+		if summary.EndedAt == nil {
+			if session, ok := liveBySessionID[row.SessionID]; ok {
+				summary.Mode = session.Mode
+				summary.ActivityState = session.ActivityState
+			}
+			if activityState := assignmentActivityStateFromSubstatus(summary.Substatus); activityState != "active" || summary.ActivityState == "" {
+				summary.ActivityState = activityState
+			}
 		}
 		if branchState, ok := branchStateByRepoBranch[row.Repo+"::"+row.Branch]; ok {
 			summary.BranchState = branchState
 		}
-		summary.State = assignmentStateFromSummary(summary)
+		if summary.State == "" || (summary.EndedAt != nil && summary.State == "active") {
+			summary.State = assignmentStateFromSummary(summary)
+		}
 		out = append(out, summary)
 	}
 	return out, nil
@@ -706,6 +725,12 @@ func queryCompliance(ctx context.Context, db *sql.DB, limit int) ([]AgentRuleRow
 }
 
 func assignmentStateFromSummary(summary AssignmentSummary) string {
+	if derived := assignmentStateFromSubstatus(summary.Substatus); derived != "" {
+		if summary.EndedAt == nil && derived == "completed" {
+			return "active"
+		}
+		return derived
+	}
 	if summary.EndedAt == nil {
 		switch summary.ActivityState {
 		case "blocked":
@@ -727,6 +752,40 @@ func assignmentStateFromSummary(summary AssignmentSummary) string {
 		return "completed"
 	default:
 		return "ended"
+	}
+}
+
+func assignmentActivityStateFromSubstatus(substatus string) string {
+	normalized := strings.ToLower(strings.TrimSpace(substatus))
+	switch {
+	case normalized == "":
+		return "active"
+	case strings.HasPrefix(normalized, "blocked_"):
+		return "blocked"
+	case strings.HasPrefix(normalized, "waiting_for_"):
+		return "waiting"
+	case strings.HasPrefix(normalized, "terminal_"):
+		return "completed"
+	default:
+		return "active"
+	}
+}
+
+func assignmentStateFromSubstatus(substatus string) string {
+	normalized := strings.ToLower(strings.TrimSpace(substatus))
+	switch {
+	case normalized == "":
+		return ""
+	case strings.HasPrefix(normalized, "blocked_"):
+		return "blocked"
+	case normalized == "terminal_cancelled":
+		return "cancelled"
+	case normalized == "terminal_lost", normalized == "terminal_stuck_abandoned":
+		return "lost"
+	case strings.HasPrefix(normalized, "terminal_"):
+		return "completed"
+	default:
+		return "active"
 	}
 }
 
@@ -772,10 +831,11 @@ func queryAgentEvents(ctx context.Context, db *sql.DB, limit int) ([]AgentEventR
 }
 
 type activeAssignment struct {
-	Repo     string
-	Branch   string
-	Worktree string
-	TaskID   string
+	Repo      string
+	Branch    string
+	Worktree  string
+	TaskID    string
+	Substatus string
 }
 
 func loadActiveAssignments(ctx context.Context, db *sql.DB, threshold time.Time) (map[string]activeAssignment, error) {
@@ -789,7 +849,7 @@ func loadActiveAssignments(ctx context.Context, db *sql.DB, threshold time.Time)
 	}
 
 	rows, err := db.QueryContext(ctx, `
-		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id, started_at
+		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id, assignment_substatus, started_at
 		FROM agent_assignments
 		WHERE ended_at IS NULL
 		  AND session_id IN (
@@ -805,8 +865,9 @@ func loadActiveAssignments(ctx context.Context, db *sql.DB, threshold time.Time)
 
 	for rows.Next() {
 		var assignmentID, sessionID, agentID, repo, branch, worktree, taskID string
+		var substatus sql.NullString
 		var startedAt time.Time
-		if err := rows.Scan(&assignmentID, &sessionID, &agentID, &repo, &branch, &worktree, &taskID, &startedAt); err != nil {
+		if err := rows.Scan(&assignmentID, &sessionID, &agentID, &repo, &branch, &worktree, &taskID, &substatus, &startedAt); err != nil {
 			return nil, fmt.Errorf("queryActiveSessions: agent_assignments scan row: %w", err)
 		}
 		if sessionID == "" {
@@ -816,10 +877,11 @@ func loadActiveAssignments(ctx context.Context, db *sql.DB, threshold time.Time)
 			continue
 		}
 		out[sessionID] = activeAssignment{
-			Repo:     repo,
-			Branch:   branch,
-			Worktree: worktree,
-			TaskID:   taskID,
+			Repo:      repo,
+			Branch:    branch,
+			Worktree:  worktree,
+			TaskID:    taskID,
+			Substatus: substatus.String,
 		}
 	}
 	if err := rows.Err(); err != nil {

@@ -23,6 +23,7 @@ var (
 type Completion struct {
 	TaskID     string
 	Status     string
+	Substatus  string
 	Summary    string
 	Tests      []string
 	FinishedAt time.Time
@@ -104,7 +105,7 @@ func (s *Store) Heartbeat(ctx context.Context, sessionID string, markProgress bo
 // It also updates the branch session tracking fields for dashboard visibility.
 func (s *Store) AttachAssignment(
 	ctx context.Context,
-	sessionID, agentID, repo, branch, worktree, mode, taskID string,
+	sessionID, agentID, repo, branch, worktree, mode, taskID, substatus string,
 ) error {
 	if sessionID == "" {
 		return ErrMissingSessionID
@@ -127,6 +128,7 @@ func (s *Store) AttachAssignment(
 		Branch:    branch,
 		Worktree:  worktree,
 		TaskID:    taskID,
+		Substatus: substatus,
 	}
 	if err := state.AttachAgentAssignment(ctx, s.db, assignment); err != nil {
 		return err
@@ -161,6 +163,7 @@ func (s *Store) Finalize(ctx context.Context, sessionID, agentID string, complet
 	return state.FinalizeAgentSession(ctx, s.db, sessionID, agentID, state.AgentSessionCompletion{
 		TaskID:     completion.TaskID,
 		Status:     completion.Status,
+		Substatus:  completion.Substatus,
 		Summary:    completion.Summary,
 		Tests:      completion.Tests,
 		FinishedAt: completion.FinishedAt,

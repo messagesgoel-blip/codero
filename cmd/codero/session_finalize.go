@@ -15,6 +15,7 @@ import (
 type sessionCompletionRecord struct {
 	TaskID     string   `json:"task_id"`
 	Status     string   `json:"status"`
+	Substatus  string   `json:"substatus"`
 	Summary    string   `json:"summary"`
 	Tests      []string `json:"tests"`
 	FinishedAt string   `json:"finished_at"`
@@ -75,6 +76,7 @@ func sessionFinalizeCmd(configPath *string) *cobra.Command {
 			if err := store.Finalize(cmd.Context(), note.SessionID, note.AgentID, session.Completion{
 				TaskID:     note.Completion.TaskID,
 				Status:     note.Completion.Status,
+				Substatus:  note.Completion.Substatus,
 				Summary:    note.Completion.Summary,
 				Tests:      note.Completion.Tests,
 				FinishedAt: finishedAt,
