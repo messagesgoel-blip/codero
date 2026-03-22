@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	sqlite3 "github.com/mattn/go-sqlite3"
 )
 
 // ErrAgentSessionNotFound is returned when an agent session record is missing.
@@ -1203,10 +1205,40 @@ func AcceptTask(ctx context.Context, db *DB, sessionID, taskID string) (*AgentAs
 		return nil, fmt.Errorf("accept task: check existing claim: %w", err)
 	}
 
+	assignmentID := uuid.New().String()
+
+	// A session may hold only one live assignment at a time. Supersede any
+	// other live row for this session before inserting the new claim.
+	var priorAssignmentID string
+	err = tx.QueryRowContext(ctx,
+		`SELECT assignment_id
+		 FROM agent_assignments
+		 WHERE session_id = ? AND ended_at IS NULL AND task_id <> ?
+		 LIMIT 1`,
+		sessionID, taskID,
+	).Scan(&priorAssignmentID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("accept task: check existing live session assignment: %w", err)
+	}
+	if err == nil {
+		if _, err = tx.ExecContext(ctx, `
+			UPDATE agent_assignments
+			SET ended_at = ?,
+			    end_reason = 'superseded',
+			    state = ?,
+			    blocked_reason = '',
+			    assignment_substatus = ?,
+			    superseded_by = ?
+			WHERE assignment_id = ? AND ended_at IS NULL`,
+			now, string(assignmentStateSuperseded), AssignmentSubstatusTerminalWaitingNextTask, assignmentID, priorAssignmentID,
+		); err != nil {
+			return nil, fmt.Errorf("accept task: supersede prior assignment: %w", err)
+		}
+	}
+
 	// No live claim — insert a new assignment.
 	// assignment_version defaults to 1 via the schema CHECK (assignment_version >= 1)
 	// and DEFAULT 1 added by migration 000011.
-	assignmentID := uuid.New().String()
 	if _, err = tx.ExecContext(ctx, `
 		INSERT INTO agent_assignments (
 			assignment_id, session_id, agent_id, task_id,
@@ -1216,6 +1248,29 @@ func AcceptTask(ctx context.Context, db *DB, sessionID, taskID string) (*AgentAs
 		assignmentID, sessionID, agentID, taskID,
 		string(assignmentStateActive), AssignmentSubstatusInProgress, now,
 	); err != nil {
+		if isLiveTaskConstraintError(err) {
+			conflictAssignment, conflictSession, lookupErr := loadLiveTaskClaimTx(ctx, tx, taskID)
+			if lookupErr != nil {
+				return nil, fmt.Errorf("accept task: reload unique-constraint conflict: %w", lookupErr)
+			}
+			if conflictSession == sessionID {
+				row := tx.QueryRowContext(ctx, `
+					SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id,
+					       state, blocked_reason, assignment_substatus,
+					       started_at, ended_at, end_reason, superseded_by
+					FROM agent_assignments
+					WHERE assignment_id = ?`,
+					conflictAssignment,
+				)
+				a, scanErr := scanAgentAssignment(row)
+				if scanErr != nil {
+					return nil, fmt.Errorf("accept task: reload same-session unique-constraint row: %w", scanErr)
+				}
+				return a, nil
+			}
+			return nil, fmt.Errorf("%w: assignment %s held by session %s",
+				ErrTaskAlreadyClaimed, conflictAssignment, conflictSession)
+		}
 		return nil, fmt.Errorf("accept task: insert: %w", err)
 	}
 
@@ -1242,6 +1297,31 @@ func AcceptTask(ctx context.Context, db *DB, sessionID, taskID string) (*AgentAs
 		Substatus: AssignmentSubstatusInProgress,
 		StartedAt: now,
 	}, nil
+}
+
+func loadLiveTaskClaimTx(ctx context.Context, tx *sql.Tx, taskID string) (assignmentID, sessionID string, err error) {
+	err = tx.QueryRowContext(ctx, `
+		SELECT assignment_id, session_id
+		FROM agent_assignments
+		WHERE task_id = ? AND ended_at IS NULL
+		LIMIT 1`,
+		taskID,
+	).Scan(&assignmentID, &sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", ErrAgentAssignmentNotFound
+	}
+	if err != nil {
+		return "", "", err
+	}
+	return assignmentID, sessionID, nil
+}
+
+func isLiveTaskConstraintError(err error) bool {
+	var sqliteErr sqlite3.Error
+	if errors.As(err, &sqliteErr) {
+		return sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique || sqliteErr.ExtendedCode == sqlite3.ErrConstraintPrimaryKey
+	}
+	return strings.Contains(err.Error(), "idx_agent_assignments_live_task_id")
 }
 
 func scanAgentSession(row *sql.Row) (*AgentSession, error) {

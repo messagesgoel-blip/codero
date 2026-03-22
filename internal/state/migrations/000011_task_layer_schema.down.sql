@@ -9,6 +9,7 @@ DROP INDEX IF EXISTS idx_codero_github_links_repo_pr;
 DROP TABLE IF EXISTS codero_github_links;
 
 DROP INDEX IF EXISTS idx_agent_assignments_feedback_updated;
+DROP INDEX IF EXISTS idx_agent_assignments_live_task_id;
 DROP INDEX IF EXISTS idx_agent_assignments_task_version;
 DROP INDEX IF EXISTS idx_agent_assignments_successor_session;
 DROP INDEX IF EXISTS idx_agent_assignments_parent_assignment;

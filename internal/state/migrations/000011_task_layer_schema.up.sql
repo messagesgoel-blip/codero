@@ -56,6 +56,10 @@ CREATE INDEX IF NOT EXISTS idx_agent_assignments_successor_session
 CREATE INDEX IF NOT EXISTS idx_agent_assignments_task_version
     ON agent_assignments (task_id, assignment_version DESC);
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_assignments_live_task_id
+    ON agent_assignments (task_id)
+    WHERE ended_at IS NULL AND task_id <> '';
+
 CREATE INDEX IF NOT EXISTS idx_agent_assignments_feedback_updated
     ON agent_assignments (last_feedback_at DESC);
 

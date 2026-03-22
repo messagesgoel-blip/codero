@@ -1053,6 +1053,7 @@ func mustRegisterSession(t *testing.T, db *DB, sessionID, agentID string) {
 func TestAcceptTask_HappyPath(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
+	before := time.Now().UTC().Add(-2 * time.Second)
 
 	mustRegisterSession(t, db, "sess-accept-1", "agent-a")
 
@@ -1091,6 +1092,26 @@ func TestAcceptTask_HappyPath(t *testing.T) {
 	}
 	if version != 1 {
 		t.Errorf("assignment_version: got %d, want 1", version)
+	}
+
+	var (
+		lastSeen     time.Time
+		lastProgress sql.NullTime
+	)
+	if err := db.sql.QueryRow(
+		`SELECT last_seen_at, last_progress_at FROM agent_sessions WHERE session_id = ?`,
+		"sess-accept-1",
+	).Scan(&lastSeen, &lastProgress); err != nil {
+		t.Fatalf("query session heartbeat fields: %v", err)
+	}
+	if lastSeen.Before(before) {
+		t.Errorf("last_seen_at not updated by AcceptTask: got %s, want after %s", lastSeen, before)
+	}
+	if !lastProgress.Valid {
+		t.Fatal("last_progress_at should be set by AcceptTask")
+	}
+	if lastProgress.Time.Before(before) {
+		t.Errorf("last_progress_at not updated by AcceptTask: got %s, want after %s", lastProgress.Time, before)
 	}
 }
 
@@ -1182,6 +1203,66 @@ func TestAcceptTask_TerminalAllowsReuse(t *testing.T) {
 	}
 	if a2.SessionID != "sess-second" {
 		t.Errorf("session_id: got %q, want %q", a2.SessionID, "sess-second")
+	}
+}
+
+func TestAcceptTask_SupersedesPriorLiveAssignmentForSameSession(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	mustRegisterSession(t, db, "sess-supersede", "agent-a")
+
+	first, err := AcceptTask(ctx, db, "sess-supersede", "TASK-OLD")
+	if err != nil {
+		t.Fatalf("first AcceptTask: %v", err)
+	}
+
+	second, err := AcceptTask(ctx, db, "sess-supersede", "TASK-NEW")
+	if err != nil {
+		t.Fatalf("second AcceptTask: %v", err)
+	}
+	if second.ID == first.ID {
+		t.Fatal("expected a new assignment for the second task claim")
+	}
+
+	assignments, err := ListAgentAssignments(ctx, db, "sess-supersede")
+	if err != nil {
+		t.Fatalf("ListAgentAssignments: %v", err)
+	}
+	if len(assignments) != 2 {
+		t.Fatalf("assignments count: got %d, want 2", len(assignments))
+	}
+
+	var superseded *AgentAssignment
+	var active *AgentAssignment
+	for i := range assignments {
+		if assignments[i].ID == first.ID {
+			superseded = &assignments[i]
+		}
+		if assignments[i].ID == second.ID {
+			active = &assignments[i]
+		}
+	}
+	if superseded == nil || active == nil {
+		t.Fatalf("expected both prior and new assignments to exist; got %#v", assignments)
+	}
+	if superseded.EndedAt == nil {
+		t.Fatal("prior assignment should be ended when a new task is accepted for the same session")
+	}
+	if superseded.EndReason != "superseded" {
+		t.Fatalf("prior assignment end_reason: got %q, want superseded", superseded.EndReason)
+	}
+	if superseded.State != string(assignmentStateSuperseded) {
+		t.Fatalf("prior assignment state: got %q, want %q", superseded.State, assignmentStateSuperseded)
+	}
+	if superseded.SupersededBy == nil || *superseded.SupersededBy != second.ID {
+		t.Fatalf("prior assignment superseded_by: got %v, want %q", superseded.SupersededBy, second.ID)
+	}
+	if active.EndedAt != nil {
+		t.Fatalf("new assignment should remain live, got ended_at=%v", active.EndedAt)
+	}
+	if active.TaskID != "TASK-NEW" {
+		t.Fatalf("new assignment task_id: got %q, want %q", active.TaskID, "TASK-NEW")
 	}
 }
 

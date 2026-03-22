@@ -338,6 +338,27 @@ func TestOpen_TaskLayerTablesConstraints(t *testing.T) {
 	`); err == nil {
 		t.Fatal("expected pr_state check constraint violation, got nil")
 	}
+
+	if _, err := db.Unwrap().Exec(`
+		INSERT INTO agent_sessions (session_id, agent_id)
+		VALUES ('session-2', 'codex-b')
+	`); err != nil {
+		t.Fatalf("insert second agent_session: %v", err)
+	}
+
+	if _, err := db.Unwrap().Exec(`
+		INSERT INTO agent_assignments (assignment_id, session_id, agent_id, repo, branch, task_id)
+		VALUES ('assignment-2', 'session-2', 'codex-b', 'acme/api', 'feat/task-layer-rival', 'TASK-1')
+	`); err == nil {
+		t.Fatal("expected live task_id unique index violation for agent_assignments, got nil")
+	}
+
+	if _, err := db.Unwrap().Exec(`
+		INSERT INTO agent_assignments (assignment_id, session_id, agent_id, repo, branch, task_id, ended_at, end_reason)
+		VALUES ('assignment-3', 'session-2', 'codex-b', 'acme/api', 'feat/task-layer-ended', 'TASK-1', datetime('now'), 'done')
+	`); err != nil {
+		t.Fatalf("ended duplicate task_id insert should succeed, got: %v", err)
+	}
 }
 
 func TestOpen_UniqueConstraint(t *testing.T) {

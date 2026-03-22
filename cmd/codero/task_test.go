@@ -11,6 +11,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -147,6 +148,36 @@ func TestTaskAcceptCmd_Conflict(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "already claimed") {
 		t.Errorf("error should mention 'already claimed'; got: %v", err)
+	}
+}
+
+func TestTaskAcceptCmd_MissingSessionIsUsageError(t *testing.T) {
+	dbPath := openTaskTestDB(t)
+	t.Setenv("CODERO_DB_PATH", dbPath)
+	t.Setenv("CODERO_SESSION_ID", "")
+
+	_, err := runTaskAccept(t, "--task", "CLI-TASK-NO-SESSION")
+	if err == nil {
+		t.Fatal("expected usage error, got nil")
+	}
+	var usageErr *UsageError
+	if !errors.As(err, &usageErr) {
+		t.Fatalf("expected UsageError, got %T: %v", err, err)
+	}
+}
+
+func TestTaskAcceptCmd_MissingTaskIsUsageError(t *testing.T) {
+	dbPath := openTaskTestDB(t)
+	t.Setenv("CODERO_DB_PATH", dbPath)
+	t.Setenv("CODERO_SESSION_ID", "cli-sess-has-env")
+
+	_, err := runTaskAccept(t, "--session", "cli-sess-has-env")
+	if err == nil {
+		t.Fatal("expected usage error, got nil")
+	}
+	var usageErr *UsageError
+	if !errors.As(err, &usageErr) {
+		t.Fatalf("expected UsageError, got %T: %v", err, err)
 	}
 }
 

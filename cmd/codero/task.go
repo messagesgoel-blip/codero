@@ -47,10 +47,10 @@ Terminal (ended) assignments do not block a new claim.`,
 				sessionID = resolveSessionIDFromEnv()
 			}
 			if sessionID == "" {
-				return fmt.Errorf("--session is required (or set CODERO_SESSION_ID)")
+				return usageErrorf("--session is required (or set CODERO_SESSION_ID)")
 			}
 			if taskID == "" {
-				return fmt.Errorf("--task is required")
+				return usageErrorf("--task is required")
 			}
 
 			cfg, err := loadConfig(*configPathForCmd(cmd))
