@@ -81,6 +81,13 @@ function esc(s) { var d = document.createElement('div'); d.textContent = s || ''
 function escAttr(s) { return esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function clearEl(id) { var e = document.getElementById(id); if (e) e.innerHTML = ''; return e; } // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method
 function $(id) { return document.getElementById(id); }
+function feedStatus(feeds, key) {
+  var feed = feeds && feeds[key];
+  return feed && feed.status ? feed.status : 'unavailable';
+}
+function eventTypeValue(t) {
+  return t === null || t === undefined ? '' : String(t);
+}
 
 /* ── SHARED RENDERERS ──────────────────────────────────── */
 function mapStateToClass(state) {
@@ -202,8 +209,8 @@ function initTheme() {
 function renderHealthBar(h) {
   if (!h) return;
   setDot('hb-db-dot', h.database ? h.database.status : 'down');
-  setDot('hb-sessions-dot', h.feeds ? h.feeds.active_sessions.status : 'unavailable');
-  setDot('hb-gates-dot', h.feeds ? h.feeds.gate_checks.status : 'unavailable');
+  setDot('hb-sessions-dot', feedStatus(h.feeds, 'active_sessions'));
+  setDot('hb-gates-dot', feedStatus(h.feeds, 'gate_checks'));
   var al = $('hb-agents-label'); if (al) al.textContent = (h.active_agent_count||0)+' agents';
   var rl = $('hb-refreshed'); if (rl) rl.textContent = 'refreshed ' + new Date().toLocaleTimeString();
 }
@@ -353,7 +360,7 @@ function renderAgentsSessions(c) {
       '</tr></thead><tbody>';
     rows.forEach(function(r) {
       var eid = 'expand-sess-'+r.session_id.replace(/[^a-z0-9]/gi,'-');
-      html += '<tr class="expandable" onclick="toggleExpand(\'sess\',\''+escAttr(r.session_id)+'\');renderAgentsTab()">' +
+      html += '<tr class="expandable" data-expand-table="sess" data-expand-row="'+escAttr(r.session_id)+'" data-expand-render="agents">' +
         '<td class="chevron">'+chevron('sess',r.session_id)+'</td>' +
         '<td>'+statusChip(r.activity_state)+' '+esc(r.agent_id||r.owner_agent||'\u2014') +
           (r.mode ? ' <span class="enforcement-badge soft">'+esc(r.mode)+'</span>':'')+
@@ -390,7 +397,7 @@ function renderAgentsAssignments(c) {
       '<th>Substatus</th><th>Blocked</th><th>Started</th><th>Ended</th></tr></thead><tbody>';
     rows.forEach(function(a) {
       var eid = 'expand-assign-'+a.assignment_id.replace(/[^a-z0-9]/gi,'-');
-      html += '<tr class="expandable" onclick="toggleExpand(\'assign\',\''+escAttr(a.assignment_id)+'\');renderAgentsTab()">' +
+      html += '<tr class="expandable" data-expand-table="assign" data-expand-row="'+escAttr(a.assignment_id)+'" data-expand-render="agents">' +
         '<td class="chevron">'+chevron('assign',a.assignment_id)+'</td>' +
         '<td>'+statusChip(a.state)+'</td>' +
         '<td>'+truncId(a.assignment_id)+'</td>' +
@@ -453,13 +460,14 @@ function renderAgentsTimeline(el) {
   var h = '<div class="timeline" style="max-height:24rem;overflow-y:auto">';
   events.forEach(function(ev, i) {
     var color = evtColor(ev.event_type);
+    var eventType = eventTypeValue(ev.event_type);
     var last = i === events.length-1;
     h += '<div class="timeline-entry"><div class="timeline-track">' +
       '<div class="timeline-dot" style="background:var('+color+')"></div>' +
       (last?'':'<div class="timeline-line"></div>') +
       '</div><div class="timeline-body">' +
       '<div class="timeline-time">'+relativeTime(ev.created_at)+'</div>' +
-      '<div class="timeline-text">'+esc(ev.event_type.replace(/_/g,' '))+'</div>' +
+      '<div class="timeline-text">'+esc(eventType ? eventType.replace(/_/g,' ') : 'unknown event')+'</div>' +
       '<div class="timeline-agent">'+esc(ev.agent_id||'\u2014')+(ev.session_id?' \u00b7 '+truncId(ev.session_id):'')+'</div>' +
       '</div></div>';
   });
@@ -467,6 +475,7 @@ function renderAgentsTimeline(el) {
   el.innerHTML += h; // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method
 }
 function evtColor(t) {
+  t = eventTypeValue(t).toLowerCase();
   if (t.indexOf('register')>=0||t.indexOf('start')>=0) return '--status-active';
   if (t.indexOf('end')>=0||t.indexOf('complete')>=0) return '--status-completed';
   if (t.indexOf('block')>=0||t.indexOf('fail')>=0||t.indexOf('error')>=0) return '--status-lost';
@@ -508,7 +517,7 @@ function renderEventsTab() {
   events.forEach(function(ev) {
     var sev = inferSev(ev);
     var eid = 'expand-ev-'+ev.seq;
-    h += '<tr class="expandable" onclick="toggleExpand(\'ev\',\''+ev.seq+'\');renderEventsTab()">' +
+    h += '<tr class="expandable" data-expand-table="ev" data-expand-row="'+escAttr(String(ev.seq))+'" data-expand-render="events">' +
       '<td class="chevron">'+chevron('ev',String(ev.seq))+'</td>' +
       '<td>'+relativeTime(ev.created_at)+'</td>' +
       '<td>'+esc(ev.repo)+'</td><td>'+esc(ev.branch)+'</td>' +
@@ -716,9 +725,20 @@ async function refreshActiveTab() {
   if (fn) await fn();
 }
 
+function initInteractions() {
+  document.addEventListener('click', function(e) {
+    var row = e.target.closest('.expandable[data-expand-table][data-expand-row]');
+    if (!row) return;
+    toggleExpand(row.dataset.expandTable, row.dataset.expandRow);
+    if (row.dataset.expandRender === 'agents') renderAgentsTab();
+    if (row.dataset.expandRender === 'events') renderEventsTab();
+  });
+}
+
 /* ── INIT ──────────────────────────────────────────────── */
 document.addEventListener('DOMContentLoaded', function() {
   initTheme();
+  initInteractions();
   initRouter();
   startPolling();
 });
