@@ -72,6 +72,8 @@ func TestOpen_TablesCreated(t *testing.T) {
 		"agent_events",
 		"agent_rules",
 		"assignment_rule_checks",
+		"codero_github_links",
+		"task_feedback_cache",
 		"schema_migrations",
 	} {
 		var name string
@@ -202,6 +204,140 @@ func TestOpen_Idempotent(t *testing.T) {
 		t.Fatalf("second Open (idempotent): %v", err)
 	}
 	_ = db2.Close()
+}
+
+func TestOpen_AgentAssignmentsTaskLayerDefaults(t *testing.T) {
+	db := openTestDB(t)
+
+	if _, err := db.Unwrap().Exec(`
+		INSERT INTO agent_sessions (session_id, agent_id)
+		VALUES ('session-1', 'codex-a')
+	`); err != nil {
+		t.Fatalf("insert agent_session: %v", err)
+	}
+
+	if _, err := db.Unwrap().Exec(`
+		INSERT INTO agent_assignments (assignment_id, session_id, agent_id, repo, branch)
+		VALUES ('assignment-1', 'session-1', 'codex-a', 'acme/api', 'feat/task-layer')
+	`); err != nil {
+		t.Fatalf("insert agent_assignment: %v", err)
+	}
+
+	var (
+		assignmentVersion                          int
+		parentAssignmentID, successorSessionID     sql.NullString
+		description, suggestedSubstatus            sql.NullString
+		actualSubstatus                            sql.NullString
+		lastEmitAt, blockedSince                   sql.NullTime
+		firstFeedbackAt, lastFeedbackAt            sql.NullTime
+		feedbackPollCount, substatusDeviationCount int
+	)
+	err := db.Unwrap().QueryRow(`
+		SELECT assignment_version, parent_assignment_id, successor_session_id,
+		       description, last_emit_at, blocked_since, first_feedback_at, last_feedback_at,
+		       feedback_poll_count, suggested_substatus_last, actual_substatus_last,
+		       substatus_deviation_count
+		FROM agent_assignments
+		WHERE assignment_id = 'assignment-1'
+	`).Scan(
+		&assignmentVersion, &parentAssignmentID, &successorSessionID,
+		&description, &lastEmitAt, &blockedSince, &firstFeedbackAt, &lastFeedbackAt,
+		&feedbackPollCount, &suggestedSubstatus, &actualSubstatus,
+		&substatusDeviationCount,
+	)
+	if err != nil {
+		t.Fatalf("select task-layer agent_assignment defaults: %v", err)
+	}
+
+	if assignmentVersion != 1 {
+		t.Errorf("assignment_version default: got %d, want 1", assignmentVersion)
+	}
+	if parentAssignmentID.Valid {
+		t.Errorf("parent_assignment_id default: got %q, want NULL", parentAssignmentID.String)
+	}
+	if successorSessionID.Valid {
+		t.Errorf("successor_session_id default: got %q, want NULL", successorSessionID.String)
+	}
+	if description.Valid {
+		t.Errorf("description default: got %q, want NULL", description.String)
+	}
+	if lastEmitAt.Valid {
+		t.Errorf("last_emit_at default: got %v, want NULL", lastEmitAt.Time)
+	}
+	if blockedSince.Valid {
+		t.Errorf("blocked_since default: got %v, want NULL", blockedSince.Time)
+	}
+	if firstFeedbackAt.Valid {
+		t.Errorf("first_feedback_at default: got %v, want NULL", firstFeedbackAt.Time)
+	}
+	if lastFeedbackAt.Valid {
+		t.Errorf("last_feedback_at default: got %v, want NULL", lastFeedbackAt.Time)
+	}
+	if feedbackPollCount != 0 {
+		t.Errorf("feedback_poll_count default: got %d, want 0", feedbackPollCount)
+	}
+	if suggestedSubstatus.Valid {
+		t.Errorf("suggested_substatus_last default: got %q, want NULL", suggestedSubstatus.String)
+	}
+	if actualSubstatus.Valid {
+		t.Errorf("actual_substatus_last default: got %q, want NULL", actualSubstatus.String)
+	}
+	if substatusDeviationCount != 0 {
+		t.Errorf("substatus_deviation_count default: got %d, want 0", substatusDeviationCount)
+	}
+}
+
+func TestOpen_TaskLayerTablesConstraints(t *testing.T) {
+	db := openTestDB(t)
+
+	if _, err := db.Unwrap().Exec(`
+		INSERT INTO agent_sessions (session_id, agent_id)
+		VALUES ('session-1', 'codex-a')
+	`); err != nil {
+		t.Fatalf("insert agent_session: %v", err)
+	}
+
+	if _, err := db.Unwrap().Exec(`
+		INSERT INTO agent_assignments (assignment_id, session_id, agent_id, repo, branch, task_id)
+		VALUES ('assignment-1', 'session-1', 'codex-a', 'acme/api', 'feat/task-layer', 'TASK-1')
+	`); err != nil {
+		t.Fatalf("insert agent_assignment: %v", err)
+	}
+
+	if _, err := db.Unwrap().Exec(`
+		INSERT INTO codero_github_links (link_id, task_id, repo_full_name, pr_number, pr_state)
+		VALUES ('link-1', 'TASK-1', 'acme/api', 42, 'open')
+	`); err != nil {
+		t.Fatalf("insert codero_github_links: %v", err)
+	}
+
+	if _, err := db.Unwrap().Exec(`
+		INSERT INTO task_feedback_cache (cache_id, assignment_id, session_id, task_id, cache_hash)
+		VALUES ('cache-1', 'assignment-1', 'session-1', 'TASK-1', 'hash-1')
+	`); err != nil {
+		t.Fatalf("insert task_feedback_cache: %v", err)
+	}
+
+	if _, err := db.Unwrap().Exec(`
+		INSERT INTO codero_github_links (link_id, task_id, repo_full_name)
+		VALUES ('link-2', 'TASK-1', 'acme/api')
+	`); err == nil {
+		t.Fatal("expected unique task_id violation for codero_github_links, got nil")
+	}
+
+	if _, err := db.Unwrap().Exec(`
+		INSERT INTO task_feedback_cache (cache_id, assignment_id, session_id, task_id, cache_hash)
+		VALUES ('cache-2', 'assignment-1', 'session-1', 'TASK-1', 'hash-2')
+	`); err == nil {
+		t.Fatal("expected unique assignment_id violation for task_feedback_cache, got nil")
+	}
+
+	if _, err := db.Unwrap().Exec(`
+		INSERT INTO codero_github_links (link_id, task_id, repo_full_name, pr_state)
+		VALUES ('link-3', 'TASK-2', 'acme/api', 'invalid')
+	`); err == nil {
+		t.Fatal("expected pr_state check constraint violation, got nil")
+	}
 }
 
 func TestOpen_UniqueConstraint(t *testing.T) {
