@@ -807,6 +807,9 @@ func TestReconcileAgentAssignmentWaitingState(t *testing.T) {
 	if active.Substatus != AssignmentSubstatusWaitingForMergeApproval {
 		t.Fatalf("substatus after ci green = %q, want %q", active.Substatus, AssignmentSubstatusWaitingForMergeApproval)
 	}
+	if active.State != string(assignmentStateBlocked) {
+		t.Fatalf("state after ci green = %q, want %q", active.State, assignmentStateBlocked)
+	}
 
 	if _, err := db.sql.ExecContext(ctx, `
 		UPDATE branch_states
@@ -826,6 +829,9 @@ func TestReconcileAgentAssignmentWaitingState(t *testing.T) {
 	}
 	if active.Substatus != AssignmentSubstatusInProgress {
 		t.Fatalf("substatus after merge_ready = %q, want %q", active.Substatus, AssignmentSubstatusInProgress)
+	}
+	if active.State != string(assignmentStateActive) {
+		t.Fatalf("state after merge_ready = %q, want %q", active.State, assignmentStateActive)
 	}
 }
 
@@ -863,6 +869,85 @@ func TestRecordAssignmentRuleCheckTx_RejectsInvalidResult(t *testing.T) {
 	err = recordAssignmentRuleCheckTx(ctx, tx, "assign-invalid-result", "sess-invalid-result", RuleIDGateMustPassBeforeMerge, "passed", false, nil, "codero")
 	if err == nil {
 		t.Fatal("expected invalid result error, got nil")
+	}
+}
+
+func TestRecordAssignmentRuleCheckTx_UsesLatestActiveRuleVersion(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	if err := RegisterAgentSession(ctx, db, "sess-rule-version", "agent-1", "agent"); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	if err := AttachAgentAssignment(ctx, db, &AgentAssignment{
+		ID:        "assign-rule-version",
+		SessionID: "sess-rule-version",
+		AgentID:   "agent-1",
+		Repo:      "acme/api",
+		Branch:    "feat/rule-version",
+		Worktree:  "/srv/storage/repo/codero/.worktrees/COD-071-v3-closeout/.tmp-tests/rule-version",
+		TaskID:    "TASK-17",
+	}); err != nil {
+		t.Fatalf("AttachAgentAssignment: %v", err)
+	}
+
+	if _, err := db.sql.ExecContext(ctx, `
+		UPDATE agent_rules
+		SET active = 0
+		WHERE rule_id = ? AND rule_version = 1`,
+		RuleIDGateMustPassBeforeMerge,
+	); err != nil {
+		t.Fatalf("deactivate RULE-001 v1: %v", err)
+	}
+	if _, err := db.sql.ExecContext(ctx, `
+		INSERT INTO agent_rules (
+			rule_id, rule_name, rule_kind, description, enforcement,
+			violation_action, routing_target, rule_version, active
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+		RuleIDGateMustPassBeforeMerge,
+		"Gate must pass before merge",
+		"gate",
+		"updated rule",
+		"hard",
+		`["block","notify"]`,
+		"routing_team",
+		2,
+	); err != nil {
+		t.Fatalf("insert RULE-001 v2: %v", err)
+	}
+
+	tx, err := db.sql.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := recordAssignmentRuleCheckTx(ctx, tx, "assign-rule-version", "sess-rule-version", RuleIDGateMustPassBeforeMerge, "fail", true, map[string]any{
+		"reason": "versioned-rule-test",
+	}, "codero"); err != nil {
+		t.Fatalf("recordAssignmentRuleCheckTx: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	var version int
+	var result string
+	if err := db.sql.QueryRowContext(ctx, `
+		SELECT rule_version, result
+		FROM assignment_rule_checks
+		WHERE assignment_id = ? AND rule_id = ?
+		ORDER BY rule_version DESC
+		LIMIT 1`,
+		"assign-rule-version", RuleIDGateMustPassBeforeMerge,
+	).Scan(&version, &result); err != nil {
+		t.Fatalf("read RULE-001 versioned check: %v", err)
+	}
+	if version != 2 {
+		t.Fatalf("rule_version = %d, want 2", version)
+	}
+	if result != "fail" {
+		t.Fatalf("result = %q, want fail", result)
 	}
 }
 

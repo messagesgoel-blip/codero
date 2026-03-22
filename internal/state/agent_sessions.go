@@ -993,11 +993,16 @@ func ReconcileAgentAssignmentWaitingState(ctx context.Context, db *DB, repo, bra
 		return nil
 	}
 
+	nextState := assignmentStateFromSubstatus(nextSubstatus)
+	if nextState == "" {
+		nextState = string(assignmentStateActive)
+	}
+
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE agent_assignments
 		SET state = ?, blocked_reason = '', assignment_substatus = ?
 		WHERE assignment_id = ? AND ended_at IS NULL`,
-		string(assignmentStateActive), nextSubstatus, assignment.ID,
+		nextState, nextSubstatus, assignment.ID,
 	); err != nil {
 		return fmt.Errorf("reconcile assignment waiting state: update assignment %s: %w", assignment.ID, err)
 	}

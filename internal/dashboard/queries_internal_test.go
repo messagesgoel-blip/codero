@@ -47,6 +47,8 @@ func seedAgentAssignmentForQueryTestWithSubstatus(t *testing.T, db *sql.DB, assi
 	stateValue := "active"
 	blockedReason := ""
 	switch {
+	case substatus == "waiting_for_merge_approval":
+		stateValue = "blocked"
 	case strings.HasPrefix(substatus, "blocked_"):
 		stateValue = "blocked"
 		blockedReason = strings.TrimPrefix(substatus, "blocked_")
@@ -110,6 +112,12 @@ func TestActiveSessions_AssignmentSubstatusDrivesActivityState(t *testing.T) {
 	}
 	if sessions[0].ActivityState != "waiting" {
 		t.Fatalf("activity_state = %q, want waiting", sessions[0].ActivityState)
+	}
+}
+
+func TestAssignmentStateFromSubstatus_WaitingForMergeApprovalBlocked(t *testing.T) {
+	if got := assignmentStateFromSubstatus("waiting_for_merge_approval"); got != "blocked" {
+		t.Fatalf("assignmentStateFromSubstatus(waiting_for_merge_approval) = %q, want blocked", got)
 	}
 }
 
