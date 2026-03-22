@@ -120,6 +120,7 @@ body {
 }
 .nav-item:hover { background: var(--surface-2); color: var(--text); }
 .nav-item.active { background: var(--surface-3); color: var(--text); font-weight: 600; }
+.nav-icon { font-size: 0.875rem; flex-shrink: 0; width: 1.25rem; text-align: center; }
 .nav-badge {
   margin-left: auto; font-size: 10px; font-family: var(--font-mono);
   background: var(--surface-3); padding: 0.125rem 0.375rem; border-radius: 0.25rem;
@@ -345,8 +346,9 @@ button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 /* ── RESPONSIVE: sidebar collapse ──────────────────────── */
 @media (max-width: 767px) {
   .sidebar { width: 3.5rem; padding: 0.75rem 0.5rem; }
-  .nav-item span, .nav-badge, .sidebar-logo span { display: none; }
+  .nav-item span:not(.nav-icon), .nav-badge, .sidebar-logo span { display: none; }
   .nav-item { justify-content: center; padding: 0.5rem; }
+  .nav-icon { font-size: 1rem; }
   .main-content { padding: 1rem; }
   .detail-grid { grid-template-columns: 1fr; }
   .split-panel { grid-template-columns: 1fr; }

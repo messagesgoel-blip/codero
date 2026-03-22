@@ -1634,8 +1634,8 @@ func TestStaticFilesServedWithContentTypes(t *testing.T) {
 		wantType    string
 		wantContain string
 	}{
-		{"/dashboard/index.html", "text/html", "codero"},
-		{"/dashboard/styles.css", "text/css", "font"},
+		{"/dashboard/index.html", "text/html", "./styles.css"},
+		{"/dashboard/styles.css", "text/css", "--bg-base"},
 		{"/dashboard/app.js", "javascript", "apiFetch"},
 	}
 	for _, tt := range tests {
@@ -1654,6 +1654,18 @@ func TestStaticFilesServedWithContentTypes(t *testing.T) {
 		}
 		if !bytes.Contains(body, []byte(tt.wantContain)) {
 			t.Errorf("GET %s: body missing %q", tt.path, tt.wantContain)
+		}
+		// For index.html, also verify the other relative asset link.
+		if tt.path == "/dashboard/index.html" {
+			if !bytes.Contains(body, []byte("./app.js")) {
+				t.Errorf("GET %s: body missing %q", tt.path, "./app.js")
+			}
+		}
+		// For app.js, enforce JS Content-Type (Go uses text/javascript).
+		if tt.path == "/dashboard/app.js" {
+			if !strings.Contains(ct, "javascript") {
+				t.Errorf("GET %s: Content-Type %q, want javascript MIME", tt.path, ct)
+			}
 		}
 	}
 }

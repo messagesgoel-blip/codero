@@ -43,14 +43,26 @@ function switchTab(tab) {
 function navigateTo(tab) { window.location.hash = '#' + tab; }
 
 /* ── API WRAPPER ───────────────────────────────────────── */
+var API_TIMEOUT = 15000;
 async function apiFetch(path, opts) {
-  var res = await fetch(API + path, opts || {});
-  if (!res.ok) {
-    var msg = res.statusText;
-    try { var j = await res.json(); msg = j.error || msg; } catch(_){}
-    var err = new Error(msg); err.status = res.status; throw err;
+  opts = opts || {};
+  var controller = new AbortController();
+  var timer = setTimeout(function() { controller.abort(); }, API_TIMEOUT);
+  if (!opts.signal) opts.signal = controller.signal;
+  try {
+    var res = await fetch(API + path, opts);
+    clearTimeout(timer);
+    if (!res.ok) {
+      var msg = res.statusText;
+      try { var j = await res.json(); msg = j.error || msg; } catch(_){}
+      var err = new Error(msg); err.status = res.status; throw err;
+    }
+    return res.json();
+  } catch(e) {
+    clearTimeout(timer);
+    if (e.name === 'AbortError') throw new Error('Request timed out');
+    throw e;
   }
-  return res.json();
 }
 async function fetchSection(id, path) {
   var prev = sectionState[id];
@@ -71,14 +83,29 @@ function $(id) { return document.getElementById(id); }
 
 /* ── SHARED RENDERERS ──────────────────────────────────── */
 function mapStateToClass(state) {
+  /* Core lifecycle states */
   var m = {active:'active',waiting:'waiting',blocked:'blocked',completed:'completed',
-           cancelled:'cancelled',lost:'lost',ended:'completed',pass:'active',fail:'lost',
+           cancelled:'cancelled',lost:'lost',ended:'completed',
            coding:'active',cli_reviewing:'active',reviewed:'completed',merge_ready:'completed',
-           paused:'waiting',queued_cli:'waiting'};
-  return m[state] || 'cancelled';
+           paused:'waiting',queued_cli:'waiting',local_review:'active',queued_for_review:'waiting'};
+  if (m[state]) return m[state];
+  /* Assignment substatuses */
+  if (state && state.indexOf('waiting_for') === 0) return 'waiting';
+  if (state && state.indexOf('blocked_') === 0) return 'blocked';
+  if (state && state.indexOf('terminal_') === 0) return 'completed';
+  return '';
+}
+function mapSeverityToClass(sev) {
+  var m = {critical:'lost',high:'blocked',medium:'waiting',low:'active',info:'cancelled'};
+  return m[sev] || '';
+}
+function severityChip(sev) {
+  if (!sev) return '<span class="status-chip">\u2014</span>';
+  var cls = mapSeverityToClass(sev.toLowerCase());
+  return '<span class="status-chip ' + cls + '">' + esc(sev) + '</span>';
 }
 function statusChip(state) {
-  if (!state) return '<span class="status-chip cancelled">\u2014</span>';
+  if (!state) return '<span class="status-chip">\u2014</span>';
   var cls = mapStateToClass(state);
   var dot = (state === 'active' || state === 'coding' || state === 'cli_reviewing')
     ? '<span class="pulse-dot animate" style="background:var(--status-active)"></span>' : '';
@@ -485,7 +512,7 @@ function renderEventsTab() {
       '<td>'+relativeTime(ev.created_at)+'</td>' +
       '<td>'+esc(ev.repo)+'</td><td>'+esc(ev.branch)+'</td>' +
       '<td>'+esc(ev.event_type)+'</td>' +
-      '<td>'+statusChip(sev.toLowerCase())+'</td></tr>';
+      '<td>'+severityChip(sev)+'</td></tr>';
     h += '<tr class="expand-row" id="'+eid+'" style="display:'+(isExpanded('ev',String(ev.seq))?'':'none')+'">' +
       '<td colspan="6"><div class="expand-content"><pre style="font-size:0.6875rem;font-family:var(--font-mono);white-space:pre-wrap;word-break:break-all">'+
       esc(ev.payload||'{}')+'</pre></div></td></tr>';
@@ -550,7 +577,7 @@ function renderFindingsTab() {
     checks.forEach(function(chk) {
       gh += '<div class="rule-card"><div class="rule-card-header">' +
         '<div class="rule-card-name">'+esc(chk.name||chk.id||'\u2014')+'</div>' +
-        '<span class="enforcement-badge '+(chk.status==='pass'?'soft':'hard')+'">'+esc(chk.status)+'</span></div>' +
+        '<span class="enforcement-badge '+(['fail','error'].indexOf(chk.status)>=0?'hard':'soft')+'">'+esc(chk.status)+'</span></div>' +
         '<div class="rule-card-desc">'+esc(chk.group||chk.tool||'')+'</div>' +
         '<div class="rule-card-stats">' +
           (chk.duration_ms?'<span style="color:var(--text-muted)">'+(chk.duration_ms/1000).toFixed(2)+'s</span>':'') +
@@ -679,7 +706,9 @@ async function saveSettings() {
 var pollTimer = null;
 function startPolling() {
   if (pollTimer) clearTimeout(pollTimer);
-  pollTimer = setTimeout(function() { refreshActiveTab().then(startPolling); }, POLL);
+  pollTimer = setTimeout(function() {
+    refreshActiveTab().catch(function(){}).then(function() { startPolling(); });
+  }, POLL);
 }
 async function refreshActiveTab() {
   var fn = tabRefreshers[activeTab];
