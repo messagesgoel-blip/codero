@@ -38,13 +38,18 @@ func seedAgentSessionForQueryTest(t *testing.T, db *sql.DB, sessionID, agentID s
 
 func seedAgentAssignmentForQueryTest(t *testing.T, db *sql.DB, assignmentID, sessionID, agentID, repo, branch string, startedAt time.Time) {
 	t.Helper()
+	seedAgentAssignmentForQueryTestWithSubstatus(t, db, assignmentID, sessionID, agentID, repo, branch, "", startedAt)
+}
+
+func seedAgentAssignmentForQueryTestWithSubstatus(t *testing.T, db *sql.DB, assignmentID, sessionID, agentID, repo, branch, substatus string, startedAt time.Time) {
+	t.Helper()
 	// nosemgrep: go.lang.security.audit.sqli.gosql-sqli.gosql-sqli
 	_, err := db.Exec(`INSERT INTO agent_assignments
-		(assignment_id, session_id, agent_id, repo, branch, worktree, task_id, started_at, ended_at, end_reason, superseded_by)
-		VALUES (?,?,?,?,?,?,?,?,NULL,'',NULL)`,
-		assignmentID, sessionID, agentID, repo, branch, "", "", startedAt)
+		(assignment_id, session_id, agent_id, repo, branch, worktree, task_id, assignment_substatus, started_at, ended_at, end_reason, superseded_by)
+		VALUES (?,?,?,?,?,?,?,?,?,NULL,'',NULL)`,
+		assignmentID, sessionID, agentID, repo, branch, "", "", substatus, startedAt)
 	if err != nil {
-		t.Fatalf("seedAgentAssignmentForQueryTest: %v", err)
+		t.Fatalf("seedAgentAssignmentForQueryTestWithSubstatus: %v", err)
 	}
 }
 
@@ -72,6 +77,25 @@ func TestActiveSessions_DedupeBeforeLimit(t *testing.T) {
 	}
 	if sessions[0].OwnerAgent != "agent-a" || sessions[1].OwnerAgent != "agent-b" {
 		t.Fatalf("owner_agent values must match agent_id: %+v", sessions)
+	}
+}
+
+func TestActiveSessions_AssignmentSubstatusDrivesActivityState(t *testing.T) {
+	db := openDashboardQueryTestDB(t)
+	now := time.Now().UTC()
+
+	seedAgentSessionForQueryTest(t, db, "sess-wait", "agent-a", now, now.Add(-20*time.Minute))
+	seedAgentAssignmentForQueryTestWithSubstatus(t, db, "assign-wait", "sess-wait", "agent-a", "acme/api", "feat/COD-071-waiting", "waiting_for_merge_approval", now.Add(-10*time.Minute))
+
+	sessions, err := queryActiveSessions(context.Background(), db, 1)
+	if err != nil {
+		t.Fatalf("queryActiveSessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("len(sessions) = %d, want 1", len(sessions))
+	}
+	if sessions[0].ActivityState != "waiting" {
+		t.Fatalf("activity_state = %q, want waiting", sessions[0].ActivityState)
 	}
 }
 

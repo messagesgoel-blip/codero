@@ -557,6 +557,7 @@ func (r *ReviewRunner) attachSessionAssignment(ctx context.Context, repo, branch
 		r.sessionWorktree,
 		r.sessionMode,
 		r.sessionTaskID,
+		"",
 	); err != nil {
 		loglib.Warn("runner: session attach failed",
 			loglib.FieldComponent, "runner",

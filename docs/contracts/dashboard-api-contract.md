@@ -283,6 +283,9 @@ assumptions. It mirrors `agent_id` and should not be treated as an independent i
   in future responses but is not surfaced today.
 - Registration begins with `session_id` + `agent_id` only. Repo/branch/worktree/task
   may be empty until an assignment is attached.
+- When an active assignment exists, `activity_state` is derived from
+  `agent_assignments.assignment_substatus`: `waiting_for_* -> waiting`,
+  `blocked_* -> blocked`, everything else -> `active`.
 - `task` is omitted entirely when neither `task_id` nor a matching branch pattern exists.
   Clients MUST render a missing `task` field gracefully — typically by showing `branch`
   instead — and must not depend on a JSON `null`.
@@ -292,6 +295,47 @@ assumptions. It mirrors `agent_id` and should not be treated as an independent i
   as if it were equivalent progress.
 - `owner_agent` mirrors `agent_id` for dashboard/TUI parity; treat it as a legacy alias.
 - The response MUST NOT expose secrets, tokens, raw prompts, or file contents.
+
+---
+
+## GET /api/v1/dashboard/assignments
+
+Returns recent assignment rows across agent sessions, newest first.
+
+### Response `200 OK`
+
+```json
+{
+  "count": 2,
+  "assignments": [
+    {
+      "assignment_id": "assign-123",
+      "session_id": "sess-123",
+      "agent_id": "agent-007",
+      "repo": "acme/api",
+      "branch": "feat/COD-071-assignment-substatus",
+      "worktree": "/worktrees/codero/wt-1",
+      "task_id": "COD-071",
+      "substatus": "waiting_for_ci",
+      "mode": "cli",
+      "state": "active",
+      "activity_state": "waiting",
+      "branch_state": "merge_ready",
+      "pr_number": 42,
+      "started_at": "2026-03-21T14:10:00Z"
+    }
+  ],
+  "generated_at": "2026-03-21T14:40:34Z"
+}
+```
+
+**Assignment rules:**
+- `substatus` is optional but, when present, uses the approved assignment enum such as
+  `in_progress`, `waiting_for_ci`, `waiting_for_merge_approval`,
+  `blocked_*`, and `terminal_*`.
+- `state` is derived from assignment lifecycle data plus `substatus`.
+- `activity_state` is emitted only for live assignments. Ended assignments may still
+  carry `substatus`, but clients must not treat them as active work.
 
 ---
 

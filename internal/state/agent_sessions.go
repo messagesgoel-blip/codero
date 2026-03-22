@@ -43,6 +43,7 @@ type AgentAssignment struct {
 	Branch       string
 	Worktree     string
 	TaskID       string
+	Substatus    string
 	StartedAt    time.Time
 	EndedAt      *time.Time
 	EndReason    string
@@ -62,6 +63,7 @@ type AgentEvent struct {
 type AgentSessionCompletion struct {
 	TaskID     string    `json:"task_id"`
 	Status     string    `json:"status"`
+	Substatus  string    `json:"substatus"`
 	Summary    string    `json:"summary"`
 	Tests      []string  `json:"tests"`
 	FinishedAt time.Time `json:"finished_at"`
@@ -255,9 +257,15 @@ func ExpireAgentSession(ctx context.Context, db *DB, sessionID, reason string) e
 
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE agent_assignments
-		SET ended_at = datetime('now'), end_reason = ?
+		SET ended_at = datetime('now'),
+		    end_reason = ?,
+		    assignment_substatus = CASE
+		        WHEN assignment_substatus IS NOT NULL AND assignment_substatus <> '' THEN assignment_substatus
+		        WHEN ? IN ('expired', 'lost') THEN ?
+		        ELSE assignment_substatus
+		    END
 		WHERE session_id = ? AND ended_at IS NULL`,
-		reason, sessionID,
+		reason, reason, AssignmentSubstatusTerminalLost, sessionID,
 	); err != nil {
 		return fmt.Errorf("expire agent session: end assignments: %w", err)
 	}
@@ -293,6 +301,11 @@ func AttachAgentAssignment(ctx context.Context, db *DB, assignment *AgentAssignm
 	if assignment == nil {
 		return fmt.Errorf("attach agent assignment: nil assignment")
 	}
+	substatus, err := validateAttachAssignmentSubstatus(assignment.Substatus)
+	if err != nil {
+		return fmt.Errorf("attach agent assignment: %w", err)
+	}
+	assignment.Substatus = substatus
 
 	tx, err := db.sql.BeginTx(ctx, nil)
 	if err != nil {
@@ -321,9 +334,12 @@ func AttachAgentAssignment(ctx context.Context, db *DB, assignment *AgentAssignm
 
 	_, err = tx.ExecContext(ctx, `
 		UPDATE agent_assignments
-		SET ended_at = datetime('now'), end_reason = 'superseded', superseded_by = ?
+		SET ended_at = datetime('now'),
+		    end_reason = 'superseded',
+		    assignment_substatus = ?,
+		    superseded_by = ?
 		WHERE session_id = ? AND ended_at IS NULL`,
-		assignment.ID, assignment.SessionID,
+		AssignmentSubstatusTerminalWaitingNextTask, assignment.ID, assignment.SessionID,
 	)
 	if err != nil {
 		return fmt.Errorf("attach agent assignment: supersede: %w", err)
@@ -331,13 +347,22 @@ func AttachAgentAssignment(ctx context.Context, db *DB, assignment *AgentAssignm
 
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO agent_assignments (
-			assignment_id, session_id, agent_id, repo, branch, worktree, task_id
-		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			assignment_id, session_id, agent_id, repo, branch, worktree, task_id, assignment_substatus
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		assignment.ID, assignment.SessionID, assignment.AgentID,
-		assignment.Repo, assignment.Branch, assignment.Worktree, assignment.TaskID,
+		assignment.Repo, assignment.Branch, assignment.Worktree, assignment.TaskID, assignment.Substatus,
 	)
 	if err != nil {
 		return fmt.Errorf("attach agent assignment: insert: %w", err)
+	}
+	if err := seedPendingAssignmentRuleChecksTx(ctx, tx, assignment.ID, assignment.SessionID); err != nil {
+		return fmt.Errorf("attach agent assignment: seed rule checks: %w", err)
+	}
+	if err := recordAssignmentRuleCheckTx(ctx, tx, assignment.ID, assignment.SessionID, RuleIDNoSilentFailure, "pass", false, map[string]any{
+		"state":     string(assignmentStateActive),
+		"substatus": assignment.Substatus,
+	}, "codero"); err != nil {
+		return fmt.Errorf("attach agent assignment: record RULE-002: %w", err)
 	}
 
 	payload, err := json.Marshal(map[string]string{
@@ -346,6 +371,7 @@ func AttachAgentAssignment(ctx context.Context, db *DB, assignment *AgentAssignm
 		"branch":        assignment.Branch,
 		"worktree":      assignment.Worktree,
 		"task_id":       assignment.TaskID,
+		"substatus":     assignment.Substatus,
 	})
 	if err != nil {
 		return fmt.Errorf("attach agent assignment: marshal event payload: %w", err)
@@ -370,7 +396,7 @@ func AttachAgentAssignment(ctx context.Context, db *DB, assignment *AgentAssignm
 // GetActiveAgentAssignment returns the most recent active assignment for a session.
 func GetActiveAgentAssignment(ctx context.Context, db *DB, sessionID string) (*AgentAssignment, error) {
 	const q = `
-		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id,
+		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id, assignment_substatus,
 		       started_at, ended_at, end_reason, superseded_by
 		FROM agent_assignments
 		WHERE session_id = ? AND ended_at IS NULL
@@ -384,7 +410,7 @@ func GetActiveAgentAssignment(ctx context.Context, db *DB, sessionID string) (*A
 // ListAgentAssignments returns all assignments for a session.
 func ListAgentAssignments(ctx context.Context, db *DB, sessionID string) ([]AgentAssignment, error) {
 	const q = `
-		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id,
+		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id, assignment_substatus,
 		       started_at, ended_at, end_reason, superseded_by
 		FROM agent_assignments
 		WHERE session_id = ?
@@ -468,7 +494,7 @@ func FinalizeAgentSession(ctx context.Context, db *DB, sessionID, agentID string
 
 	var active *AgentAssignment
 	row := tx.QueryRowContext(ctx, `
-		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id,
+		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id, assignment_substatus,
 		       started_at, ended_at, end_reason, superseded_by
 		FROM agent_assignments
 		WHERE session_id = ? AND ended_at IS NULL
@@ -480,6 +506,59 @@ func FinalizeAgentSession(ctx context.Context, db *DB, sessionID, agentID string
 		active = a
 	} else if !errors.Is(err, ErrAgentAssignmentNotFound) {
 		return fmt.Errorf("finalize agent session: load active assignment %q: %w", sessionID, err)
+	}
+	targetState, substatus, err := validateTerminalAssignmentSubstatus(completion.Status, completion.Substatus)
+	if err != nil {
+		if active != nil {
+			if recordErr := recordAssignmentRuleCheckTx(ctx, tx, active.ID, sessionID, RuleIDNoSilentFailure, "fail", true, map[string]any{
+				"status":    completion.Status,
+				"substatus": completion.Substatus,
+				"reason":    err.Error(),
+			}, ""); recordErr != nil {
+				return fmt.Errorf("finalize agent session: record RULE-002 failure: %w", recordErr)
+			}
+			if commitErr := tx.Commit(); commitErr != nil {
+				return fmt.Errorf("finalize agent session: persist RULE-002 failure: %w", commitErr)
+			}
+		}
+		return err
+	}
+	if active != nil {
+		if err := recordAssignmentRuleCheckTx(ctx, tx, active.ID, sessionID, RuleIDNoSilentFailure, "pass", false, map[string]any{
+			"state":     string(targetState),
+			"status":    completion.Status,
+			"substatus": substatus,
+		}, "codero"); err != nil {
+			return fmt.Errorf("finalize agent session: record RULE-002: %w", err)
+		}
+
+		rule001Pass := true
+		rule001Detail := map[string]any{
+			"reason": "not_applicable",
+		}
+		if targetState == assignmentStateCompleted {
+			rule001Pass, rule001Detail, err = evaluateRule001CompletionTx(ctx, tx, active)
+			if err != nil {
+				return fmt.Errorf("finalize agent session: evaluate RULE-001: %w", err)
+			}
+		}
+		rule001Result := "pass"
+		rule001Violation := false
+		resolvedBy := "codero"
+		if !rule001Pass {
+			rule001Result = "fail"
+			rule001Violation = true
+			resolvedBy = ""
+		}
+		if err := recordAssignmentRuleCheckTx(ctx, tx, active.ID, sessionID, RuleIDGateMustPassBeforeMerge, rule001Result, rule001Violation, rule001Detail, resolvedBy); err != nil {
+			return fmt.Errorf("finalize agent session: record RULE-001: %w", err)
+		}
+		if !rule001Pass {
+			if err := tx.Commit(); err != nil {
+				return fmt.Errorf("finalize agent session: persist RULE-001 failure: %w", err)
+			}
+			return ErrAssignmentGateNotPassed
+		}
 	}
 
 	if _, err := tx.ExecContext(ctx, `
@@ -497,9 +576,9 @@ func FinalizeAgentSession(ctx context.Context, db *DB, sessionID, agentID string
 		}
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE agent_assignments
-			SET ended_at = ?, end_reason = ?
+			SET ended_at = ?, end_reason = ?, assignment_substatus = ?
 			WHERE assignment_id = ? AND ended_at IS NULL`,
-			finishedAt, completion.Status, active.ID,
+			finishedAt, completion.Status, substatus, active.ID,
 		); err != nil {
 			return fmt.Errorf("finalize agent session: end assignment: %w", err)
 		}
@@ -646,9 +725,10 @@ func scanAgentAssignment(row *sql.Row) (*AgentAssignment, error) {
 	var a AgentAssignment
 	var endedAt sql.NullTime
 	var supersededBy sql.NullString
+	var substatus sql.NullString
 
 	err := row.Scan(
-		&a.ID, &a.SessionID, &a.AgentID, &a.Repo, &a.Branch, &a.Worktree, &a.TaskID,
+		&a.ID, &a.SessionID, &a.AgentID, &a.Repo, &a.Branch, &a.Worktree, &a.TaskID, &substatus,
 		&a.StartedAt, &endedAt, &a.EndReason, &supersededBy,
 	)
 	if err != nil {
@@ -663,6 +743,9 @@ func scanAgentAssignment(row *sql.Row) (*AgentAssignment, error) {
 	if supersededBy.Valid {
 		a.SupersededBy = &supersededBy.String
 	}
+	if substatus.Valid {
+		a.Substatus = substatus.String
+	}
 	return &a, nil
 }
 
@@ -670,9 +753,10 @@ func scanAgentAssignmentRow(rows *sql.Rows) (*AgentAssignment, error) {
 	var a AgentAssignment
 	var endedAt sql.NullTime
 	var supersededBy sql.NullString
+	var substatus sql.NullString
 
 	if err := rows.Scan(
-		&a.ID, &a.SessionID, &a.AgentID, &a.Repo, &a.Branch, &a.Worktree, &a.TaskID,
+		&a.ID, &a.SessionID, &a.AgentID, &a.Repo, &a.Branch, &a.Worktree, &a.TaskID, &substatus,
 		&a.StartedAt, &endedAt, &a.EndReason, &supersededBy,
 	); err != nil {
 		return nil, fmt.Errorf("scan agent assignment row: %w", err)
@@ -682,6 +766,9 @@ func scanAgentAssignmentRow(rows *sql.Rows) (*AgentAssignment, error) {
 	}
 	if supersededBy.Valid {
 		a.SupersededBy = &supersededBy.String
+	}
+	if substatus.Valid {
+		a.Substatus = substatus.String
 	}
 	return &a, nil
 }

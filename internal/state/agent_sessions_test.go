@@ -2,6 +2,7 @@ package state
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 	"time"
@@ -217,6 +218,9 @@ func TestAttachAgentAssignment_Supersede(t *testing.T) {
 	if active.ID != "assign-1" {
 		t.Errorf("active assignment id: got %q, want %q", active.ID, "assign-1")
 	}
+	if active.Substatus != AssignmentSubstatusInProgress {
+		t.Errorf("active substatus: got %q, want %q", active.Substatus, AssignmentSubstatusInProgress)
+	}
 
 	second := &AgentAssignment{
 		ID:        "assign-2",
@@ -262,8 +266,39 @@ func TestAttachAgentAssignment_Supersede(t *testing.T) {
 	if superseded.EndReason != "superseded" {
 		t.Errorf("end_reason: got %q, want %q", superseded.EndReason, "superseded")
 	}
+	if superseded.Substatus != AssignmentSubstatusTerminalWaitingNextTask {
+		t.Errorf("superseded substatus: got %q, want %q", superseded.Substatus, AssignmentSubstatusTerminalWaitingNextTask)
+	}
 	if superseded.SupersededBy == nil || *superseded.SupersededBy != "assign-2" {
 		t.Errorf("superseded_by: got %v, want %q", superseded.SupersededBy, "assign-2")
+	}
+
+	rows, err := db.sql.QueryContext(ctx, `
+		SELECT rule_id, result
+		FROM assignment_rule_checks
+		WHERE assignment_id = ?
+		ORDER BY rule_id ASC`, "assign-2")
+	if err != nil {
+		t.Fatalf("query assignment_rule_checks: %v", err)
+	}
+	defer rows.Close()
+
+	results := map[string]string{}
+	for rows.Next() {
+		var ruleID, result string
+		if err := rows.Scan(&ruleID, &result); err != nil {
+			t.Fatalf("scan assignment_rule_checks: %v", err)
+		}
+		results[ruleID] = result
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("assignment_rule_checks rows: %v", err)
+	}
+	if results[RuleIDGateMustPassBeforeMerge] != "pending" {
+		t.Fatalf("RULE-001 result = %q, want pending", results[RuleIDGateMustPassBeforeMerge])
+	}
+	if results[RuleIDNoSilentFailure] != "pass" {
+		t.Fatalf("RULE-002 result = %q, want pass", results[RuleIDNoSilentFailure])
 	}
 }
 
@@ -275,9 +310,12 @@ func TestFinalizeAgentSession(t *testing.T) {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	_, err := db.sql.ExecContext(ctx, `
-		INSERT INTO branch_states (id, repo, branch, state, owner_agent, owner_session_id, owner_session_last_seen)
-		VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
-		"branch-final", "acme/api", "feat/final", "queued_cli", "agent-1", "sess-final",
+		INSERT INTO branch_states (
+			id, repo, branch, state, approved, ci_green, pending_events, unresolved_threads,
+			owner_agent, owner_session_id, owner_session_last_seen
+		)
+		VALUES (?, ?, ?, ?, 1, 1, 0, 0, ?, ?, datetime('now'))`,
+		"branch-final", "acme/api", "feat/final", "merge_ready", "agent-1", "sess-final",
 	)
 	if err != nil {
 		t.Fatalf("seed branch state: %v", err)
@@ -297,6 +335,7 @@ func TestFinalizeAgentSession(t *testing.T) {
 	finishedAt := time.Date(2026, 3, 21, 20, 0, 0, 0, time.UTC)
 	if err := FinalizeAgentSession(ctx, db, "sess-final", "agent-1", AgentSessionCompletion{
 		Status:     "done",
+		Substatus:  AssignmentSubstatusTerminalFinished,
 		Summary:    "completed",
 		Tests:      []string{"go test ./cmd/codero"},
 		FinishedAt: finishedAt,
@@ -319,6 +358,9 @@ func TestFinalizeAgentSession(t *testing.T) {
 	if len(assignments) != 1 || assignments[0].EndedAt == nil || assignments[0].EndReason != "done" {
 		t.Fatalf("finalized assignments = %#v", assignments)
 	}
+	if assignments[0].Substatus != AssignmentSubstatusTerminalFinished {
+		t.Fatalf("assignment substatus = %q, want %q", assignments[0].Substatus, AssignmentSubstatusTerminalFinished)
+	}
 
 	var ownerSessionID string
 	if err := db.sql.QueryRowContext(ctx, `
@@ -340,6 +382,147 @@ func TestFinalizeAgentSession(t *testing.T) {
 	}
 	if events[len(events)-1].EventType != "session_finalized" {
 		t.Fatalf("latest event_type = %q, want session_finalized", events[len(events)-1].EventType)
+	}
+
+	rows, err := db.sql.QueryContext(ctx, `
+		SELECT rule_id, result
+		FROM assignment_rule_checks
+		WHERE assignment_id = ?
+		ORDER BY rule_id ASC`, "assign-final")
+	if err != nil {
+		t.Fatalf("query assignment_rule_checks: %v", err)
+	}
+	defer rows.Close()
+
+	results := map[string]string{}
+	for rows.Next() {
+		var ruleID, result string
+		if err := rows.Scan(&ruleID, &result); err != nil {
+			t.Fatalf("scan assignment_rule_checks: %v", err)
+		}
+		results[ruleID] = result
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("assignment_rule_checks rows: %v", err)
+	}
+	if results[RuleIDGateMustPassBeforeMerge] != "pass" {
+		t.Fatalf("RULE-001 result = %q, want pass", results[RuleIDGateMustPassBeforeMerge])
+	}
+	if results[RuleIDNoSilentFailure] != "pass" {
+		t.Fatalf("RULE-002 result = %q, want pass", results[RuleIDNoSilentFailure])
+	}
+}
+
+func TestFinalizeAgentSession_RejectsCompletionWhenMergeGateFails(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	if err := RegisterAgentSession(ctx, db, "sess-gate", "agent-1", "agent"); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	_, err := db.sql.ExecContext(ctx, `
+		INSERT INTO branch_states (
+			id, repo, branch, state, approved, ci_green, pending_events, unresolved_threads,
+			owner_agent, owner_session_id, owner_session_last_seen
+		)
+		VALUES (?, ?, ?, ?, 0, 0, 1, 1, ?, ?, datetime('now'))`,
+		"branch-gate", "acme/api", "feat/gate", "queued_cli", "agent-1", "sess-gate",
+	)
+	if err != nil {
+		t.Fatalf("seed branch state: %v", err)
+	}
+	if err := AttachAgentAssignment(ctx, db, &AgentAssignment{
+		ID:        "assign-gate",
+		SessionID: "sess-gate",
+		AgentID:   "agent-1",
+		Repo:      "acme/api",
+		Branch:    "feat/gate",
+		Worktree:  "/srv/storage/repo/codero/.worktrees/COD-071/.tmp-tests/gate",
+		TaskID:    "TASK-10",
+	}); err != nil {
+		t.Fatalf("AttachAgentAssignment: %v", err)
+	}
+
+	err = FinalizeAgentSession(ctx, db, "sess-gate", "agent-1", AgentSessionCompletion{
+		Status:     "done",
+		Substatus:  AssignmentSubstatusTerminalFinished,
+		Summary:    "completed",
+		FinishedAt: time.Now().UTC(),
+	})
+	if !errors.Is(err, ErrAssignmentGateNotPassed) {
+		t.Fatalf("FinalizeAgentSession error = %v, want %v", err, ErrAssignmentGateNotPassed)
+	}
+
+	sessionRow, err := GetAgentSession(ctx, db, "sess-gate")
+	if err != nil {
+		t.Fatalf("GetAgentSession: %v", err)
+	}
+	if sessionRow.EndedAt != nil {
+		t.Fatalf("session should remain live, got %#v", sessionRow)
+	}
+
+	active, err := GetActiveAgentAssignment(ctx, db, "sess-gate")
+	if err != nil {
+		t.Fatalf("GetActiveAgentAssignment: %v", err)
+	}
+	if active.EndedAt != nil {
+		t.Fatalf("assignment should remain active, got %#v", active)
+	}
+
+	var rule001Result string
+	if err := db.sql.QueryRowContext(ctx, `
+		SELECT result
+		FROM assignment_rule_checks
+		WHERE assignment_id = ? AND rule_id = ?`,
+		"assign-gate", RuleIDGateMustPassBeforeMerge,
+	).Scan(&rule001Result); err != nil {
+		t.Fatalf("read RULE-001 check: %v", err)
+	}
+	if rule001Result != "fail" {
+		t.Fatalf("RULE-001 result = %q, want fail", rule001Result)
+	}
+}
+
+func TestFinalizeAgentSession_RequiresSubstatus(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	if err := RegisterAgentSession(ctx, db, "sess-substatus", "agent-1", "agent"); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	if err := AttachAgentAssignment(ctx, db, &AgentAssignment{
+		ID:        "assign-substatus",
+		SessionID: "sess-substatus",
+		AgentID:   "agent-1",
+		Repo:      "acme/api",
+		Branch:    "feat/substatus",
+		Worktree:  "/srv/storage/repo/codero/.worktrees/COD-071/.tmp-tests/substatus",
+		TaskID:    "TASK-11",
+	}); err != nil {
+		t.Fatalf("AttachAgentAssignment: %v", err)
+	}
+
+	err := FinalizeAgentSession(ctx, db, "sess-substatus", "agent-1", AgentSessionCompletion{
+		Status:     "blocked",
+		Summary:    "waiting on credentials",
+		FinishedAt: time.Now().UTC(),
+	})
+	if !errors.Is(err, ErrAssignmentSubstatusRequired) {
+		t.Fatalf("FinalizeAgentSession error = %v, want %v", err, ErrAssignmentSubstatusRequired)
+	}
+
+	var result string
+	var detail sql.NullString
+	if err := db.sql.QueryRowContext(ctx, `
+		SELECT result, detail
+		FROM assignment_rule_checks
+		WHERE assignment_id = ? AND rule_id = ?`,
+		"assign-substatus", RuleIDNoSilentFailure,
+	).Scan(&result, &detail); err != nil {
+		t.Fatalf("read RULE-002 check: %v", err)
+	}
+	if result != "fail" {
+		t.Fatalf("RULE-002 result = %q, want fail", result)
 	}
 }
 
