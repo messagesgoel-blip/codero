@@ -3,319 +3,64 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>codero — command terminal</title>
+<title>codero dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
 <div class="shell">
-
-<!-- TOPBAR -->
-<div class="topbar">
-  <div class="tb-logo">
-    <span class="tb-logo-icon">&#x203A;_</span>
-    <span class="gradient-text">CODERO</span>
-    <span class="tb-logo-subtitle">Command Terminal</span>
-  </div>
-  <div class="tb-sep"></div>
-  <div class="tb-tabs" role="tablist" aria-label="Dashboard sections">
-    <button class="tb-tab active" type="button" id="tab-processes" role="tab" data-tab="processes" aria-selected="true" aria-controls="page-processes" tabindex="0" onclick="showTab('processes',this)" onkeydown="return tabKey(event,this)">Processes</button>
-    <button class="tb-tab" type="button" id="tab-eventlogs" role="tab" data-tab="eventlogs" aria-selected="false" aria-controls="page-eventlogs" tabindex="0" onclick="showTab('eventlogs',this)" onkeydown="return tabKey(event,this)">Event Logs</button>
-    <button class="tb-tab" type="button" id="tab-findings" role="tab" data-tab="findings" aria-selected="false" aria-controls="page-findings" tabindex="0" onclick="showTab('findings',this)" onkeydown="return tabKey(event,this)">Findings</button>
-    <button class="tb-tab" type="button" id="tab-architecture" role="tab" data-tab="architecture" aria-selected="false" aria-controls="page-architecture" tabindex="0" onclick="showTab('architecture',this)" onkeydown="return tabKey(event,this)">Architecture</button>
-    <button class="tb-tab" type="button" id="tab-settings" role="tab" data-tab="settings" aria-selected="false" aria-controls="page-settings" tabindex="0" onclick="showTab('settings',this)" onkeydown="return tabKey(event,this)">Settings</button>
-  </div>
-  <div class="tb-right">
-    <div class="tb-pr-group">
-      <span class="tb-pr-num" id="tb-pr-num">PR #&#x2014;</span>
-      <span class="tb-branch" id="tb-branch">&#x2014;</span>
-      <span class="tb-merge-badge unknown" id="tb-merge-badge">&#x2014;</span>
-    </div>
-    <div class="tb-sep"></div>
-    <div class="agents-badge"><div class="agents-dot"></div><span id="agents-count">0</span> agents active</div>
-    <button class="review-btn" onclick="showTab('findings',document.getElementById('tab-findings'))">Review Findings</button>
-    <div class="theme-toggle">
-      <button class="tt-btn" id="tt-system" onclick="setTheme('system')">sys</button>
-      <button class="tt-btn active" id="tt-dark" onclick="setTheme('dark')">dark</button>
-      <button class="tt-btn" id="tt-light" onclick="setTheme('light')">light</button>
-    </div>
-  </div>
-</div>
-
-<!-- STATS BAR -->
-<div class="stats-bar" id="stats-bar">
-  <!-- Security Score ring -->
-  <div class="stat-card">
-    <div class="stat-ring">
-      <svg viewBox="0 0 38 38">
-        <circle class="stat-ring-track" cx="19" cy="19" r="16"/>
-        <circle class="stat-ring-fill" id="sr-ring-fill" cx="19" cy="19" r="16" stroke-dasharray="100.5" stroke-dashoffset="22"/>
-      </svg>
-      <div class="stat-ring-label">
-        <span class="stat-ring-score" id="sr-score">&#x2014;</span>
-        <span class="stat-ring-pct" id="sr-pct">&#x2014;</span>
-      </div>
-    </div>
-    <div class="stat-card-body">
-      <div class="stat-card-label">Security Score</div>
-    </div>
-  </div>
-  <!-- Critical Findings -->
-  <div class="stat-card">
-    <div class="stat-card-body">
-      <div class="stat-card-val red" id="stat-critical">&#x2014;</div>
-      <div class="stat-card-label">Critical &middot; Must Fix</div>
-    </div>
-  </div>
-  <!-- High Severity -->
-  <div class="stat-card">
-    <div class="stat-card-body">
-      <div class="stat-card-val amber" id="stat-high">&#x2014;</div>
-      <div class="stat-card-label">High Severity &middot; Should Fix</div>
-    </div>
-  </div>
-  <!-- Coverage -->
-  <div class="stat-card">
-    <div class="stat-card-body">
-      <div class="stat-card-val teal" id="stat-coverage">&#x2014;</div>
-      <div class="stat-card-label">Coverage &middot; Tests + Scans</div>
-    </div>
-  </div>
-  <!-- Review ETA -->
-  <div class="stat-card">
-    <div class="stat-card-body">
-      <div class="stat-card-val blue" id="stat-eta">&#x2014;</div>
-      <div class="stat-card-label">Review ETA</div>
-    </div>
-  </div>
-  <button class="stats-bar-btn" onclick="showTab('findings',document.getElementById('tab-findings'))">&#x25B6; Start Review</button>
-</div>
-
-<!-- MERGE STATUS BAR -->
-<div class="merge-bar">
-  <span class="mb-label">Status:</span>
-  <span class="mb-status unknown" id="mb-status">&#x2014;</span>
-  <span class="mb-sep">&#x2014;</span>
-  <span class="mb-detail" id="mb-detail">loading&#x2026;</span>
-</div>
-
-<!-- PIPELINE RAIL -->
-<div class="pipeline-rail" id="pipeline-rail">
-  <div class="pipeline-rail-head">
-    <span class="pipeline-rail-title">Gate Pipeline</span>
-    <div class="pipeline-rail-legend">
-      <span class="pipeline-rail-chip pass"><span class="dot"></span>Pass</span>
-      <span class="pipeline-rail-chip fail"><span class="dot"></span>Fail</span>
-      <span class="pipeline-rail-chip skip"><span class="dot"></span>Skip</span>
-      <span class="pipeline-rail-chip pending"><span class="dot"></span>Pending</span>
-    </div>
-    <span class="pipeline-rail-summary" id="pipeline-rail-summary">loading&#x2026;</span>
-  </div>
-  <div class="pipeline-stage-list" id="pipeline-stage-list"></div>
-  <div class="pipeline-progress" id="pipeline-progress"><div class="pipeline-progress-fill" id="pipeline-progress-fill" style="width:0%"></div></div>
-</div>
-
-<!-- ACTION BANNER (shown when critical/high findings exist) -->
-<div class="action-banner" id="action-banner">
-  <span class="action-banner-icon">&#x26A0;</span>
-  <span class="action-banner-text" id="action-banner-text">Action Required</span>
-  <span class="action-banner-detail" id="action-banner-detail"></span>
-  <button class="action-banner-btn" onclick="showTab('findings',document.getElementById('tab-findings'))">View Findings</button>
-</div>
-
-<!-- PAGE: PROCESSES -->
-<div class="page active" id="page-processes">
-  <div class="health-bar" id="health-bar">
-    <span class="hb-icon">&#x21BB;</span>
-    <span class="hb-label">System Health</span>
-    <div class="hb-item"><div class="hb-dot" id="hb-db-dot"></div><span class="hb-key">db</span><span class="hb-val" id="hb-db">&#x2026;</span></div>
-    <div class="hb-item"><span class="hb-key">agents</span><span class="hb-num" id="hb-agents">&#x2014;</span></div>
-    <div class="hb-item"><div class="hb-dot" id="hb-sessions-dot"></div><span class="hb-key">sessions feed</span><span class="hb-val" id="hb-sessions-status">&#x2026;</span><span class="hb-num" id="hb-sessions-age" style="color:var(--dim);margin-left:2px"></span></div>
-    <div class="hb-item"><div class="hb-dot" id="hb-gate-dot"></div><span class="hb-key">gate-checks</span><span class="hb-val" id="hb-gate-status">&#x2026;</span><span class="hb-num" id="hb-gate-age" style="color:var(--dim);margin-left:2px"></span></div>
-    <div class="hb-item" id="hb-sr" style="display:none"><span class="hb-key">score</span><span class="hb-num" id="hb-sr-val">&#x2014;/10</span></div>
-    <div class="hb-item" id="hb-cov" style="display:none"><span class="hb-key">coverage</span><span class="hb-num" id="hb-cov-val">&#x2014;%</span></div>
-    <div class="hb-item" id="hb-eta" style="display:none"><span class="hb-key">ETA</span><span class="hb-num" id="hb-eta-val">&#x2014; min</span></div>
-    <div class="hb-item" style="margin-left:auto"><span class="hb-key">refreshed</span><span class="hb-num" id="hb-refreshed">&#x2014;</span></div>
-  </div>
-  <div class="proc-content" id="proc-content">
-    <div class="state-msg">loading&#x2026;</div>
-  </div>
-  <!-- Activity Feed (populated by renderActivityFeed) -->
-  <div class="activity-feed" id="activity-feed" style="display:none">
-    <div class="af-header">Activity Feed</div>
-    <div id="af-rows"></div>
-  </div>
-</div>
-
-<!-- PAGE: EVENT LOGS -->
-<div class="page" id="page-eventlogs">
-  <div class="filter-bar">
-    <span class="filter-label">Filter:</span>
-    <button class="filter-btn active" id="ef-all"      onclick="setEvtFilter('ALL',this)">ALL</button>
-    <button class="filter-btn"        id="ef-critical" onclick="setEvtFilter('CRITICAL',this)">CRITICAL</button>
-    <button class="filter-btn"        id="ef-high"     onclick="setEvtFilter('HIGH',this)">HIGH</button>
-    <button class="filter-btn"        id="ef-medium"   onclick="setEvtFilter('MEDIUM',this)">MEDIUM</button>
-    <button class="filter-btn"        id="ef-low"      onclick="setEvtFilter('LOW',this)">LOW</button>
-    <span class="filter-count" id="ef-count"></span>
-  </div>
-  <div class="events-list" id="events-list"><div class="state-msg">loading&#x2026;</div></div>
-</div>
-
-<!-- PAGE: FINDINGS -->
-<div class="page" id="page-findings" style="flex-direction:column">
-  <div class="findings-content" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:0">
-    <!-- Review Status Hero -->
-    <div class="review-hero" id="review-hero">
-      <div class="review-hero-card hero-info" id="hero-status-card">
-        <div class="hero-card-title">Review Status</div>
-        <div class="hero-card-value" id="hero-status">&#x2014;</div>
-        <div class="hero-card-sub" id="hero-status-sub">Waiting for gate-check report</div>
-      </div>
-      <div class="review-hero-card hero-fail" id="hero-blockers-card">
-        <div class="hero-card-title">Blockers</div>
-        <div class="hero-card-value" id="hero-blockers" style="color:var(--red)">0</div>
-        <div class="hero-card-sub" id="hero-blockers-sub">No blocking findings</div>
-      </div>
-      <div class="review-hero-card hero-pass" id="hero-pipeline-card">
-        <div class="hero-card-title">Pipeline Progress</div>
-        <div class="hero-card-value" id="hero-pipeline-pct" style="color:var(--teal)">&#x2014;</div>
-        <div class="hero-card-sub" id="hero-pipeline-sub">Waiting for pipeline data</div>
-      </div>
-    </div>
-    <!-- Blocker Summary -->
-    <div class="blocker-summary" id="blocker-summary">
-      <div class="blocker-summary-head">
-        <span class="blocker-summary-icon">&#x1F6D1;</span>
-        <span class="blocker-summary-title">Blocking Findings</span>
-        <span class="blocker-summary-count" id="blocker-count">0</span>
-      </div>
-      <div class="blocker-summary-list" id="blocker-list"></div>
-    </div>
-    <!-- Stat + sev strips -->
-    <div class="stat-strip">
-      <div class="stat-card"><div class="stat-icon">&#x2261;</div><div class="stat-label">Checks total</div><div class="stat-val" id="f-total">&#x2014;</div></div>
-      <div class="stat-card"><div class="stat-icon">&#x2717;</div><div class="stat-label">Failed</div><div class="stat-val red" id="f-failed">&#x2014;</div></div>
-      <div class="stat-card"><div class="stat-icon">&#x26A1;</div><div class="stat-label">Overall status</div><div class="stat-val" id="f-overall">&#x2014;</div></div>
-    </div>
-    <div class="sev-strip">
-      <div class="sev-card critical"><span class="sev-dot critical"></span><span class="sev-label critical">FAILED</span><div class="sev-count" id="f-sev-fail" style="color:var(--red)">&#x2014;</div></div>
-      <div class="sev-card high"><span class="sev-dot high"></span><span class="sev-label high">SKIPPED</span><div class="sev-count" id="f-sev-skip" style="color:var(--amber)">&#x2014;</div></div>
-      <div class="sev-card medium"><span class="sev-dot medium"></span><span class="sev-label medium">BYPASSED</span><div class="sev-count" id="f-sev-bypass" style="color:var(--amber)">&#x2014;</div></div>
-      <div class="sev-card low"><span class="sev-dot low"></span><span class="sev-label low">PASSED</span><div class="sev-count" id="f-sev-pass" style="color:var(--teal)">&#x2014;</div></div>
-    </div>
-    <!-- View toggle -->
-    <div class="view-toggle-row">
-      <button class="view-toggle-btn active" id="vtb-cards" onclick="setFindingsView('cards',this)">Card view</button>
-      <button class="view-toggle-btn" id="vtb-table" onclick="setFindingsView('table',this)">Table view</button>
-    </div>
-    <!-- Split: cards + resolution panel -->
-    <div class="findings-split" id="findings-split">
-      <div class="findings-left" id="findings-left">
-        <!-- Finding cards rendered here -->
-        <div class="findings-cards" id="findings-cards">
-          <div class="state-msg">loading gate checks&#x2026;</div>
-        </div>
-        <!-- Gate table (hidden by default) -->
-        <div class="gate-table-wrap" id="gate-table-wrap" style="display:none">
-          <div class="state-msg">loading gate checks&#x2026;</div>
-        </div>
-      </div>
-      <div class="findings-right" id="findings-right">
-        <!-- Resolution panel -->
-        <div class="resolution-panel" id="resolution-panel">
-          <div class="res-panel-header">
-            <span class="res-panel-title">Resolution Plan</span>
-            <span class="res-panel-count" id="res-count">0 items</span>
-          </div>
-          <div class="res-items" id="res-items">
-            <div class="state-msg" style="padding:16px 0;font-size:10px">no findings to resolve</div>
-          </div>
-          <button class="res-resolve-btn" id="res-resolve-btn">Resolve All (0)</button>
-          <!-- Change Impact mini-diagram (populated from live check data) -->
-          <div class="change-impact" id="change-impact" style="display:none"></div>
-        </div>
-      </div>
-    </div>
-  </div>
-  <!-- Comment box -->
-  <div class="comment-box">
-    <div class="chat-context-bar" id="chat-context-bar">
-      <span class="chat-context-dot"></span>
-      <span class="chat-context-label">Review Assistant</span>
-      <span class="chat-context-value" id="chat-context-tab">Findings</span>
-    </div>
-    <div class="chat-thread" id="chat-thread" aria-live="polite">
-      <div class="chat-empty" id="chat-empty">Ask Codero about the review process: queue, gate checks, findings, or merge readiness.</div>
-    </div>
-    <div class="chat-suggestions" id="chat-suggestions"></div>
-    <div class="chat-compose">
-      <label for="comment-input" class="visually-hidden">Ask Codero about the review process</label>
-      <textarea class="comment-textarea" id="comment-input" placeholder="Message Review Assistant..." rows="1" onkeydown="handleChatKeydown(event)"></textarea>
-      <button class="comment-post-btn" id="chat-send-btn" onclick="submitChat()" aria-label="Send message" title="Send message">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+  <aside class="sidebar">
+    <div class="sidebar-logo"><span>codero</span></div>
+    <nav class="sidebar-nav">
+      <button class="nav-item active" id="nav-overview" onclick="navigateTo('overview')">
+        <span>Overview</span>
       </button>
+      <button class="nav-item" id="nav-agents" onclick="navigateTo('agents')">
+        <span>Agents</span>
+        <span class="nav-badge" id="badge-agents">&mdash;</span>
+      </button>
+      <button class="nav-item" id="nav-events" onclick="navigateTo('events')">
+        <span>Events</span>
+      </button>
+      <button class="nav-item" id="nav-findings" onclick="navigateTo('findings')">
+        <span>Findings</span>
+      </button>
+      <button class="nav-item" id="nav-architecture" onclick="navigateTo('architecture')">
+        <span>Architecture</span>
+      </button>
+      <button class="nav-item" id="nav-settings" onclick="navigateTo('settings')">
+        <span>Settings</span>
+      </button>
+    </nav>
+  </aside>
+  <div class="main-area">
+    <div class="main-content">
+      <div class="page active" id="page-overview"></div>
+      <div class="page" id="page-agents"></div>
+      <div class="page" id="page-events"></div>
+      <div class="page" id="page-findings"></div>
+      <div class="page" id="page-architecture"></div>
+      <div class="page" id="page-settings"></div>
     </div>
-    <div class="chat-actions" id="chat-actions"></div>
-  </div>
-</div>
-
-<!-- PAGE: ARCHITECTURE -->
-<div class="page" id="page-architecture">
-  <div class="arch-content">
-    <div class="arch-diagram">
-      <!-- Main flow column -->
-      <div class="arch-flow">
-        <div class="arch-node healthy">Auth Service<div class="arch-node-status">&#x25CF; healthy</div></div>
-        <div class="arch-arrow">&#x2193;</div>
-        <div class="arch-node healthy">Token Flow<div class="arch-node-status">&#x25CF; healthy</div></div>
-        <div class="arch-arrow">&#x2193;</div>
-        <div class="arch-node amber" style="border-color:rgba(212,152,48,.4);background:rgba(212,152,48,.08);color:var(--amber)">Auth Middleware<div class="arch-node-status">&#x26A0; finding</div></div>
-        <div class="arch-arrow">&#x2193;</div>
-        <div class="arch-split">
-          <div class="arch-branch">
-            <div class="arch-node finding">config.yaml<div class="arch-node-status">&#x2717; secret leak</div></div>
-          </div>
-          <div class="arch-branch">
-            <div class="arch-node healthy">Active Node<div class="arch-node-status">&#x25CF; healthy</div></div>
-          </div>
-        </div>
+    <div class="health-bar" id="health-bar">
+      <span class="health-dot" id="hb-db-dot"></span>
+      <span id="hb-db-label">db</span>
+      <span class="health-dot" id="hb-sessions-dot"></span>
+      <span id="hb-sessions-label">sessions</span>
+      <span class="health-dot" id="hb-gates-dot"></span>
+      <span id="hb-gates-label">gates</span>
+      <span id="hb-agents-label"></span>
+      <span id="hb-refreshed"></span>
+      <div class="theme-toggle">
+        <button data-theme="system" onclick="setTheme('system')">sys</button>
+        <button data-theme="dark" onclick="setTheme('dark')">dark</button>
+        <button data-theme="light" onclick="setTheme('light')">light</button>
       </div>
-      <!-- Code inset -->
-      <div class="arch-code-inset">
-        <div class="aci-title">config.yaml — redacted fields</div>
-        <div class="arch-code-line"><span class="arch-code-key">jwt_secret:</span><span class="arch-code-val">&lt;REDACTED&gt;</span></div>
-        <div class="arch-code-line"><span class="arch-code-key">db_password:</span><span class="arch-code-val">&lt;REDACTED&gt;</span></div>
-        <div class="arch-code-line"><span class="arch-code-key">api_key:</span><span class="arch-code-val">&lt;REDACTED&gt;</span></div>
-        <div class="arch-code-line"><span class="arch-code-key">private_key:</span><span class="arch-code-val">&lt;REDACTED&gt;</span></div>
-        <div style="margin-top:8px;font-size:8px;color:var(--red)">&#x26A0; Hardcoded secrets detected by semgrep</div>
-      </div>
     </div>
   </div>
 </div>
-
-<!-- PAGE: SETTINGS -->
-<div class="page" id="page-settings">
-<div class="settings-page">
-  <div class="s-section">
-    <div class="s-title">Integrations</div>
-    <div class="integration-grid" id="int-grid"><div class="state-msg">loading&#x2026;</div></div>
-  </div>
-  <div class="s-section">
-    <div class="s-title">Gate pipeline</div>
-    <table class="gate-config">
-      <thead><tr><th>Gate</th><th>Enabled</th><th>Blocks commit</th><th>Timeout</th><th>Provider</th></tr></thead>
-      <tbody id="gate-config-body"><tr><td colspan="5"><div class="state-msg">loading&#x2026;</div></td></tr></tbody>
-    </table>
-    <div class="settings-save">
-      <button class="save-btn" id="save-btn" onclick="saveSettings()" disabled>save changes</button>
-      <span class="save-status" id="save-status"></span>
-    </div>
-  </div>
-</div>
-</div>
-
-</div><!-- shell -->
 <script src="./app.js"></script>
 </body>
 </html>

@@ -1576,8 +1576,9 @@ func TestDashboardHTML_HasExpectedContent(t *testing.T) {
 	}
 	html := string(htmlData)
 	for _, want := range []string{
-		"Processes", "Event Logs", "Findings",
-		"Review Findings", "agents active",
+		"codero", "Overview", "Agents", "Events",
+		"Findings", "Architecture", "Settings",
+		"health-bar", "./styles.css", "./app.js",
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("index.html missing %q", want)
@@ -1592,9 +1593,26 @@ func TestDashboardHTML_HasExpectedContent(t *testing.T) {
 	js := string(jsData)
 	for _, want := range []string{
 		"active-sessions", "apiFetch", "/health",
+		"/assignments", "/compliance", "/agent-events",
+		"renderAgentsTab", "renderOverviewTab",
 	} {
 		if !strings.Contains(js, want) {
 			t.Errorf("app.js missing %q", want)
+		}
+	}
+
+	// Check CSS content.
+	cssData, err := fs.ReadFile(subFS, "styles.css")
+	if err != nil {
+		t.Fatalf("read styles.css: %v", err)
+	}
+	css := string(cssData)
+	for _, want := range []string{
+		"--bg-base", "--surface-1", "--status-active",
+		".status-chip", ".metric-card", ".data-table",
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("styles.css missing %q", want)
 		}
 	}
 }
