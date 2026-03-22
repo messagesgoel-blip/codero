@@ -67,6 +67,7 @@ func main() {
 		pollCmd(&configPath),
 		whyCmd(&configPath),
 		proveCmd(&configPath),
+		taskCmd(&configPath),
 	)
 
 	if err := root.Execute(); err != nil {
