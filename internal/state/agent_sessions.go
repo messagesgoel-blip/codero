@@ -59,6 +59,14 @@ type AgentEvent struct {
 	CreatedAt time.Time
 }
 
+type AgentSessionCompletion struct {
+	TaskID     string    `json:"task_id"`
+	Status     string    `json:"status"`
+	Summary    string    `json:"summary"`
+	Tests      []string  `json:"tests"`
+	FinishedAt time.Time `json:"finished_at"`
+}
+
 // RegisterAgentSession inserts or updates a session registration.
 // Registration starts with session_id + agent_id; mode is optional and
 // only updates when provided.
@@ -420,6 +428,110 @@ func AppendAgentEvent(ctx context.Context, db *DB, ev *AgentEvent) (int64, error
 		return 0, fmt.Errorf("append agent event: read id: %w", err)
 	}
 	return id, nil
+}
+
+// FinalizeAgentSession ends a live session, closes its active assignment if any,
+// clears branch ownership, and records a completion event payload.
+func FinalizeAgentSession(ctx context.Context, db *DB, sessionID, agentID string, completion AgentSessionCompletion) error {
+	tx, err := db.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("finalize agent session: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var (
+		storedAgentID string
+		endedAt       sql.NullTime
+	)
+	if err := tx.QueryRowContext(ctx, `
+		SELECT agent_id, ended_at
+		FROM agent_sessions
+		WHERE session_id = ?`,
+		sessionID,
+	).Scan(&storedAgentID, &endedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrAgentSessionNotFound
+		}
+		return fmt.Errorf("finalize agent session: load session %q: %w", sessionID, err)
+	}
+	if endedAt.Valid {
+		return ErrAgentSessionAlreadyEnded
+	}
+	if agentID != "" && storedAgentID != agentID {
+		return ErrAgentSessionAgentMismatch
+	}
+
+	finishedAt := completion.FinishedAt.UTC()
+	if finishedAt.IsZero() {
+		finishedAt = time.Now().UTC()
+	}
+
+	var active *AgentAssignment
+	row := tx.QueryRowContext(ctx, `
+		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id,
+		       started_at, ended_at, end_reason, superseded_by
+		FROM agent_assignments
+		WHERE session_id = ? AND ended_at IS NULL
+		ORDER BY started_at DESC
+		LIMIT 1`,
+		sessionID,
+	)
+	if a, err := scanAgentAssignment(row); err == nil {
+		active = a
+	} else if !errors.Is(err, ErrAgentAssignmentNotFound) {
+		return fmt.Errorf("finalize agent session: load active assignment %q: %w", sessionID, err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET ended_at = ?, end_reason = ?
+		WHERE session_id = ? AND ended_at IS NULL`,
+		finishedAt, completion.Status, sessionID,
+	); err != nil {
+		return fmt.Errorf("finalize agent session: end session: %w", err)
+	}
+
+	if active != nil {
+		if completion.TaskID == "" {
+			completion.TaskID = active.TaskID
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE agent_assignments
+			SET ended_at = ?, end_reason = ?
+			WHERE assignment_id = ? AND ended_at IS NULL`,
+			finishedAt, completion.Status, active.ID,
+		); err != nil {
+			return fmt.Errorf("finalize agent session: end assignment: %w", err)
+		}
+		if active.Repo != "" && active.Branch != "" {
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE branch_states
+				SET owner_session_id = '', owner_session_last_seen = NULL,
+				    owner_agent = '', updated_at = datetime('now')
+				WHERE repo = ? AND branch = ? AND owner_session_id = ?`,
+				active.Repo, active.Branch, sessionID,
+			); err != nil {
+				return fmt.Errorf("finalize agent session: clear branch ownership: %w", err)
+			}
+		}
+	}
+
+	payload, err := json.Marshal(completion)
+	if err != nil {
+		return fmt.Errorf("finalize agent session: marshal payload: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO agent_events (session_id, agent_id, event_type, payload)
+		VALUES (?, ?, ?, ?)`,
+		sessionID, storedAgentID, "session_finalized", string(payload),
+	); err != nil {
+		return fmt.Errorf("finalize agent session: append event: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("finalize agent session: commit: %w", err)
+	}
+	return nil
 }
 
 // ListAgentEvents returns events for a session with id > sinceID.

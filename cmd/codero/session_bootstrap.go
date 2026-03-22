@@ -200,6 +200,11 @@ func writeSessionBootstrap(cfg *sessionBootstrapConfig) (*sessionBootstrapResult
 		confirmCmd += ` --config "$CODERO_PILOT_CONFIG"`
 	}
 	confirmCmd += ` session confirm --session-id "$CODERO_SESSION_ID" --agent-id "$CODERO_AGENT_ID"`
+	finalizeCmd := `"$CODERO_PILOT_CLI"`
+	if cfg.ConfigPath != "" {
+		finalizeCmd += ` --config "$CODERO_PILOT_CONFIG"`
+	}
+	finalizeCmd += ` session finalize --from-session-md "$CODERO_RUNTIME_SESSION_MD"`
 
 	agentBody := fmt.Sprintf(`# Runtime Agent Note
 
@@ -245,7 +250,21 @@ Do not use the codero binary from PATH for this session.
 Before doing any other work in this window, run exactly this command and stop if it fails:
 - %s
 Use these values unchanged when attaching or heartbeating.
-`, cfg.AgentID, cfg.SessionID, cfg.Mode, cfg.BaseURL, cfg.TailnetBaseURL, cfg.CLIPath, cfg.ConfigPath, cfg.Worktree, cfg.Repo, cfg.Branch, cfg.TaskID, confirmCmd)
+
+## Completion Record
+Fill this JSON block before ending the session, then run:
+- %s
+
+`+"```json"+`
+{
+  "task_id": %q,
+  "status": "",
+  "summary": "",
+  "tests": [],
+  "finished_at": ""
+}
+`+"```"+`
+`, cfg.AgentID, cfg.SessionID, cfg.Mode, cfg.BaseURL, cfg.TailnetBaseURL, cfg.CLIPath, cfg.ConfigPath, cfg.Worktree, cfg.Repo, cfg.Branch, cfg.TaskID, confirmCmd, finalizeCmd, cfg.TaskID)
 
 	if err := os.WriteFile(agentPath, []byte(agentBody), 0o644); err != nil {
 		return nil, fmt.Errorf("bootstrap write AGENT.md: %w", err)

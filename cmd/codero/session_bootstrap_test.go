@@ -85,6 +85,12 @@ func TestWriteSessionBootstrapWritesRuntimeNotes(t *testing.T) {
 	if !strings.Contains(string(sessionBody), "session confirm") {
 		t.Fatalf("SESSION.md missing session confirm command: %s", string(sessionBody))
 	}
+	if !strings.Contains(string(sessionBody), "## Completion Record") {
+		t.Fatalf("SESSION.md missing completion record stub: %s", string(sessionBody))
+	}
+	if !strings.Contains(string(sessionBody), `"task_id": "TASK-1"`) {
+		t.Fatalf("SESSION.md missing completion task_id stub: %s", string(sessionBody))
+	}
 	if got := result.Exports["CODERO_RUNTIME_DIR"]; got != filepath.Join(root, cfg.SessionID) {
 		t.Fatalf("runtime dir export: got %q", got)
 	}
