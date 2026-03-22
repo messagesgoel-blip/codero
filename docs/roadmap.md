@@ -282,6 +282,19 @@ Sprint 4 (Phase 2 start):
 
 ---
 
+## 6.1) Deferred Post-v3 Hardening Backlog
+
+These items are explicitly deferred for later implementation. They are not blockers for v3 session/compliance acceptance or the current PR `#86` closeout path.
+
+- High availability / failover: revisit standby-region or multi-region failover only after the current single-region durable-store model reaches measured operational limits. This likely requires a durable-store redesign, not a small patch.
+- Scalability under sustained load: plan backend horizontalization and possible sharding/priority separation for high-volume feedback aggregation and compliance workloads once single-writer SQLite throughput becomes a measured constraint.
+- Feedback precedence / conflict resolution: publish an explicit source-priority contract for conflicting signals (hard compliance, merge readiness / CI, human review, operator annotations) and define whether any audited override path should exist for non-hard signals.
+- Real-time feedback transport: evaluate SSE or WebSocket push delivery if polling and webhook catch-up become a measured latency bottleneck for operators or agents.
+- Extended timeout escalation: build on the existing lost/stuck/TTL detection with abnormal-duration alerts, reassignment, and escalation policies for assignments that remain stalled too long without progress.
+- Observability expansion: add queue saturation, reconciliation lag, rule-check latency, and operator troubleshooting views before attempting major scale-out or failover work.
+
+---
+
 ## 7) Risks and Mitigations
 
 Risk: hidden coupling when importing ghwatcher modules.
