@@ -98,11 +98,24 @@ func seedAgentAssignment(t *testing.T, db *sql.DB, assignmentID, sessionID, agen
 // seedAgentAssignmentWithSubstatus inserts one agent_assignments row with an optional substatus.
 func seedAgentAssignmentWithSubstatus(t *testing.T, db *sql.DB, assignmentID, sessionID, agentID, repo, branch, worktree, taskID, substatus string, startedAt time.Time) {
 	t.Helper()
+	stateValue := "active"
+	blockedReason := ""
+	switch {
+	case strings.HasPrefix(substatus, "blocked_"):
+		stateValue = "blocked"
+		blockedReason = strings.TrimPrefix(substatus, "blocked_")
+	case substatus == "terminal_cancelled":
+		stateValue = "cancelled"
+	case substatus == "terminal_lost" || substatus == "terminal_stuck_abandoned":
+		stateValue = "lost"
+	case strings.HasPrefix(substatus, "terminal_"):
+		stateValue = "completed"
+	}
 	// nosemgrep: go.lang.security.audit.sqli.gosql-sqli.gosql-sqli
 	_, err := db.Exec(`INSERT INTO agent_assignments
-		(assignment_id, session_id, agent_id, repo, branch, worktree, task_id, assignment_substatus, started_at, ended_at, end_reason, superseded_by)
-		VALUES (?,?,?,?,?,?,?,?,?,NULL,'',NULL)`,
-		assignmentID, sessionID, agentID, repo, branch, worktree, taskID, substatus, startedAt)
+		(assignment_id, session_id, agent_id, repo, branch, worktree, task_id, state, blocked_reason, assignment_substatus, started_at, ended_at, end_reason, superseded_by)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL,'',NULL)`,
+		assignmentID, sessionID, agentID, repo, branch, worktree, taskID, stateValue, blockedReason, substatus, startedAt)
 	if err != nil {
 		t.Fatalf("seedAgentAssignmentWithSubstatus: %v", err)
 	}
@@ -1108,7 +1121,7 @@ func TestAssignments_SubstatusAndTerminalState(t *testing.T) {
 	seedAgentSession(t, db, "sess-assign-done", "agent-assign-done", "cli", startedAt.Add(-time.Minute), lastSeen.Add(-time.Minute))
 	seedAgentAssignmentWithSubstatus(t, db, "assign-live", "sess-assign-live", "agent-assign-live", "acme/api", "feat/live", "", "COD-101", "waiting_for_ci", startedAt)
 	seedAgentAssignmentWithSubstatus(t, db, "assign-done", "sess-assign-done", "agent-assign-done", "acme/api", "feat/done", "", "COD-102", "terminal_finished", startedAt.Add(-time.Minute))
-	if _, err := db.Exec(`UPDATE agent_assignments SET ended_at = ?, end_reason = 'done' WHERE assignment_id = ?`, endedAt, "assign-done"); err != nil {
+	if _, err := db.Exec(`UPDATE agent_assignments SET ended_at = ?, end_reason = 'done', state = 'completed' WHERE assignment_id = ?`, endedAt, "assign-done"); err != nil {
 		t.Fatalf("finalize seeded assignment: %v", err)
 	}
 	if _, err := db.Exec(`UPDATE agent_sessions SET ended_at = ?, end_reason = 'done' WHERE session_id = ?`, endedAt, "sess-assign-done"); err != nil {
@@ -1163,11 +1176,14 @@ func TestCompliance_Empty(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(resp.Rules) != 2 {
-		t.Fatalf("rules len = %d, want 2 seeded rules", len(resp.Rules))
+	if len(resp.Rules) != 4 {
+		t.Fatalf("rules len = %d, want 4 seeded rules", len(resp.Rules))
 	}
-	if resp.Rules[0].RuleID != "RULE-001" || resp.Rules[1].RuleID != "RULE-002" {
-		t.Fatalf("rule ids = %+v, want RULE-001/RULE-002", resp.Rules)
+	wantRuleIDs := []string{"RULE-001", "RULE-002", "RULE-003", "RULE-004"}
+	for i, want := range wantRuleIDs {
+		if resp.Rules[i].RuleID != want {
+			t.Fatalf("rules[%d].rule_id = %q, want %q", i, resp.Rules[i].RuleID, want)
+		}
 	}
 	if len(resp.Checks) != 0 {
 		t.Fatalf("checks len = %d, want 0", len(resp.Checks))
@@ -1202,8 +1218,8 @@ func TestCompliance_WithRulesAndChecks(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(resp.Rules) != 2 {
-		t.Fatalf("rules len = %d, want 2", len(resp.Rules))
+	if len(resp.Rules) != 4 {
+		t.Fatalf("rules len = %d, want 4", len(resp.Rules))
 	}
 	if len(resp.Checks) != 1 {
 		t.Fatalf("checks len = %d, want 1", len(resp.Checks))

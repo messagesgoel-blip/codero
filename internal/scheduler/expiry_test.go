@@ -179,8 +179,8 @@ func TestExpiryWorker_AgentSessionExpiry_EndsSessionAndAssignment(t *testing.T) 
 	if session.EndedAt == nil {
 		t.Fatal("ended_at should be set")
 	}
-	if session.EndReason != "expired" {
-		t.Errorf("end_reason: got %q, want %q", session.EndReason, "expired")
+	if session.EndReason != "lost" {
+		t.Errorf("end_reason: got %q, want %q", session.EndReason, "lost")
 	}
 
 	_, err = state.GetActiveAgentAssignment(ctx, db, "sess-agent")
@@ -198,8 +198,11 @@ func TestExpiryWorker_AgentSessionExpiry_EndsSessionAndAssignment(t *testing.T) 
 	if assignments[0].EndedAt == nil {
 		t.Fatal("assignment ended_at should be set")
 	}
-	if assignments[0].EndReason != "expired" {
-		t.Errorf("assignment end_reason: got %q, want %q", assignments[0].EndReason, "expired")
+	if assignments[0].EndReason != "lost" {
+		t.Errorf("assignment end_reason: got %q, want %q", assignments[0].EndReason, "lost")
+	}
+	if assignments[0].Substatus != state.AssignmentSubstatusTerminalLost {
+		t.Errorf("assignment substatus: got %q, want %q", assignments[0].Substatus, state.AssignmentSubstatusTerminalLost)
 	}
 
 	events, err := state.ListAgentEvents(ctx, db, "sess-agent", 0)
@@ -209,8 +212,8 @@ func TestExpiryWorker_AgentSessionExpiry_EndsSessionAndAssignment(t *testing.T) 
 	if len(events) != 3 {
 		t.Fatalf("events count: got %d, want 3", len(events))
 	}
-	if events[len(events)-1].EventType != "session_expired" {
-		t.Errorf("event_type: got %q, want %q", events[len(events)-1].EventType, "session_expired")
+	if events[len(events)-1].EventType != "session_protocol_lost" {
+		t.Errorf("event_type: got %q, want %q", events[len(events)-1].EventType, "session_protocol_lost")
 	}
 }
 

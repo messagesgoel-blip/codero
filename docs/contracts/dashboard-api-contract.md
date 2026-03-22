@@ -316,6 +316,7 @@ Returns recent assignment rows across agent sessions, newest first.
       "branch": "feat/COD-071-assignment-substatus",
       "worktree": "/worktrees/codero/wt-1",
       "task_id": "COD-071",
+      "blocked_reason": "",
       "substatus": "waiting_for_ci",
       "mode": "cli",
       "state": "active",
@@ -333,7 +334,9 @@ Returns recent assignment rows across agent sessions, newest first.
 - `substatus` is optional but, when present, uses the approved assignment enum such as
   `in_progress`, `waiting_for_ci`, `waiting_for_merge_approval`,
   `blocked_*`, and `terminal_*`.
-- `state` is derived from assignment lifecycle data plus `substatus`.
+- `state` is the persisted assignment lifecycle field. When absent in older data, the
+  dashboard may derive a fallback value from terminal metadata plus `substatus`.
+- `blocked_reason` is optional and is emitted only for persisted blocked assignments.
 - `activity_state` is emitted only for live assignments. Ended assignments may still
   carry `substatus`, but clients must not treat them as active work.
 

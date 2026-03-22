@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -14,6 +15,8 @@ import (
 const (
 	RuleIDGateMustPassBeforeMerge = "RULE-001"
 	RuleIDNoSilentFailure         = "RULE-002"
+	RuleIDBranchHoldTTL           = "RULE-003"
+	RuleIDHeartbeatProgress       = "RULE-004"
 
 	AssignmentSubstatusInProgress                = "in_progress"
 	AssignmentSubstatusWaitingForCI              = "waiting_for_ci"
@@ -32,9 +35,10 @@ const (
 )
 
 var (
-	ErrAssignmentSubstatusRequired = errors.New("assignment substatus required")
-	ErrInvalidAssignmentSubstatus  = errors.New("invalid assignment substatus")
-	ErrAssignmentGateNotPassed     = errors.New("assignment gate must pass before completion")
+	ErrAssignmentSubstatusRequired   = errors.New("assignment substatus required")
+	ErrInvalidAssignmentSubstatus    = errors.New("invalid assignment substatus")
+	ErrAssignmentGateNotPassed       = errors.New("assignment gate must pass before completion")
+	ErrAssignmentComplianceNotPassed = errors.New("assignment compliance rules must pass before completion")
 )
 
 type assignmentLifecycleState string
@@ -46,6 +50,13 @@ const (
 	assignmentStateCancelled  assignmentLifecycleState = "cancelled"
 	assignmentStateSuperseded assignmentLifecycleState = "superseded"
 	assignmentStateLost       assignmentLifecycleState = "lost"
+)
+
+const (
+	assignmentBranchHoldTTL            = 72 * time.Hour
+	assignmentBranchHoldForceCancelTTL = assignmentBranchHoldTTL + (assignmentBranchHoldTTL / 2)
+	assignmentHeartbeatTTL             = 30 * time.Second
+	assignmentProgressTTL              = 60 * time.Minute
 )
 
 type agentRuleDefinition struct {
@@ -80,6 +91,28 @@ var defaultAgentRuleDefinitions = map[string]agentRuleDefinition{
 		Enforcement:     "hard",
 		ViolationAction: []string{"block", "fail"},
 		RoutingTarget:   "routing_team",
+		RuleVersion:     1,
+		Active:          true,
+	},
+	RuleIDBranchHoldTTL: {
+		RuleID:          RuleIDBranchHoldTTL,
+		RuleName:        "Branch hold TTL",
+		RuleKind:        "hold",
+		Description:     "An agent may not hold ownership of a branch for longer than branch_hold_TTL (default: 72 hours). At 1.5x TTL, Codero forcibly releases branch ownership and transitions the assignment to cancelled.",
+		Enforcement:     "hard",
+		ViolationAction: []string{"block", "notify"},
+		RoutingTarget:   "tech_lead",
+		RuleVersion:     1,
+		Active:          true,
+	},
+	RuleIDHeartbeatProgress: {
+		RuleID:          RuleIDHeartbeatProgress,
+		RuleName:        "Heartbeat and progress protocol",
+		RuleKind:        "protocol",
+		Description:     "An agent must emit a heartbeat every 30 seconds and advance progress_at at least every 60 minutes. Failure on heartbeat triggers the lost path. Failure on progress triggers the stuck path.",
+		Enforcement:     "hard",
+		ViolationAction: []string{"block", "log", "notify"},
+		RoutingTarget:   "infra",
 		RuleVersion:     1,
 		Active:          true,
 	},
@@ -213,6 +246,14 @@ func assignmentStateFromSubstatus(substatus string) string {
 	}
 }
 
+func blockedReasonFromSubstatus(substatus string) string {
+	normalized := normalizeAssignmentSubstatus(substatus)
+	if strings.HasPrefix(normalized, "blocked_") {
+		return strings.TrimPrefix(normalized, "blocked_")
+	}
+	return ""
+}
+
 func seedPendingAssignmentRuleChecksTx(ctx context.Context, tx *sql.Tx, assignmentID, sessionID string) error {
 	rules, err := listActiveAgentRuleDefinitionsTx(ctx, tx)
 	if err != nil {
@@ -272,7 +313,12 @@ func listActiveAgentRuleDefinitionsTx(ctx context.Context, tx *sql.Tx) ([]agentR
 	}
 
 	fallback := make([]agentRuleDefinition, 0, len(defaultAgentRuleDefinitions))
-	for _, ruleID := range []string{RuleIDGateMustPassBeforeMerge, RuleIDNoSilentFailure} {
+	for _, ruleID := range []string{
+		RuleIDGateMustPassBeforeMerge,
+		RuleIDNoSilentFailure,
+		RuleIDBranchHoldTTL,
+		RuleIDHeartbeatProgress,
+	} {
 		fallback = append(fallback, defaultAgentRuleDefinitions[ruleID])
 	}
 	return fallback, nil
@@ -466,4 +512,141 @@ func mergeGateReason(pass bool, branchState string, approved, ciGreen bool, pend
 	default:
 		return "merge_gate_blocked"
 	}
+}
+
+func evaluateRule003BranchHoldTTL(now time.Time, assignment *AgentAssignment) (bool, bool, map[string]any) {
+	if assignment == nil {
+		return false, false, map[string]any{
+			"reason": "assignment_missing",
+		}
+	}
+	age := now.UTC().Sub(assignment.StartedAt.UTC())
+	if age < 0 {
+		age = 0
+	}
+	pass := age <= assignmentBranchHoldTTL
+	forceCancel := age > assignmentBranchHoldForceCancelTTL
+	reason := "within_ttl"
+	switch {
+	case forceCancel:
+		reason = "force_release_required"
+	case !pass:
+		reason = "branch_hold_ttl_exceeded"
+	}
+	return pass, forceCancel, map[string]any{
+		"hold_age_seconds":         int64(age / time.Second),
+		"hold_ttl_seconds":         int64(assignmentBranchHoldTTL / time.Second),
+		"force_cancel_ttl_seconds": int64(assignmentBranchHoldForceCancelTTL / time.Second),
+		"reason":                   reason,
+	}
+}
+
+type rule004Evaluation struct {
+	Pass           bool
+	FailurePath    string
+	Classification string
+	Detail         map[string]any
+}
+
+func evaluateRule004HeartbeatProgress(now time.Time, session *AgentSession, assignment *AgentAssignment) rule004Evaluation {
+	if session == nil {
+		return rule004Evaluation{
+			Pass:           false,
+			FailurePath:    "lost",
+			Classification: "infrastructure_failure",
+			Detail: map[string]any{
+				"reason": "session_missing",
+			},
+		}
+	}
+
+	heartbeatAge := now.UTC().Sub(session.LastSeenAt.UTC())
+	if heartbeatAge < 0 {
+		heartbeatAge = 0
+	}
+	progressRef := session.StartedAt
+	if session.LastProgressAt != nil {
+		progressRef = *session.LastProgressAt
+	} else if assignment != nil && assignment.StartedAt.After(progressRef) {
+		progressRef = assignment.StartedAt
+	}
+	progressAge := now.UTC().Sub(progressRef.UTC())
+	if progressAge < 0 {
+		progressAge = 0
+	}
+
+	detail := map[string]any{
+		"heartbeat_age_seconds": int64(heartbeatAge / time.Second),
+		"heartbeat_ttl_seconds": int64(assignmentHeartbeatTTL / time.Second),
+		"progress_age_seconds":  int64(progressAge / time.Second),
+		"progress_ttl_seconds":  int64(assignmentProgressTTL / time.Second),
+		"reason":                "protocol_ok",
+	}
+	if session.LastProgressAt != nil {
+		detail["last_progress_at"] = session.LastProgressAt.UTC().Format(time.RFC3339)
+	}
+
+	switch {
+	case heartbeatAge > assignmentHeartbeatTTL:
+		detail["reason"] = "heartbeat_missing"
+		return rule004Evaluation{
+			Pass:           false,
+			FailurePath:    "lost",
+			Classification: "infrastructure_failure",
+			Detail:         detail,
+		}
+	case progressAge > assignmentProgressTTL:
+		detail["reason"] = "progress_stale"
+		return rule004Evaluation{
+			Pass:           false,
+			FailurePath:    "stuck",
+			Classification: "stuck_assignment",
+			Detail:         detail,
+		}
+	default:
+		return rule004Evaluation{
+			Pass:   true,
+			Detail: detail,
+		}
+	}
+}
+
+func activeRuleBlockersTx(ctx context.Context, tx *sql.Tx, assignmentID string) (map[string]string, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT arc.rule_id, arc.result
+		FROM assignment_rule_checks arc
+		JOIN agent_rules ar ON ar.rule_id = arc.rule_id
+		WHERE arc.assignment_id = ?
+		  AND ar.active = 1
+		  AND arc.result <> 'pass'
+		ORDER BY arc.rule_id ASC`,
+		assignmentID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list assignment rule blockers: %w", err)
+	}
+	defer rows.Close()
+
+	blockers := map[string]string{}
+	for rows.Next() {
+		var ruleID, result string
+		if err := rows.Scan(&ruleID, &result); err != nil {
+			return nil, fmt.Errorf("list assignment rule blockers: scan: %w", err)
+		}
+		blockers[ruleID] = result
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list assignment rule blockers: rows: %w", err)
+	}
+	return blockers, nil
+}
+
+func assignmentCompletionError(blockers map[string]string) error {
+	if len(blockers) == 1 && blockers[RuleIDGateMustPassBeforeMerge] == "fail" {
+		return ErrAssignmentGateNotPassed
+	}
+	if len(blockers) > 0 {
+		return ErrAssignmentComplianceNotPassed
+	}
+	return nil
 }

@@ -515,7 +515,7 @@ func queryAssignments(ctx context.Context, db *sql.DB, limit int) ([]AssignmentS
 	}
 
 	rows, err := db.QueryContext(ctx, `
-		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id, assignment_substatus,
+		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id, state, blocked_reason, assignment_substatus,
 		       started_at, ended_at, end_reason, superseded_by
 		FROM agent_assignments
 		ORDER BY started_at DESC
@@ -526,25 +526,27 @@ func queryAssignments(ctx context.Context, db *sql.DB, limit int) ([]AssignmentS
 	defer rows.Close()
 
 	type assignmentRow struct {
-		AssignmentID string
-		SessionID    string
-		AgentID      string
-		Repo         string
-		Branch       string
-		Worktree     string
-		TaskID       string
-		Substatus    sql.NullString
-		StartedAt    time.Time
-		EndedAt      sql.NullTime
-		EndReason    string
-		SupersededBy sql.NullString
+		AssignmentID  string
+		SessionID     string
+		AgentID       string
+		Repo          string
+		Branch        string
+		Worktree      string
+		TaskID        string
+		State         sql.NullString
+		BlockedReason sql.NullString
+		Substatus     sql.NullString
+		StartedAt     time.Time
+		EndedAt       sql.NullTime
+		EndReason     string
+		SupersededBy  sql.NullString
 	}
 
 	var raw []assignmentRow
 	for rows.Next() {
 		var row assignmentRow
 		if err := rows.Scan(
-			&row.AssignmentID, &row.SessionID, &row.AgentID, &row.Repo, &row.Branch, &row.Worktree, &row.TaskID, &row.Substatus,
+			&row.AssignmentID, &row.SessionID, &row.AgentID, &row.Repo, &row.Branch, &row.Worktree, &row.TaskID, &row.State, &row.BlockedReason, &row.Substatus,
 			&row.StartedAt, &row.EndedAt, &row.EndReason, &row.SupersededBy,
 		); err != nil {
 			return nil, fmt.Errorf("queryAssignments: scan row: %w", err)
@@ -604,6 +606,12 @@ func queryAssignments(ctx context.Context, db *sql.DB, limit int) ([]AssignmentS
 		if row.Substatus.Valid {
 			summary.Substatus = row.Substatus.String
 		}
+		if row.State.Valid {
+			summary.State = row.State.String
+		}
+		if row.BlockedReason.Valid {
+			summary.BlockedReason = row.BlockedReason.String
+		}
 		if row.EndedAt.Valid {
 			endedAt := row.EndedAt.Time
 			summary.EndedAt = &endedAt
@@ -623,7 +631,9 @@ func queryAssignments(ctx context.Context, db *sql.DB, limit int) ([]AssignmentS
 		if branchState, ok := branchStateByRepoBranch[row.Repo+"::"+row.Branch]; ok {
 			summary.BranchState = branchState
 		}
-		summary.State = assignmentStateFromSummary(summary)
+		if summary.State == "" || (summary.EndedAt != nil && summary.State == "active") {
+			summary.State = assignmentStateFromSummary(summary)
+		}
 		out = append(out, summary)
 	}
 	return out, nil

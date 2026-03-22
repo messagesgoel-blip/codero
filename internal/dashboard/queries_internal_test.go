@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -43,11 +44,24 @@ func seedAgentAssignmentForQueryTest(t *testing.T, db *sql.DB, assignmentID, ses
 
 func seedAgentAssignmentForQueryTestWithSubstatus(t *testing.T, db *sql.DB, assignmentID, sessionID, agentID, repo, branch, substatus string, startedAt time.Time) {
 	t.Helper()
+	stateValue := "active"
+	blockedReason := ""
+	switch {
+	case strings.HasPrefix(substatus, "blocked_"):
+		stateValue = "blocked"
+		blockedReason = strings.TrimPrefix(substatus, "blocked_")
+	case substatus == "terminal_cancelled":
+		stateValue = "cancelled"
+	case substatus == "terminal_lost" || substatus == "terminal_stuck_abandoned":
+		stateValue = "lost"
+	case strings.HasPrefix(substatus, "terminal_"):
+		stateValue = "completed"
+	}
 	// nosemgrep: go.lang.security.audit.sqli.gosql-sqli.gosql-sqli
 	_, err := db.Exec(`INSERT INTO agent_assignments
-		(assignment_id, session_id, agent_id, repo, branch, worktree, task_id, assignment_substatus, started_at, ended_at, end_reason, superseded_by)
-		VALUES (?,?,?,?,?,?,?,?,?,NULL,'',NULL)`,
-		assignmentID, sessionID, agentID, repo, branch, "", "", substatus, startedAt)
+		(assignment_id, session_id, agent_id, repo, branch, worktree, task_id, state, blocked_reason, assignment_substatus, started_at, ended_at, end_reason, superseded_by)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL,'',NULL)`,
+		assignmentID, sessionID, agentID, repo, branch, "", "", stateValue, blockedReason, substatus, startedAt)
 	if err != nil {
 		t.Fatalf("seedAgentAssignmentForQueryTestWithSubstatus: %v", err)
 	}
