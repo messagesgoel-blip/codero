@@ -1,7 +1,6 @@
 # Codero Repo Policy
 
-Global policy authority: `/srv/storage/AGENTS.md`.
-If any rule conflicts, global policy wins.
+Global references live in `/srv/storage/AGENTS.md`. This file defines Codero-specific policy.
 
 ## Canonical Path
 `/srv/storage/repo/codero/`
@@ -18,15 +17,10 @@ Does NOT own:
 - Runtime: Go (`cmd/`, `internal/`)
 - Storage: SQLite durable state and Redis coordination
 - Ops surfaces: `/health`, `/queue`, `/metrics`, `/gate`
-- Tool env: `/srv/storage/shared/tools/venvs/codero`
 
 ## Repo-Specific Tooling
-- Verify shared hook wiring with:
-  - `(cd /srv/storage/repo/codero && /srv/storage/shared/agent-toolkit/bin/install-hooks --verify)`
-- Preferred shared test entrypoints:
-  - `/srv/storage/shared/testing/codero.sh`
-  - `/srv/storage/shared/testing/run-tests`
-  - `/srv/storage/shared/testing/gate-matrix.sh`
+- Use shared hook verification and shared testing entrypoints for Codero.
+- Prefer `/srv/storage/shared/testing/codero.sh`, `/srv/storage/shared/testing/run-tests`, and `/srv/storage/shared/testing/gate-matrix.sh`.
 
 ## Ownership And Gatekeepers
 | Path | Owns | Gatekeeper |
@@ -51,20 +45,11 @@ Does NOT own:
 - Do not merge with unresolved CodeRabbit blocking comments.
 - One agent = one branch = one dedicated worktree path.
 
-## Local Dev Commands
-```bash
-go test ./...
-go test ./... -race
-```
-
 ## Testing Notes
 - Prefer contract and integration coverage for state transitions and heartbeat flows.
 - Keep `docs/contracts/` in sync with runtime behavior.
 - For gate behavior changes, validate CLI and `/gate` endpoint parity.
+- Common local verification: `go test ./...` and `go test ./... -race`.
 
 ## Definition Of Done
-A Codero task is done only when all are true:
-1. Changes are in canonical path `/srv/storage/repo/codero`.
-2. Required tests and gates pass.
-3. Changes are committed on a task branch.
-4. PR is opened with required context.
+A Codero task is done when required tests and gates pass, the change is committed on a task branch, and the PR is opened with required context.
