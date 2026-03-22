@@ -223,6 +223,8 @@ func assignmentActivityStateFromSubstatus(substatus string) string {
 		return "blocked"
 	case strings.HasPrefix(normalized, "waiting_for_"):
 		return "waiting"
+	case strings.HasPrefix(normalized, "terminal_"):
+		return "completed"
 	default:
 		return "active"
 	}
@@ -390,7 +392,8 @@ func recordAssignmentRuleCheckTx(
 	}
 
 	var res sql.Result
-	if result == "pass" {
+	switch result {
+	case "pass":
 		res, err = tx.ExecContext(ctx, `
 			UPDATE assignment_rule_checks
 			SET checked_at = datetime('now'),
@@ -403,7 +406,7 @@ func recordAssignmentRuleCheckTx(
 			WHERE assignment_id = ? AND rule_id = ?`,
 			result, string(actionsJSON), detailJSON, resolvedBy, assignmentID, ruleID,
 		)
-	} else {
+	case "fail":
 		res, err = tx.ExecContext(ctx, `
 			UPDATE assignment_rule_checks
 			SET checked_at = datetime('now'),
@@ -416,6 +419,8 @@ func recordAssignmentRuleCheckTx(
 			WHERE assignment_id = ? AND rule_id = ?`,
 			result, string(actionsJSON), detailJSON, assignmentID, ruleID,
 		)
+	default:
+		return fmt.Errorf("record assignment rule check %s: invalid result %q", ruleID, result)
 	}
 	if err != nil {
 		return fmt.Errorf("record assignment rule check %s: update: %w", ruleID, err)
@@ -428,7 +433,8 @@ func recordAssignmentRuleCheckTx(
 		return nil
 	}
 
-	if result == "pass" {
+	switch result {
+	case "pass":
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO assignment_rule_checks (
 				check_id, assignment_id, session_id, rule_id, rule_version, checked_at,
@@ -436,7 +442,7 @@ func recordAssignmentRuleCheckTx(
 			) VALUES (?, ?, ?, ?, ?, datetime('now'), ?, 0, ?, ?, datetime('now'), ?)`,
 			uuid.NewString(), assignmentID, sessionID, rule.RuleID, rule.RuleVersion, result, string(actionsJSON), detailJSON, resolvedBy,
 		)
-	} else {
+	case "fail":
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO assignment_rule_checks (
 				check_id, assignment_id, session_id, rule_id, rule_version, checked_at,
@@ -444,6 +450,8 @@ func recordAssignmentRuleCheckTx(
 			) VALUES (?, ?, ?, ?, ?, datetime('now'), ?, 1, ?, ?, NULL, '')`,
 			uuid.NewString(), assignmentID, sessionID, rule.RuleID, rule.RuleVersion, result, string(actionsJSON), detailJSON,
 		)
+	default:
+		return fmt.Errorf("record assignment rule check %s: invalid result %q", ruleID, result)
 	}
 	if err != nil {
 		return fmt.Errorf("record assignment rule check %s: insert: %w", ruleID, err)

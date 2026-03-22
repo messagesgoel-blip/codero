@@ -1164,6 +1164,47 @@ func TestAssignments_SubstatusAndTerminalState(t *testing.T) {
 	}
 }
 
+func TestAssignments_EndedRowsDoNotInheritLiveSessionActivity(t *testing.T) {
+	h, db := newTestHandler(t)
+	startedAt := time.Now().Add(-30 * time.Minute).UTC()
+	lastSeen := time.Now().Add(-20 * time.Second).UTC()
+	endedAt := time.Now().Add(-5 * time.Minute).UTC()
+
+	seedAgentSession(t, db, "sess-assign-mixed", "agent-mixed", "cli", startedAt, lastSeen)
+	seedAgentAssignmentWithSubstatus(t, db, "assign-old", "sess-assign-mixed", "agent-mixed", "acme/api", "feat/old", "", "COD-201", "terminal_finished", startedAt)
+	if _, err := db.Exec(`UPDATE agent_assignments SET ended_at = ?, end_reason = 'done', state = 'completed' WHERE assignment_id = ?`, endedAt, "assign-old"); err != nil {
+		t.Fatalf("finalize old assignment: %v", err)
+	}
+	seedAgentAssignmentWithSubstatus(t, db, "assign-live", "sess-assign-mixed", "agent-mixed", "acme/api", "feat/live", "", "COD-202", "waiting_for_ci", startedAt.Add(10*time.Minute))
+
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/assignments", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.AssignmentsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	var ended *dashboard.AssignmentSummary
+	for i := range resp.Assignments {
+		if resp.Assignments[i].AssignmentID == "assign-old" {
+			ended = &resp.Assignments[i]
+			break
+		}
+	}
+	if ended == nil {
+		t.Fatalf("missing ended assignment in response: %+v", resp.Assignments)
+	}
+	if ended.ActivityState != "" {
+		t.Fatalf("ended activity_state = %q, want empty", ended.ActivityState)
+	}
+	if ended.Mode != "" {
+		t.Fatalf("ended mode = %q, want empty", ended.Mode)
+	}
+}
+
 func TestCompliance_Empty(t *testing.T) {
 	h, _ := newTestHandler(t)
 

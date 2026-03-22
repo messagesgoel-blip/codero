@@ -141,6 +141,7 @@ func (w *ExpiryWorker) runSessionExpiry(ctx context.Context) {
 				loglib.FieldComponent, "expiry",
 				"error", err,
 			)
+			return
 		}
 
 		expired, err := state.ListExpiredAgentSessions(ctx, w.db, SessionHeartbeatTTL)

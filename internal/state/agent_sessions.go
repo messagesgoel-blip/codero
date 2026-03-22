@@ -714,11 +714,6 @@ func FinalizeAgentSession(ctx context.Context, db *DB, sessionID, agentID string
 				}
 				return blockErr
 			}
-		} else if !rule001Pass {
-			if err := tx.Commit(); err != nil {
-				return fmt.Errorf("finalize agent session: persist RULE-001 failure: %w", err)
-			}
-			return ErrAssignmentGateNotPassed
 		}
 	}
 

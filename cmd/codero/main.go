@@ -830,7 +830,7 @@ func sessionAttachCmd(configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&worktree, "worktree", "", "worktree path (default: CODERO_WORKTREE or cwd)")
 	cmd.Flags().StringVar(&mode, "mode", "", "session mode label (default: agent)")
 	cmd.Flags().StringVar(&taskID, "task-id", "", "optional task identifier")
-	cmd.Flags().StringVar(&substatus, "substatus", "", "assignment substatus (default: in_progress)")
+	cmd.Flags().StringVar(&substatus, "substatus", "in_progress", "assignment substatus")
 
 	return cmd
 }

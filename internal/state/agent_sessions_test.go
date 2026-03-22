@@ -829,6 +829,43 @@ func TestReconcileAgentAssignmentWaitingState(t *testing.T) {
 	}
 }
 
+func TestAssignmentActivityStateFromSubstatus_TerminalCompleted(t *testing.T) {
+	if got := assignmentActivityStateFromSubstatus(AssignmentSubstatusTerminalFinished); got != "completed" {
+		t.Fatalf("assignmentActivityStateFromSubstatus(terminal_finished) = %q, want completed", got)
+	}
+}
+
+func TestRecordAssignmentRuleCheckTx_RejectsInvalidResult(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	if err := RegisterAgentSession(ctx, db, "sess-invalid-result", "agent-1", "agent"); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	if err := AttachAgentAssignment(ctx, db, &AgentAssignment{
+		ID:        "assign-invalid-result",
+		SessionID: "sess-invalid-result",
+		AgentID:   "agent-1",
+		Repo:      "acme/api",
+		Branch:    "feat/invalid-result",
+		Worktree:  "/srv/storage/repo/codero/.worktrees/COD-071/.tmp-tests/invalid-result",
+		TaskID:    "TASK-16",
+	}); err != nil {
+		t.Fatalf("AttachAgentAssignment: %v", err)
+	}
+
+	tx, err := db.sql.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	err = recordAssignmentRuleCheckTx(ctx, tx, "assign-invalid-result", "sess-invalid-result", RuleIDGateMustPassBeforeMerge, "passed", false, nil, "codero")
+	if err == nil {
+		t.Fatal("expected invalid result error, got nil")
+	}
+}
+
 func TestListExpiredAgentSessions(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()

@@ -619,11 +619,11 @@ func queryAssignments(ctx context.Context, db *sql.DB, limit int) ([]AssignmentS
 		if row.SupersededBy.Valid {
 			summary.SupersededBy = row.SupersededBy.String
 		}
-		if session, ok := liveBySessionID[row.SessionID]; ok {
-			summary.Mode = session.Mode
-			summary.ActivityState = session.ActivityState
-		}
 		if summary.EndedAt == nil {
+			if session, ok := liveBySessionID[row.SessionID]; ok {
+				summary.Mode = session.Mode
+				summary.ActivityState = session.ActivityState
+			}
 			if activityState := assignmentActivityStateFromSubstatus(summary.Substatus); activityState != "active" || summary.ActivityState == "" {
 				summary.ActivityState = activityState
 			}
@@ -764,6 +764,8 @@ func assignmentActivityStateFromSubstatus(substatus string) string {
 		return "blocked"
 	case strings.HasPrefix(normalized, "waiting_for_"):
 		return "waiting"
+	case strings.HasPrefix(normalized, "terminal_"):
+		return "completed"
 	default:
 		return "active"
 	}
