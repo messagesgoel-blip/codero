@@ -354,7 +354,8 @@ func ExpireAgentSession(ctx context.Context, db *DB, sessionID, reason string) e
 		    end_reason = ?,
 		    state = ?,
 		    blocked_reason = '',
-		    assignment_substatus = ?
+		    assignment_substatus = ?,
+		    assignment_version = assignment_version + 1
 		WHERE session_id = ? AND ended_at IS NULL`,
 		now, reason, string(assignmentStateLost), terminalSubstatus, sessionID,
 	); err != nil {
@@ -442,7 +443,8 @@ func AttachAgentAssignment(ctx context.Context, db *DB, assignment *AgentAssignm
 		    state = ?,
 		    blocked_reason = '',
 		    assignment_substatus = ?,
-		    superseded_by = ?
+		    superseded_by = ?,
+		    assignment_version = assignment_version + 1
 		WHERE session_id = ? AND ended_at IS NULL`,
 		now, string(assignmentStateSuperseded), AssignmentSubstatusTerminalWaitingNextTask, assignment.ID, assignment.SessionID,
 	)
@@ -748,7 +750,7 @@ func FinalizeAgentSession(ctx context.Context, db *DB, sessionID, agentID string
 		blockedReason := blockedReasonFromSubstatus(substatus)
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE agent_assignments
-			SET ended_at = ?, end_reason = ?, state = ?, blocked_reason = ?, assignment_substatus = ?
+			SET ended_at = ?, end_reason = ?, state = ?, blocked_reason = ?, assignment_substatus = ?, assignment_version = assignment_version + 1
 			WHERE assignment_id = ? AND ended_at IS NULL`,
 			finishedAt, completion.Status, string(targetState), blockedReason, substatus, active.ID,
 		); err != nil {
@@ -890,7 +892,7 @@ func MonitorAgentAssignmentRules(ctx context.Context, db *DB, now time.Time) err
 			}
 			if _, err := tx.ExecContext(ctx, `
 				UPDATE agent_assignments
-				SET ended_at = ?, end_reason = ?, state = ?, blocked_reason = '', assignment_substatus = ?
+				SET ended_at = ?, end_reason = ?, state = ?, blocked_reason = '', assignment_substatus = ?, assignment_version = assignment_version + 1
 				WHERE assignment_id = ? AND ended_at IS NULL`,
 				now, reason, string(assignmentStateLost), substatus, contextRow.Assignment.ID,
 			); err != nil {
@@ -926,7 +928,7 @@ func MonitorAgentAssignmentRules(ctx context.Context, db *DB, now time.Time) err
 		if forceCancel {
 			if _, err := tx.ExecContext(ctx, `
 				UPDATE agent_assignments
-				SET ended_at = ?, end_reason = 'cancelled', state = ?, blocked_reason = '', assignment_substatus = ?
+				SET ended_at = ?, end_reason = 'cancelled', state = ?, blocked_reason = '', assignment_substatus = ?, assignment_version = assignment_version + 1
 				WHERE assignment_id = ? AND ended_at IS NULL`,
 				now, string(assignmentStateCancelled), AssignmentSubstatusTerminalCancelled, contextRow.Assignment.ID,
 			); err != nil {
@@ -1015,7 +1017,7 @@ func ReconcileAgentAssignmentWaitingState(ctx context.Context, db *DB, repo, bra
 
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE agent_assignments
-		SET state = ?, blocked_reason = '', assignment_substatus = ?
+		SET state = ?, blocked_reason = '', assignment_substatus = ?, assignment_version = assignment_version + 1
 		WHERE assignment_id = ? AND ended_at IS NULL`,
 		nextState, nextSubstatus, assignment.ID,
 	); err != nil {
@@ -1237,7 +1239,8 @@ func AcceptTask(ctx context.Context, db *DB, sessionID, taskID string) (*AgentAs
 			    state = ?,
 			    blocked_reason = '',
 			    assignment_substatus = ?,
-			    superseded_by = ?
+			    superseded_by = ?,
+			    assignment_version = assignment_version + 1
 			WHERE assignment_id = ? AND ended_at IS NULL`,
 			now, string(assignmentStateSuperseded), AssignmentSubstatusTerminalWaitingNextTask, assignmentID, priorAssignmentID,
 		); err != nil {
@@ -1313,9 +1316,17 @@ func AcceptTask(ctx context.Context, db *DB, sessionID, taskID string) (*AgentAs
 // recognized or not valid for an emit transition.
 var ErrInvalidEmitSubstatus = errors.New("invalid emit substatus")
 
-// validateEmitSubstatusNormalized checks that the given normalized substatus is
-// a recognized value for an emit update. It accepts active, blocked, and
-// terminal substatuses.
+var systemOwnedTerminalSubstatuses = map[string]struct{}{
+	AssignmentSubstatusTerminalWaitingNextTask: {},
+	AssignmentSubstatusTerminalLost:            {},
+	AssignmentSubstatusTerminalStuckAbandoned:  {},
+}
+
+func isSystemOwnedTerminalSubstatus(substatus string) bool {
+	_, ok := systemOwnedTerminalSubstatuses[substatus]
+	return ok
+}
+
 func validateEmitSubstatusNormalized(substatus string) error {
 	if substatus == "" {
 		return fmt.Errorf("%w: substatus must not be empty", ErrInvalidEmitSubstatus)
@@ -1327,6 +1338,9 @@ func validateEmitSubstatusNormalized(substatus string) error {
 		return nil
 	}
 	if _, ok := terminalAssignmentSubstatusSet[substatus]; ok {
+		if isSystemOwnedTerminalSubstatus(substatus) {
+			return fmt.Errorf("%w: %q is system-owned and cannot be set via emit", ErrInvalidEmitSubstatus, substatus)
+		}
 		return nil
 	}
 	return fmt.Errorf("%w: %q", ErrInvalidEmitSubstatus, substatus)

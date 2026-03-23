@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -1503,5 +1504,257 @@ func TestEmitAssignmentUpdate_NotFound(t *testing.T) {
 	_, err := EmitAssignmentUpdate(ctx, db, "nonexistent-assignment", 1, AssignmentSubstatusInProgress)
 	if !errors.Is(err, ErrAgentAssignmentNotFound) {
 		t.Fatalf("expected ErrAgentAssignmentNotFound; got: %v", err)
+	}
+}
+
+func TestEmitAssignmentUpdate_SystemOwnedTerminalSubstatusRejected(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	systemOwned := []string{
+		AssignmentSubstatusTerminalWaitingNextTask,
+		AssignmentSubstatusTerminalLost,
+		AssignmentSubstatusTerminalStuckAbandoned,
+	}
+
+	for _, substatus := range systemOwned {
+		t.Run(substatus, func(t *testing.T) {
+			a := mustAcceptTask(t, db, "sess-sys-"+substatus, "agent-a", "TASK-SYS-"+substatus)
+
+			_, err := EmitAssignmentUpdate(ctx, db, a.ID, 1, substatus)
+			if !errors.Is(err, ErrInvalidEmitSubstatus) {
+				t.Fatalf("expected ErrInvalidEmitSubstatus for %q; got: %v", substatus, err)
+			}
+			if !strings.Contains(err.Error(), "system-owned") {
+				t.Fatalf("error should mention system-owned; got: %v", err)
+			}
+		})
+	}
+}
+
+func TestEmitAssignmentUpdate_AgentSafeTerminalSubstatusAllowed(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	agentSafe := []string{
+		AssignmentSubstatusTerminalFinished,
+		AssignmentSubstatusTerminalWaitingComments,
+		AssignmentSubstatusTerminalCancelled,
+	}
+
+	for _, substatus := range agentSafe {
+		t.Run(substatus, func(t *testing.T) {
+			a := mustAcceptTask(t, db, "sess-safe-"+substatus, "agent-a", "TASK-SAFE-"+substatus)
+
+			updated, err := EmitAssignmentUpdate(ctx, db, a.ID, 1, substatus)
+			if err != nil {
+				t.Fatalf("emit with %q should succeed; got: %v", substatus, err)
+			}
+			if updated.Substatus != substatus {
+				t.Fatalf("substatus: got %q, want %q", updated.Substatus, substatus)
+			}
+			if updated.Version != 2 {
+				t.Fatalf("version: got %d, want 2", updated.Version)
+			}
+			if updated.EndedAt == nil {
+				t.Fatal("ended_at should be set for terminal substatus")
+			}
+		})
+	}
+}
+
+func TestEmitAssignmentUpdate_StaleEmitAfterMonitorLostRejected(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	if err := RegisterAgentSession(ctx, db, "sess-monitor-stale", "agent-a", "agent"); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	_, err := db.sql.ExecContext(ctx, `
+		INSERT INTO branch_states (
+			id, repo, branch, state, approved, ci_green, pending_events, unresolved_threads,
+			owner_agent, owner_session_id, owner_session_last_seen
+		)
+		VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?, ?, datetime('now'))`,
+		"branch-monitor-stale", "acme/api", "feat/monitor-stale", "coding", "agent-a", "sess-monitor-stale",
+	)
+	if err != nil {
+		t.Fatalf("seed branch state: %v", err)
+	}
+	if err := AttachAgentAssignment(ctx, db, &AgentAssignment{
+		ID:        "assign-monitor-stale",
+		SessionID: "sess-monitor-stale",
+		AgentID:   "agent-a",
+		Repo:      "acme/api",
+		Branch:    "feat/monitor-stale",
+		Worktree:  t.TempDir(),
+		TaskID:    "TASK-MONITOR-STALE",
+	}); err != nil {
+		t.Fatalf("AttachAgentAssignment: %v", err)
+	}
+
+	a, err := GetActiveAgentAssignment(ctx, db, "sess-monitor-stale")
+	if err != nil {
+		t.Fatalf("GetActiveAgentAssignment: %v", err)
+	}
+	originalVersion := a.Version
+
+	_, err = db.sql.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET last_seen_at = datetime('now','-2 minutes')
+		WHERE session_id = ?`,
+		"sess-monitor-stale",
+	)
+	if err != nil {
+		t.Fatalf("seed stale heartbeat: %v", err)
+	}
+
+	if err := MonitorAgentAssignmentRules(ctx, db, time.Now().UTC()); err != nil {
+		t.Fatalf("MonitorAgentAssignmentRules: %v", err)
+	}
+
+	_, err = EmitAssignmentUpdate(ctx, db, a.ID, originalVersion, AssignmentSubstatusInProgress)
+	if !errors.Is(err, ErrAssignmentEnded) {
+		t.Fatalf("expected ErrAssignmentEnded after monitor lost transition; got: %v", err)
+	}
+}
+
+func TestEmitAssignmentUpdate_StaleEmitAfterAcceptSupersedeRejected(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	mustRegisterSession(t, db, "sess-supersede-stale", "agent-a")
+
+	first, err := AcceptTask(ctx, db, "sess-supersede-stale", "TASK-FIRST-STALE")
+	if err != nil {
+		t.Fatalf("AcceptTask first: %v", err)
+	}
+	originalVersion := first.Version
+
+	second, err := AcceptTask(ctx, db, "sess-supersede-stale", "TASK-SECOND-STALE")
+	if err != nil {
+		t.Fatalf("AcceptTask second: %v", err)
+	}
+	if second.ID == first.ID {
+		t.Fatal("expected a new assignment for the second task")
+	}
+
+	_, err = EmitAssignmentUpdate(ctx, db, first.ID, originalVersion, AssignmentSubstatusInProgress)
+	if !errors.Is(err, ErrAssignmentEnded) {
+		t.Fatalf("expected ErrAssignmentEnded after supersede; got: %v", err)
+	}
+}
+
+func TestEmitAssignmentUpdate_StaleEmitAfterFinalizeRejected(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	if err := RegisterAgentSession(ctx, db, "sess-finalize-stale", "agent-a", "agent"); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	_, err := db.sql.ExecContext(ctx, `
+		INSERT INTO branch_states (
+			id, repo, branch, state, approved, ci_green, pending_events, unresolved_threads,
+			owner_agent, owner_session_id, owner_session_last_seen
+		)
+		VALUES (?, ?, ?, ?, 1, 1, 0, 0, ?, ?, datetime('now'))`,
+		"branch-finalize-stale", "acme/api", "feat/finalize-stale", "merge_ready", "agent-a", "sess-finalize-stale",
+	)
+	if err != nil {
+		t.Fatalf("seed branch state: %v", err)
+	}
+	if err := AttachAgentAssignment(ctx, db, &AgentAssignment{
+		ID:        "assign-finalize-stale",
+		SessionID: "sess-finalize-stale",
+		AgentID:   "agent-a",
+		Repo:      "acme/api",
+		Branch:    "feat/finalize-stale",
+		Worktree:  t.TempDir(),
+		TaskID:    "TASK-FINALIZE-STALE",
+	}); err != nil {
+		t.Fatalf("AttachAgentAssignment: %v", err)
+	}
+
+	a, err := GetActiveAgentAssignment(ctx, db, "sess-finalize-stale")
+	if err != nil {
+		t.Fatalf("GetActiveAgentAssignment: %v", err)
+	}
+	originalVersion := a.Version
+
+	if err := FinalizeAgentSession(ctx, db, "sess-finalize-stale", "agent-a", AgentSessionCompletion{
+		Status:     "done",
+		Substatus:  AssignmentSubstatusTerminalFinished,
+		Summary:    "completed",
+		FinishedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("FinalizeAgentSession: %v", err)
+	}
+
+	_, err = EmitAssignmentUpdate(ctx, db, a.ID, originalVersion, AssignmentSubstatusInProgress)
+	if !errors.Is(err, ErrAssignmentEnded) {
+		t.Fatalf("expected ErrAssignmentEnded after finalize; got: %v", err)
+	}
+}
+
+func TestEmitAssignmentUpdate_VersionIncrementsOnReconcile(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	if err := RegisterAgentSession(ctx, db, "sess-reconcile-version", "agent-a", "agent"); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	_, err := db.sql.ExecContext(ctx, `
+		INSERT INTO branch_states (
+			id, repo, branch, state, approved, ci_green, pending_events, unresolved_threads,
+			owner_agent, owner_session_id, owner_session_last_seen
+		)
+		VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?, ?, datetime('now'))`,
+		"branch-reconcile-version", "acme/api", "feat/reconcile-version", "reviewed", "agent-a", "sess-reconcile-version",
+	)
+	if err != nil {
+		t.Fatalf("seed branch state: %v", err)
+	}
+	if err := AttachAgentAssignment(ctx, db, &AgentAssignment{
+		ID:        "assign-reconcile-version",
+		SessionID: "sess-reconcile-version",
+		AgentID:   "agent-a",
+		Repo:      "acme/api",
+		Branch:    "feat/reconcile-version",
+		Worktree:  t.TempDir(),
+		TaskID:    "TASK-RECONCILE-VERSION",
+		Substatus: AssignmentSubstatusWaitingForCI,
+	}); err != nil {
+		t.Fatalf("AttachAgentAssignment: %v", err)
+	}
+
+	a, err := GetActiveAgentAssignment(ctx, db, "sess-reconcile-version")
+	if err != nil {
+		t.Fatalf("GetActiveAgentAssignment: %v", err)
+	}
+	originalVersion := a.Version
+
+	if _, err := db.sql.ExecContext(ctx, `
+		UPDATE branch_states
+		SET ci_green = 1, approved = 0, pending_events = 0, unresolved_threads = 0
+		WHERE repo = ? AND branch = ?`,
+		"acme/api", "feat/reconcile-version",
+	); err != nil {
+		t.Fatalf("update branch state: %v", err)
+	}
+	if err := ReconcileAgentAssignmentWaitingState(ctx, db, "acme/api", "feat/reconcile-version"); err != nil {
+		t.Fatalf("ReconcileAgentAssignmentWaitingState: %v", err)
+	}
+
+	_, err = EmitAssignmentUpdate(ctx, db, a.ID, originalVersion, AssignmentSubstatusInProgress)
+	if !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("expected ErrVersionConflict after reconcile; got: %v", err)
+	}
+
+	updated, err := GetActiveAgentAssignment(ctx, db, "sess-reconcile-version")
+	if err != nil {
+		t.Fatalf("GetActiveAgentAssignment after reconcile: %v", err)
+	}
+	if updated.Version != originalVersion+1 {
+		t.Fatalf("version after reconcile: got %d, want %d", updated.Version, originalVersion+1)
 	}
 }
