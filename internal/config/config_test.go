@@ -170,9 +170,16 @@ func TestValidate_ObservabilityPort(t *testing.T) {
 		GitHubToken:       "ghp_test",
 		Repos:             []string{"org/repo"},
 		ObservabilityPort: 8080,
+		APIServer: APIServerConfig{
+			Addr:            ":7700",
+			ShutdownTimeout: time.Second,
+		},
 		Sweeper: SweeperConfig{
-			Interval:   time.Second,
-			SessionTTL: time.Second,
+			Interval:          time.Second,
+			SessionTTL:        time.Second,
+			BranchHoldTTL:     time.Second,
+			HandoffTTL:        time.Second,
+			IssuePollInterval: time.Second,
 		},
 		AutoMerge: AutoMergeConfig{Method: "squash"},
 	}
@@ -228,6 +235,48 @@ func TestValidate_SweeperDurations(t *testing.T) {
 			},
 			want: ErrInvalidSessionTTL,
 		},
+		{
+			name: "branch hold ttl zero",
+			mut: func(c *Config) {
+				c.Sweeper.BranchHoldTTL = 0
+			},
+			want: ErrInvalidBranchHoldTTL,
+		},
+		{
+			name: "branch hold ttl negative",
+			mut: func(c *Config) {
+				c.Sweeper.BranchHoldTTL = -1 * time.Second
+			},
+			want: ErrInvalidBranchHoldTTL,
+		},
+		{
+			name: "handoff ttl zero",
+			mut: func(c *Config) {
+				c.Sweeper.HandoffTTL = 0
+			},
+			want: ErrInvalidHandoffTTL,
+		},
+		{
+			name: "handoff ttl negative",
+			mut: func(c *Config) {
+				c.Sweeper.HandoffTTL = -1 * time.Second
+			},
+			want: ErrInvalidHandoffTTL,
+		},
+		{
+			name: "issue poll interval zero",
+			mut: func(c *Config) {
+				c.Sweeper.IssuePollInterval = 0
+			},
+			want: ErrInvalidIssuePollInterval,
+		},
+		{
+			name: "issue poll interval negative",
+			mut: func(c *Config) {
+				c.Sweeper.IssuePollInterval = -1 * time.Second
+			},
+			want: ErrInvalidIssuePollInterval,
+		},
 	}
 
 	for _, tt := range tests {
@@ -238,6 +287,42 @@ func TestValidate_SweeperDurations(t *testing.T) {
 			tt.mut(c)
 
 			if err := c.Validate(); !errors.Is(err, tt.want) {
+				t.Fatalf("Validate() error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidate_APIServerAddr(t *testing.T) {
+	tests := []struct {
+		name string
+		addr string
+		want error
+	}{
+		{name: "default addr", addr: ":7700"},
+		{name: "loopback addr", addr: "127.0.0.1:7700"},
+		{name: "ipv6 addr", addr: "[::1]:7700"},
+		{name: "empty", addr: "", want: ErrInvalidAPIServerAddr},
+		{name: "missing port", addr: "localhost", want: ErrInvalidAPIServerAddr},
+		{name: "zero port", addr: ":0", want: ErrInvalidAPIServerAddr},
+		{name: "non numeric port", addr: "localhost:http", want: ErrInvalidAPIServerAddr},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := defaults()
+			c.GitHubToken = "ghp_test"
+			c.Repos = []string{"org/repo"}
+			c.APIServer.Addr = tt.addr
+
+			err := c.Validate()
+			if tt.want == nil {
+				if err != nil {
+					t.Fatalf("Validate() unexpected error = %v", err)
+				}
+				return
+			}
+			if !errors.Is(err, tt.want) {
 				t.Fatalf("Validate() error = %v, want %v", err, tt.want)
 			}
 		})
@@ -263,9 +348,16 @@ func TestValidate_DashboardBasePath(t *testing.T) {
 		GitHubToken:       "ghp_test",
 		Repos:             []string{"org/repo"},
 		ObservabilityPort: 8080,
+		APIServer: APIServerConfig{
+			Addr:            ":7700",
+			ShutdownTimeout: time.Second,
+		},
 		Sweeper: SweeperConfig{
-			Interval:   time.Second,
-			SessionTTL: time.Second,
+			Interval:          time.Second,
+			SessionTTL:        time.Second,
+			BranchHoldTTL:     time.Second,
+			HandoffTTL:        time.Second,
+			IssuePollInterval: time.Second,
 		},
 		DashboardBasePath: "/my-dashboard",
 		AutoMerge:         AutoMergeConfig{Method: "squash"},
@@ -278,9 +370,16 @@ func TestValidate_DashboardBasePath(t *testing.T) {
 		GitHubToken:       "ghp_test",
 		Repos:             []string{"org/repo"},
 		ObservabilityPort: 8080,
+		APIServer: APIServerConfig{
+			Addr:            ":7700",
+			ShutdownTimeout: time.Second,
+		},
 		Sweeper: SweeperConfig{
-			Interval:   time.Second,
-			SessionTTL: time.Second,
+			Interval:          time.Second,
+			SessionTTL:        time.Second,
+			BranchHoldTTL:     time.Second,
+			HandoffTTL:        time.Second,
+			IssuePollInterval: time.Second,
 		},
 		DashboardBasePath: "",
 		AutoMerge:         AutoMergeConfig{Method: "squash"},
@@ -306,9 +405,16 @@ func TestValidate_AutoMergeMethodAlwaysValidated(t *testing.T) {
 		GitHubToken:       "ghp_test",
 		Repos:             []string{"org/repo"},
 		ObservabilityPort: 8080,
+		APIServer: APIServerConfig{
+			Addr:            ":7700",
+			ShutdownTimeout: time.Second,
+		},
 		Sweeper: SweeperConfig{
-			Interval:   time.Second,
-			SessionTTL: time.Second,
+			Interval:          time.Second,
+			SessionTTL:        time.Second,
+			BranchHoldTTL:     time.Second,
+			HandoffTTL:        time.Second,
+			IssuePollInterval: time.Second,
 		},
 		AutoMerge: AutoMergeConfig{
 			Enabled: false,
@@ -323,9 +429,16 @@ func TestValidate_AutoMergeMethodAlwaysValidated(t *testing.T) {
 		GitHubToken:       "ghp_test",
 		Repos:             []string{"org/repo"},
 		ObservabilityPort: 8080,
+		APIServer: APIServerConfig{
+			Addr:            ":7700",
+			ShutdownTimeout: time.Second,
+		},
 		Sweeper: SweeperConfig{
-			Interval:   time.Second,
-			SessionTTL: time.Second,
+			Interval:          time.Second,
+			SessionTTL:        time.Second,
+			BranchHoldTTL:     time.Second,
+			HandoffTTL:        time.Second,
+			IssuePollInterval: time.Second,
 		},
 		AutoMerge: AutoMergeConfig{
 			Enabled: false,
@@ -653,5 +766,185 @@ api_server:
 	}
 	if c.APIServer.ShutdownTimeout != 20*time.Second {
 		t.Errorf("APIServer.ShutdownTimeout: got %s, want %s", c.APIServer.ShutdownTimeout, 20*time.Second)
+	}
+}
+
+func TestValidate_APIServerTimeouts(t *testing.T) {
+	tests := []struct {
+		name string
+		mut  func(*Config)
+		want error
+	}{
+		{
+			name: "shutdown timeout zero",
+			mut:  func(c *Config) { c.APIServer.ShutdownTimeout = 0 },
+			want: ErrInvalidShutdownTimeout,
+		},
+		{
+			name: "shutdown timeout negative",
+			mut:  func(c *Config) { c.APIServer.ShutdownTimeout = -1 * time.Second },
+			want: ErrInvalidShutdownTimeout,
+		},
+		{
+			name: "read timeout negative",
+			mut:  func(c *Config) { c.APIServer.ReadTimeout = -1 * time.Second },
+			want: ErrInvalidReadTimeout,
+		},
+		{
+			name: "write timeout negative",
+			mut:  func(c *Config) { c.APIServer.WriteTimeout = -1 * time.Second },
+			want: ErrInvalidWriteTimeout,
+		},
+		{
+			name: "read timeout zero is valid",
+			mut:  func(c *Config) { c.APIServer.ReadTimeout = 0 },
+		},
+		{
+			name: "write timeout zero is valid",
+			mut:  func(c *Config) { c.APIServer.WriteTimeout = 0 },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := defaults()
+			c.GitHubToken = "ghp_test"
+			c.Repos = []string{"org/repo"}
+			tt.mut(c)
+			err := c.Validate()
+			if tt.want == nil {
+				if err != nil {
+					t.Fatalf("Validate() unexpected error = %v", err)
+				}
+				return
+			}
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("Validate() error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestEnvOverrides_ZeroDurationIgnored(t *testing.T) {
+	// "0s" should NOT override defaults for strictly-positive sweeper fields.
+	t.Setenv("CODERO_SWEEPER_INTERVAL", "0s")
+	t.Setenv("CODERO_SESSION_TTL", "0s")
+	t.Setenv("CODERO_BRANCH_HOLD_TTL", "0s")
+	t.Setenv("CODERO_HANDOFF_TTL", "0s")
+	t.Setenv("CODERO_ISSUE_POLL_INTERVAL", "0s")
+	t.Setenv("CODERO_API_SHUTDOWN_TIMEOUT", "0s")
+
+	c := defaults()
+	applyEnvOverrides(c)
+
+	// All should retain positive defaults since "0s" was rejected.
+	if c.Sweeper.Interval <= 0 {
+		t.Errorf("Sweeper.Interval should retain default, got %s", c.Sweeper.Interval)
+	}
+	if c.Sweeper.SessionTTL <= 0 {
+		t.Errorf("Sweeper.SessionTTL should retain default, got %s", c.Sweeper.SessionTTL)
+	}
+	if c.Sweeper.BranchHoldTTL <= 0 {
+		t.Errorf("Sweeper.BranchHoldTTL should retain default, got %s", c.Sweeper.BranchHoldTTL)
+	}
+	if c.Sweeper.HandoffTTL <= 0 {
+		t.Errorf("Sweeper.HandoffTTL should retain default, got %s", c.Sweeper.HandoffTTL)
+	}
+	if c.Sweeper.IssuePollInterval <= 0 {
+		t.Errorf("Sweeper.IssuePollInterval should retain default, got %s", c.Sweeper.IssuePollInterval)
+	}
+	if c.APIServer.ShutdownTimeout <= 0 {
+		t.Errorf("APIServer.ShutdownTimeout should retain default, got %s", c.APIServer.ShutdownTimeout)
+	}
+}
+
+func TestEnvOverrides_ZeroDurationAcceptedForNonNegative(t *testing.T) {
+	// "0s" IS valid for read/write timeout (non-negative, not strictly positive).
+	t.Setenv("CODERO_API_READ_TIMEOUT", "0s")
+	t.Setenv("CODERO_API_WRITE_TIMEOUT", "0s")
+
+	c := defaults()
+	applyEnvOverrides(c)
+
+	if c.APIServer.ReadTimeout != 0 {
+		t.Errorf("APIServer.ReadTimeout: got %s, want 0s", c.APIServer.ReadTimeout)
+	}
+	if c.APIServer.WriteTimeout != 0 {
+		t.Errorf("APIServer.WriteTimeout: got %s, want 0s", c.APIServer.WriteTimeout)
+	}
+}
+
+func TestNormalizeCompat_LegacyBackfill(t *testing.T) {
+	tests := []struct {
+		name     string
+		apiAddr  string
+		obsHost  string
+		obsPort  int
+		wantAddr string
+	}{
+		{
+			name:     "default api_server.addr backfills from observability_port",
+			apiAddr:  ":7700",
+			obsHost:  "",
+			obsPort:  8080,
+			wantAddr: ":8080",
+		},
+		{
+			name:     "default api_server.addr backfills from custom observability_host and port",
+			apiAddr:  ":7700",
+			obsHost:  "127.0.0.1",
+			obsPort:  9090,
+			wantAddr: "127.0.0.1:9090",
+		},
+		{
+			name:     "explicit api_server.addr is not overridden",
+			apiAddr:  ":8800",
+			obsHost:  "127.0.0.1",
+			obsPort:  9090,
+			wantAddr: ":8800",
+		},
+		{
+			name:     "invalid observability_port skips backfill",
+			apiAddr:  ":7700",
+			obsHost:  "",
+			obsPort:  0,
+			wantAddr: ":7700",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := defaults()
+			c.APIServer.Addr = tt.apiAddr
+			c.ObservabilityHost = tt.obsHost
+			c.ObservabilityPort = tt.obsPort
+			normalizeCompat(c)
+			if c.APIServer.Addr != tt.wantAddr {
+				t.Errorf("APIServer.Addr = %q, want %q", c.APIServer.Addr, tt.wantAddr)
+			}
+		})
+	}
+}
+
+func TestNormalizeCompat_LoadEnvBackfill(t *testing.T) {
+	// Verify the full LoadEnv path applies legacy compat.
+	t.Setenv("GITHUB_TOKEN", "ghp_test")
+	t.Setenv("CODERO_REPOS", "org/repo")
+	t.Setenv("CODERO_OBSERVABILITY_HOST", "10.0.0.1")
+	t.Setenv("CODERO_OBSERVABILITY_PORT", "9090")
+
+	c := LoadEnv()
+	if c.APIServer.Addr != "10.0.0.1:9090" {
+		t.Errorf("APIServer.Addr = %q, want 10.0.0.1:9090 (backfilled from legacy)", c.APIServer.Addr)
+	}
+}
+
+func TestNormalizeCompat_LoadEnvExplicitAPIAddrWins(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "ghp_test")
+	t.Setenv("CODERO_REPOS", "org/repo")
+	t.Setenv("CODERO_API_ADDR", ":8800")
+	t.Setenv("CODERO_OBSERVABILITY_PORT", "9090")
+
+	c := LoadEnv()
+	if c.APIServer.Addr != ":8800" {
+		t.Errorf("APIServer.Addr = %q, want :8800 (explicit api_server.addr should win)", c.APIServer.Addr)
 	}
 }

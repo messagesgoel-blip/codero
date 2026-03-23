@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -57,6 +58,27 @@ var (
 
 	// ErrInvalidSessionTTL is returned when sweeper.session_ttl is not positive.
 	ErrInvalidSessionTTL = errors.New("sweeper.session_ttl must be greater than 0")
+
+	// ErrInvalidBranchHoldTTL is returned when sweeper.branch_hold_ttl is not positive.
+	ErrInvalidBranchHoldTTL = errors.New("sweeper.branch_hold_ttl must be greater than 0")
+
+	// ErrInvalidHandoffTTL is returned when sweeper.handoff_ttl is not positive.
+	ErrInvalidHandoffTTL = errors.New("sweeper.handoff_ttl must be greater than 0")
+
+	// ErrInvalidIssuePollInterval is returned when sweeper.issue_poll_interval is not positive.
+	ErrInvalidIssuePollInterval = errors.New("sweeper.issue_poll_interval must be greater than 0")
+
+	// ErrInvalidAPIServerAddr is returned when api_server.addr is empty or malformed.
+	ErrInvalidAPIServerAddr = errors.New("api_server.addr must be a valid host:port")
+
+	// ErrInvalidShutdownTimeout is returned when api_server.shutdown_timeout is not positive.
+	ErrInvalidShutdownTimeout = errors.New("api_server.shutdown_timeout must be greater than 0")
+
+	// ErrInvalidReadTimeout is returned when api_server.read_timeout is negative.
+	ErrInvalidReadTimeout = errors.New("api_server.read_timeout must not be negative")
+
+	// ErrInvalidWriteTimeout is returned when api_server.write_timeout is negative.
+	ErrInvalidWriteTimeout = errors.New("api_server.write_timeout must not be negative")
 )
 
 // RedisConfig holds Redis connection settings.
@@ -161,6 +183,7 @@ func Load(path string) (*Config, error) {
 	}
 
 	applyEnvOverrides(c)
+	normalizeCompat(c)
 
 	if err := c.Validate(); err != nil {
 		return nil, err
@@ -175,6 +198,7 @@ func Load(path string) (*Config, error) {
 func LoadEnv() *Config {
 	c := defaults()
 	applyEnvOverrides(c)
+	normalizeCompat(c)
 
 	if v := os.Getenv("GITHUB_TOKEN"); v != "" {
 		c.GitHubToken = v
@@ -187,6 +211,27 @@ func LoadEnv() *Config {
 		}
 	}
 	return c
+}
+
+// ParseAPIServerAddr validates and splits api_server.addr into host and port.
+// An empty host is allowed and means bind on all interfaces.
+func ParseAPIServerAddr(addr string) (string, int, error) {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return "", 0, ErrInvalidAPIServerAddr
+	}
+
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "", 0, ErrInvalidAPIServerAddr
+	}
+
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port < 1 || port > 65535 {
+		return "", 0, ErrInvalidAPIServerAddr
+	}
+
+	return host, port, nil
 }
 
 // defaults returns a Config pre-populated with safe built-in values.
@@ -324,29 +369,30 @@ func applyEnvOverrides(c *Config) {
 	if v := os.Getenv("CODERO_AUTO_MERGE_METHOD"); v != "" {
 		c.AutoMerge.Method = v
 	}
-	// Sweeper env overrides (§6.6).
+	// Sweeper env overrides (§6.6). Use parsePositiveDuration to reject "0s"
+	// which would override defaults and then fail in Validate().
 	if v := os.Getenv("CODERO_SWEEPER_INTERVAL"); v != "" {
-		if d, ok := parseNonNegativeDuration(v); ok {
+		if d, ok := parsePositiveDuration(v); ok {
 			c.Sweeper.Interval = d
 		}
 	}
 	if v := os.Getenv("CODERO_SESSION_TTL"); v != "" {
-		if d, ok := parseNonNegativeDuration(v); ok {
+		if d, ok := parsePositiveDuration(v); ok {
 			c.Sweeper.SessionTTL = d
 		}
 	}
 	if v := os.Getenv("CODERO_BRANCH_HOLD_TTL"); v != "" {
-		if d, ok := parseNonNegativeDuration(v); ok {
+		if d, ok := parsePositiveDuration(v); ok {
 			c.Sweeper.BranchHoldTTL = d
 		}
 	}
 	if v := os.Getenv("CODERO_HANDOFF_TTL"); v != "" {
-		if d, ok := parseNonNegativeDuration(v); ok {
+		if d, ok := parsePositiveDuration(v); ok {
 			c.Sweeper.HandoffTTL = d
 		}
 	}
 	if v := os.Getenv("CODERO_ISSUE_POLL_INTERVAL"); v != "" {
-		if d, ok := parseNonNegativeDuration(v); ok {
+		if d, ok := parsePositiveDuration(v); ok {
 			c.Sweeper.IssuePollInterval = d
 		}
 	}
@@ -365,9 +411,25 @@ func applyEnvOverrides(c *Config) {
 		}
 	}
 	if v := os.Getenv("CODERO_API_SHUTDOWN_TIMEOUT"); v != "" {
-		if d, ok := parseNonNegativeDuration(v); ok {
+		if d, ok := parsePositiveDuration(v); ok {
 			c.APIServer.ShutdownTimeout = d
 		}
+	}
+}
+
+// defaultAPIServerAddr is the built-in default for api_server.addr.
+const defaultAPIServerAddr = ":7700"
+
+// normalizeCompat backfills APIServer.Addr from legacy ObservabilityHost/ObservabilityPort
+// when api_server.addr was not explicitly configured (still at built-in default).
+// This preserves backward compatibility for operators using the older config fields.
+// Explicit api_server.addr (any non-default value) always takes precedence.
+func normalizeCompat(c *Config) {
+	if c.APIServer.Addr != defaultAPIServerAddr {
+		return // api_server.addr was explicitly set, no backfill
+	}
+	if c.ObservabilityPort >= 1 && c.ObservabilityPort <= 65535 {
+		c.APIServer.Addr = net.JoinHostPort(c.ObservabilityHost, strconv.Itoa(c.ObservabilityPort))
 	}
 }
 
@@ -393,11 +455,32 @@ func (c *Config) Validate() error {
 	if c.DashboardBasePath != "" && !strings.HasPrefix(c.DashboardBasePath, "/") {
 		return ErrInvalidDashboardBasePath
 	}
+	if _, _, err := ParseAPIServerAddr(c.APIServer.Addr); err != nil {
+		return err
+	}
+	if c.APIServer.ShutdownTimeout <= 0 {
+		return ErrInvalidShutdownTimeout
+	}
+	if c.APIServer.ReadTimeout < 0 {
+		return ErrInvalidReadTimeout
+	}
+	if c.APIServer.WriteTimeout < 0 {
+		return ErrInvalidWriteTimeout
+	}
 	if c.Sweeper.Interval <= 0 {
 		return ErrInvalidSweeperInterval
 	}
 	if c.Sweeper.SessionTTL <= 0 {
 		return ErrInvalidSessionTTL
+	}
+	if c.Sweeper.BranchHoldTTL <= 0 {
+		return ErrInvalidBranchHoldTTL
+	}
+	if c.Sweeper.HandoffTTL <= 0 {
+		return ErrInvalidHandoffTTL
+	}
+	if c.Sweeper.IssuePollInterval <= 0 {
+		return ErrInvalidIssuePollInterval
 	}
 	switch c.AutoMerge.Method {
 	case "merge", "squash", "rebase":
@@ -426,6 +509,16 @@ func classifyYAMLError(err error) error {
 func parseNonNegativeDuration(v string) (time.Duration, bool) {
 	d, err := time.ParseDuration(v)
 	if err != nil || d < 0 {
+		return 0, false
+	}
+	return d, true
+}
+
+// parsePositiveDuration parses a duration that must be strictly > 0.
+// Used for sweeper intervals and shutdown timeout where zero is invalid.
+func parsePositiveDuration(v string) (time.Duration, bool) {
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
 		return 0, false
 	}
 	return d, true

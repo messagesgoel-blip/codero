@@ -27,6 +27,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	configpkg "github.com/codero/codero/internal/config"
 	"github.com/codero/codero/internal/daemon"
 	dashboardpkg "github.com/codero/codero/internal/dashboard"
 	"github.com/codero/codero/internal/gatecheck"
@@ -72,12 +73,24 @@ Examples:
 
 			if cfg != nil {
 				if effectiveHost == "" {
-					bindHost, _ := apiBindHostPort(cfg.APIServer.Addr)
-					effectiveHost = bindHost
+					bindHost, _, err := apiBindHostPort(cfg.APIServer.Addr)
+					if err != nil {
+						if cfgErr == nil {
+							cfgErr = err
+						}
+					} else {
+						effectiveHost = bindHost
+					}
 				}
 				if effectivePort == 0 {
-					_, bindPort := apiBindHostPort(cfg.APIServer.Addr)
-					effectivePort = bindPort
+					_, bindPort, err := apiBindHostPort(cfg.APIServer.Addr)
+					if err != nil {
+						if cfgErr == nil {
+							cfgErr = err
+						}
+					} else {
+						effectivePort = bindPort
+					}
 				}
 				if cfg.DashboardBasePath != "" {
 					basePath = cfg.DashboardBasePath
@@ -414,23 +427,12 @@ func dashboardBaseURL(bindHost string, bindPort int) string {
 	return "http://" + net.JoinHostPort(host, strconv.Itoa(bindPort))
 }
 
-func apiBindHostPort(addr string) (string, int) {
-	const defaultPort = 7700
-	if addr == "" {
-		return "", defaultPort
-	}
-
-	host, portStr, err := net.SplitHostPort(addr)
+func apiBindHostPort(addr string) (string, int, error) {
+	host, port, err := configpkg.ParseAPIServerAddr(addr)
 	if err != nil {
-		return "", defaultPort
+		return "", 0, err
 	}
-
-	port, err := strconv.Atoi(portStr)
-	if err != nil || port <= 0 {
-		return host, defaultPort
-	}
-
-	return host, port
+	return host, port, nil
 }
 
 func withEnv(key, value string) func() {
@@ -514,7 +516,14 @@ Examples:
 			webhookPort := 9090
 
 			if cfg != nil {
-				obsHost, obsPort = apiBindHostPort(cfg.APIServer.Addr)
+				bindHost, bindPort, err := apiBindHostPort(cfg.APIServer.Addr)
+				if err != nil {
+					if cfgErr == nil {
+						cfgErr = err
+					}
+				} else {
+					obsHost, obsPort = bindHost, bindPort
+				}
 				if cfg.DashboardBasePath != "" {
 					dashBasePath = cfg.DashboardBasePath
 				}
