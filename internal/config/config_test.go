@@ -297,7 +297,7 @@ func TestEnvOverrides_PIDFileDerivesReadyFile(t *testing.T) {
 	if c.PIDFile != "/custom/run/codero.pid" {
 		t.Errorf("PIDFile: got %q, want /custom/run/codero.pid", c.PIDFile)
 	}
-	wantReady := "/custom/run/codero.ready"
+	wantReady := filepath.Join("/custom", "run", "codero.ready")
 	if c.ReadyFile != wantReady {
 		t.Errorf("ReadyFile: got %q, want %q (derived from PID dir)", c.ReadyFile, wantReady)
 	}

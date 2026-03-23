@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -104,7 +104,7 @@ func TestHealth_IncludesReadyField(t *testing.T) {
 		t.Errorf("/health status: got %d, want 200", rec.Code)
 	}
 	// JSON should contain "ready":false before MarkReady.
-	if !contains(body, `"ready":false`) {
+	if !strings.Contains(body, `"ready":false`) {
 		t.Errorf("/health body should contain ready:false; got: %s", body)
 	}
 
@@ -113,35 +113,21 @@ func TestHealth_IncludesReadyField(t *testing.T) {
 	rec2 := httptest.NewRecorder()
 	obs.server.Handler.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/health", nil))
 	body2 := rec2.Body.String()
-	if !contains(body2, `"ready":true`) {
+	if !strings.Contains(body2, `"ready":true`) {
 		t.Errorf("/health body after MarkReady should contain ready:true; got: %s", body2)
 	}
 }
 
-func contains(s, substr string) bool {
-	return len(s) > 0 && len(substr) > 0 && (s == substr || len(s) >= len(substr) && containsStr(s, substr))
-}
-
-func containsStr(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
-}
-
 func TestHandleSignals_CallsMarkNotReadyBeforeWait(t *testing.T) {
 	markNotReadyCalled := false
-	markNotReadyWhen := time.Time{}
+	orderChan := make(chan string, 2)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	startTime := time.Now()
-
 	go func() {
 		time.Sleep(50 * time.Millisecond)
+		orderChan <- "wgDone"
 		wg.Done()
 	}()
 
@@ -150,7 +136,7 @@ func TestHandleSignals_CallsMarkNotReadyBeforeWait(t *testing.T) {
 
 	markNotReady := func() {
 		markNotReadyCalled = true
-		markNotReadyWhen = time.Now()
+		orderChan <- "markNotReady"
 	}
 
 	sigChan := make(chan os.Signal, 1)
@@ -177,13 +163,9 @@ func TestHandleSignals_CallsMarkNotReadyBeforeWait(t *testing.T) {
 		t.Error("markNotReady should have been called")
 	}
 
-	if markNotReadyWhen.Before(startTime) {
-		t.Error("markNotReady should have been called after signal")
-	}
-
-	waitDoneTime := startTime.Add(50 * time.Millisecond)
-	if markNotReadyWhen.After(waitDoneTime) {
-		t.Error("markNotReady should be called before wg.Wait completes")
+	first := <-orderChan
+	if first != "markNotReady" {
+		t.Errorf("first ordering event = %q, want markNotReady", first)
 	}
 
 	select {
@@ -194,8 +176,6 @@ func TestHandleSignals_CallsMarkNotReadyBeforeWait(t *testing.T) {
 }
 
 func handleSignalsWithChan(cancel context.CancelFunc, wg *sync.WaitGroup, markNotReady func(), sigChan chan os.Signal) int {
-	defer signal.Stop(sigChan)
-
 	<-sigChan
 
 	if markNotReady != nil {
