@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	configpkg "github.com/codero/codero/internal/config"
 	"github.com/codero/codero/internal/dashboard"
 	"github.com/codero/codero/internal/gate"
 	loglib "github.com/codero/codero/internal/log"
@@ -392,7 +393,7 @@ func (o *ObservabilityServer) MarkNotReady() {
 }
 
 // DefaultObservabilityPort is the default port for observability endpoints.
-const DefaultObservabilityPort = "8080"
+const DefaultObservabilityPort = configpkg.DefaultAPIServerPortString
 
 // handleGate returns the current pre-commit gate progress as JSON.
 // Reads .codero/gate-heartbeat/progress.env written by two-pass-review.sh.

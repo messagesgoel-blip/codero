@@ -127,6 +127,21 @@ type APIServerConfig struct {
 	ShutdownTimeout time.Duration `yaml:"shutdown_timeout"` // default: 10s
 }
 
+const (
+	// DefaultAPIServerAddr is the built-in default for api_server.addr.
+	DefaultAPIServerAddr = ":7700"
+	// DefaultAPIServerPort is the numeric default API bind port.
+	DefaultAPIServerPort = 7700
+	// DefaultAPIServerPortString is the string form of the default API bind port.
+	DefaultAPIServerPortString = "7700"
+	// DefaultAPIServerReadTimeout is the built-in default for api_server.read_timeout.
+	DefaultAPIServerReadTimeout = 30 * time.Second
+	// DefaultAPIServerWriteTimeout is the built-in default for api_server.write_timeout.
+	DefaultAPIServerWriteTimeout = 60 * time.Second
+	// DefaultAPIServerShutdownTimeout is the built-in default for api_server.shutdown_timeout.
+	DefaultAPIServerShutdownTimeout = 10 * time.Second
+)
+
 // Config holds runtime configuration for the codero daemon.
 type Config struct {
 	GitHubToken       string          `yaml:"github_token"`
@@ -252,10 +267,10 @@ func defaults() *Config {
 			IssuePollInterval: 10 * time.Minute,
 		},
 		APIServer: APIServerConfig{
-			Addr:            ":7700",
-			ReadTimeout:     30 * time.Second,
-			WriteTimeout:    60 * time.Second,
-			ShutdownTimeout: 10 * time.Second,
+			Addr:            DefaultAPIServerAddr,
+			ReadTimeout:     DefaultAPIServerReadTimeout,
+			WriteTimeout:    DefaultAPIServerWriteTimeout,
+			ShutdownTimeout: DefaultAPIServerShutdownTimeout,
 		},
 		PIDFile:  "/var/run/codero/codero.pid",
 		LogLevel: "info",
@@ -376,22 +391,22 @@ func applyEnvOverrides(c *Config) {
 			c.Sweeper.Interval = d
 		}
 	}
-	if v := os.Getenv("CODERO_SESSION_TTL"); v != "" {
+	if v := firstNonEmptyEnv("CODERO_SWEEPER_SESSION_TTL", "CODERO_SESSION_TTL"); v != "" {
 		if d, ok := parsePositiveDuration(v); ok {
 			c.Sweeper.SessionTTL = d
 		}
 	}
-	if v := os.Getenv("CODERO_BRANCH_HOLD_TTL"); v != "" {
+	if v := firstNonEmptyEnv("CODERO_SWEEPER_BRANCH_HOLD_TTL", "CODERO_BRANCH_HOLD_TTL"); v != "" {
 		if d, ok := parsePositiveDuration(v); ok {
 			c.Sweeper.BranchHoldTTL = d
 		}
 	}
-	if v := os.Getenv("CODERO_HANDOFF_TTL"); v != "" {
+	if v := firstNonEmptyEnv("CODERO_SWEEPER_HANDOFF_TTL", "CODERO_HANDOFF_TTL"); v != "" {
 		if d, ok := parsePositiveDuration(v); ok {
 			c.Sweeper.HandoffTTL = d
 		}
 	}
-	if v := os.Getenv("CODERO_ISSUE_POLL_INTERVAL"); v != "" {
+	if v := firstNonEmptyEnv("CODERO_SWEEPER_ISSUE_POLL_INTERVAL", "CODERO_ISSUE_POLL_INTERVAL"); v != "" {
 		if d, ok := parsePositiveDuration(v); ok {
 			c.Sweeper.IssuePollInterval = d
 		}
@@ -417,15 +432,12 @@ func applyEnvOverrides(c *Config) {
 	}
 }
 
-// defaultAPIServerAddr is the built-in default for api_server.addr.
-const defaultAPIServerAddr = ":7700"
-
 // normalizeCompat backfills APIServer.Addr from legacy ObservabilityHost/ObservabilityPort
 // when api_server.addr was not explicitly configured (still at built-in default).
 // This preserves backward compatibility for operators using the older config fields.
 // Explicit api_server.addr (any non-default value) always takes precedence.
 func normalizeCompat(c *Config) {
-	if c.APIServer.Addr != defaultAPIServerAddr {
+	if c.APIServer.Addr != DefaultAPIServerAddr {
 		return // api_server.addr was explicitly set, no backfill
 	}
 	if c.ObservabilityPort >= 1 && c.ObservabilityPort <= 65535 {
@@ -522,4 +534,13 @@ func parsePositiveDuration(v string) (time.Duration, bool) {
 		return 0, false
 	}
 	return d, true
+}
+
+func firstNonEmptyEnv(keys ...string) string {
+	for _, key := range keys {
+		if v := os.Getenv(key); v != "" {
+			return v
+		}
+	}
+	return ""
 }

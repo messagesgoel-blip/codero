@@ -493,10 +493,14 @@ func daemonCmd(configPath *string) *cobra.Command {
 	cmd.Flags().DurationVar(&issuePollInterval, "issue-poll-interval", 10*time.Minute, "Issue poll interval (overrides config/env, default 10m)")
 
 	// API server config flags (§6.3).
-	cmd.Flags().StringVar(&apiAddr, "api-addr", ":7700", "API server bind address (overrides config/env, default :7700)")
-	cmd.Flags().DurationVar(&apiReadTimeout, "api-read-timeout", 30*time.Second, "API read timeout (overrides config/env, default 30s)")
-	cmd.Flags().DurationVar(&apiWriteTimeout, "api-write-timeout", 60*time.Second, "API write timeout (overrides config/env, default 60s)")
-	cmd.Flags().DurationVar(&apiShutdownTimeout, "api-shutdown-timeout", 10*time.Second, "API graceful shutdown timeout (overrides config/env, default 10s)")
+	cmd.Flags().StringVar(&apiAddr, "api-addr", config.DefaultAPIServerAddr,
+		fmt.Sprintf("API server bind address (overrides config/env, default %s)", config.DefaultAPIServerAddr))
+	cmd.Flags().DurationVar(&apiReadTimeout, "api-read-timeout", config.DefaultAPIServerReadTimeout,
+		fmt.Sprintf("API read timeout (overrides config/env, default %s)", config.DefaultAPIServerReadTimeout))
+	cmd.Flags().DurationVar(&apiWriteTimeout, "api-write-timeout", config.DefaultAPIServerWriteTimeout,
+		fmt.Sprintf("API write timeout (overrides config/env, default %s)", config.DefaultAPIServerWriteTimeout))
+	cmd.Flags().DurationVar(&apiShutdownTimeout, "api-shutdown-timeout", config.DefaultAPIServerShutdownTimeout,
+		fmt.Sprintf("API graceful shutdown timeout (overrides config/env, default %s)", config.DefaultAPIServerShutdownTimeout))
 
 	return cmd
 }

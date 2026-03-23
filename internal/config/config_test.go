@@ -653,22 +653,48 @@ func TestDefaults_SweeperConfig(t *testing.T) {
 func TestDefaults_APIServerConfig(t *testing.T) {
 	c := defaults()
 
-	if c.APIServer.Addr != ":7700" {
-		t.Errorf("APIServer.Addr: got %q, want :7700", c.APIServer.Addr)
+	if c.APIServer.Addr != DefaultAPIServerAddr {
+		t.Errorf("APIServer.Addr: got %q, want %s", c.APIServer.Addr, DefaultAPIServerAddr)
 	}
-	if c.APIServer.ReadTimeout != 30*time.Second {
-		t.Errorf("APIServer.ReadTimeout: got %s, want %s", c.APIServer.ReadTimeout, 30*time.Second)
+	if c.APIServer.ReadTimeout != DefaultAPIServerReadTimeout {
+		t.Errorf("APIServer.ReadTimeout: got %s, want %s", c.APIServer.ReadTimeout, DefaultAPIServerReadTimeout)
 	}
-	if c.APIServer.WriteTimeout != 60*time.Second {
-		t.Errorf("APIServer.WriteTimeout: got %s, want %s", c.APIServer.WriteTimeout, 60*time.Second)
+	if c.APIServer.WriteTimeout != DefaultAPIServerWriteTimeout {
+		t.Errorf("APIServer.WriteTimeout: got %s, want %s", c.APIServer.WriteTimeout, DefaultAPIServerWriteTimeout)
 	}
-	if c.APIServer.ShutdownTimeout != 10*time.Second {
-		t.Errorf("APIServer.ShutdownTimeout: got %s, want %s", c.APIServer.ShutdownTimeout, 10*time.Second)
+	if c.APIServer.ShutdownTimeout != DefaultAPIServerShutdownTimeout {
+		t.Errorf("APIServer.ShutdownTimeout: got %s, want %s", c.APIServer.ShutdownTimeout, DefaultAPIServerShutdownTimeout)
 	}
 }
 
 func TestEnvOverrides_SweeperConfig(t *testing.T) {
 	t.Setenv("CODERO_SWEEPER_INTERVAL", "2m")
+	t.Setenv("CODERO_SWEEPER_SESSION_TTL", "3m")
+	t.Setenv("CODERO_SWEEPER_BRANCH_HOLD_TTL", "48h")
+	t.Setenv("CODERO_SWEEPER_HANDOFF_TTL", "15m")
+	t.Setenv("CODERO_SWEEPER_ISSUE_POLL_INTERVAL", "5m")
+
+	c := defaults()
+	applyEnvOverrides(c)
+
+	if c.Sweeper.Interval != 2*time.Minute {
+		t.Errorf("Sweeper.Interval: got %s, want %s", c.Sweeper.Interval, 2*time.Minute)
+	}
+	if c.Sweeper.SessionTTL != 3*time.Minute {
+		t.Errorf("Sweeper.SessionTTL: got %s, want %s", c.Sweeper.SessionTTL, 3*time.Minute)
+	}
+	if c.Sweeper.BranchHoldTTL != 48*time.Hour {
+		t.Errorf("Sweeper.BranchHoldTTL: got %s, want %s", c.Sweeper.BranchHoldTTL, 48*time.Hour)
+	}
+	if c.Sweeper.HandoffTTL != 15*time.Minute {
+		t.Errorf("Sweeper.HandoffTTL: got %s, want %s", c.Sweeper.HandoffTTL, 15*time.Minute)
+	}
+	if c.Sweeper.IssuePollInterval != 5*time.Minute {
+		t.Errorf("Sweeper.IssuePollInterval: got %s, want %s", c.Sweeper.IssuePollInterval, 5*time.Minute)
+	}
+}
+
+func TestEnvOverrides_SweeperConfigLegacyAliases(t *testing.T) {
 	t.Setenv("CODERO_SESSION_TTL", "3m")
 	t.Setenv("CODERO_BRANCH_HOLD_TTL", "48h")
 	t.Setenv("CODERO_HANDOFF_TTL", "15m")
@@ -677,9 +703,6 @@ func TestEnvOverrides_SweeperConfig(t *testing.T) {
 	c := defaults()
 	applyEnvOverrides(c)
 
-	if c.Sweeper.Interval != 2*time.Minute {
-		t.Errorf("Sweeper.Interval: got %s, want %s", c.Sweeper.Interval, 2*time.Minute)
-	}
 	if c.Sweeper.SessionTTL != 3*time.Minute {
 		t.Errorf("Sweeper.SessionTTL: got %s, want %s", c.Sweeper.SessionTTL, 3*time.Minute)
 	}
@@ -827,10 +850,10 @@ func TestValidate_APIServerTimeouts(t *testing.T) {
 func TestEnvOverrides_ZeroDurationIgnored(t *testing.T) {
 	// "0s" should NOT override defaults for strictly-positive sweeper fields.
 	t.Setenv("CODERO_SWEEPER_INTERVAL", "0s")
-	t.Setenv("CODERO_SESSION_TTL", "0s")
-	t.Setenv("CODERO_BRANCH_HOLD_TTL", "0s")
-	t.Setenv("CODERO_HANDOFF_TTL", "0s")
-	t.Setenv("CODERO_ISSUE_POLL_INTERVAL", "0s")
+	t.Setenv("CODERO_SWEEPER_SESSION_TTL", "0s")
+	t.Setenv("CODERO_SWEEPER_BRANCH_HOLD_TTL", "0s")
+	t.Setenv("CODERO_SWEEPER_HANDOFF_TTL", "0s")
+	t.Setenv("CODERO_SWEEPER_ISSUE_POLL_INTERVAL", "0s")
 	t.Setenv("CODERO_API_SHUTDOWN_TIMEOUT", "0s")
 
 	c := defaults()

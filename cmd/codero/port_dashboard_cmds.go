@@ -100,7 +100,7 @@ Examples:
 				effectiveHost = "localhost"
 			}
 			if effectivePort == 0 {
-				effectivePort = 7700
+				effectivePort = configpkg.DefaultAPIServerPort
 			}
 			if cfgErr != nil {
 				fmt.Fprintf(os.Stderr, "note: config load error (%v); using defaults where needed\n", cfgErr)
@@ -149,7 +149,7 @@ Examples:
 	}
 
 	cmd.Flags().StringVar(&host, "host", "", "daemon host (default: from config or localhost)")
-	cmd.Flags().IntVar(&port, "port", 0, "daemon port (default: from config or 7700)")
+	cmd.Flags().IntVar(&port, "port", 0, fmt.Sprintf("daemon port (default: from config or %d)", configpkg.DefaultAPIServerPort))
 	cmd.Flags().StringVarP(&repoPath, "repo-path", "r", "", "path to repository root when serving a local fixture (default: current directory)")
 	cmd.Flags().StringVar(&reportPath, "report-path", "", "gate-check report file to expose from /api/v1/dashboard/gate-checks in fixture mode")
 	cmd.Flags().StringVar(&fixtureDirPath, "fixture-dir", "", "directory containing fixture data files (report.json, sessions.json, activity.json) for --serve-fixture mode")
@@ -295,7 +295,7 @@ func runDashboardFixture(bindHost string, bindPort int, basePath, repoPath, repo
 	}
 	allowPortRetry := bindPort == 0
 	if bindPort == 0 {
-		bindPort = 7700
+		bindPort = configpkg.DefaultAPIServerPort
 	}
 
 	fixtureDir, err := os.MkdirTemp("", "codero-dashboard-fixture-*")
@@ -509,7 +509,7 @@ Examples:
 
 			// Use config values or built-in defaults if config is unavailable.
 			obsHost := ""
-			obsPort := 7700
+			obsPort := configpkg.DefaultAPIServerPort
 			dashBasePath := "/dashboard"
 			dashPublicURL := ""
 			webhookEnabled := false

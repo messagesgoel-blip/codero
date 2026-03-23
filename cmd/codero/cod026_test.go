@@ -526,5 +526,24 @@ webhook:
 	}
 }
 
+func TestAPIBindHostPort_Valid(t *testing.T) {
+	host, port, err := apiBindHostPort(":7700")
+	if err != nil {
+		t.Fatalf("apiBindHostPort returned error: %v", err)
+	}
+	if host != "" {
+		t.Fatalf("host: got %q, want empty bind host", host)
+	}
+	if port != 7700 {
+		t.Fatalf("port: got %d, want 7700", port)
+	}
+}
+
+func TestAPIBindHostPort_Invalid(t *testing.T) {
+	if _, _, err := apiBindHostPort("localhost"); err == nil {
+		t.Fatal("expected malformed api_server.addr to return an error")
+	}
+}
+
 // strPtr is a helper that returns a pointer to a string literal.
 func strPtr(s string) *string { return &s }
