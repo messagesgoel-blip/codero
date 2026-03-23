@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -94,15 +95,58 @@ func loadConfig(path string) (*config.Config, error) {
 }
 
 // daemonCmd starts the long-running daemon process.
+// Startup order follows codero_daemon_spec_v2 §3:
+//
+//  1. PID file
+//  2. Config (flags > env > file > defaults)
+//  3. SQLite + migrations
+//  4. Redis (degrade on failure → polling-only mode)
+//  5. Signal handlers
+//  6. Components (delivery, scheduler, runner, expiry, reconciler)
+//  7. Observability server
+//  8. Ready sentinel + mark ready
+//  9. Block on signals → phased shutdown
 func daemonCmd(configPath *string) *cobra.Command {
-	return &cobra.Command{
-		Use:   "daemon",
-		Short: "Start the codero daemon",
+	var (
+		pidFile   string
+		readyFile string
+		dbPath    string
+		redisURL  string
+	)
+
+	cmd := &cobra.Command{
+		Use:     "daemon",
+		Aliases: []string{"serve"},
+		Short:   "Start the codero daemon",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// ─── Step 2: Load configuration ─────────────────────────
 			cfg, err := loadConfig(*configPath)
 			if err != nil {
 				return fmt.Errorf("codero: config: %w", err)
 			}
+
+			// CLI flag overrides (flags > env > config file > defaults).
+			// Apply before Validate so derived paths are correct.
+			pidFileOverride := pidFile != ""
+			readyFileOverride := readyFile != ""
+			if pidFile != "" {
+				cfg.PIDFile = pidFile
+			}
+			if readyFile != "" {
+				cfg.ReadyFile = readyFile
+			}
+			// If PID file was overridden but ready file was not,
+			// derive ready sentinel from the new PID location.
+			if pidFileOverride && !readyFileOverride {
+				cfg.ReadyFile = filepath.Join(filepath.Dir(cfg.PIDFile), "codero.ready")
+			}
+			if dbPath != "" {
+				cfg.DBPath = dbPath
+			}
+			if redisURL != "" {
+				cfg.Redis.Addr = redisURL
+			}
+
 			if err := cfg.Validate(); err != nil {
 				return fmt.Errorf("codero: config: %w", err)
 			}
@@ -118,40 +162,9 @@ func daemonCmd(configPath *string) *cobra.Command {
 				"version", version,
 			)
 
-			// CODERO_SKIP_GITHUB_SCOPE_CHECK=true bypasses the live GitHub API
-			// call that validates token scopes. Intended for E2E tests and
-			// isolated environments where a real token is unavailable. Never
-			// set this in production.
-			if os.Getenv("CODERO_SKIP_GITHUB_SCOPE_CHECK") == "true" {
-				loglib.Info("codero: github scope check skipped (E2E/test mode)",
-					loglib.FieldEventType, loglib.EventStartup,
-					loglib.FieldComponent, "daemon",
-				)
-			} else if err := config.ValidateTokenScopes(cmd.Context(), cfg.GitHubToken, nil); err != nil {
-				loglib.Error("codero: github scope check failed",
-					loglib.FieldEventType, loglib.EventStartup,
-					loglib.FieldComponent, "daemon",
-					"error", err,
-				)
-				var missingErr *config.ErrMissingScopes
-				if errors.As(err, &missingErr) {
-					return fmt.Errorf("codero: github token missing scopes: %s", strings.Join(missingErr.Missing, ", "))
-				}
-				return fmt.Errorf("codero: github scope check failed: %w", err)
-			}
-
-			// Redis must be reachable before doing anything else.
-			if err := daemon.CheckRedis(cmd.Context(), cfg.Redis.Addr, cfg.Redis.Password); err != nil {
-				loglib.Error("codero: redis unavailable",
-					loglib.FieldEventType, loglib.EventStartup,
-					loglib.FieldComponent, "daemon",
-					"error", err,
-					"addr", cfg.Redis.Addr,
-				)
-				return fmt.Errorf("codero: redis unavailable at %s: %w", cfg.Redis.Addr, err)
-			}
-
-			// Acquire PID file early to prevent duplicate daemon starts.
+			// ─── Step 1: PID file ───────────────────────────────────
+			// Written first to prevent duplicate daemon starts.
+			// Stale PID from unclean exit is detected and overwritten.
 			if err := daemon.WritePID(cfg.PIDFile); err != nil {
 				loglib.Error("codero: failed to write PID file",
 					loglib.FieldEventType, loglib.EventStartup,
@@ -161,10 +174,22 @@ func daemonCmd(configPath *string) *cobra.Command {
 				)
 				return fmt.Errorf("codero: %w", err)
 			}
-			// Remove PID file on exit (clean shutdown or error return).
-			// HandleSignals waits for all goroutines before returning, so the
-			// PID file outlives every subsystem cleanup defer below.
+			loglib.Info("codero: PID file written",
+				loglib.FieldEventType, loglib.EventStartup,
+				loglib.FieldComponent, "daemon",
+				"pid_file", cfg.PIDFile,
+			)
+
+			// Phased cleanup: PID file is removed on clean exit only.
+			// On unclean exit (grace period exceeded / SIGKILL) the PID file
+			// remains on disk so the next startup knows recovery is needed.
+			// The ready sentinel is removed immediately on signal receipt,
+			// not here in the defer.
+			cleanExit := false
 			defer func() {
+				if !cleanExit {
+					return
+				}
 				if err := daemon.RemovePID(cfg.PIDFile); err != nil {
 					loglib.Warn("codero: failed to remove PID file on exit",
 						loglib.FieldComponent, "daemon",
@@ -174,7 +199,7 @@ func daemonCmd(configPath *string) *cobra.Command {
 				}
 			}()
 
-			// Open SQLite state store and run pending migrations.
+			// ─── Step 3: SQLite + migrations ────────────────────────
 			db, err := state.Open(cfg.DBPath)
 			if err != nil {
 				loglib.Error("codero: state store open failed",
@@ -192,41 +217,73 @@ func daemonCmd(configPath *string) *cobra.Command {
 				"db_path", cfg.DBPath,
 			)
 
+			// ─── Step 4: Redis (degrade on failure) ─────────────────
+			// Per spec §5.1: Redis failure enters polling-only mode.
+			// The daemon continues with SQLite as source of truth.
+			redisAvailable := true
+			if err := daemon.CheckRedis(cmd.Context(), cfg.Redis.Addr, cfg.Redis.Password); err != nil {
+				loglib.Warn("codero: redis unavailable at startup — entering polling-only mode",
+					loglib.FieldEventType, loglib.EventStartup,
+					loglib.FieldComponent, "daemon",
+					"error", err,
+					"addr", cfg.Redis.Addr,
+				)
+				redisAvailable = false
+				daemon.SetDegraded(true)
+			}
+
+			// ─── Step 5: Signal handlers + context ──────────────────
+			// Must be registered before any goroutine spawns work.
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			var wg sync.WaitGroup
 
-			// Initialize Redis client and load Lua scripts.
-			// Startup fails fast if script loading fails.
+			// ─── Step 4b: Redis client and watch ────────────────────
 			client := redislib.New(cfg.Redis.Addr, cfg.Redis.Password)
 			defer client.Close()
-			if err := client.LoadScripts(ctx); err != nil {
-				loglib.Error("codero: redis script load failed",
-					loglib.FieldEventType, loglib.EventStartup,
-					loglib.FieldComponent, "daemon",
-					"error", err,
-				)
-				return fmt.Errorf("codero: redis script load failed: %w", err)
+
+			if redisAvailable {
+				if err := client.LoadScripts(ctx); err != nil {
+					loglib.Warn("codero: redis script load failed — continuing in polling-only mode",
+						loglib.FieldEventType, loglib.EventStartup,
+						loglib.FieldComponent, "daemon",
+						"error", err,
+					)
+					redisAvailable = false
+					daemon.SetDegraded(true)
+				}
 			}
 
-			// Monitor Redis connectivity after startup.
+			// Monitor Redis connectivity (reconnect on loss).
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				daemon.WatchRedis(ctx, client)
 			}()
 
-			// Sprint 5: initialize delivery stream, runner, expiry worker,
-			// reconciler, and (optionally) webhook receiver.
+			// ─── GitHub scope check (degrades, does not abort) ──────
+			if os.Getenv("CODERO_SKIP_GITHUB_SCOPE_CHECK") == "true" {
+				loglib.Info("codero: github scope check skipped (E2E/test mode)",
+					loglib.FieldEventType, loglib.EventStartup,
+					loglib.FieldComponent, "daemon",
+				)
+			} else if err := config.ValidateTokenScopes(cmd.Context(), cfg.GitHubToken, nil); err != nil {
+				loglib.Warn("codero: github scope check failed — GitHub operations may be degraded",
+					loglib.FieldEventType, loglib.EventStartup,
+					loglib.FieldComponent, "daemon",
+					"error", err,
+				)
+				// Per spec §5.2: GitHub-unavailable mode.
+				// Continue startup; tasks requiring GitHub are queued but not dispatched.
+			}
+
+			// ─── Step 6: Components ─────────────────────────────────
 			stream := delivery.NewStream(db, client)
 			queue := scheduler.NewQueue(client)
 			leaseMgr := scheduler.NewLeaseManager(client)
 
-			// GitHub client: shared by the review runner provider and the reconciler.
 			gh := ghclient.NewClient(cfg.GitHubToken)
 
-			// Review runner: consumes queued_cli branches and dispatches reviews.
-			// Uses the real GitHubProvider to fetch CodeRabbit review comments.
 			reviewRunner := runner.New(db, queue, leaseMgr, stream,
 				runner.NewGitHubProvider(gh),
 				runner.Config{Repos: cfg.Repos},
@@ -237,7 +294,6 @@ func daemonCmd(configPath *string) *cobra.Command {
 				reviewRunner.Run(ctx)
 			}()
 
-			// Expiry worker: session heartbeat TTL and lease audit.
 			expiryWorker := scheduler.NewExpiryWorker(db, queue, stream)
 			wg.Add(1)
 			go func() {
@@ -245,13 +301,7 @@ func daemonCmd(configPath *string) *cobra.Command {
 				expiryWorker.Run(ctx)
 			}()
 
-			// Reconciler: polls GitHub for drift repair.
-			// webhookEnabled=false → polling-only mode (60s interval).
-			reconciler := webhook.NewReconciler(db,
-				gh,
-				cfg.Repos,
-				cfg.Webhook.Enabled,
-			)
+			reconciler := webhook.NewReconciler(db, gh, cfg.Repos, cfg.Webhook.Enabled)
 			if cfg.AutoMerge.Enabled {
 				reconciler.WithAutoMerge(gh, cfg.AutoMerge.Method)
 				loglib.Info("codero: auto-merge enabled",
@@ -266,7 +316,7 @@ func daemonCmd(configPath *string) *cobra.Command {
 				reconciler.Run(ctx)
 			}()
 
-			// Observability server: exposes /health, /queue, /metrics, /ready.
+			// ─── Step 7: Observability server ───────────────────────
 			slotCounter := scheduler.NewSlotCounter(client)
 			obs := daemon.NewObservabilityServer(client, queue, slotCounter, db.Unwrap(),
 				cfg.ObservabilityHost, strconv.Itoa(cfg.ObservabilityPort),
@@ -286,8 +336,7 @@ func daemonCmd(configPath *string) *cobra.Command {
 				}
 			}()
 
-			// Webhook server: started only if explicitly enabled.
-			// Polling-only mode remains fully functional without it.
+			// Webhook server (optional).
 			if cfg.Webhook.Enabled {
 				dedup := webhook.NewDeduplicator(db, client)
 				proc := webhook.NewEventProcessor(db, stream).WithGitHubClient(gh)
@@ -318,19 +367,68 @@ func daemonCmd(configPath *string) *cobra.Command {
 					loglib.FieldComponent, "daemon",
 				)
 			}
+
+			// ─── Step 8: Ready sentinel + mark ready ────────────────
+			if err := daemon.WriteSentinel(cfg.ReadyFile); err != nil {
+				loglib.Error("codero: failed to write ready sentinel",
+					loglib.FieldEventType, loglib.EventStartup,
+					loglib.FieldComponent, "daemon",
+					"error", err,
+					"ready_file", cfg.ReadyFile,
+				)
+				return fmt.Errorf("codero: ready sentinel: %w", err)
+			}
+			obs.MarkReady()
+
 			loglib.Info("codero: daemon started",
 				loglib.FieldEventType, loglib.EventStartup,
 				loglib.FieldComponent, "daemon",
 				"pid", os.Getpid(),
 				"webhook_enabled", cfg.Webhook.Enabled,
+				"redis_available", redisAvailable,
 			)
 
-			if exitCode := daemon.HandleSignals(cancel, &wg); exitCode != 0 {
+			// ─── Step 9: Block on signals → phased shutdown ─────────
+			// Shutdown order per spec §4.1:
+			//   1. Mark not ready (stop serving new requests)
+			//   2. Cancel context (drain in-flight work)
+			//   3. Wait for goroutines (grace period)
+			//   4. Close Redis, then DB (deferred)
+			//   5. Remove PID sentinel (deferred, clean exit only)
+			//
+			// The ready sentinel is removed immediately on signal so that
+			// /ready returns 503 during the grace window even if the process
+			// is still running. This matches the spec requirement that readiness
+			// flips before drain, not after.
+			markNotReady := func() {
+				obs.MarkNotReady()
+				if err := daemon.RemoveSentinel(cfg.ReadyFile); err != nil {
+					loglib.Warn("codero: failed to remove ready sentinel during shutdown",
+						loglib.FieldComponent, "daemon",
+						"ready_file", cfg.ReadyFile,
+						"error", err,
+					)
+				}
+			}
+			exitCode := daemon.HandleSignals(cancel, &wg, markNotReady)
+
+			if exitCode != 0 {
+				// Grace period exceeded — leave PID on disk for recovery.
 				return fmt.Errorf("codero: grace period exceeded, shutdown incomplete")
 			}
+
+			cleanExit = true
 			return nil
 		},
 	}
+
+	// Daemon-specific CLI flags (highest precedence per spec §6).
+	cmd.Flags().StringVar(&pidFile, "pid-file", "", "PID file path (overrides config/env)")
+	cmd.Flags().StringVar(&readyFile, "ready-file", "", "ready sentinel path (overrides config/env)")
+	cmd.Flags().StringVar(&dbPath, "db-path", "", "SQLite database path (overrides config/env)")
+	cmd.Flags().StringVar(&redisURL, "redis-url", "", "Redis connection address (overrides config/env)")
+
+	return cmd
 }
 
 // statusCmd reads the PID file and reports daemon state.
