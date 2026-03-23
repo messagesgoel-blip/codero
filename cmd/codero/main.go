@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -371,17 +370,17 @@ func daemonCmd(configPath *string) *cobra.Command {
 				reconciler.Run(ctx)
 			}()
 
-			// ─── Step 7: Observability server ───────────────────────
+			// ─── Step 7: API/observability server ───────────────────
 			slotCounter := scheduler.NewSlotCounter(client)
-			obs := daemon.NewObservabilityServer(client, queue, slotCounter, db.Unwrap(),
-				cfg.ObservabilityHost, strconv.Itoa(cfg.ObservabilityPort),
+			obs := daemon.NewObservabilityServerWithAddr(client, queue, slotCounter, db.Unwrap(),
+				cfg.APIServer.Addr, cfg.APIServer.ReadTimeout, cfg.APIServer.WriteTimeout,
 				cfg.DashboardBasePath, version)
 			obs.Start()
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				<-ctx.Done()
-				stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				stopCtx, stopCancel := context.WithTimeout(context.Background(), cfg.APIServer.ShutdownTimeout)
 				defer stopCancel()
 				if err := obs.Stop(stopCtx); err != nil {
 					loglib.Error("codero: observability server shutdown error",

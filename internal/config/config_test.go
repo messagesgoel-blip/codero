@@ -170,7 +170,11 @@ func TestValidate_ObservabilityPort(t *testing.T) {
 		GitHubToken:       "ghp_test",
 		Repos:             []string{"org/repo"},
 		ObservabilityPort: 8080,
-		AutoMerge:         AutoMergeConfig{Method: "squash"},
+		Sweeper: SweeperConfig{
+			Interval:   time.Second,
+			SessionTTL: time.Second,
+		},
+		AutoMerge: AutoMergeConfig{Method: "squash"},
 	}
 	if err := valid.Validate(); err != nil {
 		t.Errorf("expected valid port to pass, got: %v", err)
@@ -187,6 +191,56 @@ func TestValidate_ObservabilityPort(t *testing.T) {
 		if !errors.Is(err, ErrInvalidObservabilityPort) {
 			t.Errorf("port %d: expected ErrInvalidObservabilityPort, got: %v", bad, err)
 		}
+	}
+}
+
+func TestValidate_SweeperDurations(t *testing.T) {
+	tests := []struct {
+		name string
+		mut  func(*Config)
+		want error
+	}{
+		{
+			name: "interval zero",
+			mut: func(c *Config) {
+				c.Sweeper.Interval = 0
+			},
+			want: ErrInvalidSweeperInterval,
+		},
+		{
+			name: "interval negative",
+			mut: func(c *Config) {
+				c.Sweeper.Interval = -1 * time.Second
+			},
+			want: ErrInvalidSweeperInterval,
+		},
+		{
+			name: "session ttl zero",
+			mut: func(c *Config) {
+				c.Sweeper.SessionTTL = 0
+			},
+			want: ErrInvalidSessionTTL,
+		},
+		{
+			name: "session ttl negative",
+			mut: func(c *Config) {
+				c.Sweeper.SessionTTL = -1 * time.Second
+			},
+			want: ErrInvalidSessionTTL,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := defaults()
+			c.GitHubToken = "ghp_test"
+			c.Repos = []string{"org/repo"}
+			tt.mut(c)
+
+			if err := c.Validate(); !errors.Is(err, tt.want) {
+				t.Fatalf("Validate() error = %v, want %v", err, tt.want)
+			}
+		})
 	}
 }
 
@@ -209,6 +263,10 @@ func TestValidate_DashboardBasePath(t *testing.T) {
 		GitHubToken:       "ghp_test",
 		Repos:             []string{"org/repo"},
 		ObservabilityPort: 8080,
+		Sweeper: SweeperConfig{
+			Interval:   time.Second,
+			SessionTTL: time.Second,
+		},
 		DashboardBasePath: "/my-dashboard",
 		AutoMerge:         AutoMergeConfig{Method: "squash"},
 	}
@@ -220,6 +278,10 @@ func TestValidate_DashboardBasePath(t *testing.T) {
 		GitHubToken:       "ghp_test",
 		Repos:             []string{"org/repo"},
 		ObservabilityPort: 8080,
+		Sweeper: SweeperConfig{
+			Interval:   time.Second,
+			SessionTTL: time.Second,
+		},
 		DashboardBasePath: "",
 		AutoMerge:         AutoMergeConfig{Method: "squash"},
 	}
@@ -244,6 +306,10 @@ func TestValidate_AutoMergeMethodAlwaysValidated(t *testing.T) {
 		GitHubToken:       "ghp_test",
 		Repos:             []string{"org/repo"},
 		ObservabilityPort: 8080,
+		Sweeper: SweeperConfig{
+			Interval:   time.Second,
+			SessionTTL: time.Second,
+		},
 		AutoMerge: AutoMergeConfig{
 			Enabled: false,
 			Method:  "invalid",
@@ -257,6 +323,10 @@ func TestValidate_AutoMergeMethodAlwaysValidated(t *testing.T) {
 		GitHubToken:       "ghp_test",
 		Repos:             []string{"org/repo"},
 		ObservabilityPort: 8080,
+		Sweeper: SweeperConfig{
+			Interval:   time.Second,
+			SessionTTL: time.Second,
+		},
 		AutoMerge: AutoMergeConfig{
 			Enabled: false,
 			Method:  "squash",

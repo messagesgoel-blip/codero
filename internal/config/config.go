@@ -51,6 +51,12 @@ var (
 
 	// ErrInvalidMergeMethod is returned when auto_merge.method is not a valid GitHub merge strategy.
 	ErrInvalidMergeMethod = errors.New("auto_merge.method must be 'merge', 'squash', or 'rebase'")
+
+	// ErrInvalidSweeperInterval is returned when sweeper.interval is not positive.
+	ErrInvalidSweeperInterval = errors.New("sweeper.interval must be greater than 0")
+
+	// ErrInvalidSessionTTL is returned when sweeper.session_ttl is not positive.
+	ErrInvalidSessionTTL = errors.New("sweeper.session_ttl must be greater than 0")
 )
 
 // RedisConfig holds Redis connection settings.
@@ -386,6 +392,12 @@ func (c *Config) Validate() error {
 	}
 	if c.DashboardBasePath != "" && !strings.HasPrefix(c.DashboardBasePath, "/") {
 		return ErrInvalidDashboardBasePath
+	}
+	if c.Sweeper.Interval <= 0 {
+		return ErrInvalidSweeperInterval
+	}
+	if c.Sweeper.SessionTTL <= 0 {
+		return ErrInvalidSessionTTL
 	}
 	switch c.AutoMerge.Method {
 	case "merge", "squash", "rebase":

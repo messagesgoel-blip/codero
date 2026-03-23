@@ -472,7 +472,7 @@ func TestPortsCmd_DefaultOutput(t *testing.T) {
 		t.Errorf("portsCmd returned unexpected error: %v", err)
 	}
 	out := buf.String()
-	for _, want := range []string{"observability", "dashboard SPA", "8080", "/dashboard"} {
+	for _, want := range []string{"observability", "dashboard SPA", "7700", "/dashboard"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("portsCmd output missing %q\nfull output:\n%s", want, out)
 		}
@@ -488,7 +488,8 @@ func TestPortsCmd_WebhookConflictWarning(t *testing.T) {
 	content := `github_token: ghp_test
 repos:
   - org/repo
-observability_port: 9090
+api_server:
+  addr: ":9090"
 webhook:
   enabled: true
   port: 9090

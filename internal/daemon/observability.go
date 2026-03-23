@@ -49,6 +49,12 @@ type ObservabilityServer struct {
 // host is the bind address (empty string → all interfaces); port is the TCP port string.
 // dashboardBasePath is the URL prefix for the dashboard SPA (default "/dashboard").
 func NewObservabilityServer(redisClient *redis.Client, queue *scheduler.Queue, slotCounter *scheduler.SlotCounter, db *sql.DB, host, port, dashboardBasePath, version string) *ObservabilityServer {
+	return NewObservabilityServerWithAddr(redisClient, queue, slotCounter, db, net.JoinHostPort(host, port), 0, 0, dashboardBasePath, version)
+}
+
+// NewObservabilityServerWithAddr creates a new observability server using a full
+// bind address plus server-level read/write timeouts.
+func NewObservabilityServerWithAddr(redisClient *redis.Client, queue *scheduler.Queue, slotCounter *scheduler.SlotCounter, db *sql.DB, addr string, readTimeout, writeTimeout time.Duration, dashboardBasePath, version string) *ObservabilityServer {
 	if dashboardBasePath == "" {
 		dashboardBasePath = "/dashboard"
 	}
@@ -63,8 +69,13 @@ func NewObservabilityServer(redisClient *redis.Client, queue *scheduler.Queue, s
 
 	mux := http.NewServeMux()
 	server := &http.Server{
-		Addr:    net.JoinHostPort(host, port),
-		Handler: mux,
+		Addr:         addr,
+		Handler:      mux,
+		ReadTimeout:  readTimeout,
+		WriteTimeout: writeTimeout,
+	}
+	if readTimeout > 0 {
+		server.ReadHeaderTimeout = readTimeout
 	}
 
 	repoPath := os.Getenv("CODERO_REPO_PATH")
