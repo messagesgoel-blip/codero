@@ -1443,8 +1443,24 @@ func EmitAssignmentUpdate(ctx context.Context, db *DB, assignmentID string, curr
 	if rowsErr != nil {
 		return nil, fmt.Errorf("emit assignment update: rows affected: %w", rowsErr)
 	}
+	if affected == 0 {
+		return nil, fmt.Errorf("%w: assignment %s changed during update", ErrVersionConflict, assignmentID)
+	}
 	if affected != 1 {
 		return nil, fmt.Errorf("emit assignment update: unexpected rows affected: %d", affected)
+	}
+
+	if isTerminal {
+		if err := appendAgentEventTx(ctx, tx, assignment.SessionID, assignment.AgentID, "assignment_substatus_updated", map[string]any{
+			"assignment_id":  assignment.ID,
+			"repo":           assignment.Repo,
+			"branch":         assignment.Branch,
+			"from_substatus": assignment.Substatus,
+			"to_substatus":   normalized,
+			"end_reason":     endReason,
+		}); err != nil {
+			return nil, fmt.Errorf("emit assignment update: append event: %w", err)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {

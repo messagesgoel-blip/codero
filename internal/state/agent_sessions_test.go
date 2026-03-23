@@ -1478,6 +1478,35 @@ func TestEmitAssignmentUpdate_TerminalSetsEndedAt(t *testing.T) {
 	}
 }
 
+func TestEmitAssignmentUpdate_TerminalEmitAppendsEvent(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	a := mustAcceptTask(t, db, "sess-emit-terminal-event", "agent-a", "TASK-EVENT")
+
+	if _, err := EmitAssignmentUpdate(ctx, db, a.ID, 1, AssignmentSubstatusTerminalCancelled); err != nil {
+		t.Fatalf("terminal emit: %v", err)
+	}
+
+	events, err := ListAgentEvents(ctx, db, a.SessionID, 0)
+	if err != nil {
+		t.Fatalf("ListAgentEvents: %v", err)
+	}
+	if len(events) == 0 {
+		t.Fatal("expected at least one event")
+	}
+	last := events[len(events)-1]
+	if last.EventType != "assignment_substatus_updated" {
+		t.Fatalf("latest event_type = %q, want assignment_substatus_updated", last.EventType)
+	}
+	if !strings.Contains(last.Payload, `"assignment_id":"`+a.ID+`"`) {
+		t.Fatalf("payload missing assignment_id %q: %s", a.ID, last.Payload)
+	}
+	if !strings.Contains(last.Payload, `"to_substatus":"`+AssignmentSubstatusTerminalCancelled+`"`) {
+		t.Fatalf("payload missing terminal substatus %q: %s", AssignmentSubstatusTerminalCancelled, last.Payload)
+	}
+}
+
 func TestEmitAssignmentUpdate_DuplicateStrictRejection(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
