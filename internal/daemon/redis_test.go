@@ -50,3 +50,49 @@ func TestCheckRedis_SuccessWithMiniredis(t *testing.T) {
 		t.Fatalf("CheckRedis against miniredis: %v", err)
 	}
 }
+
+func TestCheckRedisWithRetry_Defaults(t *testing.T) {
+	// Test that zero values fall back to defaults
+	mr := miniredis.RunT(t)
+	err := CheckRedisWithRetry(context.Background(), mr.Addr(), "", 0, 0)
+	if err != nil {
+		t.Fatalf("CheckRedisWithRetry with zero values should use defaults: %v", err)
+	}
+}
+
+func TestCheckRedisWithRetry_CustomRetries(t *testing.T) {
+	// Test custom retry count with a failing address
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { l.Close() })
+	addr := l.Addr().String()
+
+	go func() {
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				return
+			}
+			conn.Close()
+		}
+	}()
+
+	err = CheckRedisWithRetry(context.Background(), addr, "", 2, 0)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrRedisUnavailable) {
+		t.Errorf("expected ErrRedisUnavailable, got: %v", err)
+	}
+}
+
+func TestCheckRedisWithRetry_SuccessWithMiniredis(t *testing.T) {
+	mr := miniredis.RunT(t)
+	err := CheckRedisWithRetry(context.Background(), mr.Addr(), "", 3, 1)
+	if err != nil {
+		t.Fatalf("CheckRedisWithRetry against miniredis: %v", err)
+	}
+}

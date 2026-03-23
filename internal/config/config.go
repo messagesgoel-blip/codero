@@ -54,8 +54,11 @@ var (
 
 // RedisConfig holds Redis connection settings.
 type RedisConfig struct {
-	Addr     string `yaml:"addr"`
-	Password string `yaml:"password"`
+	Addr           string `yaml:"addr"`
+	Password       string `yaml:"password"`
+	MaxRetries     int    `yaml:"max_retries"`
+	RetryInterval  int    `yaml:"retry_interval"`  // seconds
+	HealthInterval int    `yaml:"health_interval"` // seconds
 }
 
 // AutoMergeConfig controls automatic PR merging once merge_ready conditions are met.
@@ -164,8 +167,11 @@ func LoadEnv() *Config {
 func defaults() *Config {
 	c := &Config{
 		Redis: RedisConfig{
-			Addr:     "localhost:6379",
-			Password: "",
+			Addr:           "localhost:6379",
+			Password:       "",
+			MaxRetries:     3,
+			RetryInterval:  1,
+			HealthInterval: 30,
 		},
 		PIDFile:  "/var/run/codero/codero.pid",
 		LogLevel: "info",
@@ -198,6 +204,21 @@ func applyEnvOverrides(c *Config) {
 	}
 	if v := os.Getenv("CODERO_REDIS_PASS"); v != "" {
 		c.Redis.Password = v
+	}
+	if v := os.Getenv("CODERO_REDIS_MAX_RETRIES"); v != "" {
+		if i, err := strconv.Atoi(v); err == nil && i >= 0 {
+			c.Redis.MaxRetries = i
+		}
+	}
+	if v := os.Getenv("CODERO_REDIS_RETRY_INTERVAL"); v != "" {
+		if i, err := strconv.Atoi(v); err == nil && i >= 0 {
+			c.Redis.RetryInterval = i
+		}
+	}
+	if v := os.Getenv("CODERO_REDIS_HEALTH_INTERVAL"); v != "" {
+		if i, err := strconv.Atoi(v); err == nil && i >= 0 {
+			c.Redis.HealthInterval = i
+		}
 	}
 	pidFileEnvSet := false
 	if v := os.Getenv("CODERO_PID_FILE"); v != "" {

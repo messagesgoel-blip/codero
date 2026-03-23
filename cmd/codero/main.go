@@ -108,10 +108,13 @@ func loadConfig(path string) (*config.Config, error) {
 //  9. Block on signals → phased shutdown
 func daemonCmd(configPath *string) *cobra.Command {
 	var (
-		pidFile   string
-		readyFile string
-		dbPath    string
-		redisURL  string
+		pidFile             string
+		readyFile           string
+		dbPath              string
+		redisURL            string
+		redisMaxRetries     int
+		redisRetryInterval  int
+		redisHealthInterval int
 	)
 
 	cmd := &cobra.Command{
@@ -145,6 +148,15 @@ func daemonCmd(configPath *string) *cobra.Command {
 			}
 			if redisURL != "" {
 				cfg.Redis.Addr = redisURL
+			}
+			if cmd.Flags().Changed("redis-max-retries") {
+				cfg.Redis.MaxRetries = redisMaxRetries
+			}
+			if cmd.Flags().Changed("redis-retry-interval") {
+				cfg.Redis.RetryInterval = redisRetryInterval
+			}
+			if cmd.Flags().Changed("redis-health-interval") {
+				cfg.Redis.HealthInterval = redisHealthInterval
 			}
 
 			if err := cfg.Validate(); err != nil {
@@ -221,12 +233,13 @@ func daemonCmd(configPath *string) *cobra.Command {
 			// Per spec §5.1: Redis failure enters polling-only mode.
 			// The daemon continues with SQLite as source of truth.
 			redisAvailable := true
-			if err := daemon.CheckRedis(cmd.Context(), cfg.Redis.Addr, cfg.Redis.Password); err != nil {
+			if err := daemon.CheckRedisWithRetry(cmd.Context(), cfg.Redis.Addr, cfg.Redis.Password, cfg.Redis.MaxRetries, cfg.Redis.RetryInterval); err != nil {
 				loglib.Warn("codero: redis unavailable at startup — entering polling-only mode",
 					loglib.FieldEventType, loglib.EventStartup,
 					loglib.FieldComponent, "daemon",
 					"error", err,
 					"addr", cfg.Redis.Addr,
+					"retries", cfg.Redis.MaxRetries,
 				)
 				redisAvailable = false
 				daemon.SetDegraded(true)
@@ -258,7 +271,7 @@ func daemonCmd(configPath *string) *cobra.Command {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				daemon.WatchRedis(ctx, client)
+				daemon.WatchRedisWithInterval(ctx, client, cfg.Redis.HealthInterval)
 			}()
 
 			// ─── GitHub scope check (degrades, does not abort) ──────
@@ -427,6 +440,9 @@ func daemonCmd(configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&readyFile, "ready-file", "", "ready sentinel path (overrides config/env)")
 	cmd.Flags().StringVar(&dbPath, "db-path", "", "SQLite database path (overrides config/env)")
 	cmd.Flags().StringVar(&redisURL, "redis-url", "", "Redis connection address (overrides config/env)")
+	cmd.Flags().IntVar(&redisMaxRetries, "redis-max-retries", 3, "Redis startup retry attempts (overrides config/env, default 3)")
+	cmd.Flags().IntVar(&redisRetryInterval, "redis-retry-interval", 1, "Redis retry backoff interval in seconds (overrides config/env, default 1)")
+	cmd.Flags().IntVar(&redisHealthInterval, "redis-health-interval", 30, "Redis health check interval in seconds (overrides config/env, default 30)")
 
 	return cmd
 }
