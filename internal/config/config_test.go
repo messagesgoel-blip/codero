@@ -333,3 +333,115 @@ func TestEnvOverrides_NoPIDOverrideKeepsDefaultReady(t *testing.T) {
 		t.Errorf("ReadyFile: got %q, want default %q", c.ReadyFile, wantReady)
 	}
 }
+
+func TestDefaults_RedisConfig(t *testing.T) {
+	c := defaults()
+
+	if c.Redis.MaxRetries != 3 {
+		t.Errorf("Redis.MaxRetries: got %d, want 3", c.Redis.MaxRetries)
+	}
+	if c.Redis.RetryInterval != 1 {
+		t.Errorf("Redis.RetryInterval: got %d, want 1", c.Redis.RetryInterval)
+	}
+	if c.Redis.HealthInterval != 30 {
+		t.Errorf("Redis.HealthInterval: got %d, want 30", c.Redis.HealthInterval)
+	}
+}
+
+func TestEnvOverrides_RedisConfig(t *testing.T) {
+	t.Setenv("CODERO_REDIS_MAX_RETRIES", "5")
+	t.Setenv("CODERO_REDIS_RETRY_INTERVAL", "2")
+	t.Setenv("CODERO_REDIS_HEALTH_INTERVAL", "60")
+
+	c := defaults()
+	applyEnvOverrides(c)
+
+	if c.Redis.MaxRetries != 5 {
+		t.Errorf("Redis.MaxRetries: got %d, want 5", c.Redis.MaxRetries)
+	}
+	if c.Redis.RetryInterval != 2 {
+		t.Errorf("Redis.RetryInterval: got %d, want 2", c.Redis.RetryInterval)
+	}
+	if c.Redis.HealthInterval != 60 {
+		t.Errorf("Redis.HealthInterval: got %d, want 60", c.Redis.HealthInterval)
+	}
+}
+
+func TestEnvOverrides_RedisConfigInvalidValuesIgnored(t *testing.T) {
+	tests := []struct {
+		name    string
+		envKey  string
+		envVal  string
+		wantMax int
+		wantInt int
+		wantHLT int
+	}{
+		{
+			name:    "max retries invalid string",
+			envKey:  "CODERO_REDIS_MAX_RETRIES",
+			envVal:  "invalid",
+			wantMax: 3,
+			wantInt: 1,
+			wantHLT: 30,
+		},
+		{
+			name:    "max retries negative",
+			envKey:  "CODERO_REDIS_MAX_RETRIES",
+			envVal:  "-1",
+			wantMax: 3,
+			wantInt: 1,
+			wantHLT: 30,
+		},
+		{
+			name:    "retry interval invalid string",
+			envKey:  "CODERO_REDIS_RETRY_INTERVAL",
+			envVal:  "invalid",
+			wantMax: 3,
+			wantInt: 1,
+			wantHLT: 30,
+		},
+		{
+			name:    "retry interval negative",
+			envKey:  "CODERO_REDIS_RETRY_INTERVAL",
+			envVal:  "-1",
+			wantMax: 3,
+			wantInt: 1,
+			wantHLT: 30,
+		},
+		{
+			name:    "health interval invalid string",
+			envKey:  "CODERO_REDIS_HEALTH_INTERVAL",
+			envVal:  "invalid",
+			wantMax: 3,
+			wantInt: 1,
+			wantHLT: 30,
+		},
+		{
+			name:    "health interval negative",
+			envKey:  "CODERO_REDIS_HEALTH_INTERVAL",
+			envVal:  "-1",
+			wantMax: 3,
+			wantInt: 1,
+			wantHLT: 30,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(tt.envKey, tt.envVal)
+
+			c := defaults()
+			applyEnvOverrides(c)
+
+			if c.Redis.MaxRetries != tt.wantMax {
+				t.Errorf("Redis.MaxRetries: got %d, want %d", c.Redis.MaxRetries, tt.wantMax)
+			}
+			if c.Redis.RetryInterval != tt.wantInt {
+				t.Errorf("Redis.RetryInterval: got %d, want %d", c.Redis.RetryInterval, tt.wantInt)
+			}
+			if c.Redis.HealthInterval != tt.wantHLT {
+				t.Errorf("Redis.HealthInterval: got %d, want %d", c.Redis.HealthInterval, tt.wantHLT)
+			}
+		})
+	}
+}

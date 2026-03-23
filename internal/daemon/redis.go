@@ -16,14 +16,45 @@ var ErrRedisUnavailable = errors.New("redis unavailable")
 // degraded is set to 1 when Redis connectivity is lost after startup.
 var degraded atomic.Int32
 
-// CheckRedis attempts to PING the configured Redis address.
-// Returns nil on success. Retries 3 times with 1-second backoff.
-// Returns ErrRedisUnavailable if all attempts fail.
+// CheckRedis attempts a single PING to the configured Redis address.
+// Returns nil on success, ErrRedisUnavailable on failure.
+// For startup retry with backoff, use CheckRedisWithRetry.
 func CheckRedis(ctx context.Context, addr, password string) error {
 	if err := redislib.CheckHealth(ctx, addr, password); err != nil {
 		return errors.Join(ErrRedisUnavailable, err)
 	}
 	return nil
+}
+
+// CheckRedisWithRetry attempts to PING the configured Redis address with
+// configurable retry count and backoff interval.
+// Returns nil on success. Returns ErrRedisUnavailable if all attempts fail.
+// Per spec §6.2: defaults are 3 retries with 1s backoff.
+func CheckRedisWithRetry(ctx context.Context, addr, password string, maxRetries, retryIntervalSec int) error {
+	if maxRetries <= 0 {
+		maxRetries = 3
+	}
+	if retryIntervalSec <= 0 {
+		retryIntervalSec = 1
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(retryIntervalSec) * time.Second):
+			}
+		}
+
+		if err := redislib.CheckHealth(ctx, addr, password); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+	}
+	return errors.Join(ErrRedisUnavailable, lastErr)
 }
 
 // WatchRedis monitors Redis connectivity after startup.
@@ -32,6 +63,15 @@ func CheckRedis(ctx context.Context, addr, password string) error {
 // On reconnect: logs "redis restored", clears the degraded flag.
 // Runs as a goroutine — call go WatchRedis(ctx, client).
 func WatchRedis(ctx context.Context, client *redislib.Client) {
+	WatchRedisWithInterval(ctx, client, 0)
+}
+
+// WatchRedisWithInterval monitors Redis connectivity with a configurable
+// health check interval. Per spec §6.2: default is 30 seconds.
+func WatchRedisWithInterval(ctx context.Context, client *redislib.Client, healthIntervalSec int) {
+	if healthIntervalSec <= 0 {
+		healthIntervalSec = 30
+	}
 	backoff := time.Second
 	const maxBackoff = 30 * time.Second
 
@@ -39,7 +79,7 @@ func WatchRedis(ctx context.Context, client *redislib.Client) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(5 * time.Second):
+		case <-time.After(time.Duration(healthIntervalSec) * time.Second):
 		}
 
 		if err := client.Ping(ctx); err != nil {
