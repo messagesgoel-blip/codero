@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	neturl "net/url"
 	"os"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	configpkg "github.com/codero/codero/internal/config"
 	"github.com/codero/codero/internal/daemon"
 	dashboardpkg "github.com/codero/codero/internal/dashboard"
 	"github.com/codero/codero/internal/gatecheck"
@@ -71,10 +73,24 @@ Examples:
 
 			if cfg != nil {
 				if effectiveHost == "" {
-					effectiveHost = cfg.ObservabilityHost
+					bindHost, _, err := apiBindHostPort(cfg.APIServer.Addr)
+					if err != nil {
+						if cfgErr == nil {
+							cfgErr = err
+						}
+					} else {
+						effectiveHost = bindHost
+					}
 				}
 				if effectivePort == 0 {
-					effectivePort = cfg.ObservabilityPort
+					_, bindPort, err := apiBindHostPort(cfg.APIServer.Addr)
+					if err != nil {
+						if cfgErr == nil {
+							cfgErr = err
+						}
+					} else {
+						effectivePort = bindPort
+					}
 				}
 				if cfg.DashboardBasePath != "" {
 					basePath = cfg.DashboardBasePath
@@ -84,7 +100,7 @@ Examples:
 				effectiveHost = "localhost"
 			}
 			if effectivePort == 0 {
-				effectivePort = 8080
+				effectivePort = configpkg.DefaultAPIServerPort
 			}
 			if cfgErr != nil {
 				fmt.Fprintf(os.Stderr, "note: config load error (%v); using defaults where needed\n", cfgErr)
@@ -94,7 +110,7 @@ Examples:
 			}
 
 			// Determine base URL: prefer explicit public URL from config.
-			baseURL := fmt.Sprintf("http://%s:%d", effectiveHost, effectivePort)
+			baseURL := dashboardBaseURL(effectiveHost, effectivePort)
 			if cfg != nil && cfg.DashboardPublicBaseURL != "" {
 				baseURL = strings.TrimRight(cfg.DashboardPublicBaseURL, "/")
 			}
@@ -133,7 +149,7 @@ Examples:
 	}
 
 	cmd.Flags().StringVar(&host, "host", "", "daemon host (default: from config or localhost)")
-	cmd.Flags().IntVar(&port, "port", 0, "daemon port (default: from config or 8080)")
+	cmd.Flags().IntVar(&port, "port", 0, fmt.Sprintf("daemon port (default: from config or %d)", configpkg.DefaultAPIServerPort))
 	cmd.Flags().StringVarP(&repoPath, "repo-path", "r", "", "path to repository root when serving a local fixture (default: current directory)")
 	cmd.Flags().StringVar(&reportPath, "report-path", "", "gate-check report file to expose from /api/v1/dashboard/gate-checks in fixture mode")
 	cmd.Flags().StringVar(&fixtureDirPath, "fixture-dir", "", "directory containing fixture data files (report.json, sessions.json, activity.json) for --serve-fixture mode")
@@ -279,7 +295,7 @@ func runDashboardFixture(bindHost string, bindPort int, basePath, repoPath, repo
 	}
 	allowPortRetry := bindPort == 0
 	if bindPort == 0 {
-		bindPort = 8080
+		bindPort = configpkg.DefaultAPIServerPort
 	}
 
 	fixtureDir, err := os.MkdirTemp("", "codero-dashboard-fixture-*")
@@ -408,7 +424,15 @@ func dashboardBaseURL(bindHost string, bindPort int) string {
 	case "", "0.0.0.0", "::":
 		host = "localhost"
 	}
-	return fmt.Sprintf("http://%s:%d", host, bindPort)
+	return "http://" + net.JoinHostPort(host, strconv.Itoa(bindPort))
+}
+
+func apiBindHostPort(addr string) (string, int, error) {
+	host, port, err := configpkg.ParseAPIServerAddr(addr)
+	if err != nil {
+		return "", 0, err
+	}
+	return host, port, nil
 }
 
 func withEnv(key, value string) func() {
@@ -485,15 +509,21 @@ Examples:
 
 			// Use config values or built-in defaults if config is unavailable.
 			obsHost := ""
-			obsPort := 8080
+			obsPort := configpkg.DefaultAPIServerPort
 			dashBasePath := "/dashboard"
 			dashPublicURL := ""
 			webhookEnabled := false
 			webhookPort := 9090
 
 			if cfg != nil {
-				obsHost = cfg.ObservabilityHost
-				obsPort = cfg.ObservabilityPort
+				bindHost, bindPort, err := apiBindHostPort(cfg.APIServer.Addr)
+				if err != nil {
+					if cfgErr == nil {
+						cfgErr = err
+					}
+				} else {
+					obsHost, obsPort = bindHost, bindPort
+				}
 				if cfg.DashboardBasePath != "" {
 					dashBasePath = cfg.DashboardBasePath
 				}
@@ -507,7 +537,7 @@ Examples:
 				displayHost = "0.0.0.0 (all interfaces)"
 			}
 
-			localBase := fmt.Sprintf("http://localhost:%d", obsPort)
+			localBase := dashboardBaseURL(obsHost, obsPort)
 			dashURL := localBase + dashBasePath + "/"
 			if dashPublicURL != "" {
 				dashURL = strings.TrimRight(dashPublicURL, "/") + dashBasePath + "/"
@@ -529,8 +559,8 @@ Examples:
 
 			// Conflict detection: warn if observability and webhook ports collide.
 			if webhookEnabled && webhookPort == obsPort {
-				fmt.Printf("\n⚠  WARNING: observability_port and webhook.port both use %d — port conflict!\n", obsPort)
-				fmt.Println("   Fix: set different values for observability_port and webhook.port in config.")
+				fmt.Printf("\n⚠  WARNING: api_server.addr and webhook.port both use %d — port conflict!\n", obsPort)
+				fmt.Println("   Fix: set different values for api_server.addr and webhook.port in config.")
 			}
 
 			if cfgErr != nil {

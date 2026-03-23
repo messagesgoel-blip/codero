@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -50,6 +52,33 @@ var (
 
 	// ErrInvalidMergeMethod is returned when auto_merge.method is not a valid GitHub merge strategy.
 	ErrInvalidMergeMethod = errors.New("auto_merge.method must be 'merge', 'squash', or 'rebase'")
+
+	// ErrInvalidSweeperInterval is returned when sweeper.interval is not positive.
+	ErrInvalidSweeperInterval = errors.New("sweeper.interval must be greater than 0")
+
+	// ErrInvalidSessionTTL is returned when sweeper.session_ttl is not positive.
+	ErrInvalidSessionTTL = errors.New("sweeper.session_ttl must be greater than 0")
+
+	// ErrInvalidBranchHoldTTL is returned when sweeper.branch_hold_ttl is not positive.
+	ErrInvalidBranchHoldTTL = errors.New("sweeper.branch_hold_ttl must be greater than 0")
+
+	// ErrInvalidHandoffTTL is returned when sweeper.handoff_ttl is not positive.
+	ErrInvalidHandoffTTL = errors.New("sweeper.handoff_ttl must be greater than 0")
+
+	// ErrInvalidIssuePollInterval is returned when sweeper.issue_poll_interval is not positive.
+	ErrInvalidIssuePollInterval = errors.New("sweeper.issue_poll_interval must be greater than 0")
+
+	// ErrInvalidAPIServerAddr is returned when api_server.addr is empty or malformed.
+	ErrInvalidAPIServerAddr = errors.New("api_server.addr must be a valid host:port")
+
+	// ErrInvalidShutdownTimeout is returned when api_server.shutdown_timeout is not positive.
+	ErrInvalidShutdownTimeout = errors.New("api_server.shutdown_timeout must be greater than 0")
+
+	// ErrInvalidReadTimeout is returned when api_server.read_timeout is negative.
+	ErrInvalidReadTimeout = errors.New("api_server.read_timeout must not be negative")
+
+	// ErrInvalidWriteTimeout is returned when api_server.write_timeout is negative.
+	ErrInvalidWriteTimeout = errors.New("api_server.write_timeout must not be negative")
 )
 
 // RedisConfig holds Redis connection settings.
@@ -81,18 +110,52 @@ type WebhookConfig struct {
 	Path    string `yaml:"path"`    // default: /webhook/github
 }
 
+// SweeperConfig holds sweeper settings for TTL expiry and cleanup.
+type SweeperConfig struct {
+	Interval          time.Duration `yaml:"interval"`            // default: 60s
+	SessionTTL        time.Duration `yaml:"session_ttl"`         // default: 90s
+	BranchHoldTTL     time.Duration `yaml:"branch_hold_ttl"`     // default: 72h
+	HandoffTTL        time.Duration `yaml:"handoff_ttl"`         // default: 10m
+	IssuePollInterval time.Duration `yaml:"issue_poll_interval"` // default: 10m
+}
+
+// APIServerConfig holds API server settings.
+type APIServerConfig struct {
+	Addr            string        `yaml:"addr"`             // default: :7700
+	ReadTimeout     time.Duration `yaml:"read_timeout"`     // default: 30s
+	WriteTimeout    time.Duration `yaml:"write_timeout"`    // default: 60s
+	ShutdownTimeout time.Duration `yaml:"shutdown_timeout"` // default: 10s
+}
+
+const (
+	// DefaultAPIServerAddr is the built-in default for api_server.addr.
+	DefaultAPIServerAddr = ":7700"
+	// DefaultAPIServerPort is the numeric default API bind port.
+	DefaultAPIServerPort = 7700
+	// DefaultAPIServerPortString is the string form of the default API bind port.
+	DefaultAPIServerPortString = "7700"
+	// DefaultAPIServerReadTimeout is the built-in default for api_server.read_timeout.
+	DefaultAPIServerReadTimeout = 30 * time.Second
+	// DefaultAPIServerWriteTimeout is the built-in default for api_server.write_timeout.
+	DefaultAPIServerWriteTimeout = 60 * time.Second
+	// DefaultAPIServerShutdownTimeout is the built-in default for api_server.shutdown_timeout.
+	DefaultAPIServerShutdownTimeout = 10 * time.Second
+)
+
 // Config holds runtime configuration for the codero daemon.
 type Config struct {
-	GitHubToken       string        `yaml:"github_token"`
-	Repos             []string      `yaml:"repos"`
-	Redis             RedisConfig   `yaml:"redis"`
-	PIDFile           string        `yaml:"pid_file"`
-	ReadyFile         string        `yaml:"ready_file"`
-	LogLevel          string        `yaml:"log_level"`
-	LogPath           string        `yaml:"log_path"`
-	DBPath            string        `yaml:"db_path"`
-	Webhook           WebhookConfig `yaml:"webhook"`
-	ObservabilityPort int           `yaml:"observability_port"`
+	GitHubToken       string          `yaml:"github_token"`
+	Repos             []string        `yaml:"repos"`
+	Redis             RedisConfig     `yaml:"redis"`
+	Sweeper           SweeperConfig   `yaml:"sweeper"`
+	APIServer         APIServerConfig `yaml:"api_server"`
+	PIDFile           string          `yaml:"pid_file"`
+	ReadyFile         string          `yaml:"ready_file"`
+	LogLevel          string          `yaml:"log_level"`
+	LogPath           string          `yaml:"log_path"`
+	DBPath            string          `yaml:"db_path"`
+	Webhook           WebhookConfig   `yaml:"webhook"`
+	ObservabilityPort int             `yaml:"observability_port"`
 	// ObservabilityHost controls the bind address for the HTTP server.
 	// Default "" binds on all interfaces (0.0.0.0). Set to "127.0.0.1" to
 	// restrict to loopback only in environments that require it.
@@ -135,6 +198,7 @@ func Load(path string) (*Config, error) {
 	}
 
 	applyEnvOverrides(c)
+	normalizeCompat(c)
 
 	if err := c.Validate(); err != nil {
 		return nil, err
@@ -149,6 +213,7 @@ func Load(path string) (*Config, error) {
 func LoadEnv() *Config {
 	c := defaults()
 	applyEnvOverrides(c)
+	normalizeCompat(c)
 
 	if v := os.Getenv("GITHUB_TOKEN"); v != "" {
 		c.GitHubToken = v
@@ -163,6 +228,27 @@ func LoadEnv() *Config {
 	return c
 }
 
+// ParseAPIServerAddr validates and splits api_server.addr into host and port.
+// An empty host is allowed and means bind on all interfaces.
+func ParseAPIServerAddr(addr string) (string, int, error) {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return "", 0, ErrInvalidAPIServerAddr
+	}
+
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "", 0, ErrInvalidAPIServerAddr
+	}
+
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port < 1 || port > 65535 {
+		return "", 0, ErrInvalidAPIServerAddr
+	}
+
+	return host, port, nil
+}
+
 // defaults returns a Config pre-populated with safe built-in values.
 func defaults() *Config {
 	c := &Config{
@@ -172,6 +258,19 @@ func defaults() *Config {
 			MaxRetries:     3,
 			RetryInterval:  1,
 			HealthInterval: 30,
+		},
+		Sweeper: SweeperConfig{
+			Interval:          60 * time.Second,
+			SessionTTL:        90 * time.Second,
+			BranchHoldTTL:     72 * time.Hour,
+			HandoffTTL:        10 * time.Minute,
+			IssuePollInterval: 10 * time.Minute,
+		},
+		APIServer: APIServerConfig{
+			Addr:            DefaultAPIServerAddr,
+			ReadTimeout:     DefaultAPIServerReadTimeout,
+			WriteTimeout:    DefaultAPIServerWriteTimeout,
+			ShutdownTimeout: DefaultAPIServerShutdownTimeout,
 		},
 		PIDFile:  "/var/run/codero/codero.pid",
 		LogLevel: "info",
@@ -285,6 +384,65 @@ func applyEnvOverrides(c *Config) {
 	if v := os.Getenv("CODERO_AUTO_MERGE_METHOD"); v != "" {
 		c.AutoMerge.Method = v
 	}
+	// Sweeper env overrides (§6.6). Use parsePositiveDuration to reject "0s"
+	// which would override defaults and then fail in Validate().
+	if v := os.Getenv("CODERO_SWEEPER_INTERVAL"); v != "" {
+		if d, ok := parsePositiveDuration(v); ok {
+			c.Sweeper.Interval = d
+		}
+	}
+	if v := firstNonEmptyEnv("CODERO_SWEEPER_SESSION_TTL", "CODERO_SESSION_TTL"); v != "" {
+		if d, ok := parsePositiveDuration(v); ok {
+			c.Sweeper.SessionTTL = d
+		}
+	}
+	if v := firstNonEmptyEnv("CODERO_SWEEPER_BRANCH_HOLD_TTL", "CODERO_BRANCH_HOLD_TTL"); v != "" {
+		if d, ok := parsePositiveDuration(v); ok {
+			c.Sweeper.BranchHoldTTL = d
+		}
+	}
+	if v := firstNonEmptyEnv("CODERO_SWEEPER_HANDOFF_TTL", "CODERO_HANDOFF_TTL"); v != "" {
+		if d, ok := parsePositiveDuration(v); ok {
+			c.Sweeper.HandoffTTL = d
+		}
+	}
+	if v := firstNonEmptyEnv("CODERO_SWEEPER_ISSUE_POLL_INTERVAL", "CODERO_ISSUE_POLL_INTERVAL"); v != "" {
+		if d, ok := parsePositiveDuration(v); ok {
+			c.Sweeper.IssuePollInterval = d
+		}
+	}
+	// API server env overrides (§6.3).
+	if v := os.Getenv("CODERO_API_ADDR"); v != "" {
+		c.APIServer.Addr = v
+	}
+	if v := os.Getenv("CODERO_API_READ_TIMEOUT"); v != "" {
+		if d, ok := parseNonNegativeDuration(v); ok {
+			c.APIServer.ReadTimeout = d
+		}
+	}
+	if v := os.Getenv("CODERO_API_WRITE_TIMEOUT"); v != "" {
+		if d, ok := parseNonNegativeDuration(v); ok {
+			c.APIServer.WriteTimeout = d
+		}
+	}
+	if v := os.Getenv("CODERO_API_SHUTDOWN_TIMEOUT"); v != "" {
+		if d, ok := parsePositiveDuration(v); ok {
+			c.APIServer.ShutdownTimeout = d
+		}
+	}
+}
+
+// normalizeCompat backfills APIServer.Addr from legacy ObservabilityHost/ObservabilityPort
+// when api_server.addr was not explicitly configured (still at built-in default).
+// This preserves backward compatibility for operators using the older config fields.
+// Explicit api_server.addr (any non-default value) always takes precedence.
+func normalizeCompat(c *Config) {
+	if c.APIServer.Addr != DefaultAPIServerAddr {
+		return // api_server.addr was explicitly set, no backfill
+	}
+	if c.ObservabilityPort >= 1 && c.ObservabilityPort <= 65535 {
+		c.APIServer.Addr = net.JoinHostPort(c.ObservabilityHost, strconv.Itoa(c.ObservabilityPort))
+	}
 }
 
 // Validate checks that required fields are present and non-empty.
@@ -309,6 +467,33 @@ func (c *Config) Validate() error {
 	if c.DashboardBasePath != "" && !strings.HasPrefix(c.DashboardBasePath, "/") {
 		return ErrInvalidDashboardBasePath
 	}
+	if _, _, err := ParseAPIServerAddr(c.APIServer.Addr); err != nil {
+		return err
+	}
+	if c.APIServer.ShutdownTimeout <= 0 {
+		return ErrInvalidShutdownTimeout
+	}
+	if c.APIServer.ReadTimeout < 0 {
+		return ErrInvalidReadTimeout
+	}
+	if c.APIServer.WriteTimeout < 0 {
+		return ErrInvalidWriteTimeout
+	}
+	if c.Sweeper.Interval <= 0 {
+		return ErrInvalidSweeperInterval
+	}
+	if c.Sweeper.SessionTTL <= 0 {
+		return ErrInvalidSessionTTL
+	}
+	if c.Sweeper.BranchHoldTTL <= 0 {
+		return ErrInvalidBranchHoldTTL
+	}
+	if c.Sweeper.HandoffTTL <= 0 {
+		return ErrInvalidHandoffTTL
+	}
+	if c.Sweeper.IssuePollInterval <= 0 {
+		return ErrInvalidIssuePollInterval
+	}
 	switch c.AutoMerge.Method {
 	case "merge", "squash", "rebase":
 		// valid
@@ -331,4 +516,31 @@ func classifyYAMLError(err error) error {
 		return fmt.Errorf("%w: %w", ErrInvalidYAML, typeErr)
 	}
 	return fmt.Errorf("%w: %w", ErrInvalidYAML, err)
+}
+
+func parseNonNegativeDuration(v string) (time.Duration, bool) {
+	d, err := time.ParseDuration(v)
+	if err != nil || d < 0 {
+		return 0, false
+	}
+	return d, true
+}
+
+// parsePositiveDuration parses a duration that must be strictly > 0.
+// Used for sweeper intervals and shutdown timeout where zero is invalid.
+func parsePositiveDuration(v string) (time.Duration, bool) {
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		return 0, false
+	}
+	return d, true
+}
+
+func firstNonEmptyEnv(keys ...string) string {
+	for _, key := range keys {
+		if v := os.Getenv(key); v != "" {
+			return v
+		}
+	}
+	return ""
 }

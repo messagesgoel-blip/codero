@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -115,6 +114,17 @@ func daemonCmd(configPath *string) *cobra.Command {
 		redisMaxRetries     int
 		redisRetryInterval  int
 		redisHealthInterval int
+		// Sweeper config (§6.6)
+		sweeperInterval   time.Duration
+		sessionTTL        time.Duration
+		branchHoldTTL     time.Duration
+		handoffTTL        time.Duration
+		issuePollInterval time.Duration
+		// API server config (§6.3)
+		apiAddr            string
+		apiReadTimeout     time.Duration
+		apiWriteTimeout    time.Duration
+		apiShutdownTimeout time.Duration
 	)
 
 	cmd := &cobra.Command{
@@ -157,6 +167,37 @@ func daemonCmd(configPath *string) *cobra.Command {
 			}
 			if cmd.Flags().Changed("redis-health-interval") {
 				cfg.Redis.HealthInterval = redisHealthInterval
+			}
+
+			// Sweeper config overrides (§6.6).
+			if cmd.Flags().Changed("sweeper-interval") {
+				cfg.Sweeper.Interval = sweeperInterval
+			}
+			if cmd.Flags().Changed("session-ttl") {
+				cfg.Sweeper.SessionTTL = sessionTTL
+			}
+			if cmd.Flags().Changed("branch-hold-ttl") {
+				cfg.Sweeper.BranchHoldTTL = branchHoldTTL
+			}
+			if cmd.Flags().Changed("handoff-ttl") {
+				cfg.Sweeper.HandoffTTL = handoffTTL
+			}
+			if cmd.Flags().Changed("issue-poll-interval") {
+				cfg.Sweeper.IssuePollInterval = issuePollInterval
+			}
+
+			// API server config overrides (§6.3).
+			if cmd.Flags().Changed("api-addr") {
+				cfg.APIServer.Addr = apiAddr
+			}
+			if cmd.Flags().Changed("api-read-timeout") {
+				cfg.APIServer.ReadTimeout = apiReadTimeout
+			}
+			if cmd.Flags().Changed("api-write-timeout") {
+				cfg.APIServer.WriteTimeout = apiWriteTimeout
+			}
+			if cmd.Flags().Changed("api-shutdown-timeout") {
+				cfg.APIServer.ShutdownTimeout = apiShutdownTimeout
 			}
 
 			if err := cfg.Validate(); err != nil {
@@ -329,17 +370,17 @@ func daemonCmd(configPath *string) *cobra.Command {
 				reconciler.Run(ctx)
 			}()
 
-			// ─── Step 7: Observability server ───────────────────────
+			// ─── Step 7: API/observability server ───────────────────
 			slotCounter := scheduler.NewSlotCounter(client)
-			obs := daemon.NewObservabilityServer(client, queue, slotCounter, db.Unwrap(),
-				cfg.ObservabilityHost, strconv.Itoa(cfg.ObservabilityPort),
+			obs := daemon.NewObservabilityServerWithAddr(client, queue, slotCounter, db.Unwrap(),
+				cfg.APIServer.Addr, cfg.APIServer.ReadTimeout, cfg.APIServer.WriteTimeout,
 				cfg.DashboardBasePath, version)
 			obs.Start()
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				<-ctx.Done()
-				stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				stopCtx, stopCancel := context.WithTimeout(context.Background(), cfg.APIServer.ShutdownTimeout)
 				defer stopCancel()
 				if err := obs.Stop(stopCtx); err != nil {
 					loglib.Error("codero: observability server shutdown error",
@@ -443,6 +484,23 @@ func daemonCmd(configPath *string) *cobra.Command {
 	cmd.Flags().IntVar(&redisMaxRetries, "redis-max-retries", 3, "Redis startup retry attempts (overrides config/env, default 3)")
 	cmd.Flags().IntVar(&redisRetryInterval, "redis-retry-interval", 1, "Redis retry backoff interval in seconds (overrides config/env, default 1)")
 	cmd.Flags().IntVar(&redisHealthInterval, "redis-health-interval", 30, "Redis health check interval in seconds (overrides config/env, default 30)")
+
+	// Sweeper config flags (§6.6).
+	cmd.Flags().DurationVar(&sweeperInterval, "sweeper-interval", 60*time.Second, "Sweeper run interval (overrides config/env, default 60s)")
+	cmd.Flags().DurationVar(&sessionTTL, "session-ttl", 90*time.Second, "Session heartbeat TTL (overrides config/env, default 90s)")
+	cmd.Flags().DurationVar(&branchHoldTTL, "branch-hold-ttl", 72*time.Hour, "Branch hold TTL (overrides config/env, default 72h)")
+	cmd.Flags().DurationVar(&handoffTTL, "handoff-ttl", 10*time.Minute, "Handoff acceptance TTL (overrides config/env, default 10m)")
+	cmd.Flags().DurationVar(&issuePollInterval, "issue-poll-interval", 10*time.Minute, "Issue poll interval (overrides config/env, default 10m)")
+
+	// API server config flags (§6.3).
+	cmd.Flags().StringVar(&apiAddr, "api-addr", config.DefaultAPIServerAddr,
+		fmt.Sprintf("API server bind address (overrides config/env, default %s)", config.DefaultAPIServerAddr))
+	cmd.Flags().DurationVar(&apiReadTimeout, "api-read-timeout", config.DefaultAPIServerReadTimeout,
+		fmt.Sprintf("API read timeout (overrides config/env, default %s)", config.DefaultAPIServerReadTimeout))
+	cmd.Flags().DurationVar(&apiWriteTimeout, "api-write-timeout", config.DefaultAPIServerWriteTimeout,
+		fmt.Sprintf("API write timeout (overrides config/env, default %s)", config.DefaultAPIServerWriteTimeout))
+	cmd.Flags().DurationVar(&apiShutdownTimeout, "api-shutdown-timeout", config.DefaultAPIServerShutdownTimeout,
+		fmt.Sprintf("API graceful shutdown timeout (overrides config/env, default %s)", config.DefaultAPIServerShutdownTimeout))
 
 	return cmd
 }

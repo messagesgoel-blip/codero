@@ -103,7 +103,7 @@ Examples:
   codero prove
   codero prove --fast                              # skip race tests
   codero prove --json                              # JSON output only
-  codero prove --endpoint-url http://localhost:8080
+  codero prove --endpoint-url http://localhost:7700
   codero prove --repo-path /path/to/repo`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if opts.repoPath == "" {
@@ -123,7 +123,7 @@ Examples:
 	cmd.Flags().StringVarP(&opts.repoPath, "repo-path", "r", "", "repo root for go build/test (default: cwd)")
 	cmd.Flags().BoolVar(&opts.fast, "fast", false, "skip race tests (C-004) for a quicker pass")
 	cmd.Flags().BoolVar(&opts.jsonOnly, "json", false, "emit JSON summary only (no human table)")
-	cmd.Flags().StringVar(&opts.endpointURL, "endpoint-url", "http://localhost:8080",
+	cmd.Flags().StringVar(&opts.endpointURL, "endpoint-url", "http://localhost:7700",
 		"base URL for observability smoke checks (C-007..C-009)")
 
 	return cmd
