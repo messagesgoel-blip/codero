@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/codero/codero/internal/state"
 	"github.com/spf13/cobra"
@@ -15,6 +16,7 @@ func taskCmd(configPath *string) *cobra.Command {
 		Short: "Manage task assignments",
 	}
 	cmd.AddCommand(taskAcceptCmd(configPath))
+	cmd.AddCommand(taskEmitCmd(configPath))
 	return cmd
 }
 
@@ -80,6 +82,95 @@ Terminal (ended) assignments do not block a new claim.`,
 
 	cmd.Flags().StringVar(&sessionID, "session", "", "session identifier (defaults to CODERO_SESSION_ID)")
 	cmd.Flags().StringVar(&taskID, "task", "", "task identifier to claim")
+
+	return cmd
+}
+
+// taskEmitCmd returns the "task emit" subcommand.
+//
+// Usage:
+//
+//	codero task emit --assignment <id> --version <n> --substatus <substatus>
+//
+// Exit behaviour:
+//   - 0: emit applied, assignment updated.
+//   - 1: version conflict (stale version).
+//   - 2: assignment already ended.
+//   - other: unexpected error.
+func taskEmitCmd(configPath *string) *cobra.Command {
+	var (
+		assignmentID string
+		versionStr   string
+		substatus    string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "emit",
+		Short: "Emit a versioned state update to an assignment",
+		Long: `Emit applies a state/substatus transition to an assignment, guarded by
+optimistic concurrency on assignment_version.
+
+The caller must provide the current assignment_version they believe the row
+has. If the row's version matches, the update is applied and the version
+is advanced to current+1. If the version is stale, the emit is rejected.
+
+Terminal substatuses (terminal_*) also set ended_at on the assignment.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if assignmentID == "" {
+				return usageErrorf("--assignment is required")
+			}
+			if versionStr == "" {
+				return usageErrorf("--version is required")
+			}
+			if substatus == "" {
+				return usageErrorf("--substatus is required")
+			}
+
+			version, err := strconv.Atoi(versionStr)
+			if err != nil {
+				return usageErrorf("--version must be an integer: %v", err)
+			}
+			if version < 1 {
+				return usageErrorf("--version must be >= 1")
+			}
+
+			cfg, err := loadConfig(*configPathForCmd(cmd))
+			if err != nil {
+				return fmt.Errorf("codero: config: %w", err)
+			}
+
+			db, err := state.Open(cfg.DBPath)
+			if err != nil {
+				return fmt.Errorf("open state db: %w", err)
+			}
+			defer func() { _ = db.Close() }()
+
+			a, err := state.EmitAssignmentUpdate(cmd.Context(), db, assignmentID, version, substatus)
+			if err != nil {
+				if errors.Is(err, state.ErrAgentAssignmentNotFound) {
+					return fmt.Errorf("agent assignment not found: %w", err)
+				}
+				if errors.Is(err, state.ErrVersionConflict) {
+					return fmt.Errorf("version conflict: %w", err)
+				}
+				if errors.Is(err, state.ErrAssignmentEnded) {
+					return fmt.Errorf("assignment ended: %w", err)
+				}
+				if errors.Is(err, state.ErrInvalidEmitSubstatus) {
+					return fmt.Errorf("invalid substatus: %w", err)
+				}
+				return err
+			}
+
+			fmt.Printf("assignment_id: %s\nstate: %s\nsubstatus: %s\nversion: %d\n",
+				a.ID, a.State, a.Substatus, a.Version)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&assignmentID, "assignment", "", "assignment identifier")
+	cmd.Flags().StringVar(&versionStr, "version", "", "current assignment version (optimistic lock)")
+	cmd.Flags().StringVar(&substatus, "substatus", "", "target substatus for the assignment")
 
 	return cmd
 }
