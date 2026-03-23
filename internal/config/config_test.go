@@ -386,3 +386,22 @@ func TestEnvOverrides_RedisConfigInvalidValuesIgnored(t *testing.T) {
 		t.Errorf("Redis.HealthInterval: got %d, want 30 (default)", c.Redis.HealthInterval)
 	}
 }
+
+func TestEnvOverrides_RedisConfigNegativeValuesIgnored(t *testing.T) {
+	t.Setenv("CODERO_REDIS_MAX_RETRIES", "-1")
+	t.Setenv("CODERO_REDIS_RETRY_INTERVAL", "-1")
+	t.Setenv("CODERO_REDIS_HEALTH_INTERVAL", "-1")
+
+	c := defaults()
+	applyEnvOverrides(c)
+
+	if c.Redis.MaxRetries != 3 {
+		t.Errorf("Redis.MaxRetries: got %d, want 3 (default)", c.Redis.MaxRetries)
+	}
+	if c.Redis.RetryInterval != 1 {
+		t.Errorf("Redis.RetryInterval: got %d, want 1 (default)", c.Redis.RetryInterval)
+	}
+	if c.Redis.HealthInterval != 30 {
+		t.Errorf("Redis.HealthInterval: got %d, want 30 (default)", c.Redis.HealthInterval)
+	}
+}

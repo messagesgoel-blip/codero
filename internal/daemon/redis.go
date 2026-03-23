@@ -38,6 +38,7 @@ func CheckRedisWithRetry(ctx context.Context, addr, password string, maxRetries,
 		retryIntervalSec = 1
 	}
 
+	var lastErr error
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
 			select {
@@ -49,9 +50,11 @@ func CheckRedisWithRetry(ctx context.Context, addr, password string, maxRetries,
 
 		if err := redislib.CheckHealth(ctx, addr, password); err == nil {
 			return nil
+		} else {
+			lastErr = err
 		}
 	}
-	return ErrRedisUnavailable
+	return errors.Join(ErrRedisUnavailable, lastErr)
 }
 
 // WatchRedis monitors Redis connectivity after startup.
