@@ -1357,7 +1357,7 @@ func EmitAssignmentUpdate(ctx context.Context, db *DB, assignmentID string, curr
 
 	newState := assignmentStateFromSubstatus(normalized)
 	newBlockedReason := blockedReasonFromSubstatus(normalized)
-	now := time.Now().UTC()
+	now := time.Now().UTC().Truncate(time.Second)
 
 	// Determine whether this substatus is terminal.
 	_, isTerminal := terminalAssignmentSubstatusSet[normalized]
@@ -1368,30 +1368,32 @@ func EmitAssignmentUpdate(ctx context.Context, db *DB, assignmentID string, curr
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// Load current row inside the transaction.
-	var rowVersion int
-	var endedAt sql.NullTime
-	err = tx.QueryRowContext(ctx, `
-		SELECT assignment_version, ended_at
+	// Load the full row inside the transaction so we can return an in-memory
+	// post-update view without rereading after commit.
+	currentRow := tx.QueryRowContext(ctx, `
+		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id,
+		       state, blocked_reason, assignment_substatus,
+		       assignment_version, started_at, ended_at, end_reason, superseded_by
 		FROM agent_assignments
 		WHERE assignment_id = ?`,
 		assignmentID,
-	).Scan(&rowVersion, &endedAt)
+	)
+	assignment, err := scanAgentAssignment(currentRow)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, ErrAgentAssignmentNotFound) {
 			return nil, ErrAgentAssignmentNotFound
 		}
 		return nil, fmt.Errorf("emit assignment update: load row: %w", err)
 	}
 
-	if endedAt.Valid {
+	if assignment.EndedAt != nil {
 		return nil, fmt.Errorf("%w: assignment %s ended at %s",
-			ErrAssignmentEnded, assignmentID, endedAt.Time.Format(time.RFC3339))
+			ErrAssignmentEnded, assignmentID, assignment.EndedAt.Format(time.RFC3339))
 	}
 
-	if rowVersion != currentVersion {
+	if assignment.Version != currentVersion {
 		return nil, fmt.Errorf("%w: expected version %d but row has %d",
-			ErrVersionConflict, currentVersion, rowVersion)
+			ErrVersionConflict, currentVersion, assignment.Version)
 	}
 
 	nextVersion := currentVersion + 1
@@ -1435,16 +1437,16 @@ func EmitAssignmentUpdate(ctx context.Context, db *DB, assignmentID string, curr
 		return nil, fmt.Errorf("emit assignment update: commit: %w", err)
 	}
 
-	// Re-read the committed row to return accurate data.
-	row := db.sql.QueryRowContext(ctx, `
-		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id,
-		       state, blocked_reason, assignment_substatus,
-		       assignment_version, started_at, ended_at, end_reason, superseded_by
-		FROM agent_assignments
-		WHERE assignment_id = ?`,
-		assignmentID,
-	)
-	return scanAgentAssignment(row)
+	assignment.State = newState
+	assignment.Substatus = normalized
+	assignment.BlockedReason = newBlockedReason
+	assignment.Version = nextVersion
+	if isTerminal {
+		endedAt := now
+		assignment.EndedAt = &endedAt
+		assignment.EndReason = endReason
+	}
+	return assignment, nil
 }
 
 func loadLiveTaskClaimTx(ctx context.Context, tx *sql.Tx, taskID string) (assignmentID, sessionID string, err error) {
