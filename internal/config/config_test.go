@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func writeConfig(t *testing.T, content string) string {
@@ -443,5 +444,144 @@ func TestEnvOverrides_RedisConfigInvalidValuesIgnored(t *testing.T) {
 				t.Errorf("Redis.HealthInterval: got %d, want %d", c.Redis.HealthInterval, tt.wantHLT)
 			}
 		})
+	}
+}
+
+func TestDefaults_SweeperConfig(t *testing.T) {
+	c := defaults()
+
+	if c.Sweeper.Interval != 60*time.Second {
+		t.Errorf("Sweeper.Interval: got %s, want %s", c.Sweeper.Interval, 60*time.Second)
+	}
+	if c.Sweeper.SessionTTL != 90*time.Second {
+		t.Errorf("Sweeper.SessionTTL: got %s, want %s", c.Sweeper.SessionTTL, 90*time.Second)
+	}
+	if c.Sweeper.BranchHoldTTL != 72*time.Hour {
+		t.Errorf("Sweeper.BranchHoldTTL: got %s, want %s", c.Sweeper.BranchHoldTTL, 72*time.Hour)
+	}
+	if c.Sweeper.HandoffTTL != 10*time.Minute {
+		t.Errorf("Sweeper.HandoffTTL: got %s, want %s", c.Sweeper.HandoffTTL, 10*time.Minute)
+	}
+	if c.Sweeper.IssuePollInterval != 10*time.Minute {
+		t.Errorf("Sweeper.IssuePollInterval: got %s, want %s", c.Sweeper.IssuePollInterval, 10*time.Minute)
+	}
+}
+
+func TestDefaults_APIServerConfig(t *testing.T) {
+	c := defaults()
+
+	if c.APIServer.Addr != ":7700" {
+		t.Errorf("APIServer.Addr: got %q, want :7700", c.APIServer.Addr)
+	}
+	if c.APIServer.ReadTimeout != 30*time.Second {
+		t.Errorf("APIServer.ReadTimeout: got %s, want %s", c.APIServer.ReadTimeout, 30*time.Second)
+	}
+	if c.APIServer.WriteTimeout != 60*time.Second {
+		t.Errorf("APIServer.WriteTimeout: got %s, want %s", c.APIServer.WriteTimeout, 60*time.Second)
+	}
+	if c.APIServer.ShutdownTimeout != 10*time.Second {
+		t.Errorf("APIServer.ShutdownTimeout: got %s, want %s", c.APIServer.ShutdownTimeout, 10*time.Second)
+	}
+}
+
+func TestEnvOverrides_SweeperConfig(t *testing.T) {
+	t.Setenv("CODERO_SWEEPER_INTERVAL", "2m")
+	t.Setenv("CODERO_SESSION_TTL", "3m")
+	t.Setenv("CODERO_BRANCH_HOLD_TTL", "48h")
+	t.Setenv("CODERO_HANDOFF_TTL", "15m")
+	t.Setenv("CODERO_ISSUE_POLL_INTERVAL", "5m")
+
+	c := defaults()
+	applyEnvOverrides(c)
+
+	if c.Sweeper.Interval != 2*time.Minute {
+		t.Errorf("Sweeper.Interval: got %s, want %s", c.Sweeper.Interval, 2*time.Minute)
+	}
+	if c.Sweeper.SessionTTL != 3*time.Minute {
+		t.Errorf("Sweeper.SessionTTL: got %s, want %s", c.Sweeper.SessionTTL, 3*time.Minute)
+	}
+	if c.Sweeper.BranchHoldTTL != 48*time.Hour {
+		t.Errorf("Sweeper.BranchHoldTTL: got %s, want %s", c.Sweeper.BranchHoldTTL, 48*time.Hour)
+	}
+	if c.Sweeper.HandoffTTL != 15*time.Minute {
+		t.Errorf("Sweeper.HandoffTTL: got %s, want %s", c.Sweeper.HandoffTTL, 15*time.Minute)
+	}
+	if c.Sweeper.IssuePollInterval != 5*time.Minute {
+		t.Errorf("Sweeper.IssuePollInterval: got %s, want %s", c.Sweeper.IssuePollInterval, 5*time.Minute)
+	}
+}
+
+func TestEnvOverrides_APIServerConfig(t *testing.T) {
+	t.Setenv("CODERO_API_ADDR", ":8800")
+	t.Setenv("CODERO_API_READ_TIMEOUT", "45s")
+	t.Setenv("CODERO_API_WRITE_TIMEOUT", "90s")
+	t.Setenv("CODERO_API_SHUTDOWN_TIMEOUT", "20s")
+
+	c := defaults()
+	applyEnvOverrides(c)
+
+	if c.APIServer.Addr != ":8800" {
+		t.Errorf("APIServer.Addr: got %q, want :8800", c.APIServer.Addr)
+	}
+	if c.APIServer.ReadTimeout != 45*time.Second {
+		t.Errorf("APIServer.ReadTimeout: got %s, want %s", c.APIServer.ReadTimeout, 45*time.Second)
+	}
+	if c.APIServer.WriteTimeout != 90*time.Second {
+		t.Errorf("APIServer.WriteTimeout: got %s, want %s", c.APIServer.WriteTimeout, 90*time.Second)
+	}
+	if c.APIServer.ShutdownTimeout != 20*time.Second {
+		t.Errorf("APIServer.ShutdownTimeout: got %s, want %s", c.APIServer.ShutdownTimeout, 20*time.Second)
+	}
+}
+
+func TestLoad_SweeperAndAPIServerDurations(t *testing.T) {
+	path := writeConfig(t, `
+github_token: ghp_test
+repos:
+  - acme/api
+sweeper:
+  interval: 2m
+  session_ttl: 3m
+  branch_hold_ttl: 48h
+  handoff_ttl: 15m
+  issue_poll_interval: 5m
+api_server:
+  addr: ":8800"
+  read_timeout: 45s
+  write_timeout: 90s
+  shutdown_timeout: 20s
+`)
+
+	c, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if c.Sweeper.Interval != 2*time.Minute {
+		t.Errorf("Sweeper.Interval: got %s, want %s", c.Sweeper.Interval, 2*time.Minute)
+	}
+	if c.Sweeper.SessionTTL != 3*time.Minute {
+		t.Errorf("Sweeper.SessionTTL: got %s, want %s", c.Sweeper.SessionTTL, 3*time.Minute)
+	}
+	if c.Sweeper.BranchHoldTTL != 48*time.Hour {
+		t.Errorf("Sweeper.BranchHoldTTL: got %s, want %s", c.Sweeper.BranchHoldTTL, 48*time.Hour)
+	}
+	if c.Sweeper.HandoffTTL != 15*time.Minute {
+		t.Errorf("Sweeper.HandoffTTL: got %s, want %s", c.Sweeper.HandoffTTL, 15*time.Minute)
+	}
+	if c.Sweeper.IssuePollInterval != 5*time.Minute {
+		t.Errorf("Sweeper.IssuePollInterval: got %s, want %s", c.Sweeper.IssuePollInterval, 5*time.Minute)
+	}
+	if c.APIServer.Addr != ":8800" {
+		t.Errorf("APIServer.Addr: got %q, want :8800", c.APIServer.Addr)
+	}
+	if c.APIServer.ReadTimeout != 45*time.Second {
+		t.Errorf("APIServer.ReadTimeout: got %s, want %s", c.APIServer.ReadTimeout, 45*time.Second)
+	}
+	if c.APIServer.WriteTimeout != 90*time.Second {
+		t.Errorf("APIServer.WriteTimeout: got %s, want %s", c.APIServer.WriteTimeout, 90*time.Second)
+	}
+	if c.APIServer.ShutdownTimeout != 20*time.Second {
+		t.Errorf("APIServer.ShutdownTimeout: got %s, want %s", c.APIServer.ShutdownTimeout, 20*time.Second)
 	}
 }

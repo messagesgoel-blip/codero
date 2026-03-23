@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -81,18 +82,37 @@ type WebhookConfig struct {
 	Path    string `yaml:"path"`    // default: /webhook/github
 }
 
+// SweeperConfig holds sweeper settings for TTL expiry and cleanup.
+type SweeperConfig struct {
+	Interval          time.Duration `yaml:"interval"`            // default: 60s
+	SessionTTL        time.Duration `yaml:"session_ttl"`         // default: 90s
+	BranchHoldTTL     time.Duration `yaml:"branch_hold_ttl"`     // default: 72h
+	HandoffTTL        time.Duration `yaml:"handoff_ttl"`         // default: 10m
+	IssuePollInterval time.Duration `yaml:"issue_poll_interval"` // default: 10m
+}
+
+// APIServerConfig holds API server settings.
+type APIServerConfig struct {
+	Addr            string        `yaml:"addr"`             // default: :7700
+	ReadTimeout     time.Duration `yaml:"read_timeout"`     // default: 30s
+	WriteTimeout    time.Duration `yaml:"write_timeout"`    // default: 60s
+	ShutdownTimeout time.Duration `yaml:"shutdown_timeout"` // default: 10s
+}
+
 // Config holds runtime configuration for the codero daemon.
 type Config struct {
-	GitHubToken       string        `yaml:"github_token"`
-	Repos             []string      `yaml:"repos"`
-	Redis             RedisConfig   `yaml:"redis"`
-	PIDFile           string        `yaml:"pid_file"`
-	ReadyFile         string        `yaml:"ready_file"`
-	LogLevel          string        `yaml:"log_level"`
-	LogPath           string        `yaml:"log_path"`
-	DBPath            string        `yaml:"db_path"`
-	Webhook           WebhookConfig `yaml:"webhook"`
-	ObservabilityPort int           `yaml:"observability_port"`
+	GitHubToken       string          `yaml:"github_token"`
+	Repos             []string        `yaml:"repos"`
+	Redis             RedisConfig     `yaml:"redis"`
+	Sweeper           SweeperConfig   `yaml:"sweeper"`
+	APIServer         APIServerConfig `yaml:"api_server"`
+	PIDFile           string          `yaml:"pid_file"`
+	ReadyFile         string          `yaml:"ready_file"`
+	LogLevel          string          `yaml:"log_level"`
+	LogPath           string          `yaml:"log_path"`
+	DBPath            string          `yaml:"db_path"`
+	Webhook           WebhookConfig   `yaml:"webhook"`
+	ObservabilityPort int             `yaml:"observability_port"`
 	// ObservabilityHost controls the bind address for the HTTP server.
 	// Default "" binds on all interfaces (0.0.0.0). Set to "127.0.0.1" to
 	// restrict to loopback only in environments that require it.
@@ -172,6 +192,19 @@ func defaults() *Config {
 			MaxRetries:     3,
 			RetryInterval:  1,
 			HealthInterval: 30,
+		},
+		Sweeper: SweeperConfig{
+			Interval:          60 * time.Second,
+			SessionTTL:        90 * time.Second,
+			BranchHoldTTL:     72 * time.Hour,
+			HandoffTTL:        10 * time.Minute,
+			IssuePollInterval: 10 * time.Minute,
+		},
+		APIServer: APIServerConfig{
+			Addr:            ":7700",
+			ReadTimeout:     30 * time.Second,
+			WriteTimeout:    60 * time.Second,
+			ShutdownTimeout: 10 * time.Second,
 		},
 		PIDFile:  "/var/run/codero/codero.pid",
 		LogLevel: "info",
@@ -285,6 +318,51 @@ func applyEnvOverrides(c *Config) {
 	if v := os.Getenv("CODERO_AUTO_MERGE_METHOD"); v != "" {
 		c.AutoMerge.Method = v
 	}
+	// Sweeper env overrides (§6.6).
+	if v := os.Getenv("CODERO_SWEEPER_INTERVAL"); v != "" {
+		if d, ok := parseNonNegativeDuration(v); ok {
+			c.Sweeper.Interval = d
+		}
+	}
+	if v := os.Getenv("CODERO_SESSION_TTL"); v != "" {
+		if d, ok := parseNonNegativeDuration(v); ok {
+			c.Sweeper.SessionTTL = d
+		}
+	}
+	if v := os.Getenv("CODERO_BRANCH_HOLD_TTL"); v != "" {
+		if d, ok := parseNonNegativeDuration(v); ok {
+			c.Sweeper.BranchHoldTTL = d
+		}
+	}
+	if v := os.Getenv("CODERO_HANDOFF_TTL"); v != "" {
+		if d, ok := parseNonNegativeDuration(v); ok {
+			c.Sweeper.HandoffTTL = d
+		}
+	}
+	if v := os.Getenv("CODERO_ISSUE_POLL_INTERVAL"); v != "" {
+		if d, ok := parseNonNegativeDuration(v); ok {
+			c.Sweeper.IssuePollInterval = d
+		}
+	}
+	// API server env overrides (§6.3).
+	if v := os.Getenv("CODERO_API_ADDR"); v != "" {
+		c.APIServer.Addr = v
+	}
+	if v := os.Getenv("CODERO_API_READ_TIMEOUT"); v != "" {
+		if d, ok := parseNonNegativeDuration(v); ok {
+			c.APIServer.ReadTimeout = d
+		}
+	}
+	if v := os.Getenv("CODERO_API_WRITE_TIMEOUT"); v != "" {
+		if d, ok := parseNonNegativeDuration(v); ok {
+			c.APIServer.WriteTimeout = d
+		}
+	}
+	if v := os.Getenv("CODERO_API_SHUTDOWN_TIMEOUT"); v != "" {
+		if d, ok := parseNonNegativeDuration(v); ok {
+			c.APIServer.ShutdownTimeout = d
+		}
+	}
 }
 
 // Validate checks that required fields are present and non-empty.
@@ -331,4 +409,12 @@ func classifyYAMLError(err error) error {
 		return fmt.Errorf("%w: %w", ErrInvalidYAML, typeErr)
 	}
 	return fmt.Errorf("%w: %w", ErrInvalidYAML, err)
+}
+
+func parseNonNegativeDuration(v string) (time.Duration, bool) {
+	d, err := time.ParseDuration(v)
+	if err != nil || d < 0 {
+		return 0, false
+	}
+	return d, true
 }
