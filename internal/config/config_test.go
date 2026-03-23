@@ -20,6 +20,7 @@ func TestLoadEnv_Defaults(t *testing.T) {
 	t.Setenv("CODERO_REDIS_ADDR", "")
 	t.Setenv("CODERO_REDIS_PASS", "")
 	t.Setenv("CODERO_PID_FILE", "")
+	t.Setenv("CODERO_READY_FILE", "")
 	t.Setenv("CODERO_LOG_LEVEL", "")
 	t.Setenv("CODERO_LOG_PATH", "")
 	t.Setenv("CODERO_DB_PATH", "")
@@ -31,6 +32,10 @@ func TestLoadEnv_Defaults(t *testing.T) {
 	}
 	if c.PIDFile != "/var/run/codero/codero.pid" {
 		t.Errorf("PIDFile: got %q", c.PIDFile)
+	}
+	wantReadyFile := filepath.Join(filepath.Dir(c.PIDFile), "codero.ready")
+	if c.ReadyFile != wantReadyFile {
+		t.Errorf("ReadyFile: got %q, want %q", c.ReadyFile, wantReadyFile)
 	}
 	if c.LogLevel != "info" {
 		t.Errorf("LogLevel: got %q", c.LogLevel)
@@ -47,9 +52,11 @@ func TestLoadEnv_Defaults(t *testing.T) {
 }
 
 func TestLoadEnv_Overrides(t *testing.T) {
+	readyOverride := filepath.Join(t.TempDir(), "codero.ready")
 	t.Setenv("CODERO_REDIS_ADDR", "redis.example.com:6380")
 	t.Setenv("CODERO_REDIS_PASS", "secret")
 	t.Setenv("CODERO_PID_FILE", "/tmp/codero.pid")
+	t.Setenv("CODERO_READY_FILE", readyOverride)
 	t.Setenv("CODERO_LOG_LEVEL", "debug")
 	t.Setenv("CODERO_LOG_PATH", "/tmp/codero.log")
 	t.Setenv("CODERO_DB_PATH", "/tmp/codero.db")
@@ -63,6 +70,9 @@ func TestLoadEnv_Overrides(t *testing.T) {
 	}
 	if c.PIDFile != "/tmp/codero.pid" || c.LogLevel != "debug" || c.LogPath != "/tmp/codero.log" || c.DBPath != "/tmp/codero.db" {
 		t.Fatalf("override mismatch: %#v", c)
+	}
+	if c.ReadyFile != readyOverride {
+		t.Errorf("ReadyFile override: got %q, want %q", c.ReadyFile, readyOverride)
 	}
 	if len(c.Repos) != 2 || c.Repos[0] != "org/a" || c.Repos[1] != "org/b" {
 		t.Fatalf("repos parse mismatch: %v", c.Repos)

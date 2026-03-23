@@ -79,3 +79,13 @@ func WatchRedis(ctx context.Context, client *redislib.Client) {
 func IsDegraded() bool {
 	return degraded.Load() == 1
 }
+
+// SetDegraded sets or clears the degraded flag. Called at startup when Redis
+// is unavailable to enter polling-only mode.
+func SetDegraded(d bool) {
+	if d {
+		degraded.Store(1)
+	} else {
+		degraded.Store(0)
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/codero/codero/internal/dashboard"
@@ -41,6 +42,7 @@ type ObservabilityServer struct {
 	mu          sync.RWMutex           // Mutex for thread-safe state access
 	repoPath    string                 // Repo path for gate progress file lookup
 	version     string                 // Binary version string set via ldflags
+	ready       atomic.Bool            // Set true after full daemon bootstrap completes
 }
 
 // NewObservabilityServer creates a new observability server.
@@ -163,6 +165,7 @@ func (o *ObservabilityServer) handleHealth(w http.ResponseWriter, r *http.Reques
 		"status":         "ok",
 		"uptime_seconds": time.Since(o.startTime).Seconds(),
 		"version":        o.version,
+		"ready":          o.ready.Load(),
 	}
 
 	// Check Redis connectivity
@@ -345,19 +348,36 @@ func (o *ObservabilityServer) handleAgentMetrics(w http.ResponseWriter, r *http.
 	json.NewEncoder(w).Encode(response)
 }
 
-// handleReady returns readiness status (for Kubernetes readiness probe).
+// handleReady returns readiness status. The daemon is ready only after the
+// full bootstrap sequence completes (PID, SQLite, signals, components, obs).
+// Per the daemon v2 spec, this endpoint returns 503 until MarkReady is called.
 func (o *ObservabilityServer) handleReady(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+	if !o.ready.Load() {
+		http.Error(w, "daemon not ready", http.StatusServiceUnavailable)
+		return
+	}
 
-	// Check Redis
-	rc := o.redisClient.Unwrap()
-	if err := rc.Ping(ctx).Err(); err != nil {
-		http.Error(w, "Redis not ready", http.StatusServiceUnavailable)
+	// In degraded mode (Redis down), report ready but degraded.
+	if IsDegraded() {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("degraded"))
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("ok"))
+}
+
+// MarkReady signals that the daemon bootstrap is complete and the daemon
+// is ready to serve. Called after all startup steps succeed.
+func (o *ObservabilityServer) MarkReady() {
+	o.ready.Store(true)
+}
+
+// MarkNotReady clears readiness, used during shutdown to stop serving
+// new requests before draining existing ones.
+func (o *ObservabilityServer) MarkNotReady() {
+	o.ready.Store(false)
 }
 
 // DefaultObservabilityPort is the default port for observability endpoints.

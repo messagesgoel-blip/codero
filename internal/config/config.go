@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -83,6 +84,7 @@ type Config struct {
 	Repos             []string      `yaml:"repos"`
 	Redis             RedisConfig   `yaml:"redis"`
 	PIDFile           string        `yaml:"pid_file"`
+	ReadyFile         string        `yaml:"ready_file"`
 	LogLevel          string        `yaml:"log_level"`
 	LogPath           string        `yaml:"log_path"`
 	DBPath            string        `yaml:"db_path"`
@@ -160,7 +162,7 @@ func LoadEnv() *Config {
 
 // defaults returns a Config pre-populated with safe built-in values.
 func defaults() *Config {
-	return &Config{
+	c := &Config{
 		Redis: RedisConfig{
 			Addr:     "localhost:6379",
 			Password: "",
@@ -182,6 +184,9 @@ func defaults() *Config {
 			Method:  "squash",
 		},
 	}
+	// Derive ReadyFile from PIDFile directory to keep sentinel paths colocated.
+	c.ReadyFile = filepath.Join(filepath.Dir(c.PIDFile), "codero.ready")
+	return c
 }
 
 // applyEnvOverrides overwrites runtime fields from environment variables.
@@ -194,6 +199,9 @@ func applyEnvOverrides(c *Config) {
 	}
 	if v := os.Getenv("CODERO_PID_FILE"); v != "" {
 		c.PIDFile = v
+	}
+	if v := os.Getenv("CODERO_READY_FILE"); v != "" {
+		c.ReadyFile = v
 	}
 	if v := os.Getenv("CODERO_LOG_LEVEL"); v != "" {
 		c.LogLevel = v
