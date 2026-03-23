@@ -1,9 +1,15 @@
 package daemon
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/codero/codero/internal/redis"
@@ -123,4 +129,91 @@ func containsStr(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+func TestHandleSignals_CallsMarkNotReadyBeforeWait(t *testing.T) {
+	markNotReadyCalled := false
+	markNotReadyWhen := time.Time{}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	startTime := time.Now()
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		wg.Done()
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	markNotReady := func() {
+		markNotReadyCalled = true
+		markNotReadyWhen = time.Now()
+	}
+
+	sigChan := make(chan os.Signal, 1)
+	go func() {
+		sigChan <- syscall.SIGTERM
+	}()
+
+	done := make(chan int)
+	go func() {
+		exitCode := handleSignalsWithChan(cancel, &wg, markNotReady, sigChan)
+		done <- exitCode
+	}()
+
+	select {
+	case exitCode := <-done:
+		if exitCode != 0 {
+			t.Errorf("expected exit code 0, got %d", exitCode)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for HandleSignals to complete")
+	}
+
+	if !markNotReadyCalled {
+		t.Error("markNotReady should have been called")
+	}
+
+	if markNotReadyWhen.Before(startTime) {
+		t.Error("markNotReady should have been called after signal")
+	}
+
+	waitDoneTime := startTime.Add(50 * time.Millisecond)
+	if markNotReadyWhen.After(waitDoneTime) {
+		t.Error("markNotReady should be called before wg.Wait completes")
+	}
+
+	select {
+	case <-ctx.Done():
+	default:
+		t.Error("context should be cancelled after signal handling")
+	}
+}
+
+func handleSignalsWithChan(cancel context.CancelFunc, wg *sync.WaitGroup, markNotReady func(), sigChan chan os.Signal) int {
+	defer signal.Stop(sigChan)
+
+	<-sigChan
+
+	if markNotReady != nil {
+		markNotReady()
+	}
+
+	cancel()
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return 0
+	case <-time.After(gracePeriod):
+		return 1
+	}
 }

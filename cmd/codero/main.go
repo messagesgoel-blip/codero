@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -123,22 +124,31 @@ func daemonCmd(configPath *string) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("codero: config: %w", err)
 			}
-			if err := cfg.Validate(); err != nil {
-				return fmt.Errorf("codero: config: %w", err)
-			}
 
 			// CLI flag overrides (flags > env > config file > defaults).
+			// Apply before Validate so derived paths are correct.
+			pidFileOverride := pidFile != ""
+			readyFileOverride := readyFile != ""
 			if pidFile != "" {
 				cfg.PIDFile = pidFile
 			}
 			if readyFile != "" {
 				cfg.ReadyFile = readyFile
 			}
+			// If PID file was overridden but ready file was not,
+			// derive ready sentinel from the new PID location.
+			if pidFileOverride && !readyFileOverride {
+				cfg.ReadyFile = filepath.Join(filepath.Dir(cfg.PIDFile), "codero.ready")
+			}
 			if dbPath != "" {
 				cfg.DBPath = dbPath
 			}
 			if redisURL != "" {
 				cfg.Redis.Addr = redisURL
+			}
+
+			if err := cfg.Validate(); err != nil {
+				return fmt.Errorf("codero: config: %w", err)
 			}
 
 			if err := loglib.Init(cfg.LogLevel, cfg.LogPath); err != nil {
@@ -170,20 +180,15 @@ func daemonCmd(configPath *string) *cobra.Command {
 				"pid_file", cfg.PIDFile,
 			)
 
-			// Phased cleanup: PID and ready sentinel are removed on clean
-			// exit only. On unclean exit (grace period exceeded / SIGKILL)
-			// they remain on disk so the next startup knows recovery is needed.
+			// Phased cleanup: PID file is removed on clean exit only.
+			// On unclean exit (grace period exceeded / SIGKILL) the PID file
+			// remains on disk so the next startup knows recovery is needed.
+			// The ready sentinel is removed immediately on signal receipt,
+			// not here in the defer.
 			cleanExit := false
 			defer func() {
 				if !cleanExit {
 					return
-				}
-				if err := daemon.RemoveSentinel(cfg.ReadyFile); err != nil {
-					loglib.Warn("codero: failed to remove ready sentinel on exit",
-						loglib.FieldComponent, "daemon",
-						"ready_file", cfg.ReadyFile,
-						"error", err,
-					)
 				}
 				if err := daemon.RemovePID(cfg.PIDFile); err != nil {
 					loglib.Warn("codero: failed to remove PID file on exit",
@@ -389,12 +394,26 @@ func daemonCmd(configPath *string) *cobra.Command {
 			//   2. Cancel context (drain in-flight work)
 			//   3. Wait for goroutines (grace period)
 			//   4. Close Redis, then DB (deferred)
-			//   5. Remove PID/ready sentinels (deferred, clean exit only)
-			exitCode := daemon.HandleSignals(cancel, &wg)
-			obs.MarkNotReady()
+			//   5. Remove PID sentinel (deferred, clean exit only)
+			//
+			// The ready sentinel is removed immediately on signal so that
+			// /ready returns 503 during the grace window even if the process
+			// is still running. This matches the spec requirement that readiness
+			// flips before drain, not after.
+			markNotReady := func() {
+				obs.MarkNotReady()
+				if err := daemon.RemoveSentinel(cfg.ReadyFile); err != nil {
+					loglib.Warn("codero: failed to remove ready sentinel during shutdown",
+						loglib.FieldComponent, "daemon",
+						"ready_file", cfg.ReadyFile,
+						"error", err,
+					)
+				}
+			}
+			exitCode := daemon.HandleSignals(cancel, &wg, markNotReady)
 
 			if exitCode != 0 {
-				// Grace period exceeded — leave PID/ready on disk for recovery.
+				// Grace period exceeded — leave PID on disk for recovery.
 				return fmt.Errorf("codero: grace period exceeded, shutdown incomplete")
 			}
 

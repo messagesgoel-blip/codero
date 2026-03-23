@@ -284,3 +284,52 @@ func TestEnvOverrides_COD026(t *testing.T) {
 		t.Errorf("DashboardPublicBaseURL: got %q, want https://ops.example.com", c.DashboardPublicBaseURL)
 	}
 }
+
+func TestEnvOverrides_PIDFileDerivesReadyFile(t *testing.T) {
+	// When CODERO_PID_FILE is set but CODERO_READY_FILE is not,
+	// ReadyFile should be derived from the PID file location.
+	t.Setenv("CODERO_PID_FILE", "/custom/run/codero.pid")
+	t.Setenv("CODERO_READY_FILE", "") // Explicitly unset
+
+	c := defaults()
+	applyEnvOverrides(c)
+
+	if c.PIDFile != "/custom/run/codero.pid" {
+		t.Errorf("PIDFile: got %q, want /custom/run/codero.pid", c.PIDFile)
+	}
+	wantReady := "/custom/run/codero.ready"
+	if c.ReadyFile != wantReady {
+		t.Errorf("ReadyFile: got %q, want %q (derived from PID dir)", c.ReadyFile, wantReady)
+	}
+}
+
+func TestEnvOverrides_ReadyFileOverrideTakesPrecedence(t *testing.T) {
+	// When both CODERO_PID_FILE and CODERO_READY_FILE are set,
+	// the explicit ready file override should win.
+	t.Setenv("CODERO_PID_FILE", "/custom/run/codero.pid")
+	t.Setenv("CODERO_READY_FILE", "/other/path/codero.ready")
+
+	c := defaults()
+	applyEnvOverrides(c)
+
+	if c.PIDFile != "/custom/run/codero.pid" {
+		t.Errorf("PIDFile: got %q", c.PIDFile)
+	}
+	if c.ReadyFile != "/other/path/codero.ready" {
+		t.Errorf("ReadyFile: got %q, want explicit override /other/path/codero.ready", c.ReadyFile)
+	}
+}
+
+func TestEnvOverrides_NoPIDOverrideKeepsDefaultReady(t *testing.T) {
+	// When CODERO_PID_FILE is not set, ReadyFile should remain at default.
+	t.Setenv("CODERO_PID_FILE", "")
+	t.Setenv("CODERO_READY_FILE", "")
+
+	c := defaults()
+	applyEnvOverrides(c)
+
+	wantReady := filepath.Join(filepath.Dir(c.PIDFile), "codero.ready")
+	if c.ReadyFile != wantReady {
+		t.Errorf("ReadyFile: got %q, want default %q", c.ReadyFile, wantReady)
+	}
+}

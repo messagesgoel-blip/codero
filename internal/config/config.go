@@ -190,6 +190,8 @@ func defaults() *Config {
 }
 
 // applyEnvOverrides overwrites runtime fields from environment variables.
+// If CODERO_PID_FILE is set but CODERO_READY_FILE is not, ReadyFile is
+// derived from the effective PID path to keep sentinel paths colocated.
 func applyEnvOverrides(c *Config) {
 	if v := os.Getenv("CODERO_REDIS_ADDR"); v != "" {
 		c.Redis.Addr = v
@@ -197,11 +199,20 @@ func applyEnvOverrides(c *Config) {
 	if v := os.Getenv("CODERO_REDIS_PASS"); v != "" {
 		c.Redis.Password = v
 	}
+	pidFileEnvSet := false
 	if v := os.Getenv("CODERO_PID_FILE"); v != "" {
 		c.PIDFile = v
+		pidFileEnvSet = true
 	}
+	readyFileEnvSet := false
 	if v := os.Getenv("CODERO_READY_FILE"); v != "" {
 		c.ReadyFile = v
+		readyFileEnvSet = true
+	}
+	// If PID file was set via env but ready file was not,
+	// derive ready sentinel from the new PID location.
+	if pidFileEnvSet && !readyFileEnvSet {
+		c.ReadyFile = filepath.Join(filepath.Dir(c.PIDFile), "codero.ready")
 	}
 	if v := os.Getenv("CODERO_LOG_LEVEL"); v != "" {
 		c.LogLevel = v
