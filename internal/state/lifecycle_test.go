@@ -138,7 +138,10 @@ func TestLifecycle_GitHubLinkCRUD(t *testing.T) {
 	if err := UpdateLinkPRState(ctx, db, link.LinkID, "merged"); err != nil {
 		t.Fatalf("UpdateLinkPRState: %v", err)
 	}
-	updated, _ := GetLinkByTaskID(ctx, db, "LC-TASK-LINK")
+	updated, err := GetLinkByTaskID(ctx, db, "LC-TASK-LINK")
+	if err != nil {
+		t.Fatalf("GetLinkByTaskID after UpdateLinkPRState: %v", err)
+	}
 	if updated.PRState != "merged" {
 		t.Errorf("pr_state: got %q, want merged", updated.PRState)
 	}
@@ -185,8 +188,8 @@ func TestLifecycle_FeedbackCacheInvalidation(t *testing.T) {
 
 	// Verify gone
 	_, err = GetFeedbackCacheByAssignment(ctx, db, a.ID)
-	if err == nil {
-		t.Fatal("expected not-found after invalidation")
+	if !errors.Is(err, ErrFeedbackCacheNotFound) {
+		t.Fatalf("expected ErrFeedbackCacheNotFound after GetFeedbackCacheByAssignment invalidate, got %v", err)
 	}
 }
 
