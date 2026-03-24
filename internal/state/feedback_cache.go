@@ -110,6 +110,17 @@ func InvalidateFeedbackCache(ctx context.Context, db *DB, assignmentID string) e
 	return nil
 }
 
+// InvalidateFeedbackCacheByTaskID deletes all feedback cache rows for a given
+// task_id. It is a no-op if no rows exist.
+func InvalidateFeedbackCacheByTaskID(ctx context.Context, db *DB, taskID string) error {
+	_, err := db.sql.ExecContext(ctx,
+		`DELETE FROM task_feedback_cache WHERE task_id = ?`, taskID)
+	if err != nil {
+		return fmt.Errorf("invalidate feedback cache by task: %w", err)
+	}
+	return nil
+}
+
 func scanFeedbackCache(row *sql.Row) (*FeedbackCache, error) {
 	var fc FeedbackCache
 	var ciSnapshot sql.NullString

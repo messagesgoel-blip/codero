@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/codero/codero/internal/delivery"
 	loglib "github.com/codero/codero/internal/log"
@@ -82,59 +83,62 @@ func (p *EventProcessor) handlePullRequest(ctx context.Context, ev GitHubEvent) 
 	rec, err := state.GetBranch(p.db, ev.Repo, branch)
 	if err != nil {
 		if errors.Is(err, state.ErrBranchNotFound) {
-			return nil // branch not tracked — nothing to do
+			// Branch not tracked in branch_states. Still attempt link/cache
+			// updates since a github_link may exist for this branch.
+			p.updateLinkAndInvalidateCache(ctx, ev.Repo, branch, action, headHash, prNumber(ev.Payload))
+			return nil
 		}
 		return fmt.Errorf("get branch %s/%s: %w", ev.Repo, branch, err)
 	}
 
 	switch action {
 	case "closed":
-		if rec.State == state.StateClosed {
-			return nil
+		if rec.State != state.StateClosed {
+			if err := state.TransitionBranch(p.db, rec.ID, rec.State, state.StateClosed, "pr_closed_webhook"); err != nil {
+				loglib.Info("webhook: pr_closed transition skipped",
+					loglib.FieldEventType, loglib.EventRejection,
+					loglib.FieldComponent, "webhook",
+					loglib.FieldRepo, ev.Repo,
+					loglib.FieldBranch, branch,
+					"error", err,
+				)
+			} else {
+				_, _ = p.stream.AppendSystem(ctx, ev.Repo, branch, headHash, "pr_closed", "pull_request closed via webhook")
+				loglib.Info("webhook: pr_closed transition applied",
+					loglib.FieldEventType, loglib.EventTransition,
+					loglib.FieldComponent, "webhook",
+					loglib.FieldRepo, ev.Repo,
+					loglib.FieldBranch, branch,
+				)
+			}
 		}
-		if err := state.TransitionBranch(p.db, rec.ID, rec.State, state.StateClosed, "pr_closed_webhook"); err != nil {
-			loglib.Info("webhook: pr_closed transition skipped",
-				loglib.FieldEventType, loglib.EventRejection,
-				loglib.FieldComponent, "webhook",
-				loglib.FieldRepo, ev.Repo,
-				loglib.FieldBranch, branch,
-				"error", err,
-			)
-			return nil
-		}
-		_, _ = p.stream.AppendSystem(ctx, ev.Repo, branch, headHash, "pr_closed", "pull_request closed via webhook")
-		loglib.Info("webhook: pr_closed transition applied",
-			loglib.FieldEventType, loglib.EventTransition,
-			loglib.FieldComponent, "webhook",
-			loglib.FieldRepo, ev.Repo,
-			loglib.FieldBranch, branch,
-		)
 
 	case "synchronize":
-		if headHash == "" || headHash == rec.HeadHash {
-			return nil
+		if headHash != "" && headHash != rec.HeadHash {
+			if err := state.UpdateHeadHashAndTransition(p.db, rec.ID, headHash, rec.State, state.StateStaleBranch, "synchronize_webhook"); err != nil {
+				loglib.Info("webhook: synchronize transition skipped",
+					loglib.FieldEventType, loglib.EventRejection,
+					loglib.FieldComponent, "webhook",
+					loglib.FieldRepo, ev.Repo,
+					loglib.FieldBranch, branch,
+					"error", err,
+				)
+			} else {
+				_, _ = p.stream.AppendSystem(ctx, ev.Repo, branch, headHash, "head_updated",
+					fmt.Sprintf("new head %s via synchronize webhook", headHash))
+				loglib.Info("webhook: synchronize transition applied",
+					loglib.FieldEventType, loglib.EventTransition,
+					loglib.FieldComponent, "webhook",
+					loglib.FieldRepo, ev.Repo,
+					loglib.FieldBranch, branch,
+					"new_head", headHash,
+				)
+			}
 		}
-		// New commits pushed — transition to stale_branch (T12).
-		if err := state.UpdateHeadHashAndTransition(p.db, rec.ID, headHash, rec.State, state.StateStaleBranch, "synchronize_webhook"); err != nil {
-			loglib.Info("webhook: synchronize transition skipped",
-				loglib.FieldEventType, loglib.EventRejection,
-				loglib.FieldComponent, "webhook",
-				loglib.FieldRepo, ev.Repo,
-				loglib.FieldBranch, branch,
-				"error", err,
-			)
-			return nil
-		}
-		_, _ = p.stream.AppendSystem(ctx, ev.Repo, branch, headHash, "head_updated",
-			fmt.Sprintf("new head %s via synchronize webhook", headHash))
-		loglib.Info("webhook: synchronize transition applied",
-			loglib.FieldEventType, loglib.EventTransition,
-			loglib.FieldComponent, "webhook",
-			loglib.FieldRepo, ev.Repo,
-			loglib.FieldBranch, branch,
-			"new_head", headHash,
-		)
 	}
+
+	// Best-effort: update github link and invalidate feedback cache.
+	p.updateLinkAndInvalidateCache(ctx, ev.Repo, branch, action, headHash, prNumber(ev.Payload))
 
 	return nil
 }
@@ -224,6 +228,10 @@ func (p *EventProcessor) handlePullRequestReview(ctx context.Context, ev GitHubE
 		loglib.FieldBranch, branch,
 		"approved", approved,
 	)
+
+	// Best-effort: invalidate feedback cache for the linked task.
+	p.invalidateCacheForBranch(ctx, ev.Repo, branch)
+
 	return nil
 }
 
@@ -288,6 +296,10 @@ func (p *EventProcessor) handleCheckRun(ctx context.Context, ev GitHubEvent) err
 			loglib.FieldBranch, branch,
 			"ci_green", ghState.CIGreen,
 		)
+
+		// Best-effort: update CI run ID on link and invalidate feedback cache.
+		p.updateCILinkAndInvalidateCache(ctx, ev.Repo, branch, checkRunID(ev.Payload))
+
 		return nil
 	}
 
@@ -321,6 +333,10 @@ func (p *EventProcessor) handleCheckRun(ctx context.Context, ev GitHubEvent) err
 		"ci_green", ciGreen,
 		"conclusion", conclusion,
 	)
+
+	// Best-effort: update CI run ID on link and invalidate feedback cache.
+	p.updateCILinkAndInvalidateCache(ctx, ev.Repo, branch, checkRunID(ev.Payload))
+
 	return nil
 }
 
@@ -374,4 +390,159 @@ func checkRunHeadSHA(payload map[string]any) string {
 	}
 	sha, _ := cr["head_sha"].(string)
 	return sha
+}
+
+// prNumber extracts the pull request number from a pull_request payload.
+func prNumber(payload map[string]any) int {
+	pr, _ := payload["pull_request"].(map[string]any)
+	if pr == nil {
+		return 0
+	}
+	num, _ := pr["number"].(float64) // JSON numbers decode as float64
+	return int(num)
+}
+
+// checkRunID extracts the check_run ID from a check_run payload as a string.
+func checkRunID(payload map[string]any) string {
+	cr, _ := payload["check_run"].(map[string]any)
+	if cr == nil {
+		return ""
+	}
+	id, ok := cr["id"].(float64) // JSON numbers decode as float64
+	if !ok {
+		return ""
+	}
+	return strconv.FormatInt(int64(id), 10)
+}
+
+// updateLinkAndInvalidateCache is the best-effort post-processing for
+// pull_request events. It looks up the github link by (repo, branch) and:
+//   - For "opened": sets pr_number + pr_state "open"
+//   - For "closed": sets pr_state "closed"
+//   - For "synchronize": updates head_sha
+//
+// After any link update it invalidates the feedback cache for the linked task.
+func (p *EventProcessor) updateLinkAndInvalidateCache(ctx context.Context, repo, branch, action, headHash string, prNum int) {
+	link, err := state.GetLinkByBranch(ctx, p.db, repo, branch)
+	if err != nil {
+		if !errors.Is(err, state.ErrGitHubLinkNotFound) {
+			loglib.Info("webhook: get link by branch failed (best-effort)",
+				loglib.FieldComponent, "webhook",
+				loglib.FieldRepo, repo,
+				loglib.FieldBranch, branch,
+				"error", err,
+			)
+		}
+		return
+	}
+
+	switch action {
+	case "opened":
+		if prNum > 0 {
+			link.PRNumber = prNum
+		}
+		link.PRState = "open"
+		if err := state.UpsertGitHubLink(ctx, p.db, link); err != nil {
+			loglib.Info("webhook: upsert link for PR opened failed (best-effort)",
+				loglib.FieldComponent, "webhook",
+				loglib.FieldRepo, repo,
+				loglib.FieldBranch, branch,
+				"error", err,
+			)
+		}
+	case "closed":
+		if err := state.UpdateLinkPRState(ctx, p.db, link.LinkID, "closed"); err != nil {
+			loglib.Info("webhook: update link pr_state closed failed (best-effort)",
+				loglib.FieldComponent, "webhook",
+				loglib.FieldRepo, repo,
+				loglib.FieldBranch, branch,
+				"error", err,
+			)
+		}
+	case "synchronize":
+		if headHash != "" {
+			if err := state.UpdateLinkHeadSHA(ctx, p.db, link.LinkID, headHash); err != nil {
+				loglib.Info("webhook: update link head_sha failed (best-effort)",
+					loglib.FieldComponent, "webhook",
+					loglib.FieldRepo, repo,
+					loglib.FieldBranch, branch,
+					"error", err,
+				)
+			}
+		}
+	}
+
+	// Invalidate feedback cache for the linked task.
+	if err := state.InvalidateFeedbackCacheByTaskID(ctx, p.db, link.TaskID); err != nil {
+		loglib.Info("webhook: invalidate feedback cache failed (best-effort)",
+			loglib.FieldComponent, "webhook",
+			loglib.FieldRepo, repo,
+			loglib.FieldBranch, branch,
+			"error", err,
+		)
+	}
+}
+
+// invalidateCacheForBranch looks up the github link by (repo, branch) and
+// invalidates the feedback cache for the linked task. Best-effort — errors
+// are logged at Info level and do not fail the event.
+func (p *EventProcessor) invalidateCacheForBranch(ctx context.Context, repo, branch string) {
+	link, err := state.GetLinkByBranch(ctx, p.db, repo, branch)
+	if err != nil {
+		if !errors.Is(err, state.ErrGitHubLinkNotFound) {
+			loglib.Info("webhook: get link by branch failed (best-effort)",
+				loglib.FieldComponent, "webhook",
+				loglib.FieldRepo, repo,
+				loglib.FieldBranch, branch,
+				"error", err,
+			)
+		}
+		return
+	}
+
+	if err := state.InvalidateFeedbackCacheByTaskID(ctx, p.db, link.TaskID); err != nil {
+		loglib.Info("webhook: invalidate feedback cache failed (best-effort)",
+			loglib.FieldComponent, "webhook",
+			loglib.FieldRepo, repo,
+			loglib.FieldBranch, branch,
+			"error", err,
+		)
+	}
+}
+
+// updateCILinkAndInvalidateCache looks up the github link by (repo, branch),
+// updates the last_ci_run_id, and invalidates the feedback cache. Best-effort.
+func (p *EventProcessor) updateCILinkAndInvalidateCache(ctx context.Context, repo, branch, ciRunID string) {
+	link, err := state.GetLinkByBranch(ctx, p.db, repo, branch)
+	if err != nil {
+		if !errors.Is(err, state.ErrGitHubLinkNotFound) {
+			loglib.Info("webhook: get link by branch failed (best-effort)",
+				loglib.FieldComponent, "webhook",
+				loglib.FieldRepo, repo,
+				loglib.FieldBranch, branch,
+				"error", err,
+			)
+		}
+		return
+	}
+
+	if ciRunID != "" {
+		if err := state.UpdateLinkCIRunID(ctx, p.db, link.LinkID, ciRunID); err != nil {
+			loglib.Info("webhook: update link ci_run_id failed (best-effort)",
+				loglib.FieldComponent, "webhook",
+				loglib.FieldRepo, repo,
+				loglib.FieldBranch, branch,
+				"error", err,
+			)
+		}
+	}
+
+	if err := state.InvalidateFeedbackCacheByTaskID(ctx, p.db, link.TaskID); err != nil {
+		loglib.Info("webhook: invalidate feedback cache failed (best-effort)",
+			loglib.FieldComponent, "webhook",
+			loglib.FieldRepo, repo,
+			loglib.FieldBranch, branch,
+			"error", err,
+		)
+	}
 }
