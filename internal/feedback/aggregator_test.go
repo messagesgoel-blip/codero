@@ -81,8 +81,7 @@ func TestAggregateFeedback_Truncation(t *testing.T) {
 	if !result.Truncated {
 		t.Error("expected Truncated=true")
 	}
-	if len(result.ContextBlock) > MaxContextBlockBytes+200 {
-		// Allow some overhead for the truncation notice.
+	if len(result.ContextBlock) > MaxContextBlockBytes {
 		t.Errorf("context block too large: %d bytes", len(result.ContextBlock))
 	}
 	if !strings.Contains(result.ContextBlock, "[truncated") {

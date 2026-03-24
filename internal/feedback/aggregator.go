@@ -88,7 +88,7 @@ func precedenceKey(source string, snap *SourceSnapshot) int {
 		if snap != nil && (snap.Status == "failure" || snap.Status == "changes_requested") {
 			return 3
 		}
-		// Non-failure CI still sorts after human
+		// Non-failure CI still sorts before human.
 		return 3
 	case SourceHuman:
 		return 4
@@ -173,13 +173,21 @@ func AggregateFeedback(input AggregateInput) AggregateResult {
 	// Truncate if needed.
 	truncated := false
 	if len(contextBlock) > MaxContextBlockBytes {
+		const marker = "\n\n[truncated — feedback exceeded context window limit]\n"
+
 		truncated = true
-		contextBlock = contextBlock[:MaxContextBlockBytes]
+		available := MaxContextBlockBytes - len(marker)
+		if available < 0 {
+			available = 0
+		}
+		if len(contextBlock) > available {
+			contextBlock = contextBlock[:available]
+		}
 		// Find last newline for a clean cut.
 		if idx := strings.LastIndex(contextBlock, "\n"); idx > 0 {
 			contextBlock = contextBlock[:idx]
 		}
-		contextBlock += "\n\n[truncated — feedback exceeded context window limit]\n"
+		contextBlock += marker
 	}
 
 	return AggregateResult{

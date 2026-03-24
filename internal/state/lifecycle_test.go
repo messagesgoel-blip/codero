@@ -12,7 +12,9 @@ func TestLifecycle_AcceptRetryIdempotency(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	RegisterAgentSession(ctx, db, "lc-sess-1", "agent-1", "")
+	if err := RegisterAgentSession(ctx, db, "lc-sess-1", "agent-1", ""); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
 	a1, err := AcceptTask(ctx, db, "lc-sess-1", "LC-TASK-001")
 	if err != nil {
 		t.Fatalf("first accept: %v", err)
@@ -32,8 +34,12 @@ func TestLifecycle_AcceptRaceConflict(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	RegisterAgentSession(ctx, db, "lc-sess-2a", "agent-a", "")
-	RegisterAgentSession(ctx, db, "lc-sess-2b", "agent-b", "")
+	if err := RegisterAgentSession(ctx, db, "lc-sess-2a", "agent-a", ""); err != nil {
+		t.Fatalf("RegisterAgentSession session a: %v", err)
+	}
+	if err := RegisterAgentSession(ctx, db, "lc-sess-2b", "agent-b", ""); err != nil {
+		t.Fatalf("RegisterAgentSession session b: %v", err)
+	}
 
 	_, err := AcceptTask(ctx, db, "lc-sess-2a", "LC-TASK-002")
 	if err != nil {
@@ -54,11 +60,16 @@ func TestLifecycle_SubmitGateFailFeedbackRevise(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	RegisterAgentSession(ctx, db, "lc-sess-3", "agent-1", "")
-	a, _ := AcceptTask(ctx, db, "lc-sess-3", "LC-TASK-003")
+	if err := RegisterAgentSession(ctx, db, "lc-sess-3", "agent-1", ""); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	a, err := AcceptTask(ctx, db, "lc-sess-3", "LC-TASK-003")
+	if err != nil {
+		t.Fatalf("AcceptTask: %v", err)
+	}
 
 	// Submit (agent signals work ready)
-	a, err := EmitAssignmentUpdate(ctx, db, a.ID, 1, AssignmentSubstatusWaitingForCI)
+	a, err = EmitAssignmentUpdate(ctx, db, a.ID, 1, AssignmentSubstatusWaitingForCI)
 	if err != nil {
 		t.Fatalf("submit emit: %v", err)
 	}
@@ -138,8 +149,13 @@ func TestLifecycle_FeedbackCacheInvalidation(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	RegisterAgentSession(ctx, db, "lc-sess-fc", "agent-1", "")
-	a, _ := AcceptTask(ctx, db, "lc-sess-fc", "LC-TASK-FC")
+	if err := RegisterAgentSession(ctx, db, "lc-sess-fc", "agent-1", ""); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	a, err := AcceptTask(ctx, db, "lc-sess-fc", "LC-TASK-FC")
+	if err != nil {
+		t.Fatalf("AcceptTask: %v", err)
+	}
 
 	fc := &FeedbackCache{
 		AssignmentID: a.ID,
@@ -179,8 +195,13 @@ func TestLifecycle_SourceStatusSemantics(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	RegisterAgentSession(ctx, db, "lc-sess-ss", "agent-1", "")
-	a, _ := AcceptTask(ctx, db, "lc-sess-ss", "LC-TASK-SS")
+	if err := RegisterAgentSession(ctx, db, "lc-sess-ss", "agent-1", ""); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	a, err := AcceptTask(ctx, db, "lc-sess-ss", "LC-TASK-SS")
+	if err != nil {
+		t.Fatalf("AcceptTask: %v", err)
+	}
 
 	ss := `{"ci":"available","coderabbit":"pending","human":"not_configured","compliance":"error"}`
 	fc := &FeedbackCache{

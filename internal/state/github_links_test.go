@@ -234,3 +234,18 @@ func TestUpdateLinkHeadSHA(t *testing.T) {
 		t.Errorf("expected ErrGitHubLinkNotFound, got: %v", err)
 	}
 }
+
+func TestNullInt(t *testing.T) {
+	gotZero := nullInt(0)
+	if gotZero.Valid {
+		t.Fatalf("nullInt(0): expected NULL, got %+v", gotZero)
+	}
+
+	gotValue := nullInt(123)
+	if !gotValue.Valid {
+		t.Fatalf("nullInt(123): expected valid value, got %+v", gotValue)
+	}
+	if gotValue.Int64 != 123 {
+		t.Fatalf("nullInt(123): got %d, want 123", gotValue.Int64)
+	}
+}
