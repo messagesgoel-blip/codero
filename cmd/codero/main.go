@@ -13,6 +13,7 @@ import (
 
 	"github.com/codero/codero/internal/config"
 	"github.com/codero/codero/internal/daemon"
+	daemongrpc "github.com/codero/codero/internal/daemon/grpc"
 	"github.com/codero/codero/internal/delivery"
 	"github.com/codero/codero/internal/gate"
 	ghclient "github.com/codero/codero/internal/github"
@@ -349,12 +350,6 @@ func daemonCmd(configPath *string) *cobra.Command {
 			}()
 
 			expiryWorker := scheduler.NewExpiryWorker(db, queue, stream)
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				expiryWorker.Run(ctx)
-			}()
-
 			reconciler := webhook.NewReconciler(db, gh, cfg.Repos, cfg.Webhook.Enabled)
 			if cfg.AutoMerge.Enabled {
 				reconciler.WithAutoMerge(gh, cfg.AutoMerge.Method)
@@ -364,17 +359,35 @@ func daemonCmd(configPath *string) *cobra.Command {
 					"merge_method", cfg.AutoMerge.Method,
 				)
 			}
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				reconciler.Run(ctx)
-			}()
 
-			// ─── Step 7: API/observability server ───────────────────
+			// ─── Step 7: API/observability server + gRPC ────────────
 			slotCounter := scheduler.NewSlotCounter(client)
-			obs := daemon.NewObservabilityServerWithAddr(client, queue, slotCounter, db.Unwrap(),
+			sessStore := session.NewStore(db)
+
+			loglib.Info("codero: running startup recovery sweep",
+				loglib.FieldEventType, loglib.EventStartup,
+				loglib.FieldComponent, "daemon",
+			)
+			expiryWorker.RunSessionExpiryCycle(ctx)
+			expiryWorker.RunLeaseAuditCycle(ctx)
+			reconciler.RunOnce(ctx)
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+
+			// Create the gRPC daemon surface (Daemon Spec v2 §7).
+			grpcSrv := daemongrpc.NewServer(daemongrpc.ServerConfig{
+				DB:           db,
+				RawDB:        db.Unwrap(),
+				GitHubHealth: reconciler,
+				SessionStore: sessStore,
+				Version:      version,
+			})
+
+			// Serve gRPC + HTTP on the same port via h2c multiplexing.
+			obs := daemon.NewObservabilityServerWithGRPC(client, queue, slotCounter, db.Unwrap(),
 				cfg.APIServer.Addr, cfg.APIServer.ReadTimeout, cfg.APIServer.WriteTimeout,
-				cfg.DashboardBasePath, version)
+				cfg.DashboardBasePath, version, grpcSrv.GRPCServer())
 			obs.Start()
 			wg.Add(1)
 			go func() {
@@ -388,6 +401,18 @@ func daemonCmd(configPath *string) *cobra.Command {
 						"error", err,
 					)
 				}
+			}()
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				expiryWorker.Run(ctx)
+			}()
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				reconciler.Run(ctx)
 			}()
 
 			// Webhook server (optional).
@@ -433,6 +458,7 @@ func daemonCmd(configPath *string) *cobra.Command {
 				return fmt.Errorf("codero: ready sentinel: %w", err)
 			}
 			obs.MarkReady()
+			grpcSrv.MarkReady()
 
 			loglib.Info("codero: daemon started",
 				loglib.FieldEventType, loglib.EventStartup,
@@ -440,6 +466,7 @@ func daemonCmd(configPath *string) *cobra.Command {
 				"pid", os.Getpid(),
 				"webhook_enabled", cfg.Webhook.Enabled,
 				"redis_available", redisAvailable,
+				"grpc_enabled", true,
 			)
 
 			// ─── Step 9: Block on signals → phased shutdown ─────────
@@ -456,6 +483,7 @@ func daemonCmd(configPath *string) *cobra.Command {
 			// flips before drain, not after.
 			markNotReady := func() {
 				obs.MarkNotReady()
+				grpcSrv.MarkNotReady()
 				if err := daemon.RemoveSentinel(cfg.ReadyFile); err != nil {
 					loglib.Warn("codero: failed to remove ready sentinel during shutdown",
 						loglib.FieldComponent, "daemon",

@@ -23,6 +23,9 @@ import (
 	"github.com/codero/codero/internal/redis"
 	"github.com/codero/codero/internal/scheduler"
 	"github.com/codero/codero/internal/tui/adapters"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
+	ggrpc "google.golang.org/grpc"
 )
 
 // ObservabilityServer provides HTTP endpoints for health, queue status, and metrics.
@@ -44,6 +47,7 @@ type ObservabilityServer struct {
 	repoPath    string                 // Repo path for gate progress file lookup
 	version     string                 // Binary version string set via ldflags
 	ready       atomic.Bool            // Set true after full daemon bootstrap completes
+	grpcServer  *ggrpc.Server          // Optional gRPC server for daemon contract surface
 }
 
 // NewObservabilityServer creates a new observability server.
@@ -56,6 +60,13 @@ func NewObservabilityServer(redisClient *redis.Client, queue *scheduler.Queue, s
 // NewObservabilityServerWithAddr creates a new observability server using a full
 // bind address plus server-level read/write timeouts.
 func NewObservabilityServerWithAddr(redisClient *redis.Client, queue *scheduler.Queue, slotCounter *scheduler.SlotCounter, db *sql.DB, addr string, readTimeout, writeTimeout time.Duration, dashboardBasePath, version string) *ObservabilityServer {
+	return NewObservabilityServerWithGRPC(redisClient, queue, slotCounter, db, addr, readTimeout, writeTimeout, dashboardBasePath, version, nil)
+}
+
+// NewObservabilityServerWithGRPC creates a new observability server with optional
+// gRPC multiplexing. When grpcServer is non-nil, gRPC and HTTP share the same port
+// via h2c (HTTP/2 cleartext) per Daemon Spec v2 §7: "gRPC + REST on CODERO_API_ADDR".
+func NewObservabilityServerWithGRPC(redisClient *redis.Client, queue *scheduler.Queue, slotCounter *scheduler.SlotCounter, db *sql.DB, addr string, readTimeout, writeTimeout time.Duration, dashboardBasePath, version string, grpcServer *ggrpc.Server) *ObservabilityServer {
 	if dashboardBasePath == "" {
 		dashboardBasePath = "/dashboard"
 	}
@@ -69,9 +80,26 @@ func NewObservabilityServerWithAddr(redisClient *redis.Client, queue *scheduler.
 	}
 
 	mux := http.NewServeMux()
+
+	// When a gRPC server is provided, multiplex gRPC and HTTP on the same
+	// listener using h2c (HTTP/2 cleartext). gRPC requests are identified by
+	// Content-Type "application/grpc" and routed to the gRPC server; all
+	// other requests fall through to the HTTP mux.
+	var handler http.Handler = mux
+	if grpcServer != nil {
+		handler = h2c.NewHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ct := r.Header.Get("Content-Type")
+			if r.ProtoMajor == 2 && strings.HasPrefix(ct, "application/grpc") {
+				grpcServer.ServeHTTP(w, r)
+			} else {
+				mux.ServeHTTP(w, r)
+			}
+		}), &http2.Server{})
+	}
+
 	server := &http.Server{
 		Addr:         addr,
-		Handler:      mux,
+		Handler:      handler,
 		ReadTimeout:  readTimeout,
 		WriteTimeout: writeTimeout,
 	}
@@ -104,6 +132,7 @@ func NewObservabilityServerWithAddr(redisClient *redis.Client, queue *scheduler.
 		startTime:   time.Now(),
 		repoPath:    repoPath,
 		version:     version,
+		grpcServer:  grpcServer,
 	}
 
 	// Register observability routes
@@ -160,9 +189,43 @@ func (o *ObservabilityServer) Start() {
 	}()
 }
 
-// Stop gracefully shuts down the observability server.
+// Stop gracefully shuts down the observability server and any attached gRPC server.
 func (o *ObservabilityServer) Stop(ctx context.Context) error {
-	return o.server.Shutdown(ctx)
+	var (
+		grpcErr error
+		wg      sync.WaitGroup
+	)
+	if o.grpcServer != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			o.grpcServer.GracefulStop()
+		}()
+	}
+	httpErr := o.server.Shutdown(ctx)
+
+	if o.grpcServer != nil {
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			wg.Wait()
+		}()
+
+		select {
+		case <-done:
+		case <-ctx.Done():
+			o.grpcServer.Stop()
+			<-done
+			if httpErr == nil {
+				grpcErr = ctx.Err()
+			}
+		}
+	}
+
+	if httpErr != nil {
+		return httpErr
+	}
+	return grpcErr
 }
 
 // Handler exposes the observability HTTP handler for integration tests.

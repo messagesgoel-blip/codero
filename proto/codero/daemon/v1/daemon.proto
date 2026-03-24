@@ -1,0 +1,321 @@
+syntax = "proto3";
+
+package codero.daemon.v1;
+
+option go_package = "github.com/codero/codero/internal/daemon/grpc/v1;daemonv1";
+
+import "google/protobuf/timestamp.proto";
+
+// ─── Session Service (Daemon Spec v2 §7.1) ─────────────────────────
+
+service SessionService {
+  // Register a new agent session with the daemon.
+  rpc RegisterSession(RegisterSessionRequest) returns (RegisterSessionResponse);
+  // Prove a session is still alive (called by launcher, not agent).
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  // Retrieve session details by session_id.
+  rpc GetSession(GetSessionRequest) returns (GetSessionResponse);
+}
+
+message RegisterSessionRequest {
+  string agent_id = 1;
+  string client_kind = 2;
+  map<string, string> initial_context = 3;
+}
+
+message RegisterSessionResponse {
+  string session_id = 1;
+  string api_url = 2;
+  string api_token = 3;
+  int32 heartbeat_interval_seconds = 4;
+  int32 heartbeat_ttl_seconds = 5;
+  string ready_sentinel_path = 6;
+}
+
+message HeartbeatRequest {
+  string session_id = 1;
+  google.protobuf.Timestamp timestamp = 2;
+}
+
+message HeartbeatResponse {
+  bool acknowledged = 1;
+  google.protobuf.Timestamp server_time = 2;
+}
+
+message GetSessionRequest {
+  string session_id = 1;
+}
+
+enum SessionStatus {
+  SESSION_STATUS_UNSPECIFIED = 0;
+  SESSION_STATUS_ACTIVE = 1;
+  SESSION_STATUS_ENDED = 2;
+  SESSION_STATUS_LOST = 3;
+  SESSION_STATUS_EXPIRED = 4;
+}
+
+message ActiveAssignmentSummary {
+  string assignment_id = 1;
+  string task_id = 2;
+  string repo = 3;
+  string branch = 4;
+  string state = 5;
+}
+
+message GetSessionResponse {
+  string session_id = 1;
+  string agent_id = 2;
+  SessionStatus status = 3;
+  google.protobuf.Timestamp started_at = 4;
+  google.protobuf.Timestamp last_seen_at = 5;
+  string client_kind = 6;
+  int32 deviation_count = 7;
+  ActiveAssignmentSummary active_assignment = 8;
+}
+
+// ─── Task Service (Daemon Spec v2 §7.2) ─────────────────────────────
+
+service TaskService {
+  // Ingest a new task from an external orchestrator.
+  rpc IngestTask(IngestTaskRequest) returns (IngestTaskResponse);
+}
+
+enum PriorityClass {
+  PRIORITY_CLASS_UNSPECIFIED = 0;
+  PRIORITY_CLASS_CRITICAL = 1;
+  PRIORITY_CLASS_HIGH = 2;
+  PRIORITY_CLASS_NORMAL = 3;
+  PRIORITY_CLASS_LOW = 4;
+}
+
+enum TaskSource {
+  TASK_SOURCE_UNSPECIFIED = 0;
+  TASK_SOURCE_USER = 1;
+  TASK_SOURCE_ORCHESTRATOR = 2;
+  TASK_SOURCE_CODERO_INTERNAL = 3;
+}
+
+message IngestTaskRequest {
+  string task_id = 1;
+  string title = 2;
+  string description = 3;
+  string repo = 4;
+  string branch = 5;
+  string context_block = 6;
+  PriorityClass priority_class = 7;
+  TaskSource source = 8;
+  map<string, string> metadata = 9;
+}
+
+message IngestTaskResponse {
+  string task_id = 1;
+  google.protobuf.Timestamp enqueued_at = 2;
+  int32 queue_position = 3;
+  int32 estimated_wait_seconds = 4;
+}
+
+// ─── Assignment Service (Daemon Spec v2 §7.2, §7.6) ─────────────────
+
+service AssignmentService {
+  // Retrieve assignment details.
+  rpc GetAssignment(GetAssignmentRequest) returns (GetAssignmentResponse);
+  // Agent submits code for the delivery pipeline.
+  rpc Submit(SubmitRequest) returns (SubmitResponse);
+}
+
+message GetAssignmentRequest {
+  string assignment_id = 1;
+}
+
+enum AssignmentState {
+  ASSIGNMENT_STATE_UNSPECIFIED = 0;
+  ASSIGNMENT_STATE_ACTIVE = 1;
+  ASSIGNMENT_STATE_BLOCKED = 2;
+  ASSIGNMENT_STATE_COMPLETED = 3;
+  ASSIGNMENT_STATE_CANCELLED = 4;
+  ASSIGNMENT_STATE_SUPERSEDED = 5;
+  ASSIGNMENT_STATE_LOST = 6;
+}
+
+message RuleCheck {
+  string rule_id = 1;
+  string status = 2;
+  google.protobuf.Timestamp checked_at = 3;
+  google.protobuf.Timestamp resolved_at = 4;
+  string resolved_by = 5;
+}
+
+message MergeReadiness {
+  bool ready = 1;
+  repeated string blocking_reasons = 2;
+}
+
+message GetAssignmentResponse {
+  string assignment_id = 1;
+  string session_id = 2;
+  string task_id = 3;
+  AssignmentState state = 4;
+  string substatus = 5;
+  int32 assignment_version = 6;
+  string repo = 7;
+  string branch = 8;
+  string worktree = 9;
+  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp completed_at = 11;
+  string blocked_reason = 12;
+  repeated RuleCheck rule_checks = 13;
+  MergeReadiness merge_readiness = 14;
+}
+
+message SubmitRequest {
+  string assignment_id = 1;
+  string session_id = 2;
+  string summary = 3;
+  repeated string files = 4;
+}
+
+message SubmitResponse {
+  string pipeline_id = 1;
+  int32 estimated_start_seconds = 2;
+}
+
+// ─── Feedback Service (Daemon Spec v2 §7.3) ─────────────────────────
+
+service FeedbackService {
+  // Retrieve aggregated feedback for a task or assignment.
+  rpc GetFeedback(GetFeedbackRequest) returns (GetFeedbackResponse);
+}
+
+message GetFeedbackRequest {
+  string task_id = 1;
+  string assignment_id = 2;
+}
+
+enum FeedbackSourceType {
+  FEEDBACK_SOURCE_UNSPECIFIED = 0;
+  FEEDBACK_SOURCE_HUMAN_REVIEW = 1;
+  FEEDBACK_SOURCE_CODERABBIT = 2;
+  FEEDBACK_SOURCE_GATE = 3;
+  FEEDBACK_SOURCE_CI = 4;
+  FEEDBACK_SOURCE_AUTOMATED = 5;
+}
+
+enum FeedbackStatus {
+  FEEDBACK_STATUS_UNSPECIFIED = 0;
+  FEEDBACK_STATUS_ACTIONABLE = 1;
+  FEEDBACK_STATUS_RESOLVED = 2;
+  FEEDBACK_STATUS_INFORMATIONAL = 3;
+}
+
+message Finding {
+  string finding_id = 1;
+  string level = 2;
+  string message = 3;
+  string file = 4;
+  int32 line = 5;
+  int32 column = 6;
+  string rule_id = 7;
+}
+
+message FeedbackSource {
+  FeedbackSourceType source = 1;
+  int32 priority = 2;
+  int32 items_count = 3;
+  google.protobuf.Timestamp last_updated = 4;
+  FeedbackStatus status = 5;
+  repeated Finding findings = 6;
+}
+
+message GetFeedbackResponse {
+  string task_id = 1;
+  repeated FeedbackSource sources = 2;
+  string context_block = 3;
+  string suggested_substatus = 4;
+}
+
+// ─── Gate Service (Daemon Spec v2 §7.4) ──────────────────────────────
+
+service GateService {
+  // Gate runner posts findings to the daemon.
+  rpc PostFindings(PostFindingsRequest) returns (PostFindingsResponse);
+}
+
+enum GateCheckStatus {
+  GATE_CHECK_STATUS_UNSPECIFIED = 0;
+  GATE_CHECK_STATUS_PASS = 1;
+  GATE_CHECK_STATUS_FAIL = 2;
+  GATE_CHECK_STATUS_WARN = 3;
+  GATE_CHECK_STATUS_SKIP = 4;
+}
+
+message GateFinding {
+  string finding_id = 1;
+  string level = 2;
+  string message = 3;
+  string file = 4;
+  int32 line = 5;
+  int32 column = 6;
+  string rule_id = 7;
+}
+
+message GateCheck {
+  string name = 1;
+  GateCheckStatus status = 2;
+  int32 duration_ms = 3;
+  repeated GateFinding findings = 4;
+}
+
+enum GateOverallStatus {
+  GATE_OVERALL_STATUS_UNSPECIFIED = 0;
+  GATE_OVERALL_STATUS_PASS = 1;
+  GATE_OVERALL_STATUS_FAIL = 2;
+  GATE_OVERALL_STATUS_WARN = 3;
+}
+
+message PostFindingsRequest {
+  string session_id = 1;
+  string assignment_id = 2;
+  string gate_run_id = 3;
+  repeated GateCheck checks = 4;
+  GateOverallStatus overall_status = 5;
+  int32 elapsed_ms = 6;
+}
+
+message PostFindingsResponse {
+  google.protobuf.Timestamp recorded_at = 1;
+}
+
+// ─── Health Service (Daemon Spec v2 §7.4, §7.5) ─────────────────────
+
+service HealthService {
+  // Overall daemon health check.
+  rpc GetHealth(GetHealthRequest) returns (GetHealthResponse);
+  // GitHub connectivity status.
+  rpc GetGitHubStatus(GetGitHubStatusRequest) returns (GetGitHubStatusResponse);
+}
+
+message GetHealthRequest {}
+
+message GetHealthResponse {
+  string status = 1;
+  double uptime_seconds = 2;
+  string version = 3;
+  bool ready = 4;
+  string redis_status = 5;
+  int64 active_slots = 6;
+}
+
+message GetGitHubStatusRequest {}
+
+enum GitHubAvailability {
+  GITHUB_AVAILABILITY_UNSPECIFIED = 0;
+  GITHUB_AVAILABILITY_HEALTHY = 1;
+  GITHUB_AVAILABILITY_DEGRADED = 2;
+  GITHUB_AVAILABILITY_UNAVAILABLE = 3;
+}
+
+message GetGitHubStatusResponse {
+  GitHubAvailability status = 1;
+  google.protobuf.Timestamp last_check = 2;
+  string error = 3;
+}
