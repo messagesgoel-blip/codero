@@ -47,6 +47,17 @@ const (
 	RiskHigh   = "high"
 )
 
+// Error codes (stable vocabulary per spec §4.3).
+const (
+	ErrorRepoNotFound         = "repo_not_found"
+	ErrorRepoResolutionFailed = "repo_resolution_failed"
+	ErrorDBError              = "db_error"
+	ErrorIndexMissing         = "index_missing"
+	ErrorRebuildRequired      = "rebuild_required"
+	ErrorSubjectNotFound      = "subject_not_found"
+	ErrorUsage                = "usage_error"
+)
+
 // Symbol represents a code symbol stored in the graph.
 type Symbol struct {
 	ID         string `json:"id"`

@@ -643,11 +643,11 @@ func isValidationError(err error) bool {
 // GateConfigResponse is the response for GET /api/v1/dashboard/settings/gate-config.
 // Matches Dashboard API v1 §8.1.
 type GateConfigResponse struct {
-	Checks       []GateConfigCheck `json:"checks"`
-	AISettings   map[string]string `json:"ai_settings"`
+	Checks       []GateConfigCheck  `json:"checks"`
+	AISettings   map[string]string  `json:"ai_settings"`
 	ConfigDrifts []gate.ConfigDrift `json:"config_drifts"`
-	AlwaysOn     []string          `json:"always_on"`
-	GeneratedAt  time.Time         `json:"generated_at"`
+	AlwaysOn     []string           `json:"always_on"`
+	GeneratedAt  time.Time          `json:"generated_at"`
 }
 
 // GateConfigCheck is a single check entry in the gate-config response.
