@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	repocontext "github.com/codero/codero/internal/context"
 	"github.com/spf13/cobra"
@@ -259,6 +260,11 @@ func contextSymbolsCmd() *cobra.Command {
 			}
 			defer store.Close()
 
+			filePath, err = normalizeRepoFilePath(repoRoot, filePath)
+			if err != nil {
+				return contextError(cmd, repoRoot, repocontext.ErrorUsage, err.Error(), jsonOut, 2)
+			}
+
 			syms, err := store.SymbolsByFile(filePath)
 			if err != nil {
 				return contextError(cmd, repoRoot, repocontext.ErrorDBError, err.Error(), jsonOut, 1)
@@ -396,6 +402,17 @@ func contextImpactCmd() *cobra.Command {
 		Use:   "impact [repo]",
 		Short: "Advisory impact analysis for changed files",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			defer func() {
+				files = nil
+				jsonOut = false
+				if flag := cmd.Flags().Lookup("files"); flag != nil {
+					flag.Changed = false
+				}
+				if flag := cmd.Flags().Lookup("json"); flag != nil {
+					flag.Changed = false
+				}
+			}()
+
 			if err := requireArgRange(cmd, args, 0, 1, jsonOut, "impact [repo]"); err != nil {
 				return err
 			}
@@ -406,10 +423,18 @@ func contextImpactCmd() *cobra.Command {
 			}
 
 			inputMode := "staged"
-			if len(files) > 0 {
+			fileList := []string(nil)
+			if cmd.Flags().Changed("files") {
+				fileList = append(fileList, files...)
 				inputMode = "explicit"
+				for i, filePath := range fileList {
+					fileList[i], err = normalizeRepoFilePath(repoRoot, filePath)
+					if err != nil {
+						return contextError(cmd, repoRoot, repocontext.ErrorUsage, err.Error(), jsonOut, 2)
+					}
+				}
 			} else {
-				files = repocontext.StagedFiles(repoRoot)
+				fileList = repocontext.StagedFiles(repoRoot)
 			}
 
 			store, code, err := openRepoStore(repoRoot)
@@ -418,7 +443,7 @@ func contextImpactCmd() *cobra.Command {
 			}
 			defer store.Close()
 
-			resp, err := repocontext.Impact(store, repoRoot, files, inputMode)
+			resp, err := repocontext.Impact(store, repoRoot, fileList, inputMode)
 			if err != nil {
 				return contextError(cmd, repoRoot, repocontext.ErrorDBError, err.Error(), jsonOut, 1)
 			}
@@ -499,6 +524,32 @@ func openRepoStore(repoRoot string) (*repocontext.Store, string, error) {
 	return store, "", nil
 }
 
+func normalizeRepoFilePath(repoRoot, rawPath string) (string, error) {
+	if rawPath == "" {
+		return "", fmt.Errorf("file path is required")
+	}
+
+	cleaned := filepath.Clean(rawPath)
+	if !filepath.IsAbs(cleaned) {
+		cleaned = filepath.Join(repoRoot, cleaned)
+	}
+
+	absPath, err := filepath.Abs(cleaned)
+	if err != nil {
+		return "", fmt.Errorf("normalize file path %q: %w", rawPath, err)
+	}
+
+	relPath, err := filepath.Rel(repoRoot, absPath)
+	if err != nil {
+		return "", fmt.Errorf("normalize file path %q: %w", rawPath, err)
+	}
+	if relPath == ".." || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path %q is outside repo %q", rawPath, repoRoot)
+	}
+
+	return filepath.ToSlash(filepath.Clean(relPath)), nil
+}
+
 func contextError(_ *cobra.Command, repoRoot, code, message string, jsonOut bool, exitCode int) error {
 	if jsonOut {
 		resp := repocontext.ErrorResponse{
@@ -517,16 +568,91 @@ func contextError(_ *cobra.Command, repoRoot, code, message string, jsonOut bool
 }
 
 func writeJSON(v interface{}, jsonOut bool) error {
-	if !jsonOut {
-		// Non-JSON mode intentionally still emits indented JSON for now.
-		data, _ := json.MarshalIndent(v, "", "  ")
+	if jsonOut {
+		data, err := json.MarshalIndent(v, "", "  ")
+		if err != nil {
+			return err
+		}
 		fmt.Println(string(data))
 		return nil
 	}
-	data, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return err
-	}
-	fmt.Println(string(data))
+
+	renderHuman(v)
 	return nil
+}
+
+func renderHuman(v interface{}) {
+	switch resp := v.(type) {
+	case repocontext.IndexResponse:
+		fmt.Printf("index_state: %s\n", resp.IndexState)
+		fmt.Printf("db_present: %t\n", resp.DBPresent)
+		fmt.Printf("db_path: %s\n", resp.DBPath)
+		fmt.Printf("files: %d\nsymbols: %d\nedges: %d\n", resp.FileCount, resp.SymbolCount, resp.EdgeCount)
+		if resp.LastIndexedAt != "" {
+			fmt.Printf("last_indexed_at: %s\n", resp.LastIndexedAt)
+		}
+		if len(resp.Warnings) > 0 {
+			fmt.Println("warnings:")
+			for _, warning := range resp.Warnings {
+				fmt.Printf("  - %s\n", warning)
+			}
+		}
+	case repocontext.StatusResponse:
+		fmt.Printf("index_state: %s\n", resp.IndexState)
+		fmt.Printf("db_present: %t\n", resp.DBPresent)
+		fmt.Printf("db_path: %s\n", resp.DBPath)
+		fmt.Printf("db_size_bytes: %d\n", resp.DBSizeBytes)
+		fmt.Printf("files: %d\nsymbols: %d\nedges: %d\n", resp.FileCount, resp.SymbolCount, resp.EdgeCount)
+		if resp.LastIndexedAt != "" {
+			fmt.Printf("last_indexed_at: %s\n", resp.LastIndexedAt)
+		}
+		if resp.LastIndexedSHA != "" {
+			fmt.Printf("last_indexed_sha: %s\n", resp.LastIndexedSHA)
+		}
+		if resp.LanguageScope != "" {
+			fmt.Printf("language_scope: %s\n", resp.LanguageScope)
+		}
+	case repocontext.FindResponse:
+		fmt.Printf("query: %s\ncount: %d\n", resp.Query, resp.Count)
+		for _, match := range resp.Matches {
+			fmt.Printf("- %s %s %s:%d\n", match.Kind, match.Name, match.FilePath, match.LineStart)
+		}
+	case repocontext.GrepResponse:
+		fmt.Printf("pattern: %s\ncount: %d\n", resp.Pattern, resp.Count)
+		for _, match := range resp.Matches {
+			fmt.Printf("- %s:%d %s\n", match.FilePath, match.LineNumber, match.LineText)
+		}
+	case repocontext.SymbolsResponse:
+		fmt.Printf("file_path: %s\ncount: %d\n", resp.FilePath, resp.Count)
+		for _, sym := range resp.Symbols {
+			fmt.Printf("- %s %s %d-%d\n", sym.Kind, sym.Name, sym.LineStart, sym.LineEnd)
+		}
+	case repocontext.DepsResponse:
+		fmt.Printf("subject: %s (%s)\ncount: %d\n", resp.Subject.Name, resp.Subject.Kind, resp.Count)
+		for _, dep := range resp.Dependencies {
+			fmt.Printf("- %s %s %s:%d\n", dep.Kind, dep.Target.Name, dep.FilePath, dep.LineNumber)
+		}
+	case repocontext.RdepsResponse:
+		fmt.Printf("subject: %s (%s)\ncount: %d\n", resp.Subject.Name, resp.Subject.Kind, resp.Count)
+		for _, dep := range resp.Dependents {
+			fmt.Printf("- %s %s %s:%d\n", dep.Kind, dep.Source.Name, dep.FilePath, dep.LineNumber)
+		}
+	case *repocontext.ImpactResponse:
+		fmt.Printf("analysis_state: %s\n", resp.AnalysisState)
+		fmt.Printf("input_mode: %s\n", resp.InputMode)
+		if len(resp.Files) > 0 {
+			fmt.Printf("files: %s\n", strings.Join(resp.Files, ", "))
+		}
+		if resp.RiskLevel != "" {
+			fmt.Printf("risk_level: %s\n", resp.RiskLevel)
+		}
+		fmt.Printf("touched_symbols: %d\ndependents: %d\n", len(resp.TouchedSymbols), len(resp.Dependents))
+		for _, reason := range resp.Reasons {
+			fmt.Printf("- %s\n", reason)
+		}
+	case repocontext.ErrorResponse:
+		fmt.Printf("error: %s: %s\n", resp.Error.Code, resp.Error.Message)
+	default:
+		fmt.Printf("%+v\n", v)
+	}
 }

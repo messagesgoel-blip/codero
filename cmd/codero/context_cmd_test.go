@@ -9,12 +9,14 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	repocontext "github.com/codero/codero/internal/context"
+	"github.com/spf13/cobra"
 )
 
-func runContextCmd(t *testing.T, cwd string, args ...string) (string, string, error) {
+func runCobraCmd(t *testing.T, cwd string, cmd *cobra.Command, args ...string) (string, string, error) {
 	t.Helper()
 
 	origStdout := os.Stdout
@@ -52,9 +54,6 @@ func runContextCmd(t *testing.T, cwd string, args ...string) (string, string, er
 		t.Fatalf("Chdir(%s): %v", cwd, err)
 	}
 
-	cmd := contextCmd()
-	cmd.SilenceUsage = true
-	cmd.SilenceErrors = true
 	cmd.SetArgs(args)
 	execErr := cmd.ExecuteContext(context.Background())
 
@@ -73,6 +72,14 @@ func runContextCmd(t *testing.T, cwd string, args ...string) (string, string, er
 	}
 
 	return stdoutBuf.String(), stderrBuf.String(), execErr
+}
+
+func runContextCmd(t *testing.T, cwd string, args ...string) (string, string, error) {
+	t.Helper()
+	cmd := contextCmd()
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	return runCobraCmd(t, cwd, cmd, args...)
 }
 
 func setupContextCLIRepo(t *testing.T) string {
@@ -240,6 +247,35 @@ func TestContextIndexFindGrepAndSymbols_JSONContracts(t *testing.T) {
 	}
 }
 
+func TestContextSymbolsCmd_NormalizesPaths(t *testing.T) {
+	repoDir := setupContextCLIRepo(t)
+
+	if stdout, stderr, err := runContextCmd(t, repoDir, "index", "--json"); err != nil {
+		t.Fatalf("index --json: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+
+	testPaths := []string{
+		"./a.go",
+		filepath.Join(repoDir, "a.go"),
+	}
+
+	for _, pathArg := range testPaths {
+		stdout, stderr, err := runContextCmd(t, repoDir, "symbols", pathArg, "--json")
+		if err != nil {
+			t.Fatalf("symbols %q --json: %v\nstdout:\n%s\nstderr:\n%s", pathArg, err, stdout, stderr)
+		}
+		requireNoStderr(t, stderr)
+
+		resp := decodeJSON[repocontext.SymbolsResponse](t, stdout)
+		if resp.FilePath != "a.go" {
+			t.Fatalf("file_path = %q, want a.go", resp.FilePath)
+		}
+		if resp.Count != 2 {
+			t.Fatalf("count = %d, want 2", resp.Count)
+		}
+	}
+}
+
 func TestContextDepsAndRdeps_SubjectNotFoundJSONError(t *testing.T) {
 	repoDir := setupContextCLIRepo(t)
 	if stdout, stderr, err := runContextCmd(t, repoDir, "index", "--json"); err != nil {
@@ -286,5 +322,62 @@ func TestContextImpactCmd_EmptyInputJSONExit0(t *testing.T) {
 	}
 	if resp.InputMode != "staged" {
 		t.Fatalf("input_mode = %q, want staged", resp.InputMode)
+	}
+}
+
+func TestContextImpactCmd_ReusedCommandDoesNotPersistFiles(t *testing.T) {
+	repoDir := setupContextCLIRepo(t)
+
+	indexCmd := contextIndexCmd()
+	indexCmd.SilenceUsage = true
+	indexCmd.SilenceErrors = true
+	if stdout, stderr, err := runCobraCmd(t, repoDir, indexCmd, "--json"); err != nil {
+		t.Fatalf("index --json: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+
+	cmd := contextImpactCmd()
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	stdout, stderr, err := runCobraCmd(t, repoDir, cmd, "--json", "--files", "./a.go")
+	if err != nil {
+		t.Fatalf("impact explicit --json: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	requireNoStderr(t, stderr)
+	explicitResp := decodeJSON[repocontext.ImpactResponse](t, stdout)
+	if explicitResp.InputMode != "explicit" {
+		t.Fatalf("input_mode = %q, want explicit", explicitResp.InputMode)
+	}
+	if len(explicitResp.Files) != 1 || explicitResp.Files[0] != "a.go" {
+		t.Fatalf("explicit files = %+v, want [a.go]", explicitResp.Files)
+	}
+
+	stdout, stderr, err = runCobraCmd(t, repoDir, cmd, "--json")
+	if err != nil {
+		t.Fatalf("impact staged --json: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	requireNoStderr(t, stderr)
+	stagedResp := decodeJSON[repocontext.ImpactResponse](t, stdout)
+	if stagedResp.InputMode != "staged" {
+		t.Fatalf("input_mode = %q, want staged", stagedResp.InputMode)
+	}
+	if stagedResp.AnalysisState != "empty_input" {
+		t.Fatalf("analysis_state = %q, want empty_input", stagedResp.AnalysisState)
+	}
+}
+
+func TestContextStatusCmd_HumanOutput(t *testing.T) {
+	repoDir := setupContextCLIRepo(t)
+
+	stdout, stderr, err := runContextCmd(t, repoDir, "status")
+	if err != nil {
+		t.Fatalf("status: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	requireNoStderr(t, stderr)
+	if json.Valid([]byte(stdout)) {
+		t.Fatalf("expected non-JSON human output, got JSON:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "index_state: missing") {
+		t.Fatalf("expected human status output, got:\n%s", stdout)
 	}
 }
