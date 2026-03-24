@@ -252,3 +252,85 @@ func TestListPRReviewComments(t *testing.T) {
 		t.Errorf("line: want 42, got %d", comments[0].Line)
 	}
 }
+
+// TestCert_TLv2_I50_IsBotClassification verifies I-50: IsBot classifies
+// bot accounts at fetch time. The classification is done once and the result
+// is trusted downstream.
+//
+// Matrix clause: I-50 | Evidence: UT
+func TestCert_TLv2_I50_IsBotClassification(t *testing.T) {
+	tests := []struct {
+		login string
+		want  bool
+	}{
+		{"coderabbitai", true},
+		{"dependabot[bot]", true},
+		{"renovate", true},
+		{"github-actions[bot]", true},
+		{"github-actions", true},
+		{"snyk-bot", true},
+		{"humanuser", false},
+		{"alice", false},
+		{"", false},
+	}
+	for _, tc := range tests {
+		got := IsBot(tc.login)
+		if got != tc.want {
+			t.Errorf("IsBot(%q) = %v, want %v", tc.login, got, tc.want)
+		}
+	}
+}
+
+// TestCert_TLv2_I50_IsBotSetOnFetch verifies that Review and ReviewComment
+// structs populated from GitHub API have IsBot set via fetch-time classification.
+//
+// Matrix clause: I-50 | Evidence: UT
+func TestCert_TLv2_I50_IsBotSetOnFetch(t *testing.T) {
+	// Simulate a reviews response with a human and a bot reviewer.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/acme/api/pulls/1/reviews", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode([]map[string]any{
+			{"id": 1, "user": map[string]string{"login": "alice"}, "state": "APPROVED", "body": "lgtm", "commit_id": "abc123"},
+			{"id": 2, "user": map[string]string{"login": "coderabbitai"}, "state": "COMMENTED", "body": "auto", "commit_id": "abc123"},
+		})
+	})
+	mux.HandleFunc("/repos/acme/api/pulls/1/comments", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode([]map[string]any{
+			{"id": 10, "user": map[string]string{"login": "bob"}, "body": "fix this", "path": "main.go", "line": 5, "commit_id": "abc123"},
+			{"id": 11, "user": map[string]string{"login": "dependabot[bot]"}, "body": "bump", "path": "go.mod", "line": 1, "commit_id": "abc123"},
+		})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := NewClient("test-token").WithHTTPClient(srv.Client())
+	c.apiURL = srv.URL
+
+	reviews, err := c.ListPRReviews(context.Background(), "acme/api", 1)
+	if err != nil {
+		t.Fatalf("list reviews: %v", err)
+	}
+	if len(reviews) != 2 {
+		t.Fatalf("expected 2 reviews, got %d", len(reviews))
+	}
+	if reviews[0].IsBot {
+		t.Error("alice should not be classified as bot")
+	}
+	if !reviews[1].IsBot {
+		t.Error("coderabbitai should be classified as bot")
+	}
+
+	comments, err := c.ListPRReviewComments(context.Background(), "acme/api", 1)
+	if err != nil {
+		t.Fatalf("list comments: %v", err)
+	}
+	if len(comments) != 2 {
+		t.Fatalf("expected 2 comments, got %d", len(comments))
+	}
+	if comments[0].IsBot {
+		t.Error("bob should not be classified as bot")
+	}
+	if !comments[1].IsBot {
+		t.Error("dependabot[bot] should be classified as bot")
+	}
+}

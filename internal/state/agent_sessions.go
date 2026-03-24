@@ -32,6 +32,10 @@ var ErrTaskAlreadyClaimed = errors.New("task already claimed by another live ses
 // assignment_version that does not match the durable row.
 var ErrVersionConflict = errors.New("assignment version conflict")
 
+// ErrHandoffRestricted is returned when a task has a handoff nomination for
+// a specific successor session and the requesting session is not the nominee.
+var ErrHandoffRestricted = errors.New("task handoff restricted to nominated session")
+
 // ErrAssignmentEnded is returned when an emit targets an assignment whose
 // ended_at is already set (terminal/superseded/lost).
 var ErrAssignmentEnded = errors.New("assignment already ended")
@@ -1261,6 +1265,27 @@ func AcceptTask(ctx context.Context, db *DB, sessionID, taskID string) (*AgentAs
 	}
 
 	// No live claim — insert a new assignment.
+	// I-41: Check for handoff nomination. If the most recently ended
+	// assignment for this task has a successor_session_id set, only
+	// the nominated session may accept.
+	var nominatedSession sql.NullString
+	err = tx.QueryRowContext(ctx,
+		`SELECT successor_session_id
+		 FROM agent_assignments
+		 WHERE task_id = ? AND ended_at IS NOT NULL
+		   AND successor_session_id IS NOT NULL AND successor_session_id != ''
+		 ORDER BY ended_at DESC
+		 LIMIT 1`,
+		taskID,
+	).Scan(&nominatedSession)
+	if err == nil && nominatedSession.Valid && nominatedSession.String != "" && nominatedSession.String != sessionID {
+		return nil, fmt.Errorf("%w: task %s nominated session %s",
+			ErrHandoffRestricted, taskID, nominatedSession.String)
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("accept task: check handoff nomination: %w", err)
+	}
+
 	// assignment_version defaults to 1 via the schema CHECK (assignment_version >= 1)
 	// and DEFAULT 1 added by migration 000011.
 	if _, err = tx.ExecContext(ctx, `
@@ -1429,6 +1454,23 @@ func EmitAssignmentUpdate(ctx context.Context, db *DB, assignmentID string, curr
 
 	nextVersion := currentVersion + 1
 
+	// I-43: Load deviation tracking columns for this assignment.
+	var suggestedLast sql.NullString
+	var deviationCount int
+	err = tx.QueryRowContext(ctx,
+		`SELECT COALESCE(suggested_substatus_last, ''), substatus_deviation_count
+		 FROM agent_assignments WHERE assignment_id = ?`,
+		assignmentID,
+	).Scan(&suggestedLast, &deviationCount)
+	if err != nil {
+		return nil, fmt.Errorf("emit assignment update: load deviation state: %w", err)
+	}
+	// Increment deviation count if the emitted substatus differs from
+	// the last suggested substatus (and a suggestion was recorded).
+	if suggestedLast.String != "" && suggestedLast.String != normalized {
+		deviationCount++
+	}
+
 	// Build the UPDATE. If the emit is terminal, also set ended_at and end_reason.
 	var endReason string
 	if isTerminal {
@@ -1438,10 +1480,12 @@ func EmitAssignmentUpdate(ctx context.Context, db *DB, assignmentID string, curr
 	updateSQL := `
 		UPDATE agent_assignments
 		SET state = ?, assignment_substatus = ?, blocked_reason = ?,
-		    assignment_version = ?, last_emit_at = ?`
+		    assignment_version = ?, last_emit_at = ?,
+		    actual_substatus_last = ?, substatus_deviation_count = ?`
 	args := []any{
 		newState, normalized, newBlockedReason,
 		nextVersion, now,
+		normalized, deviationCount,
 	}
 	if isTerminal {
 		updateSQL += `,
