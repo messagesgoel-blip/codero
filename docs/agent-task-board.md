@@ -1,6 +1,12 @@
 # Agent Task Board
 
-Use this file as the single source of truth for active agent work.
+Use this file as the task-board ledger for spec-driven work.
+
+Status note (2026-03-24 UTC): legacy branch-era rows were retired after PRs `#88`-`#91`
+merged and the Codero spec set under `/srv/storage/Specifications/codero` became the
+authoritative baseline. Use `docs/spec-implementation-checklist.md` for the audited
+implementation status on `origin/main`, then use this board to track the next slice to
+branch from `main`.
 
 ## Status values
 
@@ -14,15 +20,12 @@ Use this file as the single source of truth for active agent work.
 
 | Task ID | Branch | Owner Agent | Status | Started (UTC) | Updated (UTC) | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| COD-031 | feat/COD-031-v12-proving-gate-automation | Copilot | done | 2026-03-17T00:51:00Z | 2026-03-17T00:51:00Z | v1.2 proving gate: `codero prove` command, Appendix G drill map, human+JSON output, 34 tests |
-| COD-026 | feat/COD-026-tui-commands-and-web-port-hardening | Copilot | done | 2026-03-16T14:03:00Z | 2026-03-16T17:06:00Z | TUI command polish (codero tui, gate-status --json/--no-prompt, dashboard, ports), web port/routing hardening. PR #28 merged. |
-| COD-025 | feat/COD-025-dashboard | Copilot | done | 2026-03-16T09:00:00Z | 2026-03-16T09:15:00Z | Web dashboard SPA embedded in binary, 9 API endpoints, SSE stream, settings, upload. PR #27 merged. |
-| COD-063 | feat/COD-063-progress-screenshots | Codex | in_progress | 2026-03-20T04:25:57Z | 2026-03-20T04:25:57Z | Capture live dashboard and TUI screenshots as measurable evidence. Reference mock assets from `/srv/storage/local/Mocks`. |
-| COD-062 | feat/COD-062-docker-home-dir-fix | Codex | review | 2026-03-20T04:06:34Z | 2026-03-20T04:11:29Z | Remove Docker runtime user home-dir warning during image build. Verified `GOFLAGS=-buildvcs=false make build` and `docker build --build-arg VERSION=$(git rev-parse --short HEAD) -t codero:cod062 .` with the runtime layer now creating a dedicated home directory. |
-| COD-024 | feat/COD-024-sprint6-tui-and-metrics | Codex | review | 2026-03-16T00:00:00Z | 2026-03-16T00:00:00Z | Sprint 6 TUI v2-alpha shipped (`gate-status --watch` Bubble Tea 3-pane), gate/dashboard parity preserved, auto gate-to-metric writes completed, hardening evidence documented. |
-| COD-023 | feat/COD-023-shared-heartbeat-gate | gcb (Copilot-B) | review | 2026-03-16T01:44:11Z | 2026-03-16T02:10:00Z | Replace local commit-gate branch flow with shared heartbeat contract; wire progress bar in CLI/TUI + /gate dashboard endpoint. PR #24 open. |
-| COD-020 | feat/COD-020-phase1f-proving-bootstrap | Codex | in_progress | 2026-03-15T00:00:00Z | 2026-03-15T00:00:00Z | Phase 1F proving-period bootstrap: daily scorecard, snapshot history, runbook updates |
-| COD-010 | feat/COD-010-p1-s4-01-wfq-queue | Codex | review | 2026-03-14T11:11:00Z | 2026-03-14T15:30:00Z | Sprint 4: completed queue_stalled detection, observability endpoints (/health, /queue, /metrics), slot counter with atomic INCR/DECR via Lua |
+| SPEC-BASELINE | chore/spec-baseline-rebaseline | Codex | done | 2026-03-24T01:05:03Z | 2026-03-24T01:05:03Z | Promote `/srv/storage/Specifications/codero` as the final baseline, publish the direct spec checklist, and rebaseline roadmap/task tracking against `origin/main` `2ae2557`. |
+| AGENT-V3 | main | unassigned | done | 2026-03-24T01:05:03Z | 2026-03-24T01:05:03Z | Core agent-session bootstrap, assignment substatus enums, rule monitoring, and lifecycle compliance are merged on `origin/main`. See `docs/spec-implementation-checklist.md`. |
+| TL-V2-CLOSEOUT | feat/tl-v2-closeout | OpenCode | done | 2026-03-24T05:00:00Z | 2026-03-24T07:30:00Z | Task Layer v2 closeout: live `codero_github_links` CRUD, `task_feedback_cache` with source_status, feedback aggregator with precedence/truncation, worktree file writer (TASK.md, FEEDBACK.md, current.json), `codero task submit`, webhook-driven link upsert + cache invalidation, import boundary enforcement, and normative lifecycle integration tests. 10 tasks, 8 commits. |
+| DM-V2-CLOSEOUT | next branch from `main` | unassigned | planned | 2026-03-24T01:05:03Z | 2026-03-24T01:05:03Z | Daemon v2 startup, degraded mode, sweeper, and API config are merged; remaining work is the final contract closeout, including the documented gRPC surface decision. |
+| RC-V1 | next branch from `main` | unassigned | planned | 2026-03-24T01:05:03Z | 2026-03-24T01:05:03Z | Repo-context v1 is not started on the audited base. Implement the additive `.codero/context/graph.db` plus `codero context ...` command family. |
+| GATE-V1 | next branch from `main` | unassigned | planned | 2026-03-24T01:05:03Z | 2026-03-24T01:05:03Z | Gate Config v1 still needs machine-global `$HOME/.codero/config.env`, dashboard parity, and the broader gate env matrix from the spec. |
 
 ## Rules
 
