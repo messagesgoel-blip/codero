@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/codero/codero/internal/gate"
 	loglib "github.com/codero/codero/internal/log"
 )
 
@@ -58,6 +59,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/dashboard/gate-checks", h.handleGateChecks)
 	mux.HandleFunc("/api/v1/dashboard/health", h.handleDashboardHealth)
 	mux.HandleFunc("/api/v1/dashboard/settings", h.handleSettings)
+	mux.HandleFunc("/api/v1/dashboard/settings/gate-config", h.handleGateConfig)
+	mux.HandleFunc("/api/v1/dashboard/settings/gate-config/", h.handleGateConfigVar)
 	mux.HandleFunc("/api/v1/dashboard/chat", h.handleChat)
 	mux.HandleFunc("/api/v1/dashboard/comments", h.handleChat)
 	mux.HandleFunc("/api/v1/dashboard/manual-review-upload", h.handleUpload)
@@ -633,6 +636,178 @@ func isValidationError(err error) bool {
 	return strings.HasPrefix(msg, "gate pipeline:") ||
 		strings.HasPrefix(msg, "integrations:") ||
 		msg == "request body required"
+}
+
+// ─── Gate Config V1 endpoints ─────────────────────────────────────────────
+
+// GateConfigResponse is the response for GET /api/v1/dashboard/settings/gate-config.
+// Matches Dashboard API v1 §8.1.
+type GateConfigResponse struct {
+	Checks       []GateConfigCheck `json:"checks"`
+	AISettings   map[string]string `json:"ai_settings"`
+	ConfigDrifts []gate.ConfigDrift `json:"config_drifts"`
+	AlwaysOn     []string          `json:"always_on"`
+	GeneratedAt  time.Time         `json:"generated_at"`
+}
+
+// GateConfigCheck is a single check entry in the gate-config response.
+type GateConfigCheck struct {
+	Name         string `json:"name"`
+	Tier         string `json:"tier"`
+	Enabled      bool   `json:"enabled"`
+	EnvVar       string `json:"env_var"`
+	DefaultValue string `json:"default_value"`
+	CurrentValue string `json:"current_value"`
+	Source       string `json:"source"`
+}
+
+// GateConfigUpdateRequest is the body for PUT /api/v1/dashboard/settings/gate-config/{var_name}.
+type GateConfigUpdateRequest struct {
+	Value string `json:"value"`
+}
+
+// handleGateConfig serves GET /api/v1/dashboard/settings/gate-config.
+func (h *Handler) handleGateConfig(w http.ResponseWriter, r *http.Request) {
+	setCORSHeaders(w)
+	switch r.Method {
+	case http.MethodGet:
+		h.getGateConfig(w, r)
+	case http.MethodOptions:
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "")
+	}
+}
+
+func (h *Handler) getGateConfig(w http.ResponseWriter, r *http.Request) {
+	cfgPath := gate.DefaultConfigFilePath()
+	vars, err := gate.ResolveEffective(cfgPath)
+	if err != nil {
+		loglib.Error("dashboard: gate config load failed",
+			loglib.FieldComponent, "dashboard", "error", err)
+		writeError(w, http.StatusInternalServerError, "gate config load failed", "config_error")
+		return
+	}
+
+	drifts, _ := gate.DetectDrifts(cfgPath)
+	if drifts == nil {
+		drifts = []gate.ConfigDrift{}
+	}
+
+	checks := make([]GateConfigCheck, 0)
+	aiSettings := make(map[string]string)
+
+	for _, rv := range vars {
+		switch rv.Tier {
+		case gate.TierAISetting:
+			aiSettings[rv.EnvVar] = rv.Value
+		default:
+			checks = append(checks, GateConfigCheck{
+				Name:         envVarToCheckName(rv.EnvVar),
+				Tier:         string(rv.Tier),
+				Enabled:      rv.Value == "true",
+				EnvVar:       rv.EnvVar,
+				DefaultValue: rv.DefaultValue,
+				CurrentValue: rv.Value,
+				Source:       string(rv.Source),
+			})
+		}
+	}
+
+	writeJSON(w, http.StatusOK, GateConfigResponse{
+		Checks:       checks,
+		AISettings:   aiSettings,
+		ConfigDrifts: drifts,
+		AlwaysOn:     gate.AlwaysOnChecks(),
+		GeneratedAt:  time.Now().UTC(),
+	})
+}
+
+// handleGateConfigVar serves PUT /api/v1/dashboard/settings/gate-config/{var_name}.
+func (h *Handler) handleGateConfigVar(w http.ResponseWriter, r *http.Request) {
+	setCORSHeaders(w)
+	switch r.Method {
+	case http.MethodPut:
+		h.putGateConfigVar(w, r)
+	case http.MethodOptions:
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "")
+	}
+}
+
+func (h *Handler) putGateConfigVar(w http.ResponseWriter, r *http.Request) {
+	// Extract var name from path: /api/v1/dashboard/settings/gate-config/{var_name}
+	varName := strings.TrimPrefix(r.URL.Path, "/api/v1/dashboard/settings/gate-config/")
+	if varName == "" {
+		writeError(w, http.StatusBadRequest, "variable name required in path", "missing_var")
+		return
+	}
+
+	entry := gate.LookupEntry(varName)
+	if entry == nil {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("unknown gate config variable: %s", varName), "unknown_var")
+		return
+	}
+
+	defer r.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to read body", "read_error")
+		return
+	}
+
+	var req GateConfigUpdateRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error(), "parse_error")
+		return
+	}
+
+	cfgPath := gate.DefaultConfigFilePath()
+	if err := gate.SaveConfigVar(cfgPath, varName, req.Value); err != nil {
+		if strings.Contains(err.Error(), "unknown variable") {
+			writeError(w, http.StatusNotFound, err.Error(), "unknown_var")
+			return
+		}
+		if strings.Contains(err.Error(), "must be") {
+			writeError(w, http.StatusUnprocessableEntity, err.Error(), "validation_error")
+			return
+		}
+		loglib.Error("dashboard: gate config save failed",
+			loglib.FieldComponent, "dashboard", "error", err)
+		writeError(w, http.StatusInternalServerError, "gate config save failed", "config_error")
+		return
+	}
+
+	loglib.Info("dashboard: gate config updated",
+		loglib.FieldEventType, "gate_config_updated",
+		loglib.FieldComponent, "dashboard",
+		"var", varName,
+		"value", req.Value,
+	)
+
+	// Return the updated check entry.
+	vars, _ := gate.ResolveEffectiveMap(cfgPath)
+	if rv, ok := vars[varName]; ok {
+		writeJSON(w, http.StatusOK, GateConfigCheck{
+			Name:         envVarToCheckName(rv.EnvVar),
+			Tier:         string(rv.Tier),
+			Enabled:      rv.Value == "true",
+			EnvVar:       rv.EnvVar,
+			DefaultValue: rv.DefaultValue,
+			CurrentValue: rv.Value,
+			Source:       string(rv.Source),
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// envVarToCheckName converts e.g. "CODERO_GOVET_ENABLED" to "govet".
+func envVarToCheckName(envVar string) string {
+	name := strings.TrimPrefix(envVar, "CODERO_")
+	name = strings.TrimSuffix(name, "_ENABLED")
+	return strings.ToLower(name)
 }
 
 // writeJSON encodes v as JSON and writes it with the given status code.
