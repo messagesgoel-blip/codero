@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -84,7 +85,15 @@ func (s *sessionService) GetSession(ctx context.Context, req *daemonv1.GetSessio
 
 	sess, err := state.GetAgentSession(ctx, s.server.db, req.SessionId)
 	if err != nil {
-		return nil, status.Errorf(codes.NotFound, "session not found: %v", err)
+		if errors.Is(err, state.ErrAgentSessionNotFound) {
+			return nil, status.Error(codes.NotFound, "session not found")
+		}
+		loglib.Error("grpc: GetSession failed",
+			loglib.FieldComponent, "grpc",
+			"session_id", req.SessionId,
+			"error", err,
+		)
+		return nil, status.Error(codes.Internal, "failed to get session")
 	}
 
 	resp := &daemonv1.GetSessionResponse{
@@ -116,6 +125,14 @@ func (s *sessionService) GetSession(ctx context.Context, req *daemonv1.GetSessio
 
 	// Look up active assignment.
 	assignment, err := state.GetActiveAgentAssignment(ctx, s.server.db, req.SessionId)
+	if err != nil && !errors.Is(err, state.ErrAgentAssignmentNotFound) {
+		loglib.Error("grpc: GetSession active assignment lookup failed",
+			loglib.FieldComponent, "grpc",
+			"session_id", req.SessionId,
+			"error", err,
+		)
+		return nil, status.Error(codes.Internal, "failed to get session")
+	}
 	if err == nil && assignment.ID != "" {
 		resp.ActiveAssignment = &daemonv1.ActiveAssignmentSummary{
 			AssignmentId: assignment.ID,

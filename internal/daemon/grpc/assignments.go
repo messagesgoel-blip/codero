@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"errors"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -26,7 +27,15 @@ func (a *assignmentService) GetAssignment(ctx context.Context, req *daemonv1.Get
 
 	assignment, err := state.GetAgentAssignmentByID(ctx, a.server.db, req.AssignmentId)
 	if err != nil {
-		return nil, status.Errorf(codes.NotFound, "assignment not found: %v", err)
+		if errors.Is(err, state.ErrAgentAssignmentNotFound) {
+			return nil, status.Error(codes.NotFound, "assignment not found")
+		}
+		loglib.Error("grpc: GetAssignment failed",
+			loglib.FieldComponent, "grpc",
+			"assignment_id", req.AssignmentId,
+			"error", err,
+		)
+		return nil, status.Error(codes.Internal, "failed to retrieve assignment")
 	}
 
 	resp := &daemonv1.GetAssignmentResponse{
@@ -74,10 +83,33 @@ func (a *assignmentService) Submit(ctx context.Context, req *daemonv1.SubmitRequ
 	// Verify assignment exists and belongs to the session.
 	assignment, err := state.GetAgentAssignmentByID(ctx, a.server.db, req.AssignmentId)
 	if err != nil {
-		return nil, status.Errorf(codes.NotFound, "assignment not found: %v", err)
+		if errors.Is(err, state.ErrAgentAssignmentNotFound) {
+			return nil, status.Error(codes.NotFound, "assignment not found")
+		}
+		loglib.Error("grpc: Submit assignment lookup failed",
+			loglib.FieldComponent, "grpc",
+			"assignment_id", req.AssignmentId,
+			"error", err,
+		)
+		return nil, status.Error(codes.Internal, "failed to retrieve assignment")
 	}
 	if assignment.SessionID != req.SessionId {
 		return nil, status.Error(codes.PermissionDenied, "assignment not owned by session")
+	}
+
+	running, err := state.IsPipelineRunning(ctx, a.server.db, assignment.Repo, assignment.Branch)
+	if err != nil {
+		loglib.Error("grpc: Submit pipeline check failed",
+			loglib.FieldComponent, "grpc",
+			"assignment_id", req.AssignmentId,
+			"repo", assignment.Repo,
+			"branch", assignment.Branch,
+			"error", err,
+		)
+		return nil, status.Error(codes.Internal, "failed to retrieve assignment")
+	}
+	if running {
+		return nil, status.Error(codes.AlreadyExists, "pipeline already running for assignment")
 	}
 
 	loglib.Info("grpc: submit received",

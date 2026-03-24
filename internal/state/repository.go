@@ -542,6 +542,25 @@ func UpdateReviewRun(db *DB, id, status, errMsg string, finishedAt time.Time) er
 	return nil
 }
 
+// IsPipelineRunning reports whether a branch already has a live delivery pipeline.
+func IsPipelineRunning(ctx context.Context, db *DB, repo, branch string) (bool, error) {
+	if repo == "" || branch == "" {
+		return false, nil
+	}
+
+	var count int
+	err := db.sql.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM review_runs
+		WHERE repo = ? AND branch = ? AND status IN ('pending', 'running')`,
+		repo, branch,
+	).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("check running pipeline: %w", err)
+	}
+	return count > 0, nil
+}
+
 // --- Findings ---
 
 // InsertFinding inserts a normalized finding record.

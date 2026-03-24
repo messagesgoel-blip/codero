@@ -350,12 +350,6 @@ func daemonCmd(configPath *string) *cobra.Command {
 			}()
 
 			expiryWorker := scheduler.NewExpiryWorker(db, queue, stream)
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				expiryWorker.Run(ctx)
-			}()
-
 			reconciler := webhook.NewReconciler(db, gh, cfg.Repos, cfg.Webhook.Enabled)
 			if cfg.AutoMerge.Enabled {
 				reconciler.WithAutoMerge(gh, cfg.AutoMerge.Method)
@@ -365,20 +359,27 @@ func daemonCmd(configPath *string) *cobra.Command {
 					"merge_method", cfg.AutoMerge.Method,
 				)
 			}
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				reconciler.Run(ctx)
-			}()
 
 			// ─── Step 7: API/observability server + gRPC ────────────
 			slotCounter := scheduler.NewSlotCounter(client)
 			sessStore := session.NewStore(db)
 
+			loglib.Info("codero: running startup recovery sweep",
+				loglib.FieldEventType, loglib.EventStartup,
+				loglib.FieldComponent, "daemon",
+			)
+			expiryWorker.RunSessionExpiryCycle(ctx)
+			expiryWorker.RunLeaseAuditCycle(ctx)
+			reconciler.RunOnce(ctx)
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+
 			// Create the gRPC daemon surface (Daemon Spec v2 §7).
 			grpcSrv := daemongrpc.NewServer(daemongrpc.ServerConfig{
 				DB:           db,
 				RawDB:        db.Unwrap(),
+				GitHubHealth: reconciler,
 				SessionStore: sessStore,
 				Version:      version,
 			})
@@ -400,6 +401,18 @@ func daemonCmd(configPath *string) *cobra.Command {
 						"error", err,
 					)
 				}
+			}()
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				expiryWorker.Run(ctx)
+			}()
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				reconciler.Run(ctx)
 			}()
 
 			// Webhook server (optional).

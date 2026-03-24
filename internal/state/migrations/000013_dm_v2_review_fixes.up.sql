@@ -1,0 +1,1 @@
+ALTER TABLE branch_states ADD COLUMN task_id TEXT NOT NULL DEFAULT '';

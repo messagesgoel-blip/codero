@@ -5,11 +5,13 @@ import (
 	"net"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/codero/codero/internal/daemon"
 	daemonv1 "github.com/codero/codero/internal/daemon/grpc/v1"
 	"github.com/codero/codero/internal/session"
 	"github.com/codero/codero/internal/state"
+	"github.com/google/uuid"
 	ggrpc "google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -124,6 +126,17 @@ func requireCode(t *testing.T, err error, want codes.Code) {
 	if st.Code() != want {
 		t.Fatalf("expected code %v, got %v (msg: %s)", want, st.Code(), st.Message())
 	}
+}
+
+type fakeGitHubHealth struct {
+	checkedAt time.Time
+	healthy   bool
+	errText   string
+	ok        bool
+}
+
+func (f fakeGitHubHealth) GitHubProbeStatus() (time.Time, bool, string, bool) {
+	return f.checkedAt, f.healthy, f.errText, f.ok
 }
 
 // ---------------------------------------------------------------------------
@@ -298,6 +311,63 @@ func TestGetHealth_DegradedMode(t *testing.T) {
 	}
 }
 
+func TestGetGitHubStatus_NoProbeReturnsUnavailable(t *testing.T) {
+	_, _, healthCli, _, _, _, _ := testServer(t)
+	ctx := context.Background()
+
+	resp, err := healthCli.GetGitHubStatus(ctx, &daemonv1.GetGitHubStatusRequest{})
+	if err != nil {
+		t.Fatalf("GetGitHubStatus: %v", err)
+	}
+	if resp.Status != daemonv1.GitHubAvailability_GITHUB_AVAILABILITY_UNAVAILABLE {
+		t.Fatalf("expected unavailable, got %v", resp.Status)
+	}
+	if resp.LastCheck != nil {
+		t.Fatalf("expected nil last_check before first probe, got %v", resp.LastCheck)
+	}
+}
+
+func TestGetGitHubStatus_ReportsProbeResult(t *testing.T) {
+	db := openTestDB(t)
+	sessStore := session.NewStore(db)
+	srv := NewServer(ServerConfig{
+		DB:           db,
+		RawDB:        db.Unwrap(),
+		GitHubHealth: fakeGitHubHealth{checkedAt: time.Unix(1711281600, 0).UTC(), healthy: true, ok: true},
+		SessionStore: sessStore,
+		Version:      "test-0.0.1",
+	})
+	srv.MarkReady()
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	go srv.GRPCServer().Serve(lis)
+	t.Cleanup(func() { srv.GRPCServer().Stop() })
+
+	conn, err := ggrpc.NewClient(
+		lis.Addr().String(),
+		ggrpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+
+	healthCli := daemonv1.NewHealthServiceClient(conn)
+	resp, err := healthCli.GetGitHubStatus(context.Background(), &daemonv1.GetGitHubStatusRequest{})
+	if err != nil {
+		t.Fatalf("GetGitHubStatus: %v", err)
+	}
+	if resp.Status != daemonv1.GitHubAvailability_GITHUB_AVAILABILITY_HEALTHY {
+		t.Fatalf("expected healthy, got %v", resp.Status)
+	}
+	if resp.LastCheck == nil {
+		t.Fatal("expected non-nil last_check")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // 4. Task Service Tests
 // ---------------------------------------------------------------------------
@@ -343,6 +413,32 @@ func TestIngestTask_MissingFields(t *testing.T) {
 	}
 }
 
+func TestIngestTask_ConflictingTaskIDForBranch(t *testing.T) {
+	_, _, _, taskCli, _, _, _ := testServer(t)
+	ctx := context.Background()
+
+	req := &daemonv1.IngestTaskRequest{
+		TaskId: "task-001",
+		Repo:   "codero/codero",
+		Branch: "codero/shared",
+		Title:  "First task",
+	}
+	if _, err := taskCli.IngestTask(ctx, req); err != nil {
+		t.Fatalf("first IngestTask: %v", err)
+	}
+	if _, err := taskCli.IngestTask(ctx, req); err != nil {
+		t.Fatalf("idempotent IngestTask: %v", err)
+	}
+
+	_, err := taskCli.IngestTask(ctx, &daemonv1.IngestTaskRequest{
+		TaskId: "task-002",
+		Repo:   "codero/codero",
+		Branch: "codero/shared",
+		Title:  "Second task",
+	})
+	requireCode(t, err, codes.AlreadyExists)
+}
+
 // ---------------------------------------------------------------------------
 // 5. Assignment + Gate + Feedback integration
 // ---------------------------------------------------------------------------
@@ -376,6 +472,47 @@ func TestSubmit_MissingFields(t *testing.T) {
 	}
 }
 
+func TestSubmit_DuplicateRunningPipeline(t *testing.T) {
+	srv, _, _, _, assignCli, _, _ := testServer(t)
+	ctx := context.Background()
+
+	if err := state.RegisterAgentSession(ctx, srv.db, "sess-submit", "agent-submit", ""); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	assignment := &state.AgentAssignment{
+		ID:        "assign-submit",
+		SessionID: "sess-submit",
+		AgentID:   "agent-submit",
+		Repo:      "codero/codero",
+		Branch:    "feat/duplicate-submit",
+		Worktree:  filepath.Join(t.TempDir(), "duplicate-submit"),
+		TaskID:    "TASK-SUBMIT",
+		State:     "active",
+		Substatus: state.AssignmentSubstatusInProgress,
+	}
+	if err := state.AttachAgentAssignment(ctx, srv.db, assignment); err != nil {
+		t.Fatalf("AttachAgentAssignment: %v", err)
+	}
+	startedAt := time.Now().UTC()
+	if err := state.CreateReviewRun(srv.db, &state.ReviewRun{
+		ID:        uuid.NewString(),
+		Repo:      assignment.Repo,
+		Branch:    assignment.Branch,
+		Provider:  "stub",
+		Status:    "running",
+		StartedAt: &startedAt,
+	}); err != nil {
+		t.Fatalf("CreateReviewRun: %v", err)
+	}
+
+	_, err := assignCli.Submit(ctx, &daemonv1.SubmitRequest{
+		AssignmentId: assignment.ID,
+		SessionId:    assignment.SessionID,
+		Summary:      "ready",
+	})
+	requireCode(t, err, codes.AlreadyExists)
+}
+
 func TestGetFeedback_MissingFields(t *testing.T) {
 	_, _, _, _, _, fbCli, _ := testServer(t)
 	ctx := context.Background()
@@ -402,4 +539,59 @@ func TestPostFindings_MissingFields(t *testing.T) {
 			requireCode(t, err, codes.InvalidArgument)
 		})
 	}
+}
+
+func TestPostFindings_SuccessAndDuplicate(t *testing.T) {
+	srv, _, _, _, _, fbCli, gateCli := testServer(t)
+	ctx := context.Background()
+
+	if err := state.RegisterAgentSession(ctx, srv.db, "sess-gate", "agent-gate", ""); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	assignment := &state.AgentAssignment{
+		ID:        "assign-gate",
+		SessionID: "sess-gate",
+		AgentID:   "agent-gate",
+		TaskID:    "TASK-GATE",
+		State:     "active",
+		Substatus: state.AssignmentSubstatusInProgress,
+	}
+	if err := state.AttachAgentAssignment(ctx, srv.db, assignment); err != nil {
+		t.Fatalf("AttachAgentAssignment: %v", err)
+	}
+
+	req := &daemonv1.PostFindingsRequest{
+		SessionId:     assignment.SessionID,
+		AssignmentId:  assignment.ID,
+		GateRunId:     "gate-run-1",
+		OverallStatus: daemonv1.GateOverallStatus_GATE_OVERALL_STATUS_FAIL,
+	}
+	if _, err := gateCli.PostFindings(ctx, req); err != nil {
+		t.Fatalf("PostFindings: %v", err)
+	}
+
+	resp, err := fbCli.GetFeedback(ctx, &daemonv1.GetFeedbackRequest{
+		AssignmentId: assignment.ID,
+	})
+	if err != nil {
+		t.Fatalf("GetFeedback: %v", err)
+	}
+	if resp.TaskId != assignment.TaskID {
+		t.Fatalf("task_id mismatch: got %q want %q", resp.TaskId, assignment.TaskID)
+	}
+	if resp.SuggestedSubstatus != "needs_revision" {
+		t.Fatalf("suggested_substatus: got %q want needs_revision", resp.SuggestedSubstatus)
+	}
+	if len(resp.Sources) != 1 {
+		t.Fatalf("expected 1 source, got %d", len(resp.Sources))
+	}
+	if resp.Sources[0].Source != daemonv1.FeedbackSourceType_FEEDBACK_SOURCE_GATE {
+		t.Fatalf("source: got %v want gate", resp.Sources[0].Source)
+	}
+	if resp.Sources[0].Status != daemonv1.FeedbackStatus_FEEDBACK_STATUS_ACTIONABLE {
+		t.Fatalf("status: got %v want actionable", resp.Sources[0].Status)
+	}
+
+	_, err = gateCli.PostFindings(ctx, req)
+	requireCode(t, err, codes.AlreadyExists)
 }

@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -35,18 +36,58 @@ func (g *gateService) PostFindings(ctx context.Context, req *daemonv1.PostFindin
 	// Verify session/assignment ownership.
 	assignment, err := state.GetAgentAssignmentByID(ctx, g.server.db, req.AssignmentId)
 	if err != nil {
-		return nil, status.Errorf(codes.NotFound, "assignment not found: %v", err)
+		if errors.Is(err, state.ErrAgentAssignmentNotFound) {
+			return nil, status.Error(codes.NotFound, "assignment not found")
+		}
+		loglib.Error("grpc: PostFindings assignment lookup failed",
+			loglib.FieldComponent, "grpc",
+			"assignment_id", req.AssignmentId,
+			"error", err,
+		)
+		return nil, status.Error(codes.Internal, "failed to retrieve assignment")
 	}
 	if assignment.SessionID != req.SessionId {
 		return nil, status.Error(codes.PermissionDenied, "assignment not owned by session")
 	}
 
-	overallStatus := "pass"
+	overallStatus := ""
 	switch req.OverallStatus {
+	case daemonv1.GateOverallStatus_GATE_OVERALL_STATUS_PASS:
+		overallStatus = "pass"
 	case daemonv1.GateOverallStatus_GATE_OVERALL_STATUS_FAIL:
 		overallStatus = "fail"
 	case daemonv1.GateOverallStatus_GATE_OVERALL_STATUS_WARN:
 		overallStatus = "warn"
+	default:
+		return nil, status.Error(codes.InvalidArgument, "overall_status is required")
+	}
+
+	existing, err := state.GetFeedbackCacheByAssignment(ctx, g.server.db, req.AssignmentId)
+	if err != nil && !errors.Is(err, state.ErrFeedbackCacheNotFound) {
+		loglib.Error("grpc: PostFindings cache lookup failed",
+			loglib.FieldComponent, "grpc",
+			"assignment_id", req.AssignmentId,
+			"error", err,
+		)
+		return nil, status.Error(codes.Internal, "failed to record findings")
+	}
+	if err == nil && existing.ComplianceSnapshot == req.GateRunId {
+		return nil, status.Error(codes.AlreadyExists, "gate findings already recorded for assignment")
+	}
+
+	statuses := map[string]string{}
+	if existing != nil {
+		statuses = parseSourceStatuses(existing.SourceStatus)
+	}
+	statuses[sourceStatusCompliance] = overallStatus
+	sourceStatus, err := marshalSourceStatuses(statuses)
+	if err != nil {
+		loglib.Error("grpc: PostFindings status marshal failed",
+			loglib.FieldComponent, "grpc",
+			"assignment_id", req.AssignmentId,
+			"error", err,
+		)
+		return nil, status.Error(codes.Internal, "failed to record findings")
 	}
 
 	// Persist gate findings to the feedback cache.
@@ -56,8 +97,16 @@ func (g *gateService) PostFindings(ctx context.Context, req *daemonv1.PostFindin
 		SessionID:          req.SessionId,
 		TaskID:             assignment.TaskID,
 		ComplianceSnapshot: req.GateRunId,
-		SourceStatus:       overallStatus,
+		SourceStatus:       sourceStatus,
 		SnapshotAt:         time.Now(),
+	}
+	if existing != nil {
+		fc.CacheID = existing.CacheID
+		fc.CISnapshot = existing.CISnapshot
+		fc.CoderabbitSnapshot = existing.CoderabbitSnapshot
+		fc.HumanReviewSnapshot = existing.HumanReviewSnapshot
+		fc.ContextBlock = existing.ContextBlock
+		fc.CacheHash = existing.CacheHash
 	}
 	if err := state.UpsertFeedbackCache(ctx, g.server.db, fc); err != nil {
 		loglib.Error("grpc: PostFindings cache upsert failed",
@@ -65,7 +114,7 @@ func (g *gateService) PostFindings(ctx context.Context, req *daemonv1.PostFindin
 			"assignment_id", req.AssignmentId,
 			"error", err,
 		)
-		return nil, status.Errorf(codes.Internal, "record findings: %v", err)
+		return nil, status.Error(codes.Internal, "failed to record findings")
 	}
 
 	loglib.Info("grpc: gate findings recorded",

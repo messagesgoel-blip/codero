@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	loglib "github.com/codero/codero/internal/log"
@@ -68,12 +69,16 @@ func (s *StubGitHubClient) GetPRState(_ context.Context, repo, branch string) (*
 // durable branch records. It is the correctness backstop in all modes and the
 // only ingestion mechanism in polling-only mode.
 type Reconciler struct {
-	db          *state.DB
-	github      GitHubClient
-	repos       []string
-	interval    time.Duration
-	merger      AutoMerger // nil → auto-merge disabled
-	mergeMethod string     // "merge", "squash", or "rebase"
+	db           *state.DB
+	github       GitHubClient
+	repos        []string
+	interval     time.Duration
+	merger       AutoMerger // nil → auto-merge disabled
+	mergeMethod  string     // "merge", "squash", or "rebase"
+	healthMu     sync.RWMutex
+	lastProbeAt  time.Time
+	lastProbeErr string
+	probed       bool
 }
 
 // NewReconciler creates a Reconciler.
@@ -139,6 +144,17 @@ func (r *Reconciler) Run(ctx context.Context) {
 	}
 }
 
+// GitHubProbeStatus returns the latest GitHub probe result observed by the reconciler.
+func (r *Reconciler) GitHubProbeStatus() (checkedAt time.Time, healthy bool, errText string, ok bool) {
+	r.healthMu.RLock()
+	defer r.healthMu.RUnlock()
+
+	if !r.probed {
+		return time.Time{}, false, "", false
+	}
+	return r.lastProbeAt, r.lastProbeErr == "", r.lastProbeErr, true
+}
+
 // runCycle iterates over all active branches and reconciles each against GitHub.
 func (r *Reconciler) runCycle(ctx context.Context) {
 	branches, err := state.ListActiveBranches(r.db)
@@ -164,6 +180,7 @@ func (r *Reconciler) runCycle(ctx context.Context) {
 func (r *Reconciler) reconcileBranch(ctx context.Context, b state.BranchRecord) {
 	ghState, err := r.github.GetPRState(ctx, b.Repo, b.Branch)
 	if err != nil {
+		r.recordGitHubProbe(err)
 		loglib.Error("reconciler: get PR state failed",
 			loglib.FieldComponent, "reconciler",
 			loglib.FieldRepo, b.Repo,
@@ -172,6 +189,7 @@ func (r *Reconciler) reconcileBranch(ctx context.Context, b state.BranchRecord) 
 		)
 		return
 	}
+	r.recordGitHubProbe(nil)
 
 	if ghState == nil {
 		// No PR exists. Skip pre-PR states where a PR is not yet expected.
@@ -251,6 +269,19 @@ func (r *Reconciler) reconcileBranch(ctx context.Context, b state.BranchRecord) 
 			return
 		}
 	}
+}
+
+func (r *Reconciler) recordGitHubProbe(err error) {
+	r.healthMu.Lock()
+	defer r.healthMu.Unlock()
+
+	r.probed = true
+	r.lastProbeAt = time.Now().UTC()
+	if err != nil {
+		r.lastProbeErr = err.Error()
+		return
+	}
+	r.lastProbeErr = ""
 }
 
 // maybeMerge calls the GitHub Merge API if auto-merge is configured and the

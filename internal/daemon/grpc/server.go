@@ -33,13 +33,20 @@ type Server struct {
 
 	// Dependencies injected at construction.
 	db           *state.DB
+	githubHealth GitHubHealthSource
 	rawDB        *sql.DB
 	sessionStore *session.Store
+}
+
+// GitHubHealthSource reports the latest reconciler GitHub probe state.
+type GitHubHealthSource interface {
+	GitHubProbeStatus() (checkedAt time.Time, healthy bool, errText string, ok bool)
 }
 
 // ServerConfig holds configuration for the gRPC server.
 type ServerConfig struct {
 	DB           *state.DB
+	GitHubHealth GitHubHealthSource
 	RawDB        *sql.DB
 	SessionStore *session.Store
 	Version      string
@@ -52,6 +59,7 @@ func NewServer(cfg ServerConfig) *Server {
 		startTime:    time.Now(),
 		version:      cfg.Version,
 		db:           cfg.DB,
+		githubHealth: cfg.GitHubHealth,
 		rawDB:        cfg.RawDB,
 		sessionStore: cfg.SessionStore,
 	}

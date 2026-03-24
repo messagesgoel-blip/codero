@@ -66,10 +66,13 @@ func (f *feedbackService) GetFeedback(ctx context.Context, req *daemonv1.GetFeed
 		})
 	}
 	if fc.ComplianceSnapshot != "" {
+		sourceStatus, suggestedSubstatus := feedbackStatusFromSourceStatus(fc.SourceStatus)
 		resp.Sources = append(resp.Sources, &daemonv1.FeedbackSource{
 			Source:   daemonv1.FeedbackSourceType_FEEDBACK_SOURCE_GATE,
 			Priority: 3,
+			Status:   sourceStatus,
 		})
+		resp.SuggestedSubstatus = suggestedSubstatus
 	}
 
 	if !fc.SnapshotAt.IsZero() {
@@ -78,13 +81,8 @@ func (f *feedbackService) GetFeedback(ctx context.Context, req *daemonv1.GetFeed
 		}
 	}
 
-	switch fc.SourceStatus {
-	case "actionable":
-		resp.SuggestedSubstatus = "needs_revision"
-	case "resolved":
-		resp.SuggestedSubstatus = "ready"
-	default:
-		resp.SuggestedSubstatus = "informational"
+	if resp.SuggestedSubstatus == "" {
+		_, resp.SuggestedSubstatus = feedbackStatusFromSourceStatus(fc.SourceStatus)
 	}
 
 	return resp, nil

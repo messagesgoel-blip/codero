@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -37,17 +38,49 @@ func (t *taskService) IngestTask(ctx context.Context, req *daemonv1.IngestTaskRe
 	}
 
 	// Record task as a queued branch_state entry.
-	_, err := t.server.rawDB.ExecContext(ctx, `
-		INSERT OR IGNORE INTO branch_states (repo, branch, state, updated_at)
-		VALUES (?, ?, 'queued', datetime('now'))`,
-		req.Repo, branch)
+	res, err := t.server.rawDB.ExecContext(ctx, `
+		INSERT INTO branch_states (id, repo, branch, task_id, state, updated_at)
+		VALUES (?, ?, ?, ?, 'queued', datetime('now'))
+		ON CONFLICT(repo, branch) DO NOTHING`,
+		uuid.NewString(), req.Repo, branch, req.TaskId)
 	if err != nil {
 		loglib.Error("grpc: IngestTask failed",
 			loglib.FieldComponent, "grpc",
 			"task_id", req.TaskId,
 			"error", err,
 		)
-		return nil, status.Errorf(codes.Internal, "ingest task: %v", err)
+		return nil, status.Error(codes.Internal, "failed to ingest task")
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		loglib.Error("grpc: IngestTask rows affected failed",
+			loglib.FieldComponent, "grpc",
+			"task_id", req.TaskId,
+			"error", err,
+		)
+		return nil, status.Error(codes.Internal, "failed to ingest task")
+	}
+	if rowsAffected == 0 {
+		var existingTaskID string
+		if err := t.server.rawDB.QueryRowContext(ctx, `
+			SELECT COALESCE(task_id, '')
+			FROM branch_states
+			WHERE repo = ? AND branch = ?`,
+			req.Repo, branch,
+		).Scan(&existingTaskID); err != nil {
+			loglib.Error("grpc: IngestTask existing branch lookup failed",
+				loglib.FieldComponent, "grpc",
+				"task_id", req.TaskId,
+				"repo", req.Repo,
+				"branch", branch,
+				"error", err,
+			)
+			return nil, status.Error(codes.Internal, "failed to ingest task")
+		}
+		if existingTaskID != req.TaskId {
+			return nil, status.Error(codes.AlreadyExists, "branch already tracked for a different task")
+		}
 	}
 
 	loglib.Info("grpc: task ingested",

@@ -191,10 +191,41 @@ func (o *ObservabilityServer) Start() {
 
 // Stop gracefully shuts down the observability server and any attached gRPC server.
 func (o *ObservabilityServer) Stop(ctx context.Context) error {
+	var (
+		grpcErr error
+		wg      sync.WaitGroup
+	)
 	if o.grpcServer != nil {
-		o.grpcServer.GracefulStop()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			o.grpcServer.GracefulStop()
+		}()
 	}
-	return o.server.Shutdown(ctx)
+	httpErr := o.server.Shutdown(ctx)
+
+	if o.grpcServer != nil {
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			wg.Wait()
+		}()
+
+		select {
+		case <-done:
+		case <-ctx.Done():
+			o.grpcServer.Stop()
+			<-done
+			if httpErr == nil {
+				grpcErr = ctx.Err()
+			}
+		}
+	}
+
+	if httpErr != nil {
+		return httpErr
+	}
+	return grpcErr
 }
 
 // Handler exposes the observability HTTP handler for integration tests.
