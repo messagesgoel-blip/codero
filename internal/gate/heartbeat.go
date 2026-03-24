@@ -96,20 +96,48 @@ type Config struct {
 	RepoPath string
 }
 
-// LoadConfig reads gate configuration from environment variables, falling back
-// to built-in defaults. Each timeout is read independently so one gate's
-// configuration cannot interfere with another gate's timeout budget.
+// LoadConfig reads gate configuration from the effective config resolution:
+// shell env > $HOME/.codero/config.env > built-in defaults.
+// Each timeout is read independently so one gate's configuration cannot
+// interfere with another gate's timeout budget.
 func LoadConfig() Config {
+	return LoadConfigFrom(DefaultConfigFilePath())
+}
+
+// LoadConfigFrom reads gate configuration using the given config file path.
+// This allows tests to point at a temp file without mutating $HOME.
+func LoadConfigFrom(configFilePath string) Config {
+	vars, _ := ResolveEffectiveMap(configFilePath)
+
 	return Config{
 		HeartbeatBin:        envOrDefault("CODERO_GATE_HEARTBEAT_BIN", DefaultHeartbeatBin),
-		CopilotEnabled:      os.Getenv("CODERO_COPILOT_ENABLED") == "true",
+		CopilotEnabled:      EffectiveBool(vars, "CODERO_COPILOT_ENABLED"),
 		FallbackMode:        parseFallbackMode(os.Getenv("CODERO_AI_GATE_FALLBACK")),
-		CopilotTimeoutSec:   envIntOrDefault("CODERO_COPILOT_TIMEOUT_SEC", DefaultCopilotTimeoutSec),
-		LiteLLMTimeoutSec:   envIntOrDefault("CODERO_LITELLM_TIMEOUT_SEC", DefaultLiteLLMTimeoutSec),
-		GateTotalTimeoutSec: envIntOrDefault("CODERO_GATE_TOTAL_TIMEOUT_SEC", DefaultGateTotalTimeoutSec),
+		CopilotTimeoutSec:   effectiveIntWithLegacy(vars, "CODERO_COPILOT_TIMEOUT", "CODERO_COPILOT_TIMEOUT_SEC", DefaultCopilotTimeoutSec),
+		LiteLLMTimeoutSec:   effectiveIntWithLegacy(vars, "CODERO_LITELLM_TIMEOUT", "CODERO_LITELLM_TIMEOUT_SEC", DefaultLiteLLMTimeoutSec),
+		GateTotalTimeoutSec: effectiveIntWithLegacy(vars, "CODERO_AI_BUDGET_SECONDS", "CODERO_GATE_TOTAL_TIMEOUT_SEC", DefaultGateTotalTimeoutSec),
 		PollIntervalSec:     envIntOrDefault("CODERO_GATE_POLL_INTERVAL_SEC", DefaultPollIntervalSec),
 		RepoPath:            os.Getenv("CODERO_REPO_PATH"),
 	}
+}
+
+// effectiveIntWithLegacy resolves an int from the effective config (spec name),
+// falling back to a legacy env var name for backward compatibility.
+func effectiveIntWithLegacy(vars map[string]ResolvedVar, specVar, legacyVar string, fallback int) int {
+	// Prefer the spec-defined variable from effective config.
+	if rv, ok := vars[specVar]; ok && rv.Source != SourceDefault {
+		if n, err := strconv.Atoi(rv.Value); err == nil && n > 0 {
+			return n
+		}
+	}
+	// Fall back to legacy env var (direct env only, not config file).
+	if v := os.Getenv(legacyVar); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	// Finally use the spec default from the registry.
+	return EffectiveInt(vars, specVar, fallback)
 }
 
 // parseFallbackMode validates and normalises the raw env string.
