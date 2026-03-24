@@ -539,6 +539,18 @@ func GetActiveAgentAssignment(ctx context.Context, db *DB, sessionID string) (*A
 	return scanAgentAssignment(row)
 }
 
+// GetAgentAssignmentByID returns a single assignment looked up by its unique ID.
+func GetAgentAssignmentByID(ctx context.Context, db *DB, assignmentID string) (*AgentAssignment, error) {
+	const q = `
+		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id, state, blocked_reason, assignment_substatus,
+		       assignment_version, started_at, ended_at, end_reason, superseded_by
+		FROM agent_assignments
+		WHERE assignment_id = ?`
+
+	row := db.sql.QueryRowContext(ctx, q, assignmentID)
+	return scanAgentAssignment(row)
+}
+
 // ListAgentAssignments returns all assignments for a session.
 func ListAgentAssignments(ctx context.Context, db *DB, sessionID string) ([]AgentAssignment, error) {
 	const q = `
