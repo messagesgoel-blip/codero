@@ -8,6 +8,10 @@ import (
 const (
 	SchemaVersion     = "1"
 	DefaultReportPath = ".codero/gate-check/last-report.json"
+
+	// MaxFindingsPerCheck is the per-check cap on structured findings.
+	// findings_count always reflects the true total; Truncated is set when capped.
+	MaxFindingsPerCheck = 50
 )
 
 type CheckStatus string
@@ -92,19 +96,21 @@ const (
 
 // CheckResult is the canonical per-check state. Never omit disabled/skipped checks.
 type CheckResult struct {
-	ID          string      `json:"id"`
-	Name        string      `json:"name"`
-	Group       Group       `json:"group"`
-	Required    bool        `json:"required"`
-	Enabled     bool        `json:"enabled"`
-	Status      CheckStatus `json:"status"`
-	ReasonCode  ReasonCode  `json:"reason_code,omitempty"`
-	Reason      string      `json:"reason,omitempty"`
-	ToolName    string      `json:"tool_name,omitempty"`
-	ToolPath    string      `json:"tool_path,omitempty"`
-	ToolVersion string      `json:"tool_version,omitempty"`
-	DurationMS  int64       `json:"duration_ms"`
-	Details     string      `json:"details,omitempty"`
+	ID            string      `json:"id"`
+	Name          string      `json:"name"`
+	Group         Group       `json:"group"`
+	Required      bool        `json:"required"`
+	Enabled       bool        `json:"enabled"`
+	Status        CheckStatus `json:"status"`
+	ReasonCode    ReasonCode  `json:"reason_code,omitempty"`
+	Reason        string      `json:"reason,omitempty"`
+	ToolName      string      `json:"tool_name,omitempty"`
+	ToolPath      string      `json:"tool_path,omitempty"`
+	ToolVersion   string      `json:"tool_version,omitempty"`
+	DurationMS    int64       `json:"duration_ms"`
+	Details       string      `json:"details,omitempty"`
+	FindingsCount int         `json:"findings_count"`
+	Truncated     bool        `json:"truncated,omitempty"`
 }
 
 // Summary aggregates counts and overall status from a set of CheckResults.
@@ -124,9 +130,10 @@ type Summary struct {
 
 // Report is the top-level output of a gate engine run.
 type Report struct {
-	Summary Summary       `json:"summary"`
-	Checks  []CheckResult `json:"checks"`
-	RunAt   time.Time     `json:"run_at"`
+	Summary    Summary       `json:"summary"`
+	Checks     []CheckResult `json:"checks"`
+	RunAt      time.Time     `json:"run_at"`
+	Invocation string        `json:"invocation,omitempty"`
 }
 
 // ComputeSummary builds a Summary from a slice of CheckResults and profile.

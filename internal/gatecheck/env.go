@@ -33,6 +33,9 @@ type EngineConfig struct {
 	RequiredChecks []string
 	OptionalChecks []string
 
+	// Invocation identifies who invoked the gate: "codero" or "hook".
+	Invocation string
+
 	// Tool path overrides
 	ShellcheckPath string
 	SemgrepPath    string
@@ -76,6 +79,11 @@ func LoadEngineConfig() EngineConfig {
 	}
 	if raw := os.Getenv("CODERO_OPTIONAL_CHECKS"); raw != "" {
 		cfg.OptionalChecks = splitCSV(raw)
+	}
+
+	cfg.Invocation = envString("CODERO_GATE_INVOCATION", "hook")
+	if cfg.Invocation == "" {
+		cfg.Invocation = "hook"
 	}
 
 	return cfg

@@ -129,6 +129,11 @@ Additional output modes:
 				if err := saveGateCheckReport(report, reportPath); err != nil {
 					fmt.Fprintf(os.Stderr, "gate-check: warning: could not save report to %s: %v\n", reportPath, err)
 				}
+
+				substatusPath := filepath.Join(filepath.Dir(reportPath), "gate-substatus.env")
+				if err := gatecheck.WriteSubstatus(substatusPath, report); err != nil {
+					fmt.Fprintf(os.Stderr, "gate-check: warning: could not write substatus to %s: %v\n", substatusPath, err)
+				}
 			}
 
 			if outputJSON {
