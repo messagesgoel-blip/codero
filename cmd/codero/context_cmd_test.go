@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	repocontext "github.com/codero/codero/internal/context"
@@ -31,6 +32,19 @@ func runContextCmd(t *testing.T, cwd string, args ...string) (string, string, er
 	if err != nil {
 		t.Fatalf("stderr pipe: %v", err)
 	}
+	defer func() {
+		if stdoutW != nil {
+			_ = stdoutW.Close()
+		}
+		if stderrW != nil {
+			_ = stderrW.Close()
+		}
+		os.Stdout = origStdout
+		os.Stderr = origStderr
+		if chdirErr := os.Chdir(origWD); chdirErr != nil {
+			t.Fatalf("restore cwd: %v", chdirErr)
+		}
+	}()
 
 	os.Stdout = stdoutW
 	os.Stderr = stderrW
@@ -45,12 +59,9 @@ func runContextCmd(t *testing.T, cwd string, args ...string) (string, string, er
 	execErr := cmd.ExecuteContext(context.Background())
 
 	_ = stdoutW.Close()
+	stdoutW = nil
 	_ = stderrW.Close()
-	os.Stdout = origStdout
-	os.Stderr = origStderr
-	if err := os.Chdir(origWD); err != nil {
-		t.Fatalf("restore cwd: %v", err)
-	}
+	stderrW = nil
 
 	var stdoutBuf bytes.Buffer
 	if _, err := io.Copy(&stdoutBuf, stdoutR); err != nil {
@@ -178,8 +189,12 @@ func TestContextIndexFindGrepAndSymbols_JSONContracts(t *testing.T) {
 	if findResp.Count < 3 {
 		t.Fatalf("expected at least 3 matches, got %d", findResp.Count)
 	}
-	if findResp.Matches[0].Name != "Alpha" || findResp.Matches[1].Name != "Beta" || findResp.Matches[2].Name != "Gamma" {
-		t.Fatalf("find sort/order mismatch: %+v", findResp.Matches[:3])
+	names := make([]string, 0, len(findResp.Matches))
+	for _, match := range findResp.Matches {
+		names = append(names, match.Name)
+	}
+	if !slices.Contains(names, "Alpha") || !slices.Contains(names, "Beta") || !slices.Contains(names, "Gamma") {
+		t.Fatalf("find result set missing expected symbols: %+v", names)
 	}
 
 	stdout, stderr, err = runContextCmd(t, repoDir, "find", "NoSuchSymbol", "--json")

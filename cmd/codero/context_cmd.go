@@ -128,6 +128,8 @@ func contextStatusCmd() *cobra.Command {
 					resp.LastIndexedAt = meta.LastIndexedAt
 					resp.LastIndexedSHA = meta.LastIndexedSHA
 					resp.LanguageScope = meta.LanguageScope
+				} else {
+					fmt.Fprintf(os.Stderr, "warning: context status degraded: repo=%s db=%s: %v\n", repoRoot, dbPath, err)
 				}
 			}
 
@@ -497,12 +499,6 @@ func openRepoStore(repoRoot string) (*repocontext.Store, string, error) {
 	return store, "", nil
 }
 
-type contextErrorResult struct {
-	exitCode int
-}
-
-func (e *contextErrorResult) Error() string { return fmt.Sprintf("exit %d", e.exitCode) }
-
 func contextError(_ *cobra.Command, repoRoot, code, message string, jsonOut bool, exitCode int) error {
 	if jsonOut {
 		resp := repocontext.ErrorResponse{
@@ -522,7 +518,7 @@ func contextError(_ *cobra.Command, repoRoot, code, message string, jsonOut bool
 
 func writeJSON(v interface{}, jsonOut bool) error {
 	if !jsonOut {
-		// Simple text output for non-JSON mode.
+		// Non-JSON mode intentionally still emits indented JSON for now.
 		data, _ := json.MarshalIndent(v, "", "  ")
 		fmt.Println(string(data))
 		return nil
