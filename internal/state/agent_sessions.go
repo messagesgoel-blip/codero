@@ -1298,6 +1298,11 @@ func AcceptTask(ctx context.Context, db *DB, sessionID, taskID string) (*AgentAs
 		return nil, fmt.Errorf("accept task: insert: %w", err)
 	}
 
+	// §3.2: seed pending rule checks atomically with the new assignment.
+	if err := seedPendingAssignmentRuleChecksTx(ctx, tx, assignmentID, sessionID); err != nil {
+		return nil, fmt.Errorf("accept task: seed rule checks: %w", err)
+	}
+
 	// Touch session heartbeat so last_seen reflects the claim instant.
 	if _, err = tx.ExecContext(ctx, `
 		UPDATE agent_sessions
