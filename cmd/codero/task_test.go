@@ -314,3 +314,103 @@ func TestTaskEmitCmd_MissingFlags(t *testing.T) {
 		})
 	}
 }
+
+// --- task submit CLI tests ---
+
+func runTaskSubmit(t *testing.T, flags ...string) (string, error) {
+	t.Helper()
+	return runCmd(t, taskSubmitCmd, flags...)
+}
+
+func TestTaskSubmitCmd_HappyPath(t *testing.T) {
+	dbPath := openTaskTestDB(t)
+	t.Setenv("CODERO_DB_PATH", dbPath)
+
+	db, err := state.Open(dbPath)
+	if err != nil {
+		t.Fatalf("state.Open: %v", err)
+	}
+	ctx := context.Background()
+	if err := state.RegisterAgentSession(ctx, db, "submit-sess-1", "agent-a", ""); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	a, err := state.AcceptTask(ctx, db, "submit-sess-1", "SUBMIT-TASK-001")
+	if err != nil {
+		t.Fatalf("AcceptTask: %v", err)
+	}
+	_ = db.Close()
+
+	out, err := runTaskSubmit(t, "--assignment", a.ID, "--version", "1")
+	if err != nil {
+		t.Fatalf("expected success, got: %v\noutput: %s", err, out)
+	}
+	for _, want := range []string{
+		"assignment_id: " + a.ID,
+		"substatus: waiting_for_ci",
+		"version: 2",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q\nfull output:\n%s", want, out)
+		}
+	}
+}
+
+func TestTaskSubmitCmd_VersionConflict(t *testing.T) {
+	dbPath := openTaskTestDB(t)
+	t.Setenv("CODERO_DB_PATH", dbPath)
+
+	db, err := state.Open(dbPath)
+	if err != nil {
+		t.Fatalf("state.Open: %v", err)
+	}
+	ctx := context.Background()
+	if err := state.RegisterAgentSession(ctx, db, "submit-sess-2", "agent-a", ""); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	a, err := state.AcceptTask(ctx, db, "submit-sess-2", "SUBMIT-TASK-002")
+	if err != nil {
+		t.Fatalf("AcceptTask: %v", err)
+	}
+	// Advance version
+	if _, err := state.EmitAssignmentUpdate(ctx, db, a.ID, 1, "waiting_for_ci"); err != nil {
+		t.Fatalf("advance version: %v", err)
+	}
+	_ = db.Close()
+
+	_, err = runTaskSubmit(t, "--assignment", a.ID, "--version", "1")
+	if err == nil {
+		t.Fatal("expected version conflict error")
+	}
+	if !strings.Contains(err.Error(), "version conflict") {
+		t.Errorf("error should mention 'version conflict'; got: %v", err)
+	}
+}
+
+func TestTaskSubmitCmd_MissingFlags(t *testing.T) {
+	dbPath := openTaskTestDB(t)
+	t.Setenv("CODERO_DB_PATH", dbPath)
+
+	tests := []struct {
+		name  string
+		flags []string
+		want  string
+	}{
+		{"no assignment", []string{"--version", "1"}, "--assignment is required"},
+		{"no version", []string{"--assignment", "abc"}, "--version is required"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := runTaskSubmit(t, tc.flags...)
+			if err == nil {
+				t.Fatal("expected usage error")
+			}
+			var usageErr *UsageError
+			if !errors.As(err, &usageErr) {
+				t.Fatalf("expected UsageError, got %T: %v", err, err)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error %q should contain %q", err, tc.want)
+			}
+		})
+	}
+}

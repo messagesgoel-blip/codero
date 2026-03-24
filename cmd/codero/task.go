@@ -17,6 +17,7 @@ func taskCmd(configPath *string) *cobra.Command {
 	}
 	cmd.AddCommand(taskAcceptCmd(configPath))
 	cmd.AddCommand(taskEmitCmd(configPath))
+	cmd.AddCommand(taskSubmitCmd(configPath))
 	return cmd
 }
 
@@ -171,6 +172,80 @@ Terminal substatuses (terminal_*) also set ended_at on the assignment.`,
 	cmd.Flags().StringVar(&assignmentID, "assignment", "", "assignment identifier")
 	cmd.Flags().StringVar(&versionStr, "version", "", "current assignment version (optimistic lock)")
 	cmd.Flags().StringVar(&substatus, "substatus", "", "target substatus for the assignment")
+
+	return cmd
+}
+
+func taskSubmitCmd(configPath *string) *cobra.Command {
+	var (
+		assignmentID string
+		versionStr   string
+		message      string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "submit",
+		Short: "Signal work is ready for Codero delivery pipeline",
+		Long: `Submit signals that the agent's current work is ready for review.
+
+Codero will handle: push → CI → CodeRabbit review → feedback assembly.
+The agent should then read .codero/FEEDBACK.md for the result.
+
+This is the primary agent signal per Task Layer v2 §12.3.
+Submit transitions the assignment substatus to waiting_for_ci.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if assignmentID == "" {
+				return usageErrorf("--assignment is required")
+			}
+			if versionStr == "" {
+				return usageErrorf("--version is required")
+			}
+
+			version, err := strconv.Atoi(versionStr)
+			if err != nil {
+				return usageErrorf("--version must be an integer: %v", err)
+			}
+			if version < 1 {
+				return usageErrorf("--version must be >= 1")
+			}
+
+			cfg, err := loadConfig(*configPathForCmd(cmd))
+			if err != nil {
+				return fmt.Errorf("codero: config: %w", err)
+			}
+
+			db, err := state.Open(cfg.DBPath)
+			if err != nil {
+				return fmt.Errorf("open state db: %w", err)
+			}
+			defer func() { _ = db.Close() }()
+
+			a, err := state.EmitAssignmentUpdate(cmd.Context(), db, assignmentID, version, state.AssignmentSubstatusWaitingForCI)
+			if err != nil {
+				if errors.Is(err, state.ErrAgentAssignmentNotFound) {
+					return fmt.Errorf("agent assignment not found: %w", err)
+				}
+				if errors.Is(err, state.ErrVersionConflict) {
+					return fmt.Errorf("version conflict: %w", err)
+				}
+				if errors.Is(err, state.ErrAssignmentEnded) {
+					return fmt.Errorf("assignment ended: %w", err)
+				}
+				return err
+			}
+
+			fmt.Printf("assignment_id: %s\nstate: %s\nsubstatus: %s\nversion: %d\n",
+				a.ID, a.State, a.Substatus, a.Version)
+			if message != "" {
+				fmt.Printf("message: %s\n", message)
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&assignmentID, "assignment", "", "assignment identifier")
+	cmd.Flags().StringVar(&versionStr, "version", "", "current assignment version (optimistic lock)")
+	cmd.Flags().StringVarP(&message, "message", "m", "", "optional submit message")
 
 	return cmd
 }
