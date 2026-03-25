@@ -834,6 +834,7 @@ func sessionCmd(configPath *string) *cobra.Command {
 		sessionHeartbeatCmd(configPath),
 		sessionAttachCmd(configPath),
 		sessionFinalizeCmd(configPath),
+		sessionEndCmd(configPath),
 	)
 
 	return cmd

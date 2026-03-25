@@ -391,6 +391,31 @@ func ExpireAgentSession(ctx context.Context, db *DB, sessionID, reason string) e
 		return fmt.Errorf("expire agent session: append event: %w", err)
 	}
 
+	// SL-1/SL-3: Write session_archives row atomically in the same transaction.
+	var expSession AgentSession
+	var sessLastProgress sql.NullTime
+	if err := tx.QueryRowContext(ctx, `
+		SELECT session_id, agent_id, mode, started_at, last_seen_at, last_progress_at
+		FROM agent_sessions WHERE session_id = ?`, sessionID,
+	).Scan(&expSession.SessionID, &expSession.AgentID, &expSession.Mode,
+		&expSession.StartedAt, &expSession.LastSeenAt, &sessLastProgress); err == nil {
+		archive := &SessionArchive{
+			SessionID: sessionID,
+			AgentID:   expSession.AgentID,
+			Result:    reason,
+			StartedAt: expSession.StartedAt,
+			EndedAt:   now,
+		}
+		if contextRow != nil {
+			archive.TaskID = contextRow.Assignment.TaskID
+			archive.Repo = contextRow.Assignment.Repo
+			archive.Branch = contextRow.Assignment.Branch
+		}
+		if err := writeSessionArchiveTx(ctx, tx, archive); err != nil {
+			return fmt.Errorf("expire agent session: write archive: %w", err)
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("expire agent session: commit: %w", err)
 	}
@@ -787,6 +812,23 @@ func FinalizeAgentSession(ctx context.Context, db *DB, sessionID, agentID string
 		sessionID, session.AgentID, "session_finalized", string(payload),
 	); err != nil {
 		return fmt.Errorf("finalize agent session: append event: %w", err)
+	}
+
+	// SL-1/SL-3: Write session_archives row atomically in the same transaction.
+	archive := &SessionArchive{
+		SessionID: sessionID,
+		AgentID:   session.AgentID,
+		Result:    completion.Status,
+		StartedAt: session.StartedAt,
+		EndedAt:   finishedAt,
+	}
+	if active != nil {
+		archive.TaskID = active.TaskID
+		archive.Repo = active.Repo
+		archive.Branch = active.Branch
+	}
+	if err := writeSessionArchiveTx(ctx, tx, archive); err != nil {
+		return fmt.Errorf("finalize agent session: write archive: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
