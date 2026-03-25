@@ -174,6 +174,11 @@ func (h *Handler) handleChat(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) postChat(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
+	if !h.chatCfg.Enabled {
+		writeError(w, http.StatusServiceUnavailable, "chat is disabled", "chat_disabled")
+		return
+	}
+
 	body, err := io.ReadAll(io.LimitReader(r.Body, 64*1024))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "failed to read request body", "read_error")
@@ -188,6 +193,11 @@ func (h *Handler) postChat(w http.ResponseWriter, r *http.Request) {
 	req.Prompt = strings.TrimSpace(req.Prompt)
 	req.Context = strings.TrimSpace(req.Context)
 	req.Tab = strings.TrimSpace(req.Tab)
+	req.ConversationID = strings.TrimSpace(req.ConversationID)
+	req.ContextScope = strings.TrimSpace(req.ContextScope)
+	if req.ContextScope == "" {
+		req.ContextScope = h.chatCfg.ContextScopeDefault
+	}
 	if req.Prompt == "" {
 		writeError(w, http.StatusBadRequest, "prompt must not be empty", "validation_error")
 		return
@@ -195,6 +205,20 @@ func (h *Handler) postChat(w http.ResponseWriter, r *http.Request) {
 	if len(req.Prompt) > dashboardChatMaxPromptLen {
 		req.Prompt = req.Prompt[:dashboardChatMaxPromptLen]
 	}
+
+	// Expand quick queries (§4.4)
+	if h.chatCfg.QuickQueriesEnabled {
+		if expanded, ok := ExpandQuickQuery(req.Prompt); ok {
+			req.Prompt = expanded
+		}
+	}
+
+	// Get or create conversation for multi-turn
+	convo := h.convos.GetOrCreate(req.ConversationID)
+	req.ConversationID = convo.ID
+
+	// Record user message in conversation history
+	h.convos.Append(convo.ID, "user", req.Prompt)
 
 	snapshot := h.collectChatSnapshot(r.Context(), req.Tab)
 	if req.Stream {
@@ -272,13 +296,20 @@ func (h *Handler) collectChatSnapshot(ctx context.Context, focus string) dashboa
 
 func (h *Handler) chatResponse(ctx context.Context, req ChatRequest, snapshot dashboardChatSnapshot) ChatResponse {
 	reply, provider, model := h.askLiteLLM(ctx, req, snapshot)
+
+	// Record assistant reply in conversation history
+	if req.ConversationID != "" {
+		h.convos.Append(req.ConversationID, "assistant", reply)
+	}
+
 	return ChatResponse{
-		Reply:       reply,
-		Provider:    provider,
-		Model:       model,
-		Suggestions: dashboardChatSuggestions(req.Tab, req.Prompt, snapshot),
-		Actions:     dashboardChatActions(req.Tab, snapshot),
-		GeneratedAt: time.Now().UTC(),
+		Reply:          reply,
+		Provider:       provider,
+		Model:          model,
+		ConversationID: req.ConversationID,
+		Suggestions:    dashboardChatSuggestions(req.Tab, req.Prompt, snapshot),
+		Actions:        dashboardChatActions(req.Tab, snapshot),
+		GeneratedAt:    time.Now().UTC(),
 	}
 }
 
@@ -341,10 +372,10 @@ func (h *Handler) streamLiteLLM(w http.ResponseWriter, flusher http.Flusher, ctx
 		return ChatResponse{}, false
 	}
 
-	payload := dashboardChatPrompt(req, snapshot)
+	messages := h.buildChatMessages(req, snapshot)
 	body, err := json.Marshal(liteLLMChatRequest{
 		Model:       model,
-		Messages:    []liteLLMChatMessage{{Role: "system", Content: dashboardChatSystemPrompt()}, {Role: "user", Content: payload}},
+		Messages:    messages,
 		Temperature: 0.2,
 		MaxTokens:   700,
 		Stream:      true,
@@ -417,13 +448,20 @@ func (h *Handler) streamLiteLLM(w http.ResponseWriter, flusher http.Flusher, ctx
 	}
 
 	final := ChatResponse{
-		Reply:       reply.String(),
-		Provider:    "litellm",
-		Model:       model,
-		Suggestions: dashboardChatSuggestions(req.Tab, req.Prompt, snapshot),
-		Actions:     dashboardChatActions(req.Tab, snapshot),
-		GeneratedAt: time.Now().UTC(),
+		Reply:          reply.String(),
+		Provider:       "litellm",
+		Model:          model,
+		ConversationID: req.ConversationID,
+		Suggestions:    dashboardChatSuggestions(req.Tab, req.Prompt, snapshot),
+		Actions:        dashboardChatActions(req.Tab, snapshot),
+		GeneratedAt:    time.Now().UTC(),
 	}
+
+	// Record streamed assistant reply in conversation history
+	if req.ConversationID != "" {
+		h.convos.Append(req.ConversationID, "assistant", final.Reply)
+	}
+
 	return final, true
 }
 
@@ -500,10 +538,12 @@ func (h *Handler) askLiteLLM(ctx context.Context, req ChatRequest, snapshot dash
 		return dashboardChatFallbackReply(req, snapshot), "fallback", "local-summary"
 	}
 
-	payload := dashboardChatPrompt(req, snapshot)
+	// Build multi-turn messages: system + prior history + current user prompt
+	messages := h.buildChatMessages(req, snapshot)
+
 	body, err := json.Marshal(liteLLMChatRequest{
 		Model:       model,
-		Messages:    []liteLLMChatMessage{{Role: "system", Content: dashboardChatSystemPrompt()}, {Role: "user", Content: payload}},
+		Messages:    messages,
 		Temperature: 0.2,
 		MaxTokens:   700,
 		Stream:      false,
@@ -558,6 +598,33 @@ func (h *Handler) askLiteLLM(ctx context.Context, req ChatRequest, snapshot dash
 		return dashboardChatFallbackReply(req, snapshot), "fallback", "local-summary"
 	}
 	return reply, "litellm", model
+}
+
+// buildChatMessages constructs the LiteLLM messages array including
+// system prompt, prior conversation history, and current user prompt with context.
+func (h *Handler) buildChatMessages(req ChatRequest, snapshot dashboardChatSnapshot) []liteLLMChatMessage {
+	messages := []liteLLMChatMessage{
+		{Role: "system", Content: dashboardChatSystemPrompt()},
+	}
+
+	// Include prior conversation history (excluding the current turn which was just appended)
+	if req.ConversationID != "" {
+		history := h.convos.History(req.ConversationID, 0, 0)
+		// Exclude the last message (the current user prompt) since we add it with snapshot context
+		if len(history) > 1 {
+			for _, msg := range history[:len(history)-1] {
+				messages = append(messages, liteLLMChatMessage{
+					Role:    msg.Role,
+					Content: msg.Content,
+				})
+			}
+		}
+	}
+
+	// Current user prompt with fresh snapshot context
+	payload := dashboardChatPrompt(req, snapshot)
+	messages = append(messages, liteLLMChatMessage{Role: "user", Content: payload})
+	return messages
 }
 
 func dashboardChatModel() string {

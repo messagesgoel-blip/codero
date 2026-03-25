@@ -234,10 +234,12 @@ type SettingsUpdateRequest struct {
 
 // ChatRequest is the body for POST /api/v1/dashboard/chat.
 type ChatRequest struct {
-	Prompt  string `json:"prompt"`
-	Tab     string `json:"tab,omitempty"`
-	Context string `json:"context,omitempty"`
-	Stream  bool   `json:"stream,omitempty"`
+	Prompt         string `json:"prompt"`
+	Tab            string `json:"tab,omitempty"`
+	Context        string `json:"context,omitempty"`
+	Stream         bool   `json:"stream,omitempty"`
+	ConversationID string `json:"conversation_id,omitempty"`
+	ContextScope   string `json:"context_scope,omitempty"` // "all","sessions","assignments","queue","repos","archives"
 }
 
 // ChatSuggestion is a follow-up prompt returned by the assistant.
@@ -256,12 +258,27 @@ type ChatAction struct {
 
 // ChatResponse is the assistant response envelope for the dashboard chat API.
 type ChatResponse struct {
-	Reply       string           `json:"reply"`
-	Provider    string           `json:"provider"`
-	Model       string           `json:"model"`
-	Suggestions []ChatSuggestion `json:"suggestions,omitempty"`
-	Actions     []ChatAction     `json:"actions,omitempty"`
-	GeneratedAt time.Time        `json:"generated_at"`
+	Reply          string           `json:"reply"`
+	Provider       string           `json:"provider"`
+	Model          string           `json:"model"`
+	ConversationID string           `json:"conversation_id,omitempty"`
+	Suggestions    []ChatSuggestion `json:"suggestions,omitempty"`
+	Actions        []ChatAction     `json:"actions,omitempty"`
+	GeneratedAt    time.Time        `json:"generated_at"`
+}
+
+// ChatHistoryEntry is one message in a conversation history response.
+type ChatHistoryEntry struct {
+	Role      string    `json:"role"`
+	Content   string    `json:"content"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// ChatHistoryResponse is the response for GET /api/v1/chat/history.
+type ChatHistoryResponse struct {
+	ConversationID string             `json:"conversation_id"`
+	Messages       []ChatHistoryEntry `json:"messages"`
+	Count          int                `json:"count"`
 }
 
 // UploadResponse is the response for POST /api/v1/dashboard/manual-review-upload.
