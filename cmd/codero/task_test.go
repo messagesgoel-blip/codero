@@ -77,7 +77,7 @@ func TestTaskAcceptCmd_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("state.Open: %v", err)
 	}
-	if err := state.RegisterAgentSession(context.Background(), db, "cli-sess-1", "agent-a", ""); err != nil {
+	if err := state.RegisterAgentSession(context.Background(), db, "cli-sess-1", "agent-a", "", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	_ = db.Close()
@@ -105,7 +105,7 @@ func TestTaskAcceptCmd_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("state.Open: %v", err)
 	}
-	if err := state.RegisterAgentSession(context.Background(), db, "cli-sess-idem", "agent-a", ""); err != nil {
+	if err := state.RegisterAgentSession(context.Background(), db, "cli-sess-idem", "agent-a", "", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	_ = db.Close()
@@ -136,10 +136,10 @@ func TestTaskAcceptCmd_Conflict(t *testing.T) {
 		t.Fatalf("state.Open: %v", err)
 	}
 	ctx := context.Background()
-	if err := state.RegisterAgentSession(ctx, db, "cli-owner", "agent-a", ""); err != nil {
+	if err := state.RegisterAgentSession(ctx, db, "cli-owner", "agent-a", "", ""); err != nil {
 		t.Fatalf("RegisterAgentSession owner: %v", err)
 	}
-	if err := state.RegisterAgentSession(ctx, db, "cli-rival", "agent-b", ""); err != nil {
+	if err := state.RegisterAgentSession(ctx, db, "cli-rival", "agent-b", "", ""); err != nil {
 		t.Fatalf("RegisterAgentSession rival: %v", err)
 	}
 	_ = db.Close()
@@ -215,7 +215,7 @@ func TestTaskEmitCmd_HappyPath(t *testing.T) {
 		t.Fatalf("state.Open: %v", err)
 	}
 	ctx := context.Background()
-	if err := state.RegisterAgentSession(ctx, db, "emit-cli-1", "agent-a", ""); err != nil {
+	if err := state.RegisterAgentSession(ctx, db, "emit-cli-1", "agent-a", "", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	a, err := state.AcceptTask(ctx, db, "emit-cli-1", "EMIT-CLI-T1")
@@ -249,7 +249,7 @@ func TestTaskEmitCmd_VersionConflict(t *testing.T) {
 		t.Fatalf("state.Open: %v", err)
 	}
 	ctx := context.Background()
-	if err := state.RegisterAgentSession(ctx, db, "emit-cli-2", "agent-a", ""); err != nil {
+	if err := state.RegisterAgentSession(ctx, db, "emit-cli-2", "agent-a", "", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	a, err := state.AcceptTask(ctx, db, "emit-cli-2", "EMIT-CLI-T2")
@@ -331,7 +331,7 @@ func TestTaskSubmitCmd_HappyPath(t *testing.T) {
 		t.Fatalf("state.Open: %v", err)
 	}
 	ctx := context.Background()
-	if err := state.RegisterAgentSession(ctx, db, "submit-sess-1", "agent-a", ""); err != nil {
+	if err := state.RegisterAgentSession(ctx, db, "submit-sess-1", "agent-a", "", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	a, err := state.AcceptTask(ctx, db, "submit-sess-1", "SUBMIT-TASK-001")
@@ -364,7 +364,7 @@ func TestTaskSubmitCmd_VersionConflict(t *testing.T) {
 		t.Fatalf("state.Open: %v", err)
 	}
 	ctx := context.Background()
-	if err := state.RegisterAgentSession(ctx, db, "submit-sess-2", "agent-a", ""); err != nil {
+	if err := state.RegisterAgentSession(ctx, db, "submit-sess-2", "agent-a", "", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	a, err := state.AcceptTask(ctx, db, "submit-sess-2", "SUBMIT-TASK-002")

@@ -476,7 +476,7 @@ func TestSubmit_DuplicateRunningPipeline(t *testing.T) {
 	srv, _, _, _, assignCli, _, _ := testServer(t)
 	ctx := context.Background()
 
-	if err := state.RegisterAgentSession(ctx, srv.db, "sess-submit", "agent-submit", ""); err != nil {
+	if err := state.RegisterAgentSession(ctx, srv.db, "sess-submit", "agent-submit", "", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	assignment := &state.AgentAssignment{
@@ -545,7 +545,7 @@ func TestPostFindings_SuccessAndDuplicate(t *testing.T) {
 	srv, _, _, _, _, fbCli, gateCli := testServer(t)
 	ctx := context.Background()
 
-	if err := state.RegisterAgentSession(ctx, srv.db, "sess-gate", "agent-gate", ""); err != nil {
+	if err := state.RegisterAgentSession(ctx, srv.db, "sess-gate", "agent-gate", "", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	assignment := &state.AgentAssignment{

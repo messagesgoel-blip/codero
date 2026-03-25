@@ -43,13 +43,18 @@ func NewStore(db *state.DB) *Store {
 // Register records a session with session_id + agent_id only.
 // If the session already exists, it refreshes agent_id, mode, and last_seen.
 func (s *Store) Register(ctx context.Context, sessionID, agentID, mode string) error {
+	return s.RegisterWithTmux(ctx, sessionID, agentID, mode, "")
+}
+
+// RegisterWithTmux records a session with an associated tmux session name (SL-9, SL-11).
+func (s *Store) RegisterWithTmux(ctx context.Context, sessionID, agentID, mode, tmuxSessionName string) error {
 	if sessionID == "" {
 		return ErrMissingSessionID
 	}
 	if agentID == "" {
 		return ErrMissingAgentID
 	}
-	if err := state.RegisterAgentSession(ctx, s.db, sessionID, agentID, mode); err != nil {
+	if err := state.RegisterAgentSession(ctx, s.db, sessionID, agentID, mode, tmuxSessionName); err != nil {
 		return err
 	}
 	return nil
@@ -116,7 +121,7 @@ func (s *Store) AttachAssignment(
 	if repo == "" || branch == "" {
 		return ErrMissingAssignment
 	}
-	if err := state.RegisterAgentSession(ctx, s.db, sessionID, agentID, mode); err != nil {
+	if err := state.RegisterAgentSession(ctx, s.db, sessionID, agentID, mode, ""); err != nil {
 		return err
 	}
 

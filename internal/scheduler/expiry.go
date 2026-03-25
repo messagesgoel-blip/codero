@@ -66,10 +66,19 @@ func sessionHeartbeatTTLFromEnv() time.Duration {
 //  2. Lease audit: detects cli_reviewing branches with expired durable leases
 //     and re-queues them (T07), acting as a safety net when Redis lease key
 //     expiry events are missed.
+//
+// SL-10: When sessions have a tmux_session_name, the worker also checks
+// tmux has-session to detect tmux-native session death.
 type ExpiryWorker struct {
-	db     *state.DB
-	queue  *Queue
-	stream *delivery.Stream
+	db          *state.DB
+	queue       *Queue
+	stream      *delivery.Stream
+	TmuxChecker TmuxSessionChecker
+}
+
+// TmuxSessionChecker abstracts tmux has-session checks for testability.
+type TmuxSessionChecker interface {
+	HasSession(ctx context.Context, name string) bool
 }
 
 // NewExpiryWorker creates an ExpiryWorker.
@@ -144,6 +153,11 @@ func (w *ExpiryWorker) runSessionExpiry(ctx context.Context) {
 			return
 		}
 
+		// SL-10: tmux-native heartbeat — check active sessions with tmux_session_name.
+		if w.TmuxChecker != nil {
+			w.runTmuxHeartbeatCheck(ctx)
+		}
+
 		expired, err := state.ListExpiredAgentSessions(ctx, w.db, SessionHeartbeatTTL)
 		if err != nil {
 			loglib.Error("expiry: list expired agent sessions failed",
@@ -201,6 +215,40 @@ func (w *ExpiryWorker) expireAgentSession(ctx context.Context, session state.Age
 	)
 
 	return nil
+}
+
+// runTmuxHeartbeatCheck checks all active sessions that have a tmux_session_name.
+// If the tmux session no longer exists, the agent session is expired as "lost" (SL-10).
+func (w *ExpiryWorker) runTmuxHeartbeatCheck(ctx context.Context) {
+	active, err := state.ListActiveAgentSessions(ctx, w.db)
+	if err != nil {
+		loglib.Error("expiry: list active agent sessions for tmux check failed",
+			loglib.FieldComponent, "expiry",
+			"error", err,
+		)
+		return
+	}
+
+	for _, sess := range active {
+		if sess.TmuxSessionName == "" {
+			continue
+		}
+		if !w.TmuxChecker.HasSession(ctx, sess.TmuxSessionName) {
+			loglib.Warn("expiry: tmux session gone, marking agent session lost",
+				loglib.FieldComponent, "expiry",
+				loglib.FieldSession, sess.SessionID,
+				"agent_id", sess.AgentID,
+				"tmux_name", sess.TmuxSessionName,
+			)
+			if err := state.ExpireAgentSession(ctx, w.db, sess.SessionID, "lost"); err != nil {
+				loglib.Error("expiry: expire tmux-lost session failed",
+					loglib.FieldComponent, "expiry",
+					loglib.FieldSession, sess.SessionID,
+					"error", err,
+				)
+			}
+		}
+	}
 }
 
 // expireSession transitions one branch to abandoned (T14) and delivers a system event.

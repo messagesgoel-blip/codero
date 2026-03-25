@@ -53,6 +53,7 @@ func main() {
 		gateCheckCmd(),
 		registerCmd(),
 		sessionCmd(&configPath),
+		agentCmd(&configPath),
 		queueCmd(&configPath),
 		branchCmd(&configPath),
 		eventsCmd(&configPath),
@@ -834,6 +835,7 @@ func sessionCmd(configPath *string) *cobra.Command {
 		sessionHeartbeatCmd(configPath),
 		sessionAttachCmd(configPath),
 		sessionFinalizeCmd(configPath),
+		sessionEndCmd(configPath),
 	)
 
 	return cmd
