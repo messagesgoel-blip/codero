@@ -1104,7 +1104,7 @@ const staleFeedThreshold = 5 * time.Minute
 // It returns an error when a freshness/count query fails so the handler can
 // surface a real backend failure rather than silently serving stale defaults.
 func queryDashboardHealth(ctx context.Context, db *sql.DB) (DashboardHealth, error) {
-	h := DashboardHealth{GeneratedAt: time.Now().UTC()}
+	h := DashboardHealth{GeneratedAt: time.Now().UTC(), SchemaVersion: SchemaVersionV1}
 	dbHealthy := true
 
 	// Database health: a lightweight ping.

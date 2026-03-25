@@ -2,14 +2,18 @@ package dashboard
 
 import "time"
 
+// SchemaVersionV1 is the schema_version value for all Dashboard API v1 responses.
+const SchemaVersionV1 = "1"
+
 // OverviewResponse is the response for GET /api/v1/dashboard/overview.
 type OverviewResponse struct {
-	RunsToday    int        `json:"runs_today"`
-	PassRate     float64    `json:"pass_rate"`     // 0–100, -1 if no data
-	BlockedCount int        `json:"blocked_count"` // branches currently in blocked state
-	AvgGateSec   float64    `json:"avg_gate_sec"`  // -1 if no data
-	Sparkline7d  []DayStats `json:"sparkline_7d"`
-	GeneratedAt  time.Time  `json:"generated_at"`
+	RunsToday     int        `json:"runs_today"`
+	PassRate      float64    `json:"pass_rate"`     // 0–100, -1 if no data
+	BlockedCount  int        `json:"blocked_count"` // branches currently in blocked state
+	AvgGateSec    float64    `json:"avg_gate_sec"`  // -1 if no data
+	Sparkline7d   []DayStats `json:"sparkline_7d"`
+	GeneratedAt   time.Time  `json:"generated_at"`
+	SchemaVersion string     `json:"schema_version"`
 }
 
 // DayStats is one day's worth of run stats for sparkline data.
@@ -89,9 +93,10 @@ type ActiveSession struct {
 
 // ActiveSessionsResponse is the response for GET /api/v1/dashboard/active-sessions.
 type ActiveSessionsResponse struct {
-	ActiveCount int             `json:"active_count"`
-	Sessions    []ActiveSession `json:"sessions"`
-	GeneratedAt time.Time       `json:"generated_at"`
+	ActiveCount   int             `json:"active_count"`
+	Sessions      []ActiveSession `json:"sessions"`
+	GeneratedAt   time.Time       `json:"generated_at"`
+	SchemaVersion string          `json:"schema_version"`
 }
 
 // AssignmentSummary is one row in the assignments panel.
@@ -118,9 +123,10 @@ type AssignmentSummary struct {
 
 // AssignmentsResponse is the response for GET /api/v1/dashboard/assignments.
 type AssignmentsResponse struct {
-	Count       int                 `json:"count"`
-	Assignments []AssignmentSummary `json:"assignments"`
-	GeneratedAt time.Time           `json:"generated_at"`
+	Count         int                 `json:"count"`
+	Assignments   []AssignmentSummary `json:"assignments"`
+	GeneratedAt   time.Time           `json:"generated_at"`
+	SchemaVersion string              `json:"schema_version"`
 }
 
 // AgentEventRow is one row in the agent-session event stream.
@@ -135,9 +141,10 @@ type AgentEventRow struct {
 
 // AgentEventsResponse is the response for GET /api/v1/dashboard/agent-events.
 type AgentEventsResponse struct {
-	Count       int             `json:"count"`
-	Events      []AgentEventRow `json:"events"`
-	GeneratedAt time.Time       `json:"generated_at"`
+	Count         int             `json:"count"`
+	Events        []AgentEventRow `json:"events"`
+	GeneratedAt   time.Time       `json:"generated_at"`
+	SchemaVersion string          `json:"schema_version"`
 }
 
 // AgentRuleRow is one dashboard-facing compliance rule definition.
@@ -171,9 +178,10 @@ type AssignmentRuleCheckRow struct {
 
 // ComplianceResponse is the response for GET /api/v1/dashboard/compliance.
 type ComplianceResponse struct {
-	Rules       []AgentRuleRow           `json:"rules"`
-	Checks      []AssignmentRuleCheckRow `json:"checks"`
-	GeneratedAt time.Time                `json:"generated_at"`
+	Rules         []AgentRuleRow           `json:"rules"`
+	Checks        []AssignmentRuleCheckRow `json:"checks"`
+	GeneratedAt   time.Time                `json:"generated_at"`
+	SchemaVersion string                   `json:"schema_version"`
 }
 
 // RunRow is one row in the runs table.
@@ -193,9 +201,10 @@ type RunRow struct {
 
 // SettingsResponse is the response for GET /api/v1/dashboard/settings.
 type SettingsResponse struct {
-	Integrations []IntegrationCard `json:"integrations"`
-	GatePipeline []GateConfig      `json:"gate_pipeline"`
-	GeneratedAt  time.Time         `json:"generated_at"`
+	Integrations  []IntegrationCard `json:"integrations"`
+	GatePipeline  []GateConfig      `json:"gate_pipeline"`
+	GeneratedAt   time.Time         `json:"generated_at"`
+	SchemaVersion string            `json:"schema_version"`
 }
 
 // IntegrationCard is one integration shown on the settings page.
@@ -312,6 +321,7 @@ type DashboardHealth struct {
 	CoveragePct          *float64            `json:"coverage_pct,omitempty"`
 	ETAMin               *int                `json:"eta_min,omitempty"`
 	GeneratedAt          time.Time           `json:"generated_at"`
+	SchemaVersion        string              `json:"schema_version"`
 }
 
 // GateCheckStatus mirrors gatecheck.CheckStatus for dashboard JSON.
@@ -352,8 +362,9 @@ type GateCheckSummary struct {
 
 // GateCheckReport is the top-level dashboard payload for GET /api/v1/dashboard/gate-checks.
 type GateCheckReport struct {
-	Summary     GateCheckSummary  `json:"summary"`
-	Checks      []GateCheckResult `json:"checks"`
-	RunAt       time.Time         `json:"run_at"`
-	GeneratedAt time.Time         `json:"generated_at"`
+	Summary       GateCheckSummary  `json:"summary"`
+	Checks        []GateCheckResult `json:"checks"`
+	RunAt         time.Time         `json:"run_at"`
+	GeneratedAt   time.Time         `json:"generated_at"`
+	SchemaVersion string            `json:"schema_version"`
 }
