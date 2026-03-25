@@ -65,6 +65,28 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/dashboard/comments", h.handleChat)
 	mux.HandleFunc("/api/v1/dashboard/manual-review-upload", h.handleUpload)
 	mux.HandleFunc("/api/v1/dashboard/events", h.handleSSE)
+
+	// §3 Session endpoints
+	mux.HandleFunc("/api/v1/dashboard/sessions", h.handleSessions)
+	mux.HandleFunc("/api/v1/dashboard/sessions/", h.handleSessionDetail)
+	// §4 Assignment detail
+	mux.HandleFunc("/api/v1/dashboard/assignments/", h.handleAssignmentDetail)
+	// §5 Feedback
+	mux.HandleFunc("/api/v1/dashboard/feedback/history", h.handleFeedbackHistory)
+	mux.HandleFunc("/api/v1/dashboard/feedback/", h.handleFeedback)
+	// §6 Gate
+	mux.HandleFunc("/api/v1/dashboard/gate/", h.handleGateRouter)
+	// §7 Merge
+	mux.HandleFunc("/api/v1/dashboard/merge/", h.handleMergeRouter)
+	// §8 Repo config
+	mux.HandleFunc("/api/v1/dashboard/settings/repo-config/", h.handleRepoConfig)
+	// §9 Compliance sub-endpoints
+	mux.HandleFunc("/api/v1/dashboard/compliance/rules", h.handleComplianceRules)
+	mux.HandleFunc("/api/v1/dashboard/compliance/checks/", h.handleComplianceChecks)
+	mux.HandleFunc("/api/v1/dashboard/compliance/violations", h.handleComplianceViolations)
+	// §10 Queue
+	mux.HandleFunc("/api/v1/dashboard/queue", h.handleQueue)
+	mux.HandleFunc("/api/v1/dashboard/queue/stats", h.handleQueueStats)
 }
 
 // handleOverview serves GET /api/v1/dashboard/overview.
@@ -96,12 +118,13 @@ func (h *Handler) handleOverview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, OverviewResponse{
-		RunsToday:    runsToday,
-		PassRate:     passRate,
-		BlockedCount: blockedCount,
-		AvgGateSec:   avgGateSec,
-		Sparkline7d:  sparkline,
-		GeneratedAt:  time.Now().UTC(),
+		RunsToday:     runsToday,
+		PassRate:      passRate,
+		BlockedCount:  blockedCount,
+		AvgGateSec:    avgGateSec,
+		Sparkline7d:   sparkline,
+		GeneratedAt:   time.Now().UTC(),
+		SchemaVersion: SchemaVersionV1,
 	})
 }
 
@@ -290,9 +313,10 @@ func (h *Handler) handleActiveSessions(w http.ResponseWriter, r *http.Request) {
 		sessions = []ActiveSession{}
 	}
 	writeJSON(w, http.StatusOK, ActiveSessionsResponse{
-		ActiveCount: len(sessions),
-		Sessions:    sessions,
-		GeneratedAt: time.Now().UTC(),
+		ActiveCount:   len(sessions),
+		Sessions:      sessions,
+		GeneratedAt:   time.Now().UTC(),
+		SchemaVersion: SchemaVersionV1,
 	})
 }
 
@@ -315,9 +339,10 @@ func (h *Handler) handleAssignments(w http.ResponseWriter, r *http.Request) {
 		assignments = []AssignmentSummary{}
 	}
 	writeJSON(w, http.StatusOK, AssignmentsResponse{
-		Count:       len(assignments),
-		Assignments: assignments,
-		GeneratedAt: time.Now().UTC(),
+		Count:         len(assignments),
+		Assignments:   assignments,
+		GeneratedAt:   time.Now().UTC(),
+		SchemaVersion: SchemaVersionV1,
 	})
 }
 
@@ -340,9 +365,10 @@ func (h *Handler) handleAgentEvents(w http.ResponseWriter, r *http.Request) {
 		events = []AgentEventRow{}
 	}
 	writeJSON(w, http.StatusOK, AgentEventsResponse{
-		Count:       len(events),
-		Events:      events,
-		GeneratedAt: time.Now().UTC(),
+		Count:         len(events),
+		Events:        events,
+		GeneratedAt:   time.Now().UTC(),
+		SchemaVersion: SchemaVersionV1,
 	})
 }
 
@@ -368,9 +394,10 @@ func (h *Handler) handleCompliance(w http.ResponseWriter, r *http.Request) {
 		checks = []AssignmentRuleCheckRow{}
 	}
 	writeJSON(w, http.StatusOK, ComplianceResponse{
-		Rules:       rules,
-		Checks:      checks,
-		GeneratedAt: time.Now().UTC(),
+		Rules:         rules,
+		Checks:        checks,
+		GeneratedAt:   time.Now().UTC(),
+		SchemaVersion: SchemaVersionV1,
 	})
 }
 
@@ -418,9 +445,10 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, SettingsResponse{
-		Integrations: ps.Integrations,
-		GatePipeline: ps.GatePipeline,
-		GeneratedAt:  time.Now().UTC(),
+		Integrations:  ps.Integrations,
+		GatePipeline:  ps.GatePipeline,
+		GeneratedAt:   time.Now().UTC(),
+		SchemaVersion: SchemaVersionV1,
 	})
 }
 
@@ -460,9 +488,10 @@ func (h *Handler) putSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, SettingsResponse{
-		Integrations: ps.Integrations,
-		GatePipeline: ps.GatePipeline,
-		GeneratedAt:  time.Now().UTC(),
+		Integrations:  ps.Integrations,
+		GatePipeline:  ps.GatePipeline,
+		GeneratedAt:   time.Now().UTC(),
+		SchemaVersion: SchemaVersionV1,
 	})
 }
 
@@ -643,11 +672,12 @@ func isValidationError(err error) bool {
 // GateConfigResponse is the response for GET /api/v1/dashboard/settings/gate-config.
 // Matches Dashboard API v1 §8.1.
 type GateConfigResponse struct {
-	Checks       []GateConfigCheck  `json:"checks"`
-	AISettings   map[string]string  `json:"ai_settings"`
-	ConfigDrifts []gate.ConfigDrift `json:"config_drifts"`
-	AlwaysOn     []string           `json:"always_on"`
-	GeneratedAt  time.Time          `json:"generated_at"`
+	Checks        []GateConfigCheck  `json:"checks"`
+	AISettings    map[string]string  `json:"ai_settings"`
+	ConfigDrifts  []gate.ConfigDrift `json:"config_drifts"`
+	AlwaysOn      []string           `json:"always_on"`
+	GeneratedAt   time.Time          `json:"generated_at"`
+	SchemaVersion string             `json:"schema_version"`
 }
 
 // GateConfigCheck is a single check entry in the gate-config response.
@@ -715,11 +745,12 @@ func (h *Handler) getGateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, GateConfigResponse{
-		Checks:       checks,
-		AISettings:   aiSettings,
-		ConfigDrifts: drifts,
-		AlwaysOn:     gate.AlwaysOnChecks(),
-		GeneratedAt:  time.Now().UTC(),
+		Checks:        checks,
+		AISettings:    aiSettings,
+		ConfigDrifts:  drifts,
+		AlwaysOn:      gate.AlwaysOnChecks(),
+		GeneratedAt:   time.Now().UTC(),
+		SchemaVersion: SchemaVersionV1,
 	})
 }
 
@@ -742,6 +773,15 @@ func (h *Handler) putGateConfigVar(w http.ResponseWriter, r *http.Request) {
 	if varName == "" {
 		writeError(w, http.StatusBadRequest, "variable name required in path", "missing_var")
 		return
+	}
+
+	// DA-5: always-on checks cannot be disabled via the dashboard.
+	for _, name := range gate.AlwaysOnChecks() {
+		envName := "CODERO_" + strings.ToUpper(name) + "_ENABLED"
+		if strings.ReplaceAll(envName, "-", "_") == varName {
+			writeError(w, http.StatusForbidden, "always-on check cannot be disabled", "always_on")
+			return
+		}
 	}
 
 	entry := gate.LookupEntry(varName)
