@@ -35,7 +35,7 @@ func querySessions(ctx context.Context, db *sql.DB, status string, limit, offset
 	}
 
 	// Query rows.
-	query := `SELECT session_id, agent_id, mode, started_at, last_seen_at, ended_at, end_reason FROM agent_sessions`
+	query := `SELECT session_id, agent_id, mode, COALESCE(tmux_session_name, ''), started_at, last_seen_at, ended_at, end_reason FROM agent_sessions`
 	if status != "" {
 		switch status {
 		case "active":
@@ -57,7 +57,7 @@ func querySessions(ctx context.Context, db *sql.DB, status string, limit, offset
 		var s SessionRow
 		var endedAt sql.NullTime
 		var endReason sql.NullString
-		if err := rows.Scan(&s.SessionID, &s.AgentID, &s.Mode, &s.StartedAt, &s.LastSeenAt, &endedAt, &endReason); err != nil {
+		if err := rows.Scan(&s.SessionID, &s.AgentID, &s.Mode, &s.TmuxSessionName, &s.StartedAt, &s.LastSeenAt, &endedAt, &endReason); err != nil {
 			return nil, 0, fmt.Errorf("querySessions: scan: %w", err)
 		}
 		if endedAt.Valid {
@@ -70,6 +70,7 @@ func querySessions(ctx context.Context, db *sql.DB, status string, limit, offset
 		if endReason.Valid {
 			s.EndReason = endReason.String
 		}
+		s.Checkpoint = deriveCheckpoint(s.Status, s.EndReason)
 		out = append(out, s)
 	}
 	if out == nil {
@@ -88,13 +89,13 @@ func querySessionByID(ctx context.Context, db *sql.DB, sessionID string) (*Sessi
 	}
 
 	row := db.QueryRowContext(ctx, `
-		SELECT session_id, agent_id, mode, started_at, last_seen_at, ended_at, end_reason
+		SELECT session_id, agent_id, mode, COALESCE(tmux_session_name, ''), started_at, last_seen_at, ended_at, end_reason
 		FROM agent_sessions WHERE session_id = ?`, sessionID)
 
 	var s SessionRow
 	var endedAt sql.NullTime
 	var endReason sql.NullString
-	if err := row.Scan(&s.SessionID, &s.AgentID, &s.Mode, &s.StartedAt, &s.LastSeenAt, &endedAt, &endReason); err != nil {
+	if err := row.Scan(&s.SessionID, &s.AgentID, &s.Mode, &s.TmuxSessionName, &s.StartedAt, &s.LastSeenAt, &endedAt, &endReason); err != nil {
 		return nil, err
 	}
 	if endedAt.Valid {
@@ -107,6 +108,7 @@ func querySessionByID(ctx context.Context, db *sql.DB, sessionID string) (*Sessi
 	if endReason.Valid {
 		s.EndReason = endReason.String
 	}
+	s.Checkpoint = deriveCheckpoint(s.Status, s.EndReason)
 	return &s, nil
 }
 
@@ -475,7 +477,7 @@ func queryComplianceViolations(ctx context.Context, db *sql.DB, limit int) ([]As
 
 func queryQueue(ctx context.Context, db *sql.DB) ([]QueueItem, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT id, repo, branch, state, queue_priority, owner_session_id, 
+		SELECT id, repo, branch, state, queue_priority, owner_session_id,
 		       submission_time, created_at
 		FROM branch_states
 		WHERE state IN ('queued_cli', 'cli_reviewing', 'merge_ready', 'coding', 'local_review', 'reviewed')
@@ -514,4 +516,79 @@ func queryQueueStats(ctx context.Context, db *sql.DB) (pending, active, blocked,
 			COUNT(*)
 		FROM branch_states`).Scan(&pending, &active, &blocked, &total)
 	return
+}
+
+// ─── §2.8 Session archives queries ───────────────────────────────────────
+
+// ArchiveRow is the API response shape for a session archive.
+type ArchiveRow struct {
+	ArchiveID       string `json:"archive_id"`
+	SessionID       string `json:"session_id"`
+	AgentID         string `json:"agent_id"`
+	Result          string `json:"result"`
+	Repo            string `json:"repo"`
+	Branch          string `json:"branch"`
+	TaskID          string `json:"task_id,omitempty"`
+	TaskSource      string `json:"task_source,omitempty"`
+	StartedAt       string `json:"started_at"`
+	EndedAt         string `json:"ended_at"`
+	DurationSeconds int    `json:"duration_seconds"`
+	CommitCount     int    `json:"commit_count"`
+	MergeSHA        string `json:"merge_sha,omitempty"`
+}
+
+// deriveCheckpoint maps session status + end_reason to a lifecycle checkpoint.
+func deriveCheckpoint(status, endReason string) string {
+	switch {
+	case status == "active":
+		return "CODING"
+	case status == "ended" && endReason == "completed":
+		return "FINALIZED"
+	case status == "ended" && endReason == "expired":
+		return "EXPIRED"
+	case status == "ended" && endReason == "failed":
+		return "FAILED"
+	case status == "ended":
+		return "ENDED"
+	default:
+		return "LAUNCHED"
+	}
+}
+
+func querySessionArchives(ctx context.Context, db *sql.DB, limit int) ([]ArchiveRow, error) {
+	exists, err := tableExists(ctx, db, "session_archives")
+	if err != nil {
+		return nil, fmt.Errorf("check session_archives: %w", err)
+	}
+	if !exists {
+		return []ArchiveRow{}, nil
+	}
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT archive_id, session_id, agent_id, result,
+		       COALESCE(repo, ''), COALESCE(branch, ''),
+		       COALESCE(task_id, ''), COALESCE(task_source, ''),
+		       COALESCE(started_at, ''), COALESCE(ended_at, ''),
+		       COALESCE(duration_seconds, 0), COALESCE(commit_count, 0),
+		       COALESCE(merge_sha, '')
+		FROM session_archives
+		ORDER BY ended_at DESC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []ArchiveRow
+	for rows.Next() {
+		var a ArchiveRow
+		if err := rows.Scan(&a.ArchiveID, &a.SessionID, &a.AgentID, &a.Result,
+			&a.Repo, &a.Branch, &a.TaskID, &a.TaskSource,
+			&a.StartedAt, &a.EndedAt,
+			&a.DurationSeconds, &a.CommitCount, &a.MergeSHA); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
 }

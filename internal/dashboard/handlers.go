@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -87,6 +88,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// §10 Queue
 	mux.HandleFunc("/api/v1/dashboard/queue", h.handleQueue)
 	mux.HandleFunc("/api/v1/dashboard/queue/stats", h.handleQueueStats)
+
+	// §2.8 / RV-1: session archives endpoint for TUI/dashboard parity
+	mux.HandleFunc("/api/v1/dashboard/archives", h.handleArchives)
 }
 
 // handleOverview serves GET /api/v1/dashboard/overview.
@@ -595,7 +599,7 @@ func (h *Handler) handleSSE(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	ctx := r.Context()
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -875,3 +879,16 @@ func setCORSHeaders(w http.ResponseWriter) {
 
 // Ensure context is used to avoid unused import.
 var _ = context.Background
+
+// queryIntParam reads an integer query parameter with a default value.
+func queryIntParam(r *http.Request, name string, defaultVal int) int {
+	v := r.URL.Query().Get(name)
+	if v == "" {
+		return defaultVal
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 {
+		return defaultVal
+	}
+	return n
+}

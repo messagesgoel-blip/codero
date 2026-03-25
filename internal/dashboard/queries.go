@@ -970,7 +970,8 @@ func queryLatestActivitySeq(ctx context.Context, db *sql.DB) (int64, error) {
 // queryActivitySince returns delivery_events newer than sinceSeq.
 func queryActivitySince(ctx context.Context, db *sql.DB, sinceSeq int64, limit int) ([]ActivityEvent, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT seq, repo, branch, event_type, payload, created_at
+		SELECT seq, repo, branch, event_type, payload, created_at,
+		       COALESCE(session_id, ''), COALESCE(assignment_id, '')
 		FROM delivery_events
 		WHERE seq > ?
 		ORDER BY seq ASC
@@ -983,7 +984,8 @@ func queryActivitySince(ctx context.Context, db *sql.DB, sinceSeq int64, limit i
 	var out []ActivityEvent
 	for rows.Next() {
 		var e ActivityEvent
-		if err := rows.Scan(&e.Seq, &e.Repo, &e.Branch, &e.EventType, &e.Payload, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.Seq, &e.Repo, &e.Branch, &e.EventType, &e.Payload, &e.CreatedAt,
+			&e.SessionID, &e.AssignmentID); err != nil {
 			return nil, err
 		}
 		out = append(out, e)
