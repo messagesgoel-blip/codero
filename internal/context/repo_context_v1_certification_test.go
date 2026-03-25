@@ -121,6 +121,40 @@ func TestCert_RCv1_F03_IncrementalRefresh(t *testing.T) {
 	}
 }
 
+func TestCert_RCv1_GitHelpersIgnoreInheritedGitEnv(t *testing.T) {
+	otherRepo := initGitRepo(t)
+	writeGoFile(t, otherRepo, "other.go", "package main\nfunc Other() {}\n")
+	gitAdd(t, otherRepo, ".")
+	gitCommit(t, otherRepo, "initial")
+	otherHead := gitHeadForTest(t, otherRepo)
+	if otherHead == "" {
+		t.Fatal("other repo head should not be empty")
+	}
+
+	repoRoot := initGitRepo(t)
+	writeGoFile(t, repoRoot, "a.go", "package main\nfunc A() {}\n")
+	gitAdd(t, repoRoot, ".")
+	gitCommit(t, repoRoot, "initial")
+	initialHead := gitHeadForTest(t, repoRoot)
+	if initialHead == "" {
+		t.Fatal("repo head should not be empty")
+	}
+
+	t.Setenv("GIT_DIR", filepath.Join(otherRepo, ".git"))
+	t.Setenv("GIT_WORK_TREE", otherRepo)
+
+	writeGoFile(t, repoRoot, "b.go", "package main\nfunc B() {}\n")
+	gitAdd(t, repoRoot, ".")
+	gitCommit(t, repoRoot, "add b.go")
+
+	if got := gitHeadForTest(t, repoRoot); got == "" || got == initialHead {
+		t.Fatalf("repoRoot head = %q, want new commit distinct from %q", got, initialHead)
+	}
+	if got := gitHeadForTest(t, otherRepo); got != otherHead {
+		t.Fatalf("otherRepo head changed under inherited git env: got %q, want %q", got, otherHead)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // F-04 — Symbol discovery: find returns matching symbols
 // ---------------------------------------------------------------------------
@@ -481,9 +515,39 @@ func run(t *testing.T, dir, name string, args ...string) {
 	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GIT_AUTHOR_DATE=2026-01-01T00:00:00Z", "GIT_COMMITTER_DATE=2026-01-01T00:00:00Z")
+	cmd.Env = append(cleanGitEnvForTest(os.Environ()),
+		"GIT_AUTHOR_DATE=2026-01-01T00:00:00Z",
+		"GIT_COMMITTER_DATE=2026-01-01T00:00:00Z",
+	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("%s %v: %v\n%s", name, args, err, out)
 	}
+}
+
+func gitHeadForTest(t *testing.T, dir string) string {
+	t.Helper()
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = dir
+	cmd.Env = cleanGitEnvForTest(os.Environ())
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD in %s: %v\n%s", dir, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func cleanGitEnvForTest(env []string) []string {
+	cleaned := make([]string, 0, len(env))
+	for _, kv := range env {
+		key, _, found := strings.Cut(kv, "=")
+		if !found {
+			continue
+		}
+		if strings.HasPrefix(key, "GIT_") {
+			continue
+		}
+		cleaned = append(cleaned, kv)
+	}
+	return cleaned
 }

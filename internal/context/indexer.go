@@ -411,6 +411,7 @@ func collectGoFiles(repoRoot string) (goFiles []string, warnings []string) {
 func gitHEAD(repoRoot string) string {
 	cmd := exec.Command("git", "rev-parse", "HEAD")
 	cmd.Dir = repoRoot
+	cmd.Env = cleanGitEnv(os.Environ())
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -421,6 +422,7 @@ func gitHEAD(repoRoot string) string {
 func gitChangedFiles(repoRoot, baseSHA string) ([]string, error) {
 	cmd := exec.Command("git", "diff", "--name-only", baseSHA, "HEAD")
 	cmd.Dir = repoRoot
+	cmd.Env = cleanGitEnv(os.Environ())
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
@@ -438,6 +440,7 @@ func gitChangedFiles(repoRoot, baseSHA string) ([]string, error) {
 func gitStagedFiles(repoRoot string) ([]string, error) {
 	cmd := exec.Command("git", "diff", "--cached", "--name-only")
 	cmd.Dir = repoRoot
+	cmd.Env = cleanGitEnv(os.Environ())
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
@@ -449,6 +452,21 @@ func gitStagedFiles(repoRoot string) ([]string, error) {
 		}
 	}
 	return files, nil
+}
+
+func cleanGitEnv(env []string) []string {
+	cleaned := make([]string, 0, len(env))
+	for _, kv := range env {
+		key, _, found := strings.Cut(kv, "=")
+		if !found {
+			continue
+		}
+		if strings.HasPrefix(key, "GIT_") {
+			continue
+		}
+		cleaned = append(cleaned, kv)
+	}
+	return cleaned
 }
 
 func exprString(expr ast.Expr) string {
