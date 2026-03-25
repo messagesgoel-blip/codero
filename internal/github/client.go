@@ -61,6 +61,7 @@ type PRInfo struct {
 type Review struct {
 	ID       int64
 	User     string
+	IsBot    bool
 	State    string // "APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED"
 	Body     string
 	CommitID string
@@ -70,6 +71,7 @@ type Review struct {
 type ReviewComment struct {
 	ID       int64
 	User     string
+	IsBot    bool
 	Body     string
 	Path     string
 	Line     int
@@ -184,6 +186,7 @@ func (c *Client) ListPRReviews(ctx context.Context, repo string, prNumber int) (
 			all = append(all, Review{
 				ID:       r.ID,
 				User:     r.User.Login,
+				IsBot:    IsBot(r.User.Login),
 				State:    r.State,
 				Body:     r.Body,
 				CommitID: r.CommitID,
@@ -216,8 +219,8 @@ func (c *Client) ListPRReviewComments(ctx context.Context, repo string, prNumber
 		}
 		for _, r := range raw {
 			all = append(all, ReviewComment{
-				ID: r.ID, User: r.User.Login, Body: r.Body,
-				Path: r.Path, Line: r.Line, CommitID: r.CommitID,
+				ID: r.ID, User: r.User.Login, IsBot: IsBot(r.User.Login),
+				Body: r.Body, Path: r.Path, Line: r.Line, CommitID: r.CommitID,
 			})
 		}
 		nextURL = parseLinkNext(headers.Get("Link"))
@@ -380,6 +383,22 @@ func countChangesRequested(reviews []Review) int {
 // resolveApprovalStatus scans reviews in submission order.
 // The latest non-COMMENTED state from each reviewer wins, matching GitHub's
 // own "current review state" behaviour.
+// IsBot returns true if the given login should be classified as a bot account.
+// Classification happens once at fetch time per I-50; downstream code trusts
+// the cached result without re-checking.
+func IsBot(login string) bool {
+	if strings.HasSuffix(login, "[bot]") {
+		return true
+	}
+	lower := strings.ToLower(login)
+	switch lower {
+	case "coderabbitai", "dependabot", "renovate", "github-actions",
+		"codecov", "sonarcloud", "mergify", "snyk-bot":
+		return true
+	}
+	return false
+}
+
 func resolveApprovalStatus(reviews []Review) (approved, changesRequested bool) {
 	latest := make(map[string]string)
 	for _, r := range reviews {
