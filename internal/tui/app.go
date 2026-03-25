@@ -3,7 +3,6 @@ package tui
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
 	"os/exec"
@@ -67,6 +66,8 @@ type (
 // Config is provided by the command layer to configure the TUI program.
 type Config struct {
 	RepoPath  string
+	Repo      string
+	Branch    string
 	Context   context.Context
 	Interval  time.Duration
 	Theme     Theme
@@ -77,7 +78,7 @@ type Config struct {
 	InitialTab Tab
 	// StateDB is the optional state database handle used for session/archive/compliance views.
 	// When nil, the DB-backed views render a "no data" placeholder.
-	StateDB *sql.DB
+	StateDB *state.DB
 }
 
 // Model is the root Bubble Tea model for the Codero TUI.
@@ -110,6 +111,7 @@ type Model struct {
 	focused   FocusedPane
 	activeTab Tab
 	gateVM    adapters.GateViewModel
+	checksVM  adapters.CheckReportViewModel
 
 	paletteActive bool
 	paletteInput  textinput.Model
@@ -128,6 +130,10 @@ type Model struct {
 	lastUpdated time.Time
 	statusMsg   string
 	err         error
+
+	branchRecord   *state.BranchRecord
+	activeSessions []dashboard.ActiveSession
+	blockReasons   []dashboard.BlockReason
 }
 
 // New constructs the root TUI model from a Config.
@@ -177,8 +183,9 @@ func New(cfg Config) Model {
 	}
 	m.gatePane.SetVM(cfg.InitialVM)
 	// Pre-populate checksPane so the right pane isn't blank on first render.
-	if report, err := adapters.LoadCheckReport(cfg.RepoPath); err == nil {
+	if report, _, err := dashboard.LoadGateCheckReport(cfg.RepoPath); err == nil && report != nil {
 		vm := adapters.FromCheckReport(*report)
+		m.checksVM = vm
 		m.checksPane.SetVM(vm)
 		m.pipelinePane.SetVM(vm)
 	}
@@ -192,7 +199,7 @@ func AdapterFromPath(repoPath string) adapters.GateViewModel {
 
 func (m Model) Init() tea.Cmd {
 	if m.cfg.WatchMode {
-		return tickCmd(m.cfg.Interval)
+		return tea.Batch(m.loadLiveShellCmds(), tickCmd(m.cfg.Interval))
 	}
 	return nil
 }
@@ -208,18 +215,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.layout = Compute(msg.Width, msg.Height)
 		m.applyLayout()
+		cmds = append(cmds, m.loadLiveShellCmds())
 
 	case tickMsg:
 		vm := adapters.FromProgressEnv(m.cfg.RepoPath)
 		m.gateVM = vm
 		m.gatePane.SetVM(vm)
 		m.lastUpdated = msg.t
-		// Also refresh the gate-check report for the findings pane if available.
-		if report, err := adapters.LoadCheckReport(m.cfg.RepoPath); err == nil {
-			checksVM := adapters.FromCheckReport(*report)
-			m.checksPane.SetVM(checksVM)
-			m.pipelinePane.SetVM(checksVM)
-		}
+		cmds = append(cmds, m.loadLiveShellCmds())
 		// Refresh DB-backed views when their tab is active.
 		if m.cfg.StateDB != nil {
 			switch m.activeTab {
@@ -238,22 +241,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case gateRefreshMsg:
 		m.gateVM = msg.vm
 		m.gatePane.SetVM(msg.vm)
-		if report, err := adapters.LoadCheckReport(m.cfg.RepoPath); err == nil {
-			vm := adapters.FromCheckReport(*report)
-			m.checksPane.SetVM(vm)
-			m.pipelinePane.SetVM(vm)
-		}
 
 	case queueRefreshMsg:
 		m.queuePane.SetItems(msg.items)
 
 	case branchRefreshMsg:
+		m.branchRecord = msg.record
 		m.branchPane.SetRecord(msg.record)
 
 	case eventsRefreshMsg:
 		var cmd tea.Cmd
 		m.eventsPane, cmd = m.eventsPane.Update(msg)
 		cmds = append(cmds, cmd)
+
+	case checksRefreshMsg:
+		m.checksVM = msg.vm
+		m.checksPane.SetVM(msg.vm)
+		m.pipelinePane.SetVM(msg.vm)
+
+	case activeSessionsRefreshMsg:
+		m.activeSessions = msg.sessions
+
+	case blockReasonsRefreshMsg:
+		m.blockReasons = msg.reasons
 
 	case outputMsg:
 		m.outputLines = msg.lines
@@ -344,6 +354,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.gateVM = vm
 		m.gatePane.SetVM(vm)
 		m.lastUpdated = time.Now()
+		return m, m.loadLiveShellCmds()
 
 	case key.Matches(msg, m.keys.Retry):
 		if m.gateVM.IsFinal {
@@ -707,18 +718,19 @@ func (m Model) loadComplianceCmd() tea.Cmd {
 }
 
 // queryTUIArchives reads session_archives for the TUI archives view.
-func queryTUIArchives(ctx context.Context, db *sql.DB) ([]ArchiveRow, error) {
+func queryTUIArchives(ctx context.Context, db *state.DB) ([]ArchiveRow, error) {
 	if db == nil {
 		return nil, nil
 	}
+	sqlDB := db.Unwrap()
 	var hasTable bool
-	err := db.QueryRowContext(ctx,
+	err := sqlDB.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='session_archives'`).Scan(&hasTable)
 	if err != nil || !hasTable {
 		return nil, err
 	}
 
-	rows, err := db.QueryContext(ctx, `
+	rows, err := sqlDB.QueryContext(ctx, `
 		SELECT archive_id, session_id, agent_id, result,
 		       COALESCE(repo, ''), COALESCE(branch, ''),
 		       COALESCE(task_id, ''), COALESCE(task_source, ''),
@@ -748,18 +760,19 @@ func queryTUIArchives(ctx context.Context, db *sql.DB) ([]ArchiveRow, error) {
 }
 
 // queryTUICompliance reads gate compliance state for the TUI compliance view.
-func queryTUICompliance(ctx context.Context, db *sql.DB) (ComplianceViewModel, error) {
+func queryTUICompliance(ctx context.Context, db *state.DB) (ComplianceViewModel, error) {
 	var vm ComplianceViewModel
 	if db == nil {
 		return vm, nil
 	}
+	sqlDB := db.Unwrap()
 
 	// Read gate rules from compliance_rules table.
 	var hasRules bool
-	_ = db.QueryRowContext(ctx,
+	_ = sqlDB.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='compliance_rules'`).Scan(&hasRules)
 	if hasRules {
-		rows, err := db.QueryContext(ctx,
+		rows, err := sqlDB.QueryContext(ctx,
 			`SELECT rule_id, COALESCE(rule_version, 0), COALESCE(description, ''), COALESCE(enforcement, 'blocking')
 			 FROM compliance_rules ORDER BY rule_id LIMIT 100`)
 		if err == nil {
@@ -774,10 +787,10 @@ func queryTUICompliance(ctx context.Context, db *sql.DB) (ComplianceViewModel, e
 
 	// Read recent compliance checks.
 	var hasChecks bool
-	_ = db.QueryRowContext(ctx,
+	_ = sqlDB.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='compliance_checks'`).Scan(&hasChecks)
 	if hasChecks {
-		rows, err := db.QueryContext(ctx,
+		rows, err := sqlDB.QueryContext(ctx,
 			`SELECT check_id, COALESCE(assignment_id, ''), COALESCE(session_id, ''),
 			        rule_id, result, violation, checked_at, COALESCE(resolved_by, '')
 			 FROM compliance_checks ORDER BY checked_at DESC LIMIT 50`)

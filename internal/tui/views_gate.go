@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/codero/codero/internal/dashboard"
 	"github.com/codero/codero/internal/gate"
 	"github.com/codero/codero/internal/gatecheck"
 	"github.com/codero/codero/internal/tui/adapters"
@@ -26,6 +27,7 @@ const authAgentCount = 2
 // GatePane renders the left pane: agent progress rows + relay orchestration.
 type GatePane struct {
 	vm       adapters.GateViewModel
+	sessions []dashboard.ActiveSession
 	selected int
 	theme    Theme
 	width    int
@@ -47,13 +49,15 @@ func (p GatePane) Update(msg tea.Msg) (GatePane, tea.Cmd) {
 				p.selected--
 			}
 		case "down", "j":
-			total := authAgentCount + len(p.vm.PipelineRows)
+			total := authAgentCount + len(p.vm.PipelineRows) + len(p.sessions)
 			if p.selected < total-1 {
 				p.selected++
 			}
 		}
 	case gateRefreshMsg:
 		p.vm = msg.vm
+	case activeSessionsRefreshMsg:
+		p.sessions = msg.sessions
 	}
 	return p, nil
 }
@@ -125,6 +129,38 @@ func (p GatePane) View() string {
 		lines = append(lines, "")
 	}
 
+	// ── live sessions sourced from the canonical active-sessions view ────────
+	if len(p.sessions) > 0 {
+		lines = append(lines, p.theme.PaneHeader.Width(w).Render("LIVE SESSIONS"))
+		lines = append(lines, p.theme.Muted.Render(" agent / branch / elapsed"))
+		lines = append(lines, "")
+
+		for j, session := range p.sessions {
+			idx := authAgentCount + len(p.vm.PipelineRows) + j
+			stateLabel := strings.ToUpper(session.ActivityState)
+			stateStyle := p.activityStateStyle(session.ActivityState)
+			line1 := fmt.Sprintf("  ● %-12s %s", truncStr(session.AgentID, 12), stateStyle.Render(stateLabel))
+
+			elapsed := adapters.ElapsedLabel(int(session.ElapsedSec))
+			target := truncStr(session.Branch, maxInt(8, w-18))
+			if target == "" {
+				target = truncStr(session.Repo, maxInt(8, w-18))
+			}
+			line2 := fmt.Sprintf("     %-8s %s", elapsed, target)
+			if session.PRNumber > 0 {
+				line2 += fmt.Sprintf("  #%d", session.PRNumber)
+			}
+
+			if p.selected == idx {
+				lines = append(lines, p.theme.ListSelected.Width(w).Render(line1))
+			} else {
+				lines = append(lines, p.theme.Base.Render(line1))
+			}
+			lines = append(lines, p.theme.Muted.Render(line2))
+			lines = append(lines, "")
+		}
+	}
+
 	// ── relay orchestration section (bottom of left pane) ─────────────────────
 	// Only render if there's enough vertical space remaining.
 	remaining := p.height - len(lines)
@@ -151,6 +187,21 @@ func (p GatePane) View() string {
 
 func (p *GatePane) SetSize(w, h int)                { p.width = w; p.height = h }
 func (p *GatePane) SetVM(vm adapters.GateViewModel) { p.vm = vm }
+
+func (p GatePane) activityStateStyle(activity string) lipgloss.Style {
+	switch activity {
+	case "blocked", "stalled":
+		return p.theme.Fail
+	case "waiting", "queued":
+		return p.theme.Warning
+	case "reviewing", "running":
+		return p.theme.Running
+	case "merge_ready", "merged", "done":
+		return p.theme.Pass
+	default:
+		return p.theme.Accent
+	}
+}
 
 // ── GatePane helpers ──────────────────────────────────────────────────────────
 

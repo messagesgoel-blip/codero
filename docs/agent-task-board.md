@@ -34,6 +34,7 @@ has signed off.
 | EL-V1 | impl/execution-loop-v1-cert | Copilot | done | 2026-03-25T10:38:32Z | 2026-03-25T16:00:00Z | All 24 criteria pass. Signed off 2026-03-25. |
 | RV-V1 | impl/realtime-views-v1-cert | Copilot | done | 2026-03-25T11:47:02Z | 2026-03-25T16:00:00Z | All 18 criteria pass. Signed off 2026-03-25. |
 | LC-V1 | impl/litellm-chat-v1-cert | Copilot | done | 2026-03-25T14:05:36Z | 2026-03-25T16:00:00Z | All 14 criteria pass. Signed off 2026-03-25. |
+| UI-001 | feat/UI-001-tui-live-shell | Codex | review | 2026-03-25T18:52:19Z | 2026-03-25T19:04:04Z | First bounded v1.2.4 shell slice: wire `codero tui` to the state DB, refresh delivery events and live sessions from canonical dashboard/state sources, and expose merge blocker summary in persistent shell chrome. |
 
 ## Rules
 

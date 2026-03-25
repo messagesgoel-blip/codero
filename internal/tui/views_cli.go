@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/codero/codero/internal/dashboard"
+	"github.com/codero/codero/internal/state"
 	"github.com/codero/codero/internal/tui/adapters"
 )
 
@@ -116,7 +117,8 @@ func renderTerminalCLI(m Model) string {
 	// Header with context and message count
 	headerLeft := t.PaneHeader.Render("REVIEW ASSISTANT")
 	contextLabel := " " + t.Muted.Render("·") + " " + t.Running.Render(m.chatContextTab())
-	headerRight := t.Muted.Render(fmt.Sprintf("%d messages  ", len(m.cliMessages)))
+	mergeLabel := " " + t.Muted.Render("·") + " " + mergeStatusLabel(m)
+	headerRight := mergeLabel + " " + t.Muted.Render(fmt.Sprintf("· %d messages  ", len(m.cliMessages)))
 	spacer := width - lipgloss.Width(headerLeft) - lipgloss.Width(contextLabel) - lipgloss.Width(headerRight)
 	if spacer < 1 {
 		spacer = 1
@@ -180,6 +182,22 @@ func commandChip(t Theme, label string) string {
 		Foreground(fg).
 		Padding(0, 1).
 		Render(label)
+}
+
+func mergeStatusLabel(m Model) string {
+	switch {
+	case len(m.blockReasons) > 0:
+		top := m.blockReasons[0]
+		return m.theme.Fail.Render(fmt.Sprintf("merge blocked: %s (%d)", top.Source, top.Count))
+	case m.checksVM.Summary.Failed > 0:
+		return m.theme.Warning.Render(fmt.Sprintf("merge blocked: %d failing checks", m.checksVM.Summary.Failed))
+	case m.branchRecord != nil && m.branchRecord.State == state.StateMergeReady:
+		return m.theme.Pass.Render("merge ready")
+	case m.branchRecord != nil:
+		return m.theme.Muted.Render("branch: " + string(m.branchRecord.State))
+	default:
+		return m.theme.Muted.Render("merge status pending")
+	}
 }
 
 func (m Model) renderTerminalThread(width, height int) []string {
