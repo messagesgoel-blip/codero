@@ -3,6 +3,8 @@ package grpc
 import (
 	"context"
 	"errors"
+	"fmt"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -119,10 +121,29 @@ func (a *assignmentService) Submit(ctx context.Context, req *daemonv1.SubmitRequ
 		"summary", req.Summary,
 	)
 
-	// The delivery pipeline is wired separately; this endpoint accepts the submit
-	// signal and acknowledges it. The actual pipeline execution is async.
+	// EL-12: Every submit MUST trigger a full gate run. Create a pending
+	// review_run atomically so the runner is guaranteed to pick it up.
+	now := time.Now().UTC()
+	pipelineID := req.AssignmentId + "-" + fmt.Sprintf("%d", now.UnixNano())
+	if err := state.CreateReviewRun(a.server.db, &state.ReviewRun{
+		ID:        pipelineID,
+		Repo:      assignment.Repo,
+		Branch:    assignment.Branch,
+		HeadHash:  "", // populated by runner after staging
+		Provider:  "gate",
+		Status:    "pending",
+		StartedAt: &now,
+	}); err != nil {
+		loglib.Error("grpc: Submit create review run failed",
+			loglib.FieldComponent, "grpc",
+			"assignment_id", req.AssignmentId,
+			"error", err,
+		)
+		return nil, status.Error(codes.Internal, "failed to create pipeline run")
+	}
+
 	return &daemonv1.SubmitResponse{
-		PipelineId:            req.AssignmentId + "-pipeline",
+		PipelineId:            pipelineID,
 		EstimatedStartSeconds: 0,
 	}, nil
 }

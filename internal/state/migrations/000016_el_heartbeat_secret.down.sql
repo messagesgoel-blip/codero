@@ -1,0 +1,3 @@
+-- Rollback EL-23 heartbeat_secret column.
+-- SQLite does not support DROP COLUMN before 3.35.0; this is a best-effort rollback.
+-- The column will remain but be ignored.

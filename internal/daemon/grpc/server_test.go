@@ -15,6 +15,7 @@ import (
 	ggrpc "google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -222,12 +223,18 @@ func TestHeartbeat(t *testing.T) {
 	_, sessCli, _, _, _, _, _ := testServer(t)
 	ctx := context.Background()
 
-	reg, err := sessCli.RegisterSession(ctx, &daemonv1.RegisterSessionRequest{AgentId: "hb-agent"})
+	var header metadata.MD
+	reg, err := sessCli.RegisterSession(ctx, &daemonv1.RegisterSessionRequest{AgentId: "hb-agent"}, ggrpc.Header(&header))
 	if err != nil {
 		t.Fatalf("RegisterSession: %v", err)
 	}
+	secrets := header.Get("x-heartbeat-secret")
+	if len(secrets) == 0 || secrets[0] == "" {
+		t.Fatal("expected heartbeat secret header")
+	}
 
-	hb, err := sessCli.Heartbeat(ctx, &daemonv1.HeartbeatRequest{SessionId: reg.SessionId})
+	hbCtx := metadata.NewOutgoingContext(ctx, metadata.Pairs("x-heartbeat-secret", secrets[0]))
+	hb, err := sessCli.Heartbeat(hbCtx, &daemonv1.HeartbeatRequest{SessionId: reg.SessionId})
 	if err != nil {
 		t.Fatalf("Heartbeat: %v", err)
 	}

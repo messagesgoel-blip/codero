@@ -51,18 +51,19 @@ func (c *Config) defaults() {
 // review workflows, and records deterministic state transitions. It is the
 // central dispatch engine for Sprint 5.
 type ReviewRunner struct {
-	db              *state.DB
-	queue           *scheduler.Queue
-	leaseMgr        *scheduler.LeaseManager
-	stream          *delivery.Stream
-	provider        Provider
-	cfg             Config
-	sessionStore    *session.Store
-	sessionID       string
-	sessionAgentID  string
-	sessionMode     string
-	sessionWorktree string
-	sessionTaskID   string
+	db                     *state.DB
+	queue                  *scheduler.Queue
+	leaseMgr               *scheduler.LeaseManager
+	stream                 *delivery.Stream
+	provider               Provider
+	cfg                    Config
+	sessionStore           *session.Store
+	sessionID              string
+	sessionAgentID         string
+	sessionMode            string
+	sessionHeartbeatSecret string
+	sessionWorktree        string
+	sessionTaskID          string
 }
 
 // New creates a ReviewRunner with the given dependencies.
@@ -522,20 +523,23 @@ func (r *ReviewRunner) registerSession(ctx context.Context) {
 	if r.sessionStore == nil || r.sessionID == "" {
 		return
 	}
-	if err := r.sessionStore.Register(ctx, r.sessionID, r.sessionAgentID, r.sessionMode); err != nil {
+	secret, err := r.sessionStore.Register(ctx, r.sessionID, r.sessionAgentID, r.sessionMode)
+	if err != nil {
 		loglib.Warn("runner: session register failed",
 			loglib.FieldComponent, "runner",
 			"session_id", r.sessionID,
 			"error", err,
 		)
+		return
 	}
+	r.sessionHeartbeatSecret = secret
 }
 
 func (r *ReviewRunner) emitSessionHeartbeat(ctx context.Context) {
 	if r.sessionStore == nil || r.sessionID == "" {
 		return
 	}
-	if err := r.sessionStore.Heartbeat(ctx, r.sessionID, false); err != nil {
+	if err := r.sessionStore.Heartbeat(ctx, r.sessionID, r.sessionHeartbeatSecret, false); err != nil {
 		loglib.Warn("runner: session heartbeat failed",
 			loglib.FieldComponent, "runner",
 			"session_id", r.sessionID,
