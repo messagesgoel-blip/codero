@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	loglib "github.com/codero/codero/internal/log"
 	"github.com/codero/codero/internal/state"
 )
 
@@ -84,6 +85,7 @@ func (s *Store) Confirm(ctx context.Context, sessionID, agentID string) error {
 
 // Heartbeat updates last_seen for the session and any attached branch assignment.
 // When markProgress is true, it also refreshes the durable progress timestamp.
+// It also refreshes branch owner_agent so stale rows recover on heartbeat.
 func (s *Store) Heartbeat(ctx context.Context, sessionID, heartbeatSecret string, markProgress bool) error {
 	if sessionID == "" {
 		return ErrMissingSessionID
@@ -105,6 +107,15 @@ func (s *Store) Heartbeat(ctx context.Context, sessionID, heartbeatSecret string
 	if active.Repo != "" && active.Branch != "" {
 		if err := state.UpdateSessionHeartbeat(s.db, active.Repo, active.Branch); err != nil {
 			return err
+		}
+		if err := state.UpdateOwnerAgent(ctx, s.db, active.Repo, active.Branch, active.AgentID); err != nil {
+			loglib.Warn("session: failed to record owner agent",
+				loglib.FieldComponent, "session",
+				loglib.FieldSession, sessionID,
+				loglib.FieldRepo, active.Repo,
+				loglib.FieldBranch, active.Branch,
+				"error", err,
+			)
 		}
 	}
 	return nil
