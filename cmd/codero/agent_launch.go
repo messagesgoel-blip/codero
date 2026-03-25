@@ -129,7 +129,7 @@ func runAgentLaunch(ctx context.Context, cfg *AgentLaunchConfig, store *session.
 	}
 
 	// Step 6: Register session with daemon (SL-12)
-	if err := store.RegisterWithTmux(ctx, sessionID, cfg.AgentID, cfg.Mode, tmuxName); err != nil {
+	if _, err := store.RegisterWithTmux(ctx, sessionID, cfg.AgentID, cfg.Mode, tmuxName); err != nil {
 		// Cleanup tmux on registration failure
 		_ = exec.KillSession(ctx, tmuxName)
 		return fmt.Errorf("step 6: register session: %w", err)

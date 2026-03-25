@@ -21,6 +21,10 @@ var ErrAgentSessionNotFound = errors.New("agent session not found")
 var ErrAgentSessionAlreadyEnded = errors.New("agent session already ended")
 var ErrAgentSessionAgentMismatch = errors.New("agent session agent mismatch")
 
+// ErrInvalidHeartbeatSecret is returned when the heartbeat_secret does not
+// match the stored value. EL-23: launcher-only enforcement.
+var ErrInvalidHeartbeatSecret = errors.New("invalid heartbeat secret")
+
 // ErrAgentAssignmentNotFound is returned when an agent assignment record is missing.
 var ErrAgentAssignmentNotFound = errors.New("agent assignment not found")
 
@@ -100,63 +104,99 @@ type agentAssignmentContext struct {
 // Registration starts with session_id + agent_id; mode and tmuxSessionName
 // are optional and only update when provided.
 func RegisterAgentSession(ctx context.Context, db *DB, sessionID, agentID, mode, tmuxSessionName string) error {
+	_, err := RegisterAgentSessionWithSecret(ctx, db, sessionID, agentID, mode, tmuxSessionName)
+	return err
+}
+
+// RegisterAgentSessionWithSecret inserts or updates a session registration and
+// returns the launcher-owned heartbeat secret used for EL-23 enforcement.
+func RegisterAgentSessionWithSecret(ctx context.Context, db *DB, sessionID, agentID, mode, tmuxSessionName string) (string, error) {
 	tx, err := db.sql.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("register agent session: begin tx: %w", err)
+		return "", fmt.Errorf("register agent session: begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	var endedAt sql.NullTime
+	var existingSecret sql.NullString
 	err = tx.QueryRowContext(ctx, `
-		SELECT ended_at
+		SELECT ended_at, heartbeat_secret
 		FROM agent_sessions
 		WHERE session_id = ?`,
 		sessionID,
-	).Scan(&endedAt)
+	).Scan(&endedAt, &existingSecret)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("register agent session: check existing row: %w", err)
+		return "", fmt.Errorf("register agent session: check existing row: %w", err)
 	}
 	if err == nil && endedAt.Valid && isSingleUseSessionID(sessionID) {
-		return ErrAgentSessionAlreadyEnded
+		return "", ErrAgentSessionAlreadyEnded
+	}
+
+	heartbeatSecret := strings.TrimSpace(existingSecret.String)
+	if heartbeatSecret == "" {
+		heartbeatSecret = uuid.New().String()
 	}
 
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO agent_sessions (session_id, agent_id, mode, tmux_session_name, started_at, last_seen_at)
-		VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))
+		INSERT INTO agent_sessions (session_id, agent_id, mode, tmux_session_name, started_at, last_seen_at, heartbeat_secret)
+		VALUES (?, ?, ?, ?, datetime('now'), datetime('now'), ?)
 		ON CONFLICT(session_id) DO UPDATE SET
 			agent_id = excluded.agent_id,
 			mode = COALESCE(NULLIF(excluded.mode, ''), agent_sessions.mode),
 			tmux_session_name = COALESCE(NULLIF(excluded.tmux_session_name, ''), agent_sessions.tmux_session_name),
 			ended_at = NULL,
 			end_reason = '',
-			last_seen_at = datetime('now')`,
-		sessionID, agentID, mode, tmuxSessionName,
+			last_seen_at = datetime('now'),
+			heartbeat_secret = COALESCE(NULLIF(agent_sessions.heartbeat_secret, ''), excluded.heartbeat_secret)`,
+		sessionID, agentID, mode, tmuxSessionName, heartbeatSecret,
 	)
 	if err != nil {
-		return fmt.Errorf("register agent session: %w", err)
+		return "", fmt.Errorf("register agent session: %w", err)
 	}
 	payload, err := json.Marshal(map[string]string{
 		"mode": mode,
 	})
 	if err != nil {
-		return fmt.Errorf("register agent session: marshal event payload: %w", err)
+		return "", fmt.Errorf("register agent session: marshal event payload: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO agent_events (session_id, agent_id, event_type, payload)
 		VALUES (?, ?, ?, ?)`,
 		sessionID, agentID, "session_registered", string(payload),
 	); err != nil {
-		return fmt.Errorf("register agent session: append event: %w", err)
+		return "", fmt.Errorf("register agent session: append event: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("register agent session: commit: %w", err)
+		return "", fmt.Errorf("register agent session: commit: %w", err)
 	}
-	return nil
+	return heartbeatSecret, nil
 }
 
 func isSingleUseSessionID(sessionID string) bool {
 	_, err := uuid.Parse(sessionID)
 	return err == nil
+}
+
+// ValidateHeartbeatSecret checks that the provided secret matches the stored
+// heartbeat_secret for the session. EL-23: only the launcher (which received
+// the secret from RegisterSession) can heartbeat.
+func ValidateHeartbeatSecret(ctx context.Context, db *DB, sessionID, secret string) error {
+	var stored string
+	err := db.sql.QueryRowContext(ctx, `
+		SELECT heartbeat_secret FROM agent_sessions
+		WHERE session_id = ? AND ended_at IS NULL`,
+		sessionID,
+	).Scan(&stored)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrAgentSessionNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("validate heartbeat secret: %w", err)
+	}
+	if stored == "" || stored != secret {
+		return ErrInvalidHeartbeatSecret
+	}
+	return nil
 }
 
 // UpdateAgentSessionHeartbeat updates the last_seen_at timestamp for a session.

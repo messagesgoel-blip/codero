@@ -6,7 +6,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	grpclib "google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -33,13 +35,24 @@ func (s *sessionService) RegisterSession(ctx context.Context, req *daemonv1.Regi
 		clientKind = "unknown"
 	}
 
-	if err := s.server.sessionStore.Register(ctx, sessionID, req.AgentId, clientKind); err != nil {
+	secret, err := s.server.sessionStore.Register(ctx, sessionID, req.AgentId, clientKind)
+	if err != nil {
 		loglib.Error("grpc: RegisterSession failed",
 			loglib.FieldComponent, "grpc",
 			"agent_id", req.AgentId,
 			"error", err,
 		)
 		return nil, status.Errorf(codes.Internal, "register session: %v", err)
+	}
+
+	// EL-23: return heartbeat_secret via response trailer so only the launcher has it.
+	trailer := metadata.Pairs("x-heartbeat-secret", secret)
+	if err := grpclib.SendHeader(ctx, trailer); err != nil {
+		loglib.Warn("grpc: failed to send heartbeat_secret header",
+			loglib.FieldComponent, "grpc",
+			"session_id", sessionID,
+			"error", err,
+		)
 	}
 
 	loglib.Info("grpc: session registered",
@@ -57,12 +70,24 @@ func (s *sessionService) RegisterSession(ctx context.Context, req *daemonv1.Regi
 }
 
 // Heartbeat proves a session is still alive.
+// EL-23: requires x-heartbeat-secret metadata matching the value from RegisterSession.
 func (s *sessionService) Heartbeat(ctx context.Context, req *daemonv1.HeartbeatRequest) (*daemonv1.HeartbeatResponse, error) {
 	if req.SessionId == "" {
 		return nil, status.Error(codes.InvalidArgument, "session_id is required")
 	}
 
-	if err := s.server.sessionStore.Heartbeat(ctx, req.SessionId, true); err != nil {
+	// EL-23: extract heartbeat_secret from gRPC metadata.
+	heartbeatSecret := ""
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		if vals := md.Get("x-heartbeat-secret"); len(vals) > 0 {
+			heartbeatSecret = vals[0]
+		}
+	}
+
+	if err := s.server.sessionStore.Heartbeat(ctx, req.SessionId, heartbeatSecret, true); err != nil {
+		if errors.Is(err, state.ErrInvalidHeartbeatSecret) {
+			return nil, status.Error(codes.PermissionDenied, "invalid heartbeat secret")
+		}
 		loglib.Warn("grpc: Heartbeat failed",
 			loglib.FieldComponent, "grpc",
 			"session_id", req.SessionId,

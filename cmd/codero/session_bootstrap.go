@@ -53,14 +53,17 @@ func sessionBootstrapCmd(configPath *string) *cobra.Command {
 				return err
 			}
 
-			if err := store.Register(cmd.Context(), resolved.SessionID, resolved.AgentID, resolved.Mode); err != nil {
+			secret, err := store.Register(cmd.Context(), resolved.SessionID, resolved.AgentID, resolved.Mode)
+			if err != nil {
 				return err
 			}
+			_ = secret // bootstrap prints its own output format
 
 			result, err := writeSessionBootstrap(resolved)
 			if err != nil {
 				return err
 			}
+			result.Exports["CODERO_HEARTBEAT_SECRET"] = secret
 
 			fmt.Print(renderBootstrapExports(result.Exports))
 			return nil

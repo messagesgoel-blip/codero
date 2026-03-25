@@ -871,10 +871,12 @@ func sessionRegisterCmd(configPath *string) *cobra.Command {
 				mode = resolveSessionModeFromEnv("agent")
 			}
 
-			if err := store.Register(cmd.Context(), sessionID, agentID, mode); err != nil {
+			secret, err := store.Register(cmd.Context(), sessionID, agentID, mode)
+			if err != nil {
 				return err
 			}
 			fmt.Printf("session_id: %s\n", sessionID)
+			fmt.Printf("heartbeat_secret: %s\n", secret)
 			return nil
 		},
 	}
@@ -927,8 +929,9 @@ func sessionConfirmCmd(configPath *string) *cobra.Command {
 
 func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 	var (
-		sessionID    string
-		markProgress bool
+		sessionID       string
+		heartbeatSecret string
+		markProgress    bool
 	)
 
 	cmd := &cobra.Command{
@@ -947,12 +950,16 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 			if sessionID == "" {
 				return fmt.Errorf("session-id is required")
 			}
+			if heartbeatSecret == "" {
+				heartbeatSecret = os.Getenv("CODERO_HEARTBEAT_SECRET")
+			}
 
-			return store.Heartbeat(cmd.Context(), sessionID, markProgress)
+			return store.Heartbeat(cmd.Context(), sessionID, heartbeatSecret, markProgress)
 		},
 	}
 
 	cmd.Flags().StringVar(&sessionID, "session-id", "", "session identifier (defaults to CODERO_SESSION_ID)")
+	cmd.Flags().StringVar(&heartbeatSecret, "heartbeat-secret", "", "heartbeat secret (defaults to CODERO_HEARTBEAT_SECRET)")
 	cmd.Flags().BoolVar(&markProgress, "progress", false, "also refresh session progress_at for active work")
 
 	return cmd

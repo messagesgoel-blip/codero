@@ -42,22 +42,23 @@ func NewStore(db *state.DB) *Store {
 
 // Register records a session with session_id + agent_id only.
 // If the session already exists, it refreshes agent_id, mode, and last_seen.
-func (s *Store) Register(ctx context.Context, sessionID, agentID, mode string) error {
+func (s *Store) Register(ctx context.Context, sessionID, agentID, mode string) (string, error) {
 	return s.RegisterWithTmux(ctx, sessionID, agentID, mode, "")
 }
 
 // RegisterWithTmux records a session with an associated tmux session name (SL-9, SL-11).
-func (s *Store) RegisterWithTmux(ctx context.Context, sessionID, agentID, mode, tmuxSessionName string) error {
+func (s *Store) RegisterWithTmux(ctx context.Context, sessionID, agentID, mode, tmuxSessionName string) (string, error) {
 	if sessionID == "" {
-		return ErrMissingSessionID
+		return "", ErrMissingSessionID
 	}
 	if agentID == "" {
-		return ErrMissingAgentID
+		return "", ErrMissingAgentID
 	}
-	if err := state.RegisterAgentSession(ctx, s.db, sessionID, agentID, mode, tmuxSessionName); err != nil {
-		return err
+	secret, err := state.RegisterAgentSessionWithSecret(ctx, s.db, sessionID, agentID, mode, tmuxSessionName)
+	if err != nil {
+		return "", err
 	}
-	return nil
+	return secret, nil
 }
 
 // Confirm verifies that Codero has the same live session identity the agent was
@@ -83,9 +84,12 @@ func (s *Store) Confirm(ctx context.Context, sessionID, agentID string) error {
 
 // Heartbeat updates last_seen for the session and any attached branch assignment.
 // When markProgress is true, it also refreshes the durable progress timestamp.
-func (s *Store) Heartbeat(ctx context.Context, sessionID string, markProgress bool) error {
+func (s *Store) Heartbeat(ctx context.Context, sessionID, heartbeatSecret string, markProgress bool) error {
 	if sessionID == "" {
 		return ErrMissingSessionID
+	}
+	if err := state.ValidateHeartbeatSecret(ctx, s.db, sessionID, heartbeatSecret); err != nil {
+		return err
 	}
 	if err := state.UpdateAgentSessionHeartbeat(ctx, s.db, sessionID, markProgress); err != nil {
 		return err
