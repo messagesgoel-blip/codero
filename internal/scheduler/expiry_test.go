@@ -144,7 +144,7 @@ func TestExpiryWorker_AgentSessionExpiry_EndsSessionAndAssignment(t *testing.T) 
 	db, client, _ := setupExpiryDeps(t)
 
 	ctx := context.Background()
-	if err := state.RegisterAgentSession(ctx, db, "sess-agent", "agent-1", "cli"); err != nil {
+	if err := state.RegisterAgentSession(ctx, db, "sess-agent", "agent-1", "cli", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	if err := state.AttachAgentAssignment(ctx, db, &state.AgentAssignment{

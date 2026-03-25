@@ -42,14 +42,15 @@ var ErrAssignmentEnded = errors.New("assignment already ended")
 
 // AgentSession is a row from agent_sessions.
 type AgentSession struct {
-	SessionID      string
-	AgentID        string
-	Mode           string
-	StartedAt      time.Time
-	LastSeenAt     time.Time
-	LastProgressAt *time.Time
-	EndedAt        *time.Time
-	EndReason      string
+	SessionID       string
+	AgentID         string
+	Mode            string
+	TmuxSessionName string
+	StartedAt       time.Time
+	LastSeenAt      time.Time
+	LastProgressAt  *time.Time
+	EndedAt         *time.Time
+	EndReason       string
 }
 
 // AgentAssignment is a row from agent_assignments.
@@ -96,9 +97,9 @@ type agentAssignmentContext struct {
 }
 
 // RegisterAgentSession inserts or updates a session registration.
-// Registration starts with session_id + agent_id; mode is optional and
-// only updates when provided.
-func RegisterAgentSession(ctx context.Context, db *DB, sessionID, agentID, mode string) error {
+// Registration starts with session_id + agent_id; mode and tmuxSessionName
+// are optional and only update when provided.
+func RegisterAgentSession(ctx context.Context, db *DB, sessionID, agentID, mode, tmuxSessionName string) error {
 	tx, err := db.sql.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("register agent session: begin tx: %w", err)
@@ -120,15 +121,16 @@ func RegisterAgentSession(ctx context.Context, db *DB, sessionID, agentID, mode 
 	}
 
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO agent_sessions (session_id, agent_id, mode, started_at, last_seen_at)
-		VALUES (?, ?, ?, datetime('now'), datetime('now'))
+		INSERT INTO agent_sessions (session_id, agent_id, mode, tmux_session_name, started_at, last_seen_at)
+		VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))
 		ON CONFLICT(session_id) DO UPDATE SET
 			agent_id = excluded.agent_id,
 			mode = COALESCE(NULLIF(excluded.mode, ''), agent_sessions.mode),
+			tmux_session_name = COALESCE(NULLIF(excluded.tmux_session_name, ''), agent_sessions.tmux_session_name),
 			ended_at = NULL,
 			end_reason = '',
 			last_seen_at = datetime('now')`,
-		sessionID, agentID, mode,
+		sessionID, agentID, mode, tmuxSessionName,
 	)
 	if err != nil {
 		return fmt.Errorf("register agent session: %w", err)
@@ -230,7 +232,7 @@ func UpdateAgentSessionHeartbeat(ctx context.Context, db *DB, sessionID string, 
 // GetAgentSession retrieves a session by ID.
 func GetAgentSession(ctx context.Context, db *DB, sessionID string) (*AgentSession, error) {
 	const q = `
-		SELECT session_id, agent_id, mode, started_at, last_seen_at, last_progress_at, ended_at, end_reason
+		SELECT session_id, agent_id, mode, tmux_session_name, started_at, last_seen_at, last_progress_at, ended_at, end_reason
 		FROM agent_sessions
 		WHERE session_id = ?`
 
@@ -261,7 +263,7 @@ func ConfirmAgentSession(ctx context.Context, db *DB, sessionID, agentID string)
 // ListActiveAgentSessions returns all sessions without ended_at set.
 func ListActiveAgentSessions(ctx context.Context, db *DB) ([]AgentSession, error) {
 	const q = `
-		SELECT session_id, agent_id, mode, started_at, last_seen_at, last_progress_at, ended_at, end_reason
+		SELECT session_id, agent_id, mode, tmux_session_name, started_at, last_seen_at, last_progress_at, ended_at, end_reason
 		FROM agent_sessions
 		WHERE ended_at IS NULL
 		ORDER BY last_seen_at DESC`
@@ -279,7 +281,7 @@ func ListActiveAgentSessions(ctx context.Context, db *DB) ([]AgentSession, error
 func ListExpiredAgentSessions(ctx context.Context, db *DB, ttl time.Duration) ([]AgentSession, error) {
 	threshold := time.Now().UTC().Add(-ttl).Truncate(time.Second)
 	const q = `
-		SELECT session_id, agent_id, mode, started_at, last_seen_at, last_progress_at, ended_at, end_reason
+		SELECT session_id, agent_id, mode, tmux_session_name, started_at, last_seen_at, last_progress_at, ended_at, end_reason
 		FROM agent_sessions
 		WHERE ended_at IS NULL AND last_seen_at < ?
 		ORDER BY last_seen_at ASC`
@@ -389,6 +391,31 @@ func ExpireAgentSession(ctx context.Context, db *DB, sessionID, reason string) e
 		sessionID,
 	); err != nil {
 		return fmt.Errorf("expire agent session: append event: %w", err)
+	}
+
+	// SL-1/SL-3: Write session_archives row atomically in the same transaction.
+	var expSession AgentSession
+	var sessLastProgress sql.NullTime
+	if err := tx.QueryRowContext(ctx, `
+		SELECT session_id, agent_id, mode, started_at, last_seen_at, last_progress_at
+		FROM agent_sessions WHERE session_id = ?`, sessionID,
+	).Scan(&expSession.SessionID, &expSession.AgentID, &expSession.Mode,
+		&expSession.StartedAt, &expSession.LastSeenAt, &sessLastProgress); err == nil {
+		archive := &SessionArchive{
+			SessionID: sessionID,
+			AgentID:   expSession.AgentID,
+			Result:    reason,
+			StartedAt: expSession.StartedAt,
+			EndedAt:   now,
+		}
+		if contextRow != nil {
+			archive.TaskID = contextRow.Assignment.TaskID
+			archive.Repo = contextRow.Assignment.Repo
+			archive.Branch = contextRow.Assignment.Branch
+		}
+		if err := writeSessionArchiveTx(ctx, tx, archive); err != nil {
+			return fmt.Errorf("expire agent session: write archive: %w", err)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -619,11 +646,11 @@ func FinalizeAgentSession(ctx context.Context, db *DB, sessionID, agentID string
 		endedAt             sql.NullTime
 	)
 	if err := tx.QueryRowContext(ctx, `
-		SELECT session_id, agent_id, mode, started_at, last_seen_at, last_progress_at, ended_at, end_reason
+		SELECT session_id, agent_id, mode, tmux_session_name, started_at, last_seen_at, last_progress_at, ended_at, end_reason
 		FROM agent_sessions
 		WHERE session_id = ?`,
 		sessionID,
-	).Scan(&session.SessionID, &session.AgentID, &session.Mode, &session.StartedAt, &session.LastSeenAt, &sessionLastProgress, &endedAt, &session.EndReason); err != nil {
+	).Scan(&session.SessionID, &session.AgentID, &session.Mode, &session.TmuxSessionName, &session.StartedAt, &session.LastSeenAt, &sessionLastProgress, &endedAt, &session.EndReason); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrAgentSessionNotFound
 		}
@@ -787,6 +814,23 @@ func FinalizeAgentSession(ctx context.Context, db *DB, sessionID, agentID string
 		sessionID, session.AgentID, "session_finalized", string(payload),
 	); err != nil {
 		return fmt.Errorf("finalize agent session: append event: %w", err)
+	}
+
+	// SL-1/SL-3: Write session_archives row atomically in the same transaction.
+	archive := &SessionArchive{
+		SessionID: sessionID,
+		AgentID:   session.AgentID,
+		Result:    completion.Status,
+		StartedAt: session.StartedAt,
+		EndedAt:   finishedAt,
+	}
+	if active != nil {
+		archive.TaskID = active.TaskID
+		archive.Repo = active.Repo
+		archive.Branch = active.Branch
+	}
+	if err := writeSessionArchiveTx(ctx, tx, archive); err != nil {
+		return fmt.Errorf("finalize agent session: write archive: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -1571,7 +1615,7 @@ func scanAgentSession(row *sql.Row) (*AgentSession, error) {
 	var endedAt sql.NullTime
 
 	err := row.Scan(
-		&s.SessionID, &s.AgentID, &s.Mode, &s.StartedAt, &s.LastSeenAt, &lastProgressAt, &endedAt, &s.EndReason,
+		&s.SessionID, &s.AgentID, &s.Mode, &s.TmuxSessionName, &s.StartedAt, &s.LastSeenAt, &lastProgressAt, &endedAt, &s.EndReason,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1595,7 +1639,7 @@ func scanAgentSessions(rows *sql.Rows) ([]AgentSession, error) {
 		var lastProgressAt sql.NullTime
 		var endedAt sql.NullTime
 		if err := rows.Scan(
-			&s.SessionID, &s.AgentID, &s.Mode, &s.StartedAt, &s.LastSeenAt, &lastProgressAt, &endedAt, &s.EndReason,
+			&s.SessionID, &s.AgentID, &s.Mode, &s.TmuxSessionName, &s.StartedAt, &s.LastSeenAt, &lastProgressAt, &endedAt, &s.EndReason,
 		); err != nil {
 			return nil, fmt.Errorf("scan agent session row: %w", err)
 		}

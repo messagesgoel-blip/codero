@@ -12,7 +12,7 @@ func TestLifecycle_AcceptRetryIdempotency(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	if err := RegisterAgentSession(ctx, db, "lc-sess-1", "agent-1", ""); err != nil {
+	if err := RegisterAgentSession(ctx, db, "lc-sess-1", "agent-1", "", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	a1, err := AcceptTask(ctx, db, "lc-sess-1", "LC-TASK-001")
@@ -34,10 +34,10 @@ func TestLifecycle_AcceptRaceConflict(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	if err := RegisterAgentSession(ctx, db, "lc-sess-2a", "agent-a", ""); err != nil {
+	if err := RegisterAgentSession(ctx, db, "lc-sess-2a", "agent-a", "", ""); err != nil {
 		t.Fatalf("RegisterAgentSession session a: %v", err)
 	}
-	if err := RegisterAgentSession(ctx, db, "lc-sess-2b", "agent-b", ""); err != nil {
+	if err := RegisterAgentSession(ctx, db, "lc-sess-2b", "agent-b", "", ""); err != nil {
 		t.Fatalf("RegisterAgentSession session b: %v", err)
 	}
 
@@ -60,7 +60,7 @@ func TestLifecycle_SubmitGateFailFeedbackRevise(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	if err := RegisterAgentSession(ctx, db, "lc-sess-3", "agent-1", ""); err != nil {
+	if err := RegisterAgentSession(ctx, db, "lc-sess-3", "agent-1", "", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	a, err := AcceptTask(ctx, db, "lc-sess-3", "LC-TASK-003")
@@ -152,7 +152,7 @@ func TestLifecycle_FeedbackCacheInvalidation(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	if err := RegisterAgentSession(ctx, db, "lc-sess-fc", "agent-1", ""); err != nil {
+	if err := RegisterAgentSession(ctx, db, "lc-sess-fc", "agent-1", "", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	a, err := AcceptTask(ctx, db, "lc-sess-fc", "LC-TASK-FC")
@@ -198,7 +198,7 @@ func TestLifecycle_SourceStatusSemantics(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	if err := RegisterAgentSession(ctx, db, "lc-sess-ss", "agent-1", ""); err != nil {
+	if err := RegisterAgentSession(ctx, db, "lc-sess-ss", "agent-1", "", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	a, err := AcceptTask(ctx, db, "lc-sess-ss", "LC-TASK-SS")

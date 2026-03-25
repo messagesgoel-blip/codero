@@ -13,7 +13,7 @@ func TestRegisterAgentSession_UpsertAndHeartbeat(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	if err := RegisterAgentSession(ctx, db, "sess-1", "agent-1", ""); err != nil {
+	if err := RegisterAgentSession(ctx, db, "sess-1", "agent-1", "", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	s, err := GetAgentSession(ctx, db, "sess-1")
@@ -51,7 +51,7 @@ func TestRegisterAgentSession_UpsertAndHeartbeat(t *testing.T) {
 		t.Errorf("last_progress_at: got %v, want nil when progress not marked", after.LastProgressAt)
 	}
 
-	if err := RegisterAgentSession(ctx, db, "sess-1", "agent-2", "cli"); err != nil {
+	if err := RegisterAgentSession(ctx, db, "sess-1", "agent-2", "cli", ""); err != nil {
 		t.Fatalf("RegisterAgentSession upsert: %v", err)
 	}
 	updated, err := GetAgentSession(ctx, db, "sess-1")
@@ -70,14 +70,14 @@ func TestRegisterAgentSession_RevivesEndedSession(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	if err := RegisterAgentSession(ctx, db, "sess-revive", "agent-1", ""); err != nil {
+	if err := RegisterAgentSession(ctx, db, "sess-revive", "agent-1", "", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	if err := ExpireAgentSession(ctx, db, "sess-revive", "expired"); err != nil {
 		t.Fatalf("ExpireAgentSession: %v", err)
 	}
 
-	if err := RegisterAgentSession(ctx, db, "sess-revive", "agent-2", "cli"); err != nil {
+	if err := RegisterAgentSession(ctx, db, "sess-revive", "agent-2", "cli", ""); err != nil {
 		t.Fatalf("RegisterAgentSession revive: %v", err)
 	}
 
@@ -108,14 +108,14 @@ func TestRegisterAgentSession_RejectsEndedUUIDSession(t *testing.T) {
 	ctx := context.Background()
 
 	sessionID := "0e22cb0b-80b9-4af7-b824-a6164fefe3cd"
-	if err := RegisterAgentSession(ctx, db, sessionID, "agent-1", ""); err != nil {
+	if err := RegisterAgentSession(ctx, db, sessionID, "agent-1", "", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	if err := ExpireAgentSession(ctx, db, sessionID, "expired"); err != nil {
 		t.Fatalf("ExpireAgentSession: %v", err)
 	}
 
-	err := RegisterAgentSession(ctx, db, sessionID, "agent-2", "cli")
+	err := RegisterAgentSession(ctx, db, sessionID, "agent-2", "cli", "")
 	if !errors.Is(err, ErrAgentSessionAlreadyEnded) {
 		t.Fatalf("RegisterAgentSession should reject ended UUID session: got %v", err)
 	}
@@ -136,7 +136,7 @@ func TestConfirmAgentSession(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	if err := RegisterAgentSession(ctx, db, "sess-confirm", "agent-1", ""); err != nil {
+	if err := RegisterAgentSession(ctx, db, "sess-confirm", "agent-1", "", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	if err := ConfirmAgentSession(ctx, db, "sess-confirm", "agent-1"); err != nil {
@@ -174,7 +174,7 @@ func TestUpdateAgentSessionHeartbeat_MarkProgress(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	if err := RegisterAgentSession(ctx, db, "sess-progress", "agent-1", ""); err != nil {
+	if err := RegisterAgentSession(ctx, db, "sess-progress", "agent-1", "", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 
@@ -195,7 +195,7 @@ func TestAttachAgentAssignment_Supersede(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	if err := RegisterAgentSession(ctx, db, "sess-1", "agent-1", ""); err != nil {
+	if err := RegisterAgentSession(ctx, db, "sess-1", "agent-1", "", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 
@@ -319,7 +319,7 @@ func TestFinalizeAgentSession(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	if err := RegisterAgentSession(ctx, db, "sess-final", "agent-1", "agent"); err != nil {
+	if err := RegisterAgentSession(ctx, db, "sess-final", "agent-1", "agent", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	_, err := db.sql.ExecContext(ctx, `
@@ -439,7 +439,7 @@ func TestFinalizeAgentSession_RejectsCompletionWhenMergeGateFails(t *testing.T) 
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	if err := RegisterAgentSession(ctx, db, "sess-gate", "agent-1", "agent"); err != nil {
+	if err := RegisterAgentSession(ctx, db, "sess-gate", "agent-1", "agent", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	_, err := db.sql.ExecContext(ctx, `
@@ -509,7 +509,7 @@ func TestFinalizeAgentSession_RequiresSubstatus(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	if err := RegisterAgentSession(ctx, db, "sess-substatus", "agent-1", "agent"); err != nil {
+	if err := RegisterAgentSession(ctx, db, "sess-substatus", "agent-1", "agent", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	if err := AttachAgentAssignment(ctx, db, &AgentAssignment{
@@ -552,7 +552,7 @@ func TestFinalizeAgentSession_RejectsCompletionWhenProtocolRuleFails(t *testing.
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	if err := RegisterAgentSession(ctx, db, "sess-protocol", "agent-1", "agent"); err != nil {
+	if err := RegisterAgentSession(ctx, db, "sess-protocol", "agent-1", "agent", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	_, err := db.sql.ExecContext(ctx, `
@@ -623,7 +623,7 @@ func TestMonitorAgentAssignmentRules_HeartbeatLostPath(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	if err := RegisterAgentSession(ctx, db, "sess-monitor-lost", "agent-1", "agent"); err != nil {
+	if err := RegisterAgentSession(ctx, db, "sess-monitor-lost", "agent-1", "agent", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	_, err := db.sql.ExecContext(ctx, `
@@ -699,7 +699,7 @@ func TestMonitorAgentAssignmentRules_BranchHoldForceCancel(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	if err := RegisterAgentSession(ctx, db, "sess-monitor-cancel", "agent-1", "agent"); err != nil {
+	if err := RegisterAgentSession(ctx, db, "sess-monitor-cancel", "agent-1", "agent", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	_, err := db.sql.ExecContext(ctx, `
@@ -762,7 +762,7 @@ func TestReconcileAgentAssignmentWaitingState(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	if err := RegisterAgentSession(ctx, db, "sess-wait-reconcile", "agent-1", "agent"); err != nil {
+	if err := RegisterAgentSession(ctx, db, "sess-wait-reconcile", "agent-1", "agent", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	_, err := db.sql.ExecContext(ctx, `
@@ -846,7 +846,7 @@ func TestRecordAssignmentRuleCheckTx_RejectsInvalidResult(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	if err := RegisterAgentSession(ctx, db, "sess-invalid-result", "agent-1", "agent"); err != nil {
+	if err := RegisterAgentSession(ctx, db, "sess-invalid-result", "agent-1", "agent", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	if err := AttachAgentAssignment(ctx, db, &AgentAssignment{
@@ -877,7 +877,7 @@ func TestRecordAssignmentRuleCheckTx_UsesLatestActiveRuleVersion(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	if err := RegisterAgentSession(ctx, db, "sess-rule-version", "agent-1", "agent"); err != nil {
+	if err := RegisterAgentSession(ctx, db, "sess-rule-version", "agent-1", "agent", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	if err := AttachAgentAssignment(ctx, db, &AgentAssignment{
@@ -956,7 +956,7 @@ func TestListExpiredAgentSessions(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	if err := RegisterAgentSession(ctx, db, "sess-expired", "agent-1", ""); err != nil {
+	if err := RegisterAgentSession(ctx, db, "sess-expired", "agent-1", "", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	_, err := db.sql.Exec(
@@ -995,7 +995,7 @@ func TestAgentEvents_AppendAndList(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	if err := RegisterAgentSession(ctx, db, "sess-events", "agent-1", ""); err != nil {
+	if err := RegisterAgentSession(ctx, db, "sess-events", "agent-1", "", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 
@@ -1044,7 +1044,7 @@ func TestGetActiveAgentAssignment_NotFound(t *testing.T) {
 
 func mustRegisterSession(t *testing.T, db *DB, sessionID, agentID string) {
 	t.Helper()
-	if err := RegisterAgentSession(context.Background(), db, sessionID, agentID, ""); err != nil {
+	if err := RegisterAgentSession(context.Background(), db, sessionID, agentID, "", ""); err != nil {
 		t.Fatalf("RegisterAgentSession(%q): %v", sessionID, err)
 	}
 }
@@ -1596,7 +1596,7 @@ func TestEmitAssignmentUpdate_StaleEmitAfterMonitorLostRejected(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	if err := RegisterAgentSession(ctx, db, "sess-monitor-stale", "agent-a", "agent"); err != nil {
+	if err := RegisterAgentSession(ctx, db, "sess-monitor-stale", "agent-a", "agent", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	_, err := db.sql.ExecContext(ctx, `
@@ -1678,7 +1678,7 @@ func TestEmitAssignmentUpdate_StaleEmitAfterFinalizeRejected(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	if err := RegisterAgentSession(ctx, db, "sess-finalize-stale", "agent-a", "agent"); err != nil {
+	if err := RegisterAgentSession(ctx, db, "sess-finalize-stale", "agent-a", "agent", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	_, err := db.sql.ExecContext(ctx, `
@@ -1729,7 +1729,7 @@ func TestEmitAssignmentUpdate_VersionIncrementsOnReconcile(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	if err := RegisterAgentSession(ctx, db, "sess-reconcile-version", "agent-a", "agent"); err != nil {
+	if err := RegisterAgentSession(ctx, db, "sess-reconcile-version", "agent-a", "agent", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	_, err := db.sql.ExecContext(ctx, `

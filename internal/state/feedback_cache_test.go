@@ -11,7 +11,7 @@ func TestUpsertFeedbackCache_InsertAndUpdate(t *testing.T) {
 	ctx := context.Background()
 
 	// Create prerequisite session + assignment.
-	if err := RegisterAgentSession(ctx, db, "fc-sess-1", "agent-1", ""); err != nil {
+	if err := RegisterAgentSession(ctx, db, "fc-sess-1", "agent-1", "", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	a, err := AcceptTask(ctx, db, "fc-sess-1", "FC-TASK-001")
@@ -125,7 +125,7 @@ func TestGetFeedbackCacheByTaskID(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	if err := RegisterAgentSession(ctx, db, "fc-sess-2", "agent-1", ""); err != nil {
+	if err := RegisterAgentSession(ctx, db, "fc-sess-2", "agent-1", "", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	a, err := AcceptTask(ctx, db, "fc-sess-2", "FC-TASK-002")
@@ -169,7 +169,7 @@ func TestInvalidateFeedbackCache(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	if err := RegisterAgentSession(ctx, db, "fc-sess-3", "agent-1", ""); err != nil {
+	if err := RegisterAgentSession(ctx, db, "fc-sess-3", "agent-1", "", ""); err != nil {
 		t.Fatalf("RegisterAgentSession: %v", err)
 	}
 	a, err := AcceptTask(ctx, db, "fc-sess-3", "FC-TASK-003")
