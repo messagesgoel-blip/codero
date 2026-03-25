@@ -37,11 +37,19 @@ var allowedUploadExts = map[string]bool{
 type Handler struct {
 	db       *sql.DB
 	settings *SettingsStore
+	convos   *ConversationStore
+	chatCfg  ChatConfig
 }
 
 // NewHandler creates a dashboard Handler backed by db and the given settings store.
 func NewHandler(db *sql.DB, settings *SettingsStore) *Handler {
-	return &Handler{db: db, settings: settings}
+	cfg := LoadChatConfig()
+	return &Handler{
+		db:       db,
+		settings: settings,
+		convos:   NewConversationStore(cfg.MaxHistory, cfg.ConversationTTL),
+		chatCfg:  cfg,
+	}
 }
 
 // RegisterRoutes mounts all dashboard routes onto mux.
@@ -64,6 +72,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/dashboard/settings/gate-config/", h.handleGateConfigVar)
 	mux.HandleFunc("/api/v1/dashboard/chat", h.handleChat)
 	mux.HandleFunc("/api/v1/dashboard/comments", h.handleChat)
+	mux.HandleFunc("/api/v1/chat/ask", h.handleChat)
+	mux.HandleFunc("/api/v1/chat/history", h.handleChatHistory)
+	mux.HandleFunc("/api/v1/chat/history/", h.handleChatHistoryByID)
 	mux.HandleFunc("/api/v1/dashboard/manual-review-upload", h.handleUpload)
 	mux.HandleFunc("/api/v1/dashboard/events", h.handleSSE)
 
