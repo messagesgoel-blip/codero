@@ -196,12 +196,27 @@ func (h *Handler) postChat(w http.ResponseWriter, r *http.Request) {
 		req.Prompt = req.Prompt[:dashboardChatMaxPromptLen]
 	}
 
+	// Expand slash-prefix quick queries (§4.4) before context assembly.
+	req.Prompt, _ = expandQuickQuery(req.Prompt)
+
 	snapshot := h.collectChatSnapshot(r.Context(), req.Tab)
 	if req.Stream {
 		h.streamChat(w, r, req, snapshot)
 		return
 	}
-	writeJSON(w, http.StatusOK, h.chatResponse(r.Context(), req, snapshot))
+	resp := h.chatResponse(r.Context(), req, snapshot)
+	// Store conversation entry (§3.3)
+	if h.conversations != nil {
+		h.conversations.Append(ConversationEntry{
+			ID:        fmt.Sprintf("conv-%d", time.Now().UnixNano()),
+			Prompt:    req.Prompt,
+			Reply:     resp.Reply,
+			Provider:  resp.Provider,
+			Model:     resp.Model,
+			CreatedAt: resp.GeneratedAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) collectChatSnapshot(ctx context.Context, focus string) dashboardChatSnapshot {

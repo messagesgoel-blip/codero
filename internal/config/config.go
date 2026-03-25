@@ -170,6 +170,9 @@ type Config struct {
 	// Example: "https://ops.example.com/codero"
 	DashboardPublicBaseURL string          `yaml:"dashboard_public_base_url"`
 	AutoMerge              AutoMergeConfig `yaml:"auto_merge"`
+	TUI                    TUIConfig       `yaml:"tui"`
+	Dashboard              DashboardConfig `yaml:"dashboard"`
+	Chat                   ChatConfig      `yaml:"chat"`
 }
 
 // Load reads config from a YAML file at path and applies env overrides.
@@ -288,6 +291,9 @@ func defaults() *Config {
 			Enabled: false,
 			Method:  "squash",
 		},
+		TUI:       DefaultTUIConfig(),
+		Dashboard: DefaultDashboardConfig(),
+		Chat:      DefaultChatConfig(),
 	}
 	// Derive ReadyFile from PIDFile directory to keep sentinel paths colocated.
 	c.ReadyFile = filepath.Join(filepath.Dir(c.PIDFile), "codero.ready")
@@ -430,6 +436,12 @@ func applyEnvOverrides(c *Config) {
 			c.APIServer.ShutdownTimeout = d
 		}
 	}
+
+	// TUI and Dashboard config overrides (Real-Time Views v1 §5, §6).
+	applyTUIEnvOverrides(&c.TUI)
+	applyDashboardEnvOverrides(&c.Dashboard)
+	// Chat config overrides (LiteLLM Chat v1 §6).
+	applyChatEnvOverrides(&c.Chat)
 }
 
 // normalizeCompat backfills APIServer.Addr from legacy ObservabilityHost/ObservabilityPort
