@@ -1,0 +1,3 @@
+-- Rollback: remove session/assignment context from delivery events.
+-- SQLite does not support DROP COLUMN; rebuild would be required.
+-- Placeholder for forward-only migration.

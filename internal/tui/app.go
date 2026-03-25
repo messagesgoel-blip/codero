@@ -3,6 +3,7 @@ package tui
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"os/exec"
@@ -30,10 +31,13 @@ const (
 	TabOutput
 	TabEvents
 	TabQueue
+	TabSessionDrill
+	TabArchives
+	TabCompliance
 	tabCount
 )
 
-var tabLabels = [tabCount]string{"logs & arch", "output", "events", "queue"}
+var tabLabels = [tabCount]string{"logs & arch", "output", "events", "queue", "session", "archives", "compliance"}
 
 // FocusedPane identifies which pane has keyboard focus.
 type FocusedPane int
@@ -71,6 +75,9 @@ type Config struct {
 	// InitialTab sets the center-pane tab that is active when the TUI starts.
 	// Defaults to TabOutput when zero value.
 	InitialTab Tab
+	// StateDB is the optional state database handle used for session/archive/compliance views.
+	// When nil, the DB-backed views render a "no data" placeholder.
+	StateDB *sql.DB
 }
 
 // Model is the root Bubble Tea model for the Codero TUI.
@@ -86,6 +93,10 @@ type Model struct {
 	eventsPane   EventsPane
 	checksPane   ChecksPane
 	logsArchPane LogsArchPane
+
+	sessionDrillPane SessionDrillPane
+	archivesPane     ArchivesPane
+	compliancePane   CompliancePane
 
 	outputVP    viewport.Model
 	outputLines []string
@@ -141,22 +152,25 @@ func New(cfg Config) Model {
 	cli.Focus()
 
 	m := Model{
-		cfg:           cfg,
-		keys:          keys,
-		theme:         theme,
-		gatePane:      NewGatePane(theme),
-		branchPane:    NewBranchPane(theme),
-		queuePane:     NewQueuePane(theme),
-		eventsPane:    NewEventsPane(theme),
-		checksPane:    NewChecksPane(theme),
-		logsArchPane:  NewLogsArchPane(theme),
-		pipelinePane:  NewPipelinePane(theme),
-		gateVM:        cfg.InitialVM,
-		paletteInput:  palette,
-		searchInput:   search,
-		cliInput:      cli,
-		cliHistoryIdx: -1,
-		activeTab:     cfg.InitialTab,
+		cfg:              cfg,
+		keys:             keys,
+		theme:            theme,
+		gatePane:         NewGatePane(theme),
+		branchPane:       NewBranchPane(theme),
+		queuePane:        NewQueuePane(theme),
+		eventsPane:       NewEventsPane(theme),
+		checksPane:       NewChecksPane(theme),
+		logsArchPane:     NewLogsArchPane(theme),
+		pipelinePane:     NewPipelinePane(theme),
+		sessionDrillPane: NewSessionDrillPane(theme),
+		archivesPane:     NewArchivesPane(theme),
+		compliancePane:   NewCompliancePane(theme),
+		gateVM:           cfg.InitialVM,
+		paletteInput:     palette,
+		searchInput:      search,
+		cliInput:         cli,
+		cliHistoryIdx:    -1,
+		activeTab:        cfg.InitialTab,
 		cliMessages: []terminalMessage{
 			{Role: "system", Meta: "codero", Content: "Type help, status, gate, queue, or ask a review question."},
 		},
@@ -205,6 +219,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			checksVM := adapters.FromCheckReport(*report)
 			m.checksPane.SetVM(checksVM)
 			m.pipelinePane.SetVM(checksVM)
+		}
+		// Refresh DB-backed views when their tab is active.
+		if m.cfg.StateDB != nil {
+			switch m.activeTab {
+			case TabArchives:
+				cmds = append(cmds, m.loadArchivesCmd())
+			case TabCompliance:
+				cmds = append(cmds, m.loadComplianceCmd())
+			}
 		}
 		if !vm.IsFinal || !m.cfg.WatchMode {
 			cmds = append(cmds, tickCmd(m.cfg.Interval))
@@ -289,6 +312,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.logsArchPane, cmd = m.logsArchPane.Update(msg)
 	cmds = append(cmds, cmd)
 	m.pipelinePane, cmd = m.pipelinePane.Update(msg)
+	cmds = append(cmds, cmd)
+	m.sessionDrillPane, cmd = m.sessionDrillPane.Update(msg)
+	cmds = append(cmds, cmd)
+	m.archivesPane, cmd = m.archivesPane.Update(msg)
+	cmds = append(cmds, cmd)
+	m.compliancePane, cmd = m.compliancePane.Update(msg)
 	cmds = append(cmds, cmd)
 
 	if m.outputReady {
@@ -508,8 +537,24 @@ func (m Model) renderLeft() string {
 
 func (m Model) renderCenter() string {
 	l := m.layout
-	m.logsArchPane.SetSize(l.CenterW-2, l.ContentH-2)
-	content := m.logsArchPane.View()
+	innerW := l.CenterW - 2
+	innerH := l.ContentH - 2
+
+	var content string
+	switch m.activeTab {
+	case TabSessionDrill:
+		m.sessionDrillPane.SetSize(innerW, innerH)
+		content = m.sessionDrillPane.View()
+	case TabArchives:
+		m.archivesPane.SetSize(innerW, innerH)
+		content = m.archivesPane.View()
+	case TabCompliance:
+		m.compliancePane.SetSize(innerW, innerH)
+		content = m.compliancePane.View()
+	default:
+		m.logsArchPane.SetSize(innerW, innerH)
+		content = m.logsArchPane.View()
+	}
 
 	border := m.theme.PaneBorder
 	if m.focused == PaneCenter {
@@ -552,6 +597,9 @@ func (m *Model) applyLayout() {
 	m.queuePane.SetSize(l.CenterW-2, l.ContentH-5)
 	m.eventsPane.SetSize(l.CenterW-2, l.ContentH-5)
 	m.checksPane.SetSize(l.RightW-2, l.ContentH-2)
+	m.sessionDrillPane.SetSize(l.CenterW-2, l.ContentH-5)
+	m.archivesPane.SetSize(l.CenterW-2, l.ContentH-5)
+	m.compliancePane.SetSize(l.CenterW-2, l.ContentH-5)
 	if !m.outputReady {
 		m.outputVP = viewport.New(l.CenterW-2, l.ContentH-5)
 		m.outputReady = true
@@ -634,4 +682,118 @@ func renderStatusInline(t Theme, vm adapters.GateViewModel) string {
 	default:
 		return t.Running.Render(vm.StatusIcon + " " + vm.StatusLabel)
 	}
+}
+
+// ─── DB-backed view refresh commands (RV-1 parity) ──────────────────────
+
+func (m Model) loadArchivesCmd() tea.Cmd {
+	return func() tea.Msg {
+		rows, err := queryTUIArchives(m.cfg.Context, m.cfg.StateDB)
+		if err != nil {
+			return errMsg{err}
+		}
+		return archivesRefreshMsg{archives: rows}
+	}
+}
+
+func (m Model) loadComplianceCmd() tea.Cmd {
+	return func() tea.Msg {
+		vm, err := queryTUICompliance(m.cfg.Context, m.cfg.StateDB)
+		if err != nil {
+			return errMsg{err}
+		}
+		return complianceRefreshMsg{vm: vm}
+	}
+}
+
+// queryTUIArchives reads session_archives for the TUI archives view.
+func queryTUIArchives(ctx context.Context, db *sql.DB) ([]ArchiveRow, error) {
+	if db == nil {
+		return nil, nil
+	}
+	var hasTable bool
+	err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='session_archives'`).Scan(&hasTable)
+	if err != nil || !hasTable {
+		return nil, err
+	}
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT archive_id, session_id, agent_id, result,
+		       COALESCE(repo, ''), COALESCE(branch, ''),
+		       COALESCE(task_id, ''), COALESCE(task_source, ''),
+		       started_at, ended_at,
+		       COALESCE(duration_seconds, 0), COALESCE(commit_count, 0),
+		       COALESCE(merge_sha, '')
+		FROM session_archives
+		ORDER BY ended_at DESC
+		LIMIT 50`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []ArchiveRow
+	for rows.Next() {
+		var a ArchiveRow
+		if err := rows.Scan(&a.ArchiveID, &a.SessionID, &a.AgentID, &a.Result,
+			&a.Repo, &a.Branch, &a.TaskID, &a.TaskSource,
+			&a.StartedAt, &a.EndedAt,
+			&a.DurationSeconds, &a.CommitCount, &a.MergeSHA); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// queryTUICompliance reads gate compliance state for the TUI compliance view.
+func queryTUICompliance(ctx context.Context, db *sql.DB) (ComplianceViewModel, error) {
+	var vm ComplianceViewModel
+	if db == nil {
+		return vm, nil
+	}
+
+	// Read gate rules from compliance_rules table.
+	var hasRules bool
+	_ = db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='compliance_rules'`).Scan(&hasRules)
+	if hasRules {
+		rows, err := db.QueryContext(ctx,
+			`SELECT rule_id, COALESCE(rule_version, 0), COALESCE(description, ''), COALESCE(enforcement, 'blocking')
+			 FROM compliance_rules ORDER BY rule_id LIMIT 100`)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var r ComplianceRuleRow
+				_ = rows.Scan(&r.RuleID, &r.RuleVersion, &r.Description, &r.Enforcement)
+				vm.Rules = append(vm.Rules, r)
+			}
+		}
+	}
+
+	// Read recent compliance checks.
+	var hasChecks bool
+	_ = db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='compliance_checks'`).Scan(&hasChecks)
+	if hasChecks {
+		rows, err := db.QueryContext(ctx,
+			`SELECT check_id, COALESCE(assignment_id, ''), COALESCE(session_id, ''),
+			        rule_id, result, violation, checked_at, COALESCE(resolved_by, '')
+			 FROM compliance_checks ORDER BY checked_at DESC LIMIT 50`)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var c ComplianceCheckRow
+				_ = rows.Scan(&c.CheckID, &c.AssignmentID, &c.SessionID,
+					&c.RuleID, &c.Result, &c.Violation, &c.CheckedAt, &c.ResolvedBy)
+				if c.Violation {
+					vm.Violations++
+				}
+				vm.Checks = append(vm.Checks, c)
+			}
+		}
+	}
+
+	return vm, nil
 }

@@ -22,29 +22,33 @@ type SessionListResponse struct {
 
 // SessionRow is a single session in the sessions list.
 type SessionRow struct {
-	SessionID  string     `json:"session_id"`
-	AgentID    string     `json:"agent_id"`
-	Mode       string     `json:"mode"`
-	Status     string     `json:"status"`
-	StartedAt  time.Time  `json:"started_at"`
-	LastSeenAt time.Time  `json:"last_seen_at"`
-	EndedAt    *time.Time `json:"ended_at,omitempty"`
-	EndReason  string     `json:"end_reason,omitempty"`
+	SessionID       string     `json:"session_id"`
+	AgentID         string     `json:"agent_id"`
+	Mode            string     `json:"mode"`
+	Status          string     `json:"status"`
+	TmuxSessionName string     `json:"tmux_session_name,omitempty"`
+	Checkpoint      string     `json:"checkpoint,omitempty"`
+	StartedAt       time.Time  `json:"started_at"`
+	LastSeenAt      time.Time  `json:"last_seen_at"`
+	EndedAt         *time.Time `json:"ended_at,omitempty"`
+	EndReason       string     `json:"end_reason,omitempty"`
 }
 
 // SessionDetailResponse is the response for GET /api/v1/dashboard/sessions/{id}.
 type SessionDetailResponse struct {
-	SessionID     string              `json:"session_id"`
-	AgentID       string              `json:"agent_id"`
-	Mode          string              `json:"mode"`
-	Status        string              `json:"status"`
-	StartedAt     time.Time           `json:"started_at"`
-	LastSeenAt    time.Time           `json:"last_seen_at"`
-	EndedAt       *time.Time          `json:"ended_at,omitempty"`
-	EndReason     string              `json:"end_reason,omitempty"`
-	Assignments   []AssignmentSummary `json:"assignments"`
-	SchemaVersion string              `json:"schema_version"`
-	GeneratedAt   time.Time           `json:"generated_at"`
+	SessionID       string              `json:"session_id"`
+	AgentID         string              `json:"agent_id"`
+	Mode            string              `json:"mode"`
+	Status          string              `json:"status"`
+	TmuxSessionName string              `json:"tmux_session_name,omitempty"`
+	Checkpoint      string              `json:"checkpoint,omitempty"`
+	StartedAt       time.Time           `json:"started_at"`
+	LastSeenAt      time.Time           `json:"last_seen_at"`
+	EndedAt         *time.Time          `json:"ended_at,omitempty"`
+	EndReason       string              `json:"end_reason,omitempty"`
+	Assignments     []AssignmentSummary `json:"assignments"`
+	SchemaVersion   string              `json:"schema_version"`
+	GeneratedAt     time.Time           `json:"generated_at"`
 }
 
 func (h *Handler) handleSessions(w http.ResponseWriter, r *http.Request) {
@@ -100,17 +104,19 @@ func (h *Handler) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, SessionDetailResponse{
-		SessionID:     session.SessionID,
-		AgentID:       session.AgentID,
-		Mode:          session.Mode,
-		Status:        session.Status,
-		StartedAt:     session.StartedAt,
-		LastSeenAt:    session.LastSeenAt,
-		EndedAt:       session.EndedAt,
-		EndReason:     session.EndReason,
-		Assignments:   assignments,
-		SchemaVersion: SchemaVersionV1,
-		GeneratedAt:   time.Now().UTC(),
+		SessionID:       session.SessionID,
+		AgentID:         session.AgentID,
+		Mode:            session.Mode,
+		Status:          session.Status,
+		TmuxSessionName: session.TmuxSessionName,
+		Checkpoint:      session.Checkpoint,
+		StartedAt:       session.StartedAt,
+		LastSeenAt:      session.LastSeenAt,
+		EndedAt:         session.EndedAt,
+		EndReason:       session.EndReason,
+		Assignments:     assignments,
+		SchemaVersion:   SchemaVersionV1,
+		GeneratedAt:     time.Now().UTC(),
 	})
 }
 
@@ -734,4 +740,23 @@ func queryRepoConfig(_ *sql.DB, _ string) map[string]string {
 		"coderabbit_opt_in": "false",
 		"branch_cleanup":    "true",
 	}
+}
+
+// handleArchives serves GET /api/v1/dashboard/archives (§2.8).
+func (h *Handler) handleArchives(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "")
+		return
+	}
+	archives, err := querySessionArchives(r.Context(), h.db, queryIntParam(r, "limit", 50))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "query archives: "+err.Error(), "archives_query_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"archives":       archives,
+		"total":          len(archives),
+		"schema_version": SchemaVersionV1,
+		"generated_at":   time.Now().UTC(),
+	})
 }

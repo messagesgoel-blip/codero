@@ -44,12 +44,14 @@ type GatePill struct {
 
 // ActivityEvent is one item in the activity feed.
 type ActivityEvent struct {
-	Seq       int64     `json:"seq"`
-	Repo      string    `json:"repo"`
-	Branch    string    `json:"branch"`
-	EventType string    `json:"event_type"`
-	Payload   string    `json:"payload"`
-	CreatedAt time.Time `json:"created_at"`
+	Seq          int64     `json:"seq"`
+	Repo         string    `json:"repo"`
+	Branch       string    `json:"branch"`
+	EventType    string    `json:"event_type"`
+	Payload      string    `json:"payload"`
+	CreatedAt    time.Time `json:"created_at"`
+	SessionID    string    `json:"session_id,omitempty"`
+	AssignmentID string    `json:"assignment_id,omitempty"`
 }
 
 // BlockReason is one ranked blocker in the block-reasons list.
