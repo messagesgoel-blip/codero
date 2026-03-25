@@ -58,11 +58,14 @@ func (e *Engine) Run(ctx context.Context) Report {
 		checks = append(checks, result)
 	}
 
+	EnforceFindingsCap(checks)
+
 	summary := ComputeSummary(checks, e.cfg.Profile, e.cfg.AllowRequiredSkip)
 	return Report{
-		Summary: summary,
-		Checks:  checks,
-		RunAt:   time.Now().UTC(),
+		Summary:    summary,
+		Checks:     checks,
+		RunAt:      time.Now().UTC(),
+		Invocation: e.cfg.Invocation,
 	}
 }
 
