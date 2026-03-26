@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
@@ -22,45 +21,21 @@ func setupPushTest(t *testing.T) (string, string) {
 
 	// Create bare remote
 	bareDir := filepath.Join(t.TempDir(), "remote.git")
-	if _, err := git.PlainInit(bareDir, true); err != nil {
-		t.Fatalf("bare init: %v", err)
-	}
+	runGitRaw(t, "init", "--bare", "--initial-branch", testBranch, bareDir)
 
 	// Create working clone
 	cloneDir := filepath.Join(t.TempDir(), "clone")
-	repo, err := git.PlainInit(cloneDir, false)
-	if err != nil {
-		t.Fatalf("clone init: %v", err)
-	}
-
-	// Add remote
-	_, err = repo.CreateRemote(&config.RemoteConfig{
-		Name: "origin",
-		URLs: []string{bareDir},
-	})
-	if err != nil {
-		t.Fatalf("create remote: %v", err)
-	}
+	runGitRaw(t, "init", "--initial-branch", testBranch, cloneDir)
+	runGit(t, cloneDir, "remote", "add", "origin", bareDir)
 
 	// Create initial commit
-	wt, _ := repo.Worktree()
 	os.WriteFile(filepath.Join(cloneDir, "README.md"), []byte("hello"), 0644)
-	wt.Add("README.md")
-	wt.Commit("initial", &git.CommitOptions{
-		Author: &object.Signature{Name: "test", Email: "t@t.com", When: time.Now()},
-	})
+	setGitConfig(t, cloneDir)
+	runGit(t, cloneDir, "add", "README.md")
+	runGit(t, cloneDir, "commit", "-m", "initial")
 
 	// Push initial commit to set up remote tracking
-	err = repo.Push(&git.PushOptions{
-		RemoteName: "origin",
-		RefSpecs:   []config.RefSpec{"refs/heads/" + testBranch + ":refs/heads/" + testBranch},
-	})
-	if err != nil {
-		t.Fatalf("initial push: %v", err)
-	}
-
-	// Set git identity for shell operations (rebase needs it)
-	setGitConfig(t, cloneDir)
+	runGit(t, cloneDir, "push", "-u", "origin", testBranch)
 
 	return cloneDir, bareDir
 }
@@ -71,10 +46,7 @@ func setGitConfig(t *testing.T, dir string) {
 		{"user.email", "t@t.com"},
 		{"user.name", "test"},
 	} {
-		cmd := exec.Command("git", "-C", dir, "config", kv[0], kv[1])
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git config %s: %s: %v", kv[0], out, err)
-		}
+		runGit(t, dir, "config", kv[0], kv[1])
 	}
 }
 
@@ -117,6 +89,7 @@ func TestPush_RebaseRetry(t *testing.T) {
 	// Create a second clone via shell git
 	clone2Dir := filepath.Join(t.TempDir(), "clone2")
 	cmd := exec.Command("git", "clone", "--branch", testBranch, bareDir, clone2Dir)
+	cmd.Env = sanitizedGitEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("clone2: %s: %v", out, err)
 	}
@@ -161,6 +134,7 @@ func TestPush_ConflictError(t *testing.T) {
 	// Create a second clone via shell git
 	clone2Dir := filepath.Join(t.TempDir(), "clone2")
 	cmd := exec.Command("git", "clone", "--branch", testBranch, bareDir, clone2Dir)
+	cmd.Env = sanitizedGitEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("clone2: %s: %v", out, err)
 	}
@@ -196,10 +170,40 @@ func TestPush_ConflictError(t *testing.T) {
 	}
 }
 
+func sanitizedGitEnv() []string {
+	deny := map[string]struct{}{
+		"GIT_DIR":                          {},
+		"GIT_WORK_TREE":                    {},
+		"GIT_INDEX_FILE":                   {},
+		"GIT_COMMON_DIR":                   {},
+		"GIT_ALTERNATE_OBJECT_DIRECTORIES": {},
+		"GIT_OBJECT_DIRECTORY":             {},
+	}
+	env := make([]string, 0, len(os.Environ()))
+	for _, kv := range os.Environ() {
+		key := strings.SplitN(kv, "=", 2)[0]
+		if _, blocked := deny[key]; blocked {
+			continue
+		}
+		env = append(env, kv)
+	}
+	return env
+}
+
+func runGitRaw(t *testing.T, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Env = sanitizedGitEnv()
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %s: %v", strings.Join(args, " "), out, err)
+	}
+}
+
 // runGit is a test helper that runs a git command in the given directory.
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = sanitizedGitEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %s: %s: %v", strings.Join(args, " "), out, err)
 	}
