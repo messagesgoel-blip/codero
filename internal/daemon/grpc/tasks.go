@@ -40,7 +40,7 @@ func (t *taskService) IngestTask(ctx context.Context, req *daemonv1.IngestTaskRe
 	// Record task as a queued branch_state entry.
 	res, err := t.server.rawDB.ExecContext(ctx, `
 		INSERT INTO branch_states (id, repo, branch, task_id, state, updated_at)
-		VALUES (?, ?, ?, ?, 'queued', datetime('now'))
+		VALUES (?, ?, ?, ?, 'submitted', datetime('now'))
 		ON CONFLICT(repo, branch) DO NOTHING`,
 		uuid.NewString(), req.Repo, branch, req.TaskId)
 	if err != nil {

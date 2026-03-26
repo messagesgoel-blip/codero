@@ -61,12 +61,37 @@ func (e *Engine) Run(ctx context.Context) Report {
 	EnforceFindingsCap(checks)
 
 	summary := ComputeSummary(checks, e.cfg.Profile, e.cfg.AllowRequiredSkip)
-	return Report{
+	report := Report{
 		Summary:    summary,
 		Checks:     checks,
 		RunAt:      time.Now().UTC(),
 		Invocation: e.cfg.Invocation,
 	}
+	return FinalizeReport(report)
+}
+
+// RunPipeline executes all checks inside the given worktree and writes
+// gate-substatus.env to the pipeline heartbeat path.
+func (e *Engine) RunPipeline(ctx context.Context, worktree string, stagedFiles []string) (*Report, error) {
+	if strings.TrimSpace(worktree) == "" {
+		return nil, fmt.Errorf("run pipeline: worktree is required")
+	}
+
+	cfg := e.cfg
+	cfg.RepoPath = worktree
+	if stagedFiles != nil {
+		cfg.StagedFiles = stagedFiles
+	}
+	if strings.TrimSpace(cfg.Invocation) == "" || cfg.Invocation == "hook" {
+		cfg.Invocation = "codero"
+	}
+
+	report := NewEngine(cfg).Run(ctx)
+	substatusPath := filepath.Join(worktree, HeartbeatSubstatusPath)
+	if err := WriteSubstatus(substatusPath, report); err != nil {
+		return &report, fmt.Errorf("run pipeline: write substatus: %w", err)
+	}
+	return &report, nil
 }
 
 // stagedFiles returns the list of staged files for this engine run.

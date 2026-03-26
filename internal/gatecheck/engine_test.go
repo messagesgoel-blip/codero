@@ -5,8 +5,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/codero/codero/internal/gatecheck"
 )
@@ -184,6 +186,29 @@ func writeFile(t *testing.T, dir, rel, content string) string {
 	return abs
 }
 
+func writeExecutable(t *testing.T, dir, rel, content string) string {
+	t.Helper()
+	abs := filepath.Join(dir, rel)
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(abs, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return abs
+}
+
+func findCheck(t *testing.T, report gatecheck.Report, id string) gatecheck.CheckResult {
+	t.Helper()
+	for _, c := range report.Checks {
+		if c.ID == id {
+			return c
+		}
+	}
+	t.Fatalf("check %q not found", id)
+	return gatecheck.CheckResult{}
+}
+
 func TestEngine_ProfileOff_MinimalChecks(t *testing.T) {
 	dir := makeRepo(t)
 	writeFile(t, dir, "hello.go", "package main\n")
@@ -211,6 +236,193 @@ func TestEngine_ProfileOff_MinimalChecks(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestRunPipeline_GitleaksFailBlocked(t *testing.T) {
+	dir := makeRepo(t)
+	writeFile(t, dir, "main.go", "package main\n\nfunc main() {}\n")
+	mustRun(t, dir, "git", "add", "main.go")
+
+	tool := writeExecutable(t, dir, "bin/gitleaks", "#!/bin/sh\necho leak-found\nexit 1\n")
+
+	cfg := gatecheck.EngineConfig{
+		Profile:      gatecheck.ProfilePortable,
+		GitleaksPath: tool,
+		Invocation:   "codero",
+	}
+	engine := gatecheck.NewEngine(cfg)
+
+	report, err := engine.RunPipeline(context.Background(), dir, nil)
+	if err != nil {
+		t.Fatalf("RunPipeline: %v", err)
+	}
+	if report.Result != gatecheck.StatusFail {
+		t.Errorf("result: got %q, want fail", report.Result)
+	}
+	if !report.Blocked {
+		t.Error("expected blocked=true on gitleaks failure")
+	}
+
+	check := findCheck(t, *report, "gitleaks-staged")
+	if check.Status != gatecheck.StatusFail {
+		t.Errorf("gitleaks status: got %q, want fail", check.Status)
+	}
+
+	substatus := filepath.Join(dir, gatecheck.HeartbeatSubstatusPath)
+	if _, err := os.Stat(substatus); err != nil {
+		t.Fatalf("expected substatus at %s: %v", substatus, err)
+	}
+}
+
+func TestRunPipeline_CleanPass(t *testing.T) {
+	dir := makeRepo(t)
+	writeFile(t, dir, "main.go", "package main\n\nfunc main() {}\n")
+	mustRun(t, dir, "git", "add", "main.go")
+
+	tool := writeExecutable(t, dir, "bin/gitleaks", "#!/bin/sh\nexit 0\n")
+
+	cfg := gatecheck.EngineConfig{
+		Profile:      gatecheck.ProfilePortable,
+		GitleaksPath: tool,
+		Invocation:   "codero",
+	}
+	engine := gatecheck.NewEngine(cfg)
+
+	report, err := engine.RunPipeline(context.Background(), dir, nil)
+	if err != nil {
+		t.Fatalf("RunPipeline: %v", err)
+	}
+	if report.Result != gatecheck.StatusPass {
+		t.Errorf("result: got %q, want pass", report.Result)
+	}
+	if report.Blocked {
+		t.Error("expected blocked=false on clean pass")
+	}
+}
+
+func TestRunPipeline_DisabledCheckShowsSkip(t *testing.T) {
+	dir := makeRepo(t)
+	writeFile(t, dir, "main.go", "package main\n\nfunc main() {}\n")
+	mustRun(t, dir, "git", "add", "main.go")
+
+	tool := writeExecutable(t, dir, "bin/gitleaks", "#!/bin/sh\nexit 1\n")
+
+	cfg := gatecheck.EngineConfig{
+		Profile:      gatecheck.ProfileOff,
+		GitleaksPath: tool,
+		Invocation:   "codero",
+	}
+	engine := gatecheck.NewEngine(cfg)
+
+	report, err := engine.RunPipeline(context.Background(), dir, nil)
+	if err != nil {
+		t.Fatalf("RunPipeline: %v", err)
+	}
+	check := findCheck(t, *report, "gitleaks-staged")
+	if check.Status != gatecheck.StatusSkip {
+		t.Errorf("gitleaks status: got %q, want skip", check.Status)
+	}
+}
+
+func TestRunPipeline_FindingsTruncated(t *testing.T) {
+	dir := makeRepo(t)
+	writeFile(t, dir, "main.go", "package main\n\nfunc main() {}\n")
+	mustRun(t, dir, "git", "add", "main.go")
+
+	var b strings.Builder
+	for i := 0; i < 75; i++ {
+		b.WriteString("finding ")
+		b.WriteString(strings.Repeat("x", 3))
+		b.WriteString("\n")
+	}
+	script := "#!/bin/sh\ncat <<'EOF'\n" + b.String() + "EOF\nexit 1\n"
+	tool := writeExecutable(t, dir, "bin/gitleaks", script)
+
+	cfg := gatecheck.EngineConfig{
+		Profile:      gatecheck.ProfilePortable,
+		GitleaksPath: tool,
+		Invocation:   "codero",
+	}
+	engine := gatecheck.NewEngine(cfg)
+
+	report, err := engine.RunPipeline(context.Background(), dir, nil)
+	if err != nil {
+		t.Fatalf("RunPipeline: %v", err)
+	}
+	check := findCheck(t, *report, "gitleaks-staged")
+	if check.FindingsCount != 75 {
+		t.Errorf("findings_count: got %d, want 75", check.FindingsCount)
+	}
+	if !check.Truncated {
+		t.Error("expected truncated=true for findings > 50")
+	}
+	if len(check.Findings) != gatecheck.MaxFindingsPerCheck {
+		t.Errorf("findings length: got %d, want %d", len(check.Findings), gatecheck.MaxFindingsPerCheck)
+	}
+}
+
+func TestRunPipeline_WritesSubstatusEnv(t *testing.T) {
+	dir := makeRepo(t)
+	writeFile(t, dir, "main.go", "package main\n\nfunc main() {}\n")
+	mustRun(t, dir, "git", "add", "main.go")
+
+	tool := writeExecutable(t, dir, "bin/gitleaks", "#!/bin/sh\nexit 0\n")
+
+	cfg := gatecheck.EngineConfig{
+		Profile:      gatecheck.ProfilePortable,
+		GitleaksPath: tool,
+	}
+	engine := gatecheck.NewEngine(cfg)
+
+	report, err := engine.RunPipeline(context.Background(), dir, nil)
+	if err != nil {
+		t.Fatalf("RunPipeline: %v", err)
+	}
+
+	substatusPath := filepath.Join(dir, gatecheck.HeartbeatSubstatusPath)
+	data, err := os.ReadFile(substatusPath)
+	if err != nil {
+		t.Fatalf("read substatus: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	fields := make(map[string]string, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			t.Fatalf("invalid env line: %q", line)
+		}
+		fields[parts[0]] = parts[1]
+	}
+
+	check := findCheck(t, *report, "file-size")
+	key := strings.ToUpper(strings.ReplaceAll(check.ID, "-", "_"))
+
+	assertField := func(key, want string) {
+		got, ok := fields[key]
+		if !ok {
+			t.Fatalf("missing %s in substatus env", key)
+		}
+		if got != want {
+			t.Fatalf("%s: got %q, want %q", key, got, want)
+		}
+	}
+
+	assertField("CODERO_GATE_RESULT", string(report.Result))
+	assertField("CODERO_GATE_BLOCKED", strconv.FormatBool(report.Blocked))
+	assertField("CODERO_GATE_FINDINGS_COUNT", strconv.Itoa(report.TotalFindings))
+	assertField("CODERO_GATE_DURATION_MS", strconv.FormatInt(report.DurationMS, 10))
+	assertField("CODERO_GATE_INVOCATION", "codero")
+	assertField("CODERO_GATE_TIMESTAMP", report.RunAt.Format(time.RFC3339))
+
+	assertField("CODERO_CHECK_"+key+"_STATUS", string(check.Status))
+	assertField("CODERO_CHECK_"+key+"_DURATION_MS", strconv.FormatInt(check.DurationMS, 10))
+	assertField("CODERO_CHECK_"+key+"_FINDINGS_COUNT", strconv.Itoa(check.FindingsCount))
+	assertField("CODERO_CHECK_"+key+"_EXIT_CODE", strconv.Itoa(check.ExitCode))
 }
 
 func TestEngine_MissingTool_GitleaksDisabled(t *testing.T) {

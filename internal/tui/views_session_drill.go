@@ -25,6 +25,7 @@ type SessionDetail struct {
 	EndedAt       *time.Time
 	EndReason     string
 	Assignments   []SessionAssignmentRow
+	Timeline      []SessionTimelineStep
 	GateSummary   string
 	FeedbackCount int
 	PRNumber      int
@@ -38,8 +39,16 @@ type SessionAssignmentRow struct {
 	TaskID       string
 	State        string
 	Substatus    string
+	Version      int
 	StartedAt    time.Time
 	EndedAt      *time.Time
+}
+
+// SessionTimelineStep represents one lifecycle checkpoint in the drill-down.
+type SessionTimelineStep struct {
+	Checkpoint string
+	Timestamp  time.Time
+	State      string
 }
 
 // sessionDrillMsg delivers a SessionDetail to the TUI.
@@ -102,6 +111,24 @@ func (p *SessionDrillPane) refreshViewport() {
 		sb.WriteString(fmt.Sprintf("  Ended:      %s\n", p.theme.Muted.Render(d.EndedAt.Format(time.RFC3339))))
 		sb.WriteString(fmt.Sprintf("  Reason:     %s\n", p.theme.Base.Render(d.EndReason)))
 	}
+	sb.WriteString(p.theme.Muted.Render("\n  ── Timeline ──") + "\n")
+	timeline := d.Timeline
+	if len(timeline) == 0 {
+		timeline = buildSessionTimeline(d)
+	}
+	for _, step := range timeline {
+		sb.WriteString("  ")
+		sb.WriteString(p.timelineMarkerStyle(step.State).Render(stepMarker(step.State)))
+		sb.WriteString(" ")
+		if !step.Timestamp.IsZero() {
+			sb.WriteString(p.theme.Muted.Render(step.Timestamp.Format(time.RFC3339)))
+		} else {
+			sb.WriteString(p.theme.Muted.Render("—"))
+		}
+		sb.WriteString(" ")
+		sb.WriteString(p.timelineStateStyle(step.State).Render(step.Checkpoint))
+		sb.WriteString("\n")
+	}
 
 	// Assignments
 	sb.WriteString(p.theme.Muted.Render("\n  ── Assignments ──") + "\n")
@@ -113,8 +140,8 @@ func (p *SessionDrillPane) refreshViewport() {
 			p.theme.Accent.Render(a.AssignmentID),
 			p.theme.Base.Render(a.Repo),
 			p.theme.Base.Render(a.Branch)))
-		sb.WriteString(fmt.Sprintf("      Task: %s  State: %s  Substatus: %s\n",
-			a.TaskID, p.statusStyle(a.State).Render(a.State), a.Substatus))
+		sb.WriteString(fmt.Sprintf("      Task: %s  State: %s  Substatus: %s  Version: %d\n",
+			a.TaskID, p.statusStyle(a.State).Render(a.State), a.Substatus, a.Version))
 	}
 
 	// Gate / PR summary
@@ -143,14 +170,113 @@ func (p SessionDrillPane) statusStyle(s string) lipgloss.Style {
 }
 
 func (p SessionDrillPane) checkpointStyle(cp string) lipgloss.Style {
-	ck := session.Checkpoint(cp)
+	normalized := strings.ToUpper(strings.TrimSpace(cp))
+	ck := session.Checkpoint(normalized)
 	if ck.IsTerminal() {
 		return p.theme.Fail
 	}
-	if cp == "" || cp == string(session.CheckpointLaunched) {
+	if normalized == "" || normalized == string(session.CheckpointLaunched) {
 		return p.theme.Muted
 	}
 	return p.theme.Running
+}
+
+func (p SessionDrillPane) timelineMarkerStyle(state string) lipgloss.Style {
+	switch state {
+	case "current":
+		return p.theme.Warning
+	case "done":
+		return p.theme.Pass
+	default:
+		return p.theme.Muted
+	}
+}
+
+func (p SessionDrillPane) timelineStateStyle(state string) lipgloss.Style {
+	switch state {
+	case "current":
+		return p.theme.Warning.Bold(true)
+	case "done":
+		return p.theme.Pass
+	default:
+		return p.theme.Disabled
+	}
+}
+
+func stepMarker(state string) string {
+	switch state {
+	case "current":
+		return "▶"
+	case "done":
+		return "✓"
+	default:
+		return "·"
+	}
+}
+
+func buildSessionTimeline(d *SessionDetail) []SessionTimelineStep {
+	stages := []string{
+		session.CheckpointSubmitted.String(),
+		session.CheckpointGating.String(),
+		session.CheckpointCommitted.String(),
+		session.CheckpointPushed.String(),
+		session.CheckpointPRActive.String(),
+		session.CheckpointMonitoring.String(),
+		session.CheckpointMergeReady.String(),
+		session.CheckpointMerged.String(),
+	}
+	current := strings.ToUpper(strings.TrimSpace(d.Checkpoint))
+	if current == "" {
+		current = session.CheckpointSubmitted.String()
+	}
+	currentIdx := 0
+	for i, stage := range stages {
+		if stage == current {
+			currentIdx = i
+			break
+		}
+	}
+	timeline := make([]SessionTimelineStep, 0, len(stages))
+	var base time.Time
+	switch {
+	case !d.StartedAt.IsZero():
+		base = d.StartedAt
+	case !d.LastSeenAt.IsZero():
+		base = d.LastSeenAt
+	default:
+		base = time.Now().UTC()
+	}
+	var currentTime time.Time
+	if d.EndedAt != nil {
+		currentTime = *d.EndedAt
+	} else if !d.LastSeenAt.IsZero() {
+		currentTime = d.LastSeenAt
+	} else {
+		currentTime = base
+	}
+	for i, stage := range stages {
+		step := SessionTimelineStep{Checkpoint: stage}
+		switch {
+		case i < currentIdx:
+			step.State = "done"
+			if currentIdx > 0 {
+				span := currentTime.Sub(base)
+				if span < 0 {
+					span = 0
+				}
+				step.Timestamp = base.Add(time.Duration(int64(span) * int64(i+1) / int64(currentIdx+1)))
+			} else {
+				step.Timestamp = base
+			}
+		case i == currentIdx:
+			step.State = "current"
+			step.Timestamp = currentTime
+		default:
+			step.State = "future"
+		}
+		timeline = append(timeline, step)
+	}
+	return timeline
 }
 
 func (p SessionDrillPane) View() string {

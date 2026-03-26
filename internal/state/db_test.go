@@ -92,7 +92,7 @@ func TestOpen_BranchStatesSchema(t *testing.T) {
 	// Insert a minimal row to verify all NOT NULL columns have defaults.
 	_, err := db.Unwrap().Exec(`
 		INSERT INTO branch_states (id, repo, branch, state)
-		VALUES ('test-uuid-1', 'acme/api', 'main', 'coding')
+		VALUES ('test-uuid-1', 'acme/api', 'main', 'submitted')
 	`)
 	if err != nil {
 		t.Fatalf("insert branch_state: %v", err)
@@ -137,8 +137,8 @@ func TestOpen_BranchStatesSchema(t *testing.T) {
 	if ownerSessionID != "" {
 		t.Errorf("owner_session_id default: got %q, want %q", ownerSessionID, "")
 	}
-	if state != "coding" {
-		t.Errorf("state: got %q, want %q", state, "coding")
+	if state != "submitted" {
+		t.Errorf("state: got %q, want %q", state, "submitted")
 	}
 }
 
@@ -148,7 +148,7 @@ func TestOpen_StateTransitionsSchema(t *testing.T) {
 	// Insert branch first (FK constraint).
 	_, err := db.Unwrap().Exec(`
 		INSERT INTO branch_states (id, repo, branch, state)
-		VALUES ('test-uuid-2', 'acme/api', 'feat/x', 'coding')
+		VALUES ('test-uuid-2', 'acme/api', 'feat/x', 'submitted')
 	`)
 	if err != nil {
 		t.Fatalf("insert branch_state: %v", err)
@@ -156,7 +156,7 @@ func TestOpen_StateTransitionsSchema(t *testing.T) {
 
 	_, err = db.Unwrap().Exec(`
 		INSERT INTO state_transitions (branch_state_id, from_state, to_state, trigger)
-		VALUES ('test-uuid-2', 'coding', 'queued_cli', 'codero-cli submit')
+		VALUES ('test-uuid-2', 'submitted', 'queued_cli', 'codero-cli submit')
 	`)
 	if err != nil {
 		t.Fatalf("insert state_transition: %v", err)
@@ -170,8 +170,8 @@ func TestOpen_StateTransitionsSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("select state_transition: %v", err)
 	}
-	if fromState != "coding" || toState != "queued_cli" || trigger != "codero-cli submit" {
-		t.Errorf("transition row: got (%q, %q, %q), want (coding, queued_cli, codero-cli submit)",
+	if fromState != "submitted" || toState != "queued_cli" || trigger != "codero-cli submit" {
+		t.Errorf("transition row: got (%q, %q, %q), want (submitted, queued_cli, codero-cli submit)",
 			fromState, toState, trigger)
 	}
 }
@@ -182,7 +182,7 @@ func TestOpen_ForeignKeyEnforced(t *testing.T) {
 	// Inserting a transition for a non-existent branch_state_id must fail.
 	_, err := db.Unwrap().Exec(`
 		INSERT INTO state_transitions (branch_state_id, from_state, to_state, trigger)
-		VALUES ('nonexistent-id', 'coding', 'queued_cli', 'test')
+		VALUES ('nonexistent-id', 'submitted', 'queued_cli', 'test')
 	`)
 	if err == nil {
 		t.Error("expected FK violation error, got nil")
@@ -367,7 +367,7 @@ func TestOpen_UniqueConstraint(t *testing.T) {
 	insert := func() error {
 		_, err := db.Unwrap().Exec(`
 			INSERT INTO branch_states (id, repo, branch, state)
-			VALUES ('id-' || hex(randomblob(8)), 'acme/api', 'main', 'coding')
+			VALUES ('id-' || hex(randomblob(8)), 'acme/api', 'main', 'submitted')
 		`)
 		return err
 	}
@@ -416,4 +416,105 @@ func TestOpen_CreatesParentDirectory(t *testing.T) {
 		t.Fatalf("Open with nested path: %v", err)
 	}
 	_ = db.Close()
+}
+
+func TestOpen_DeliveryPipelineColumns(t *testing.T) {
+	db := openTestDB(t)
+
+	// FK dependency: create a parent session.
+	_, err := db.Unwrap().Exec(`
+		INSERT INTO agent_sessions (session_id, agent_id, mode)
+		VALUES ('test-dp-sess', 'agent-1', 'coding')
+	`)
+	if err != nil {
+		t.Fatalf("insert agent_session: %v", err)
+	}
+
+	// --- Verify defaults: insert without new columns, check they get defaults ---
+	_, err = db.Unwrap().Exec(`
+		INSERT INTO agent_assignments (assignment_id, session_id, agent_id, repo, branch)
+		VALUES ('asgn-defaults', 'test-dp-sess', 'agent-1', 'acme/api', 'main')
+	`)
+	if err != nil {
+		t.Fatalf("insert assignment (defaults): %v", err)
+	}
+
+	var (
+		deliveryState  string
+		lastGateResult string
+		lastCommitSHA  string
+		revisionCount  int
+		lastSubmitAt   sql.NullTime
+		lastPushAt     sql.NullTime
+	)
+	err = db.Unwrap().QueryRow(`
+		SELECT delivery_state, last_submit_at, last_gate_result,
+		       last_commit_sha, last_push_at, revision_count
+		FROM agent_assignments WHERE assignment_id = 'asgn-defaults'
+	`).Scan(&deliveryState, &lastSubmitAt, &lastGateResult,
+		&lastCommitSHA, &lastPushAt, &revisionCount)
+	if err != nil {
+		t.Fatalf("select defaults: %v", err)
+	}
+	if deliveryState != "idle" {
+		t.Errorf("delivery_state default: got %q, want %q", deliveryState, "idle")
+	}
+	if lastGateResult != "" {
+		t.Errorf("last_gate_result default: got %q, want %q", lastGateResult, "")
+	}
+	if lastCommitSHA != "" {
+		t.Errorf("last_commit_sha default: got %q, want %q", lastCommitSHA, "")
+	}
+	if revisionCount != 0 {
+		t.Errorf("revision_count default: got %d, want %d", revisionCount, 0)
+	}
+	if lastSubmitAt.Valid {
+		t.Errorf("last_submit_at default: expected NULL, got %v", lastSubmitAt.Time)
+	}
+	if lastPushAt.Valid {
+		t.Errorf("last_push_at default: expected NULL, got %v", lastPushAt.Time)
+	}
+
+	// --- Verify explicit values round-trip ---
+	_, err = db.Unwrap().Exec(`
+		INSERT INTO agent_assignments
+			(assignment_id, session_id, agent_id, repo, branch,
+			 delivery_state, last_submit_at, last_gate_result,
+			 last_commit_sha, last_push_at, revision_count)
+		VALUES
+			('asgn-explicit', 'test-dp-sess', 'agent-1', 'acme/api', 'feat-x',
+			 'staging', '2025-01-15 10:30:00', 'pass',
+			 'abc123def456', '2025-01-15 10:31:00', 3)
+	`)
+	if err != nil {
+		t.Fatalf("insert assignment (explicit): %v", err)
+	}
+
+	err = db.Unwrap().QueryRow(`
+		SELECT delivery_state, last_submit_at, last_gate_result,
+		       last_commit_sha, last_push_at, revision_count
+		FROM agent_assignments WHERE assignment_id = 'asgn-explicit'
+	`).Scan(&deliveryState, &lastSubmitAt, &lastGateResult,
+		&lastCommitSHA, &lastPushAt, &revisionCount)
+	if err != nil {
+		t.Fatalf("select explicit: %v", err)
+	}
+	if deliveryState != "staging" {
+		t.Errorf("delivery_state: got %q, want %q", deliveryState, "staging")
+	}
+	if lastGateResult != "pass" {
+		t.Errorf("last_gate_result: got %q, want %q", lastGateResult, "pass")
+	}
+	if lastCommitSHA != "abc123def456" {
+		t.Errorf("last_commit_sha: got %q, want %q", lastCommitSHA, "abc123def456")
+	}
+	if revisionCount != 3 {
+		t.Errorf("revision_count: got %d, want %d", revisionCount, 3)
+	}
+	if !lastSubmitAt.Valid {
+		t.Error("last_submit_at: expected non-NULL")
+	}
+	if !lastPushAt.Valid {
+		t.Error("last_push_at: expected non-NULL")
+	}
 }

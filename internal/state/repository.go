@@ -135,7 +135,7 @@ func ListActiveBranches(db *DB) ([]BranchRecord, error) {
 		       queue_priority, submission_time, lease_id, lease_expires_at,
 		       created_at, updated_at
 		FROM branch_states
-		WHERE state IN ('coding','local_review','queued_cli','cli_reviewing','reviewed','merge_ready')
+		WHERE state IN ('submitted','waiting','queued_cli','cli_reviewing','review_approved','merge_ready')
 		ORDER BY updated_at ASC`
 
 	rows, err := db.sql.Query(q)
@@ -157,7 +157,7 @@ func ListExpiredSessions(db *DB, ttl time.Duration) ([]BranchRecord, error) {
 		       queue_priority, submission_time, lease_id, lease_expires_at,
 		       created_at, updated_at
 		FROM branch_states
-		WHERE state IN ('coding','local_review','queued_cli','cli_reviewing','reviewed','merge_ready')
+		WHERE state IN ('submitted','waiting','queued_cli','cli_reviewing','review_approved','merge_ready')
 		  AND owner_session_last_seen IS NOT NULL
 		  AND owner_session_last_seen < ?
 		ORDER BY owner_session_last_seen ASC`
@@ -199,7 +199,7 @@ func ListExpiredLeases(db *DB) ([]BranchRecord, error) {
 // The transition is rejected (ErrInvalidTransition) if not permitted by the canonical
 // state machine. The from-state is verified against the current DB record.
 func TransitionBranch(db *DB, id string, from, to State, trigger string) error {
-	if err := ValidateTransition(from, to); err != nil {
+	if err := validateBranchFSMTransition(from, to); err != nil {
 		return err
 	}
 
@@ -233,8 +233,8 @@ func TransitionBranch(db *DB, id string, from, to State, trigger string) error {
 
 	// Append audit record.
 	_, err = tx.Exec(
-		`INSERT INTO state_transitions (branch_state_id, from_state, to_state, trigger)
-		 VALUES (?, ?, ?, ?)`,
+		`INSERT INTO state_transitions (branch_state_id, from_state, to_state, trigger, created_at)
+		 VALUES (?, ?, ?, ?, datetime('now'))`,
 		id, string(from), string(to), trigger,
 	)
 	if err != nil {

@@ -94,8 +94,9 @@ function mapStateToClass(state) {
   /* Core lifecycle states */
   var m = {active:'active',waiting:'waiting',blocked:'blocked',completed:'completed',
            cancelled:'cancelled',lost:'lost',ended:'completed',
-           coding:'active',cli_reviewing:'active',reviewed:'completed',merge_ready:'completed',
-           paused:'waiting',queued_cli:'waiting',local_review:'active',queued_for_review:'waiting'};
+           submitted:'active',waiting:'waiting',queued_cli:'waiting',cli_reviewing:'active',
+           review_approved:'completed',merge_ready:'completed',merged:'completed',
+           blocked:'blocked',abandoned:'cancelled',expired:'waiting',stale:'blocked'};
   if (m[state]) return m[state];
   /* Assignment substatuses */
   if (state && state.indexOf('waiting_for') === 0) return 'waiting';
@@ -115,7 +116,7 @@ function severityChip(sev) {
 function statusChip(state) {
   if (!state) return '<span class="status-chip">\u2014</span>';
   var cls = mapStateToClass(state);
-  var dot = (state === 'active' || state === 'coding' || state === 'cli_reviewing')
+  var dot = (state === 'active' || state === 'submitted' || state === 'cli_reviewing')
     ? '<span class="pulse-dot animate" style="background:var(--status-active)"></span>' : '';
   return '<span class="status-chip ' + cls + '">' + dot + esc(state) + '</span>';
 }

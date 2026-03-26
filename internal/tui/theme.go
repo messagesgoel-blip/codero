@@ -190,15 +190,15 @@ func (t Theme) StateStyle(s state.State) lipgloss.Style {
 	switch s {
 	case state.StateMergeReady:
 		return t.Pass
-	case state.StateReviewed:
+	case state.StateReviewApproved:
 		return t.Accent
-	case state.StateCLIReviewing, state.StateLocalReview:
+	case state.StateCLIReviewing, state.StateWaiting:
 		return t.Running
-	case state.StateQueuedCLI, state.StatePaused:
+	case state.StateQueuedCLI, state.StateExpired:
 		return t.Warning
-	case state.StateBlocked, state.StateStaleBranch, state.StateAbandoned:
+	case state.StateBlocked, state.StateStale, state.StateAbandoned:
 		return t.Fail
-	case state.StateCoding:
+	case state.StateSubmitted:
 		return t.Base
 	default:
 		return t.Muted

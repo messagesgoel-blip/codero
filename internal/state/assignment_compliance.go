@@ -19,6 +19,7 @@ const (
 	RuleIDHeartbeatProgress       = "RULE-004"
 
 	AssignmentSubstatusInProgress                = "in_progress"
+	AssignmentSubstatusNeedsRevision             = "needs_revision"
 	AssignmentSubstatusWaitingForCI              = "waiting_for_ci"
 	AssignmentSubstatusWaitingForMergeApproval   = "waiting_for_merge_approval"
 	AssignmentSubstatusBlockedCredentialFailure  = "blocked_credential_failure"
@@ -120,6 +121,7 @@ var defaultAgentRuleDefinitions = map[string]agentRuleDefinition{
 
 var activeAssignmentSubstatusSet = map[string]struct{}{
 	AssignmentSubstatusInProgress:              {},
+	AssignmentSubstatusNeedsRevision:           {},
 	AssignmentSubstatusWaitingForCI:            {},
 	AssignmentSubstatusWaitingForMergeApproval: {},
 }
@@ -492,7 +494,7 @@ func evaluateRule001CompletionTx(ctx context.Context, tx *sql.Tx, assignment *Ag
 		return false, nil, fmt.Errorf("evaluate RULE-001: load branch %s/%s: %w", assignment.Repo, assignment.Branch, err)
 	}
 
-	pass := (branchState == string(StateMergeReady) || branchState == string(StateClosed)) &&
+	pass := (branchState == string(StateMergeReady) || branchState == string(StateMerged)) &&
 		approvedInt != 0 && ciGreenInt != 0 && pendingEvents == 0 && unresolvedThreads == 0
 	return pass, map[string]any{
 		"branch_state":       branchState,
@@ -511,7 +513,7 @@ func mergeGateReason(pass bool, branchState string, approved, ciGreen bool, pend
 	switch {
 	case branchState == "":
 		return "branch_not_found"
-	case branchState != string(StateMergeReady) && branchState != string(StateClosed):
+	case branchState != string(StateMergeReady) && branchState != string(StateMerged):
 		return "branch_not_merge_ready"
 	case !approved:
 		return "approval_missing"

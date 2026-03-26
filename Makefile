@@ -42,6 +42,9 @@ build:
 		exit 1; \
 	fi
 	go build -trimpath -ldflags "-X main.version=$(VERSION)" -o codero ./cmd/codero
+	@if [ -x "./scripts/sync-live-bin.sh" ]; then \
+		./scripts/sync-live-bin.sh ; \
+	fi
 
 run:
 	@echo "Starting codero daemon in development mode..."

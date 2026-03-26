@@ -15,6 +15,14 @@ import (
 	"github.com/google/uuid"
 )
 
+type mockTmuxChecker struct {
+	alive map[string]bool
+}
+
+func (m mockTmuxChecker) HasSession(_ context.Context, name string) bool {
+	return m.alive[name]
+}
+
 func setupExpiryDeps(t *testing.T) (*state.DB, *redislib.Client, *miniredis.Miniredis) {
 	t.Helper()
 
@@ -83,7 +91,7 @@ func TestExpiryWorker_SessionExpiry_Abandoned(t *testing.T) {
 	db, client, _ := setupExpiryDeps(t)
 
 	repo, branch := "owner/repo", "expired-session"
-	id := insertBranchWithState(t, db, repo, branch, state.StateCoding, 3, 0)
+	id := insertBranchWithState(t, db, repo, branch, state.StateSubmitted, 3, 0)
 
 	// Set last_seen far in the past (past SessionHeartbeatTTL).
 	pastTime := time.Now().Add(-scheduler.SessionHeartbeatTTL - 60*time.Second)
@@ -122,7 +130,7 @@ func TestExpiryWorker_SessionExpiry_SkipsRecent(t *testing.T) {
 	db, client, _ := setupExpiryDeps(t)
 
 	repo, branch := "owner/repo", "active-session"
-	id := insertBranchWithState(t, db, repo, branch, state.StateCoding, 3, 0)
+	id := insertBranchWithState(t, db, repo, branch, state.StateSubmitted, 3, 0)
 
 	// Set last_seen very recently.
 	setSessionLastSeen(t, db, id, time.Now())
@@ -135,8 +143,58 @@ func TestExpiryWorker_SessionExpiry_SkipsRecent(t *testing.T) {
 	worker.RunSessionExpiryCycle(ctx)
 
 	// State should remain unchanged.
-	if got := getBranchState(t, db, id); got != state.StateCoding {
-		t.Errorf("state: got %q, want %q (should not expire recent session)", got, state.StateCoding)
+	if got := getBranchState(t, db, id); got != state.StateSubmitted {
+		t.Errorf("state: got %q, want %q (should not expire recent session)", got, state.StateSubmitted)
+	}
+}
+
+func TestExpiryWorker_TmuxHeartbeatKeepsSessionAlive(t *testing.T) {
+	ctx := context.Background()
+	db, client, _ := setupExpiryDeps(t)
+
+	tmuxName := "codero-test-alive"
+	if err := state.RegisterAgentSession(ctx, db, "sess-tmux-alive", "agent-1", "agent", tmuxName); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	q := scheduler.NewQueue(client)
+	stream := delivery.NewStream(db, client)
+	worker := scheduler.NewExpiryWorker(db, q, stream)
+	worker.TmuxChecker = mockTmuxChecker{alive: map[string]bool{tmuxName: true}}
+
+	worker.RunSessionExpiryCycle(ctx)
+
+	sess, err := state.GetAgentSession(ctx, db, "sess-tmux-alive")
+	if err != nil {
+		t.Fatalf("GetAgentSession: %v", err)
+	}
+	if sess.EndedAt != nil {
+		t.Errorf("session should remain active, ended_at=%v", sess.EndedAt)
+	}
+}
+
+func TestExpiryWorker_TmuxHeartbeatMarksLost(t *testing.T) {
+	ctx := context.Background()
+	db, client, _ := setupExpiryDeps(t)
+
+	tmuxName := "codero-test-lost"
+	if err := state.RegisterAgentSession(ctx, db, "sess-tmux-lost", "agent-1", "agent", tmuxName); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	q := scheduler.NewQueue(client)
+	stream := delivery.NewStream(db, client)
+	worker := scheduler.NewExpiryWorker(db, q, stream)
+	worker.TmuxChecker = mockTmuxChecker{alive: map[string]bool{tmuxName: false}}
+
+	worker.RunSessionExpiryCycle(ctx)
+
+	sess, err := state.GetAgentSession(ctx, db, "sess-tmux-lost")
+	if err != nil {
+		t.Fatalf("GetAgentSession: %v", err)
+	}
+	if sess.EndReason != "lost" {
+		t.Errorf("end_reason: got %q, want lost", sess.EndReason)
 	}
 }
 

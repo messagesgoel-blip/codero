@@ -10,8 +10,8 @@ package state
 //   §2    Agent actions at each checkpoint
 //   §4.1  session_archives table
 //   §4.2  Archive trigger on terminal state
-//   SL-1  Exactly one archive per terminal session
-//   SL-2  Archives append-only
+//   SL-1  Archives append-only
+//   SL-2  Archives append-only (app-layer)
 //   SL-3  Archive atomic with terminal transition
 //   SL-4  Lazy assignment on first submit
 //   SL-5  Daemon infers repo/branch
@@ -27,6 +27,7 @@ package state
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"testing"
 
@@ -148,10 +149,10 @@ func TestSL_Section4_2_ArchiveTriggerOnTerminal(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// SL-1: Exactly one archive per terminal session
+// SL-1: Archive rows are append-only (multiple per session allowed)
 // ---------------------------------------------------------------------------
 
-func TestSL1_ExactlyOneArchivePerSession(t *testing.T) {
+func TestSL1_ArchivesAppendOnlyPerSession(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
 
@@ -174,12 +175,28 @@ func TestSL1_ExactlyOneArchivePerSession(t *testing.T) {
 		t.Errorf("archive session = %q, want sl1-sess", archive.SessionID)
 	}
 
-	// UNIQUE constraint prevents duplicate
-	_, err = db.sql.Exec(`INSERT INTO session_archives
-		(archive_id, session_id, agent_id, result, started_at, ended_at)
-		VALUES ('dup-id', 'sl1-sess', 'agent-1', 'ended', '2025-01-01', '2025-01-01')`)
-	if err == nil {
-		t.Error("expected UNIQUE constraint violation on duplicate session_id")
+	// Append-only: allow multiple rows per session (idempotent for crash recovery).
+	if err := ArchiveSession(ctx, db, "sl1-sess", "merged", "merge-sha-123"); err != nil {
+		t.Fatalf("archive merged: %v", err)
+	}
+	var count int
+	if err := db.sql.QueryRow(`SELECT COUNT(*) FROM session_archives WHERE session_id = ?`, "sl1-sess").Scan(&count); err != nil {
+		t.Fatalf("count archives: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("archive count: got %d, want 2", count)
+	}
+
+	var mergeCount int
+	if err := db.sql.QueryRow(`
+		SELECT COUNT(*) FROM session_archives
+		WHERE session_id = ? AND result = 'merged' AND merge_sha = 'merge-sha-123'`,
+		"sl1-sess",
+	).Scan(&mergeCount); err != nil {
+		t.Fatalf("count merged archives: %v", err)
+	}
+	if mergeCount != 1 {
+		t.Errorf("merged archive count: got %d, want 1", mergeCount)
 	}
 }
 
@@ -209,6 +226,39 @@ func TestSL2_ArchivesAppendOnly(t *testing.T) {
 	}
 	if archive.ArchiveID == "" {
 		t.Error("archive_id should be non-empty UUID")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SL-2b: Sessions without tasks archive NULL task fields
+// ---------------------------------------------------------------------------
+
+func TestSL2_SessionArchiveNullTaskFields(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+
+	if err := RegisterAgentSession(ctx, db, "sl2-null", "agent-1", "", ""); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if err := FinalizeAgentSession(ctx, db, "sl2-null", "agent-1", AgentSessionCompletion{
+		Status:    "ended",
+		Substatus: "terminal_finished",
+	}); err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+
+	var taskID, repo, branch sql.NullString
+	if err := db.sql.QueryRow(`
+		SELECT task_id, repo, branch
+		FROM session_archives
+		WHERE session_id = ?
+		ORDER BY archived_at DESC
+		LIMIT 1`, "sl2-null",
+	).Scan(&taskID, &repo, &branch); err != nil {
+		t.Fatalf("query archive: %v", err)
+	}
+	if taskID.Valid || repo.Valid || branch.Valid {
+		t.Errorf("expected NULL task fields, got task_id=%v repo=%v branch=%v", taskID, repo, branch)
 	}
 }
 

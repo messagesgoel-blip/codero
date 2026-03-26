@@ -480,7 +480,7 @@ func queryQueue(ctx context.Context, db *sql.DB) ([]QueueItem, error) {
 		SELECT id, repo, branch, state, queue_priority, owner_session_id,
 		       submission_time, created_at
 		FROM branch_states
-		WHERE state IN ('queued_cli', 'cli_reviewing', 'merge_ready', 'coding', 'local_review', 'reviewed')
+		WHERE state IN ('queued_cli', 'cli_reviewing', 'merge_ready', 'submitted', 'waiting', 'review_approved')
 		ORDER BY queue_priority DESC, created_at ASC`)
 	if err != nil {
 		return nil, err
@@ -511,7 +511,7 @@ func queryQueueStats(ctx context.Context, db *sql.DB) (pending, active, blocked,
 	err = db.QueryRowContext(ctx, `
 		SELECT
 			COALESCE(SUM(CASE WHEN state IN ('queued_cli', 'merge_ready') THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN state IN ('coding', 'local_review', 'cli_reviewing', 'reviewed') THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN state IN ('submitted', 'waiting', 'cli_reviewing', 'review_approved') THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN state = 'blocked' THEN 1 ELSE 0 END), 0),
 			COUNT(*)
 		FROM branch_states`).Scan(&pending, &active, &blocked, &total)
@@ -591,4 +591,79 @@ func querySessionArchives(ctx context.Context, db *sql.DB, limit int) ([]Archive
 		out = append(out, a)
 	}
 	return out, rows.Err()
+}
+
+// ─── Pipeline query (MIG-035) ─────────────────────────────────────────────
+
+func queryPipeline(ctx context.Context, db *sql.DB) ([]PipelineCard, error) {
+	hasSessions, err := tableExists(ctx, db, "agent_sessions")
+	if err != nil {
+		return nil, err
+	}
+	if !hasSessions {
+		return []PipelineCard{}, nil
+	}
+
+	hasAssignments, err := tableExists(ctx, db, "agent_assignments")
+	if err != nil {
+		return nil, err
+	}
+	if !hasAssignments {
+		return []PipelineCard{}, nil
+	}
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT s.session_id, s.agent_id, COALESCE(a.assignment_id, ''), COALESCE(a.task_id, ''),
+		       COALESCE(a.repo, ''), COALESCE(a.branch, ''), COALESCE(a.state, ''),
+		       COALESCE(a.assignment_substatus, ''), COALESCE(a.assignment_version, 0), a.started_at, s.last_seen_at
+		FROM agent_sessions s
+		LEFT JOIN agent_assignments a ON a.session_id = s.session_id AND a.ended_at IS NULL
+		WHERE s.ended_at IS NULL
+		ORDER BY s.started_at DESC
+		LIMIT 20`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []PipelineCard
+	for rows.Next() {
+		var card PipelineCard
+		var startedAt, updatedAt sql.NullTime
+		var version int
+		if err := rows.Scan(&card.SessionID, &card.AgentID, &card.AssignmentID, &card.TaskID, &card.Repo, &card.Branch, &card.State, &card.Substatus, &version, &startedAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		card.Checkpoint = pipelineCardStageLabel(card.Substatus, card.State)
+		card.Version = version
+		if startedAt.Valid {
+			card.StartedAt = startedAt.Time
+		}
+		if updatedAt.Valid {
+			card.UpdatedAt = updatedAt.Time
+		}
+		card.StageSec = pipelineCardDuration(card.StartedAt, card.UpdatedAt)
+		out = append(out, card)
+	}
+	if out == nil {
+		out = []PipelineCard{}
+	}
+	return out, rows.Err()
+}
+
+func deriveCheckpointFromSubstatus(substatus string) string {
+	switch substatus {
+	case "in_progress", "needs_revision":
+		return "GATING"
+	case "waiting_for_ci":
+		return "PUSHED"
+	case "waiting_for_merge_approval":
+		return "PR_ACTIVE"
+	case "terminal_finished", "terminal_waiting_comments", "terminal_waiting_next_task":
+		return "MERGED"
+	case "blocked_credential_failure", "blocked_merge_conflict", "blocked_external_dependency", "blocked_ci_failure", "blocked_policy":
+		return "MONITORING"
+	default:
+		return "SUBMITTED"
+	}
 }

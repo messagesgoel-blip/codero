@@ -15,6 +15,7 @@ import (
 	"github.com/codero/codero/internal/daemon"
 	daemongrpc "github.com/codero/codero/internal/daemon/grpc"
 	"github.com/codero/codero/internal/delivery"
+	deliverypipeline "github.com/codero/codero/internal/delivery_pipeline"
 	"github.com/codero/codero/internal/gate"
 	ghclient "github.com/codero/codero/internal/github"
 	loglib "github.com/codero/codero/internal/log"
@@ -23,6 +24,7 @@ import (
 	"github.com/codero/codero/internal/scheduler"
 	"github.com/codero/codero/internal/session"
 	"github.com/codero/codero/internal/state"
+	"github.com/codero/codero/internal/tmux"
 	"github.com/codero/codero/internal/webhook"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -71,6 +73,7 @@ func main() {
 		proveCmd(&configPath),
 		taskCmd(&configPath),
 		contextCmd(),
+		submitCmd(&configPath),
 	)
 
 	if err := root.Execute(); err != nil {
@@ -352,6 +355,7 @@ func daemonCmd(configPath *string) *cobra.Command {
 			}()
 
 			expiryWorker := scheduler.NewExpiryWorker(db, queue, stream)
+			expiryWorker.TmuxChecker = tmux.RealExecutor{}
 			reconciler := webhook.NewReconciler(db, gh, cfg.Repos, cfg.Webhook.Enabled)
 			if cfg.AutoMerge.Enabled {
 				reconciler.WithAutoMerge(gh, cfg.AutoMerge.Method)
@@ -377,6 +381,22 @@ func daemonCmd(configPath *string) *cobra.Command {
 				return err
 			}
 
+			pipeline := deliverypipeline.NewPipeline(deliverypipeline.PipelineDeps{
+				StateDB: db,
+				GitHub:  gh,
+			})
+			if err := pipeline.ClearStaleLocks(ctx); err != nil {
+				loglib.Warn("codero: delivery pipeline stale lock sweep failed",
+					loglib.FieldEventType, loglib.EventStartup,
+					loglib.FieldComponent, "daemon",
+					"error", err,
+				)
+			}
+			loglib.Info("codero: delivery pipeline initialized",
+				loglib.FieldEventType, loglib.EventStartup,
+				loglib.FieldComponent, "daemon",
+			)
+
 			// Create the gRPC daemon surface (Daemon Spec v2 §7).
 			grpcSrv := daemongrpc.NewServer(daemongrpc.ServerConfig{
 				DB:           db,
@@ -390,6 +410,7 @@ func daemonCmd(configPath *string) *cobra.Command {
 			obs := daemon.NewObservabilityServerWithGRPC(client, queue, slotCounter, db.Unwrap(),
 				cfg.APIServer.Addr, cfg.APIServer.ReadTimeout, cfg.APIServer.WriteTimeout,
 				cfg.DashboardBasePath, version, grpcSrv.GRPCServer())
+			obs.SetPipeline(pipeline)
 			obs.Start()
 			wg.Add(1)
 			go func() {
@@ -727,7 +748,7 @@ func autoRecordGateOutcomes(ctx context.Context, result gate.Result, repoPath, c
 	}
 }
 
-// registerCmd registers a branch for local review or queue submission.
+// registerCmd registers a branch for pre-commit waiting or queue submission.
 func registerCmd() *cobra.Command {
 	var (
 		branch    string
@@ -743,7 +764,7 @@ func registerCmd() *cobra.Command {
 
 This command:
 1. Records the branch in the local state store
-2. Transitions to local_review (default) or queued_cli (with --skip-local)
+2. Transitions to waiting (default) or queued_cli (with --skip-local)
 3. Enables tracking and scoring for dispatch
 
 If no branch is provided, uses the current git branch.`,
@@ -776,7 +797,7 @@ If no branch is provided, uses the current git branch.`,
 			}
 			defer db.Close()
 
-			targetState := state.StateLocalReview
+			targetState := state.StateWaiting
 			trigger := "codero-cli register"
 
 			if skipLocal {
@@ -789,7 +810,7 @@ If no branch is provided, uses the current git branch.`,
 				if errors.Is(err, state.ErrBranchNotFound) {
 					fmt.Printf("Branch %s/%s not found in state store.\n", repo, branch)
 					fmt.Println("Branches are typically registered via webhook or daemon submit.")
-					fmt.Println("For local_review, ensure the branch has been submitted first.")
+					fmt.Println("For waiting, ensure the branch has been submitted first.")
 					return fmt.Errorf("branch not registered")
 				}
 				return fmt.Errorf("check branch: %w", err)
@@ -808,7 +829,7 @@ If no branch is provided, uses the current git branch.`,
 			if skipLocal {
 				fmt.Println("Branch is in queue for review dispatch.")
 			} else {
-				fmt.Println("Branch is in local_review - run commit-gate before committing.")
+				fmt.Println("Branch is in waiting - run commit-gate before committing.")
 			}
 			return nil
 		},
@@ -816,7 +837,7 @@ If no branch is provided, uses the current git branch.`,
 
 	cmd.Flags().StringVarP(&repo, "repo", "R", "", "repository (owner/repo)")
 	cmd.Flags().IntVarP(&priority, "priority", "p", 10, "queue priority (0-20)")
-	cmd.Flags().BoolVar(&skipLocal, "skip-local", false, "skip local_review and go directly to queue")
+	cmd.Flags().BoolVar(&skipLocal, "skip-local", false, "skip waiting and go directly to queue")
 
 	return cmd
 }
@@ -846,6 +867,7 @@ func sessionRegisterCmd(configPath *string) *cobra.Command {
 		sessionID string
 		agentID   string
 		mode      string
+		tmuxName  string
 	)
 
 	cmd := &cobra.Command{
@@ -870,10 +892,21 @@ func sessionRegisterCmd(configPath *string) *cobra.Command {
 			if mode == "" {
 				mode = resolveSessionModeFromEnv("agent")
 			}
+			if tmuxName == "" {
+				tmuxName = os.Getenv("CODERO_TMUX_NAME")
+			}
 
-			secret, err := store.Register(cmd.Context(), sessionID, agentID, mode)
-			if err != nil {
-				return err
+			var (
+				secret      string
+				registerErr error
+			)
+			if tmuxName != "" {
+				secret, registerErr = store.RegisterWithTmux(cmd.Context(), sessionID, agentID, mode, tmuxName)
+			} else {
+				secret, registerErr = store.Register(cmd.Context(), sessionID, agentID, mode)
+			}
+			if registerErr != nil {
+				return registerErr
 			}
 			fmt.Printf("session_id: %s\n", sessionID)
 			fmt.Printf("heartbeat_secret: %s\n", secret)
@@ -884,6 +917,7 @@ func sessionRegisterCmd(configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&sessionID, "session-id", "", "session identifier (defaults to CODERO_SESSION_ID or auto-generated)")
 	cmd.Flags().StringVar(&agentID, "agent-id", "", "agent identifier (defaults to CODERO_AGENT_ID)")
 	cmd.Flags().StringVar(&mode, "mode", "", "session mode label (default: agent)")
+	cmd.Flags().StringVar(&tmuxName, "tmux-name", "", "tmux session name (optional)")
 
 	return cmd
 }

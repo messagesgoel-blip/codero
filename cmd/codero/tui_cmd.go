@@ -4,12 +4,16 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/codero/codero/internal/config"
 	"github.com/codero/codero/internal/state"
 	"github.com/codero/codero/internal/tui"
 	"github.com/spf13/cobra"
@@ -65,14 +69,11 @@ Examples:
 				repoPath = absPath
 			}
 
-			if intervalSec < 1 {
-				intervalSec = 5
-			}
-
 			cfgFile, err := loadConfig(*configPathForCmd(cmd))
 			if err != nil {
 				return fmt.Errorf("codero: config: %w", err)
 			}
+			interval := resolveTUIInterval(intervalSec)
 
 			if repoSlug == "" {
 				repoSlug = resolveTUIRepoSlug(repoPath, cfgFile.Repos)
@@ -94,16 +95,18 @@ Examples:
 
 			initialVM := tui.AdapterFromPath(repoPath)
 			cfg := tui.Config{
-				RepoPath:   repoPath,
-				Repo:       repoSlug,
-				Branch:     branchName,
-				Context:    cmd.Context(),
-				Interval:   time.Duration(intervalSec) * time.Second,
-				Theme:      theme,
-				WatchMode:  true,
-				InitialVM:  initialVM,
-				InitialTab: initialTab,
-				StateDB:    stateDB,
+				RepoPath:      repoPath,
+				Repo:          repoSlug,
+				Branch:        branchName,
+				Context:       cmd.Context(),
+				Interval:      interval,
+				Theme:         theme,
+				WatchMode:     true,
+				InitialVM:     initialVM,
+				InitialTab:    initialTab,
+				StateDB:       stateDB,
+				DaemonBaseURL: resolveDaemonBaseURL(cfgFile.APIServer.Addr),
+				SettingsDir:   filepath.Dir(cfgFile.DBPath),
 			}
 
 			opts := []tea.ProgramOption{tea.WithContext(cmd.Context())}
@@ -124,7 +127,7 @@ Examples:
 	cmd.Flags().StringVar(&themeName, "theme", "dark",
 		"UI theme: dark (default), light, system, dracula, vscode")
 	cmd.Flags().StringVar(&viewName, "view", "gate",
-		"review context for the assistant prompt: gate, logs, queue, events, output")
+		"review context for the assistant prompt: gate, logs, queue, events, overview, output")
 	cmd.Flags().BoolVar(&noAltScreen, "no-alt-screen", false,
 		"disable alt-screen mode (useful in tmux or CI-adjacent terminals)")
 
@@ -199,6 +202,32 @@ func resolveTheme(name string) tui.Theme {
 	}
 }
 
+func resolveTUIInterval(flagSeconds int) time.Duration {
+	if v := strings.TrimSpace(os.Getenv("CODERO_TUI_POLL_INTERVAL")); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return time.Duration(n) * time.Second
+		}
+	}
+	if flagSeconds < 1 {
+		flagSeconds = 5
+	}
+	return time.Duration(flagSeconds) * time.Second
+}
+
+func resolveDaemonBaseURL(addr string) string {
+	host, port, err := config.ParseAPIServerAddr(addr)
+	if err != nil {
+		return ""
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, strconv.Itoa(port))
+}
+
 // resolveInitialTab converts a view name to the corresponding tui.Tab constant.
 func resolveInitialTab(view string) tui.Tab {
 	switch strings.ToLower(strings.TrimSpace(view)) {
@@ -207,6 +236,8 @@ func resolveInitialTab(view string) tui.Tab {
 	case "queue":
 		return tui.TabQueue
 	case "output":
+		return tui.TabOutput
+	case "overview", "mission", "control":
 		return tui.TabOutput
 	default:
 		// "logs", "gate", "findings", and unknown values default to the primary

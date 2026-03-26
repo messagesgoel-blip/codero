@@ -3,7 +3,9 @@ package webhook_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,6 +37,63 @@ func insertBranch(t *testing.T, db *state.DB, repo, branch string, st state.Stat
 	return id
 }
 
+func insertAssignment(t *testing.T, db *state.DB, repo, branch, worktree, substatus string) *state.AgentAssignment {
+	t.Helper()
+	ctx := context.Background()
+	sessionID := uuid.New().String()
+	agentID := "agent-" + sessionID[:8]
+	if err := state.RegisterAgentSession(ctx, db, sessionID, agentID, "", ""); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	assignment := &state.AgentAssignment{
+		ID:        uuid.New().String(),
+		SessionID: sessionID,
+		AgentID:   agentID,
+		Repo:      repo,
+		Branch:    branch,
+		Worktree:  worktree,
+		TaskID:    "TASK-" + sessionID[:8],
+		Substatus: substatus,
+	}
+	if err := state.AttachAgentAssignment(ctx, db, assignment); err != nil {
+		t.Fatalf("AttachAgentAssignment: %v", err)
+	}
+	return assignment
+}
+
+func insertLink(t *testing.T, db *state.DB, assignment *state.AgentAssignment) {
+	t.Helper()
+	ctx := context.Background()
+	link := &state.GitHubLink{
+		TaskID:       assignment.TaskID,
+		RepoFullName: assignment.Repo,
+		BranchName:   assignment.Branch,
+		PRNumber:     1,
+		PRState:      "open",
+	}
+	if err := state.UpsertGitHubLink(ctx, db, link); err != nil {
+		t.Fatalf("UpsertGitHubLink: %v", err)
+	}
+}
+
+func insertFeedbackCache(t *testing.T, db *state.DB, assignment *state.AgentAssignment, ci, coderabbit, human string) {
+	t.Helper()
+	ctx := context.Background()
+	fc := &state.FeedbackCache{
+		AssignmentID:        assignment.ID,
+		SessionID:           assignment.SessionID,
+		TaskID:              assignment.TaskID,
+		CISnapshot:          ci,
+		CoderabbitSnapshot:  coderabbit,
+		HumanReviewSnapshot: human,
+		CacheHash:           uuid.New().String(),
+		SourceStatus:        "{}",
+	}
+	if err := state.UpsertFeedbackCache(ctx, db, fc); err != nil {
+		t.Fatalf("UpsertFeedbackCache: %v", err)
+	}
+}
+
 func getDBState(t *testing.T, db *state.DB, id string) state.State {
 	t.Helper()
 	var s string
@@ -48,7 +107,7 @@ func TestReconciler_ClosedPR(t *testing.T) {
 	db := openTestDB(t)
 
 	repo, branch := "owner/repo", "feature/x"
-	id := insertBranch(t, db, repo, branch, state.StateReviewed, "abc123")
+	id := insertBranch(t, db, repo, branch, state.StateReviewApproved, "abc123")
 
 	// GitHub says PR is closed.
 	ghClient := &mockGitHubClient{
@@ -75,8 +134,8 @@ func TestReconciler_ClosedPR(t *testing.T) {
 	cancel()
 	<-done
 
-	if got := getDBState(t, db, id); got != state.StateClosed {
-		t.Errorf("state: got %q, want %q (PR closed)", got, state.StateClosed)
+	if got := getDBState(t, db, id); got != state.StateMerged {
+		t.Errorf("state: got %q, want %q (PR closed)", got, state.StateMerged)
 	}
 }
 
@@ -84,7 +143,7 @@ func TestReconciler_StaleBranch(t *testing.T) {
 	db := openTestDB(t)
 
 	repo, branch := "owner/repo", "feat/stale"
-	id := insertBranch(t, db, repo, branch, state.StateReviewed, "old-hash")
+	id := insertBranch(t, db, repo, branch, state.StateReviewApproved, "old-hash")
 
 	// GitHub reports a different HEAD (force-push).
 	ghClient := &mockGitHubClient{
@@ -111,8 +170,8 @@ func TestReconciler_StaleBranch(t *testing.T) {
 	cancel()
 	<-done
 
-	if got := getDBState(t, db, id); got != state.StateStaleBranch {
-		t.Errorf("state: got %q, want %q (force-push detected)", got, state.StateStaleBranch)
+	if got := getDBState(t, db, id); got != state.StateStale {
+		t.Errorf("state: got %q, want %q (force-push detected)", got, state.StateStale)
 	}
 }
 
@@ -120,7 +179,7 @@ func TestReconciler_MergeReadyTransition(t *testing.T) {
 	db := openTestDB(t)
 
 	repo, branch := "owner/repo", "feat/ready"
-	id := insertBranch(t, db, repo, branch, state.StateReviewed, "abc123")
+	id := insertBranch(t, db, repo, branch, state.StateReviewApproved, "abc123")
 
 	// Set merge-readiness conditions already met.
 	if err := state.UpdateMergeReadiness(db, id, true, true, 0, 0); err != nil {
@@ -193,8 +252,8 @@ func TestReconciler_MergeReadyRevoked(t *testing.T) {
 	cancel()
 	<-done
 
-	if got := getDBState(t, db, id); got != state.StateCoding {
-		t.Errorf("state: got %q, want %q (approval revoked)", got, state.StateCoding)
+	if got := getDBState(t, db, id); got != state.StateSubmitted {
+		t.Errorf("state: got %q, want %q (approval revoked)", got, state.StateSubmitted)
 	}
 }
 
@@ -202,7 +261,7 @@ func TestReconciler_PollingOnlyMode(t *testing.T) {
 	db := openTestDB(t)
 
 	repo, branch := "owner/repo", "polling-branch"
-	_ = insertBranch(t, db, repo, branch, state.StateReviewed, "abc123")
+	_ = insertBranch(t, db, repo, branch, state.StateReviewApproved, "abc123")
 
 	ghClient := &mockGitHubClient{
 		state: map[string]*webhook.GitHubState{
@@ -229,11 +288,11 @@ func TestReconciler_PollingOnlyMode(t *testing.T) {
 	<-done // ensure Run exits cleanly
 }
 
-func TestReconciler_NoPR_ReviewedStateClosed(t *testing.T) {
+func TestReconciler_NoPR_ReviewApprovedStateMerged(t *testing.T) {
 	db := openTestDB(t)
 
 	repo, branch := "owner/repo", "no-pr-reviewed"
-	id := insertBranch(t, db, repo, branch, state.StateReviewed, "abc123")
+	id := insertBranch(t, db, repo, branch, state.StateReviewApproved, "abc123")
 
 	// GitHub returns nil (no PR exists).
 	ghClient := &mockGitHubClient{
@@ -253,19 +312,19 @@ func TestReconciler_NoPR_ReviewedStateClosed(t *testing.T) {
 	cancel()
 	<-done
 
-	// reviewed + no PR → closed (PR was expected to exist).
-	if got := getDBState(t, db, id); got != state.StateClosed {
-		t.Errorf("state: got %q, want %q (no PR → close for reviewed state)", got, state.StateClosed)
+	// review_approved + no PR → merged (PR was expected to exist).
+	if got := getDBState(t, db, id); got != state.StateMerged {
+		t.Errorf("state: got %q, want %q (no PR → merge for review_approved state)", got, state.StateMerged)
 	}
 }
 
-func TestReconciler_NoPR_CodingStateSkipped(t *testing.T) {
+func TestReconciler_NoPR_SubmittedStateSkipped(t *testing.T) {
 	db := openTestDB(t)
 
 	repo, branch := "owner/repo", "no-pr-coding"
-	id := insertBranch(t, db, repo, branch, state.StateCoding, "abc123")
+	id := insertBranch(t, db, repo, branch, state.StateSubmitted, "abc123")
 
-	// GitHub returns nil (no PR). Normal for coding state.
+	// GitHub returns nil (no PR). Normal for submitted state.
 	ghClient := &mockGitHubClient{
 		state: map[string]*webhook.GitHubState{},
 	}
@@ -283,9 +342,9 @@ func TestReconciler_NoPR_CodingStateSkipped(t *testing.T) {
 	cancel()
 	<-done
 
-	// coding + no PR → stay coding (no PR is expected in pre-PR states).
-	if got := getDBState(t, db, id); got != state.StateCoding {
-		t.Errorf("state: got %q, want %q (coding with no PR should not be closed)", got, state.StateCoding)
+	// submitted + no PR → stay submitted (no PR is expected in pre-PR states).
+	if got := getDBState(t, db, id); got != state.StateSubmitted {
+		t.Errorf("state: got %q, want %q (submitted with no PR should not be closed)", got, state.StateSubmitted)
 	}
 }
 
@@ -293,7 +352,7 @@ func TestReconciler_AutoMerge_Success(t *testing.T) {
 	db := openTestDB(t)
 
 	repo, branch := "owner/repo", "feat/automerge"
-	id := insertBranch(t, db, repo, branch, state.StateReviewed, "abc123")
+	id := insertBranch(t, db, repo, branch, state.StateReviewApproved, "abc123")
 
 	ghClient := &mockGitHubClient{
 		state: map[string]*webhook.GitHubState{
@@ -336,8 +395,8 @@ func TestReconciler_AutoMerge_Success(t *testing.T) {
 	if merger.lastMethod != "squash" {
 		t.Errorf("MergePR called with method %q, want squash", merger.lastMethod)
 	}
-	if got := getDBState(t, db, id); got != state.StateClosed {
-		t.Errorf("state: got %q, want closed (auto-merged)", got)
+	if got := getDBState(t, db, id); got != state.StateMerged {
+		t.Errorf("state: got %q, want merged (auto-merged)", got)
 	}
 }
 
@@ -390,7 +449,7 @@ func TestReconciler_AutoMerge_DisabledWhenNoPRNumber(t *testing.T) {
 	db := openTestDB(t)
 
 	repo, branch := "owner/repo", "feat/noprnumber"
-	id := insertBranch(t, db, repo, branch, state.StateReviewed, "abc123")
+	id := insertBranch(t, db, repo, branch, state.StateReviewApproved, "abc123")
 
 	ghClient := &mockGitHubClient{
 		state: map[string]*webhook.GitHubState{
@@ -420,6 +479,119 @@ func TestReconciler_AutoMerge_DisabledWhenNoPRNumber(t *testing.T) {
 	// Should still reach merge_ready even without merging.
 	if got := getDBState(t, db, id); got != state.StateMergeReady {
 		t.Errorf("state: got %q, want merge_ready", got)
+	}
+}
+
+func TestReconciler_PushesCIFeedback(t *testing.T) {
+	db := openTestDB(t)
+	repo, branch := "owner/repo", "feat/ci-feedback"
+	headHash := "abc123"
+	insertBranch(t, db, repo, branch, state.StateReviewApproved, headHash)
+
+	worktree := t.TempDir()
+	assignment := insertAssignment(t, db, repo, branch, worktree, state.AssignmentSubstatusWaitingForCI)
+	insertLink(t, db, assignment)
+	insertFeedbackCache(t, db, assignment, `[{"file":"main.go","line":12,"message":"CI failed"}]`, "", "")
+
+	rec := webhook.NewReconciler(db, &mockGitHubClient{
+		state: map[string]*webhook.GitHubState{
+			repo + "/" + branch: {Repo: repo, Branch: branch, PROpen: true, HeadHash: headHash},
+		},
+	}, []string{repo}, false)
+
+	rec.RunOnce(context.Background())
+
+	data, err := os.ReadFile(filepath.Join(worktree, ".codero", "FEEDBACK.md"))
+	if err != nil {
+		t.Fatalf("read FEEDBACK.md: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "CI Failures") {
+		t.Fatalf("FEEDBACK.md missing CI Failures section:\n%s", content)
+	}
+	if !strings.Contains(content, "CI failed") {
+		t.Fatalf("FEEDBACK.md missing CI message:\n%s", content)
+	}
+}
+
+func TestReconciler_PushesCodeReviewFeedback(t *testing.T) {
+	db := openTestDB(t)
+	repo, branch := "owner/repo", "feat/cr-feedback"
+	headHash := "def456"
+	insertBranch(t, db, repo, branch, state.StateReviewApproved, headHash)
+
+	worktree := t.TempDir()
+	assignment := insertAssignment(t, db, repo, branch, worktree, state.AssignmentSubstatusWaitingForCI)
+	insertLink(t, db, assignment)
+	insertFeedbackCache(t, db, assignment, "", `[{"message":"CodeRabbit wants changes"}]`, "")
+
+	rec := webhook.NewReconciler(db, &mockGitHubClient{
+		state: map[string]*webhook.GitHubState{
+			repo + "/" + branch: {Repo: repo, Branch: branch, PROpen: true, HeadHash: headHash},
+		},
+	}, []string{repo}, false)
+
+	rec.RunOnce(context.Background())
+
+	data, err := os.ReadFile(filepath.Join(worktree, ".codero", "FEEDBACK.md"))
+	if err != nil {
+		t.Fatalf("read FEEDBACK.md: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "Code Review") {
+		t.Fatalf("FEEDBACK.md missing Code Review section:\n%s", content)
+	}
+}
+
+func TestReconciler_NoActionableFeedbackSkipsWrite(t *testing.T) {
+	db := openTestDB(t)
+	repo, branch := "owner/repo", "feat/clean"
+	headHash := "clean123"
+	insertBranch(t, db, repo, branch, state.StateReviewApproved, headHash)
+
+	worktree := t.TempDir()
+	assignment := insertAssignment(t, db, repo, branch, worktree, state.AssignmentSubstatusWaitingForCI)
+	insertLink(t, db, assignment)
+	insertFeedbackCache(t, db, assignment, `{"status":"success"}`, "", "")
+
+	rec := webhook.NewReconciler(db, &mockGitHubClient{
+		state: map[string]*webhook.GitHubState{
+			repo + "/" + branch: {Repo: repo, Branch: branch, PROpen: true, HeadHash: headHash},
+		},
+	}, []string{repo}, false)
+
+	rec.RunOnce(context.Background())
+
+	if _, err := os.Stat(filepath.Join(worktree, ".codero", "FEEDBACK.md")); !os.IsNotExist(err) {
+		t.Fatalf("expected FEEDBACK.md to be absent, got err=%v", err)
+	}
+}
+
+func TestReconciler_ActionableFeedbackUpdatesSubstatus(t *testing.T) {
+	db := openTestDB(t)
+	repo, branch := "owner/repo", "feat/substatus"
+	headHash := "sub123"
+	insertBranch(t, db, repo, branch, state.StateReviewApproved, headHash)
+
+	worktree := t.TempDir()
+	assignment := insertAssignment(t, db, repo, branch, worktree, state.AssignmentSubstatusWaitingForMergeApproval)
+	insertLink(t, db, assignment)
+	insertFeedbackCache(t, db, assignment, `[{"message":"Needs revision"}]`, "", "")
+
+	rec := webhook.NewReconciler(db, &mockGitHubClient{
+		state: map[string]*webhook.GitHubState{
+			repo + "/" + branch: {Repo: repo, Branch: branch, PROpen: true, HeadHash: headHash},
+		},
+	}, []string{repo}, false)
+
+	rec.RunOnce(context.Background())
+
+	updated, err := state.GetAgentAssignmentByID(context.Background(), db, assignment.ID)
+	if err != nil {
+		t.Fatalf("GetAgentAssignmentByID: %v", err)
+	}
+	if updated.Substatus != state.AssignmentSubstatusNeedsRevision {
+		t.Fatalf("substatus: got %q, want %q", updated.Substatus, state.AssignmentSubstatusNeedsRevision)
 	}
 }
 

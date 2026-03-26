@@ -434,28 +434,8 @@ func ExpireAgentSession(ctx context.Context, db *DB, sessionID, reason string) e
 	}
 
 	// SL-1/SL-3: Write session_archives row atomically in the same transaction.
-	var expSession AgentSession
-	var sessLastProgress sql.NullTime
-	if err := tx.QueryRowContext(ctx, `
-		SELECT session_id, agent_id, mode, started_at, last_seen_at, last_progress_at
-		FROM agent_sessions WHERE session_id = ?`, sessionID,
-	).Scan(&expSession.SessionID, &expSession.AgentID, &expSession.Mode,
-		&expSession.StartedAt, &expSession.LastSeenAt, &sessLastProgress); err == nil {
-		archive := &SessionArchive{
-			SessionID: sessionID,
-			AgentID:   expSession.AgentID,
-			Result:    reason,
-			StartedAt: expSession.StartedAt,
-			EndedAt:   now,
-		}
-		if contextRow != nil {
-			archive.TaskID = contextRow.Assignment.TaskID
-			archive.Repo = contextRow.Assignment.Repo
-			archive.Branch = contextRow.Assignment.Branch
-		}
-		if err := writeSessionArchiveTx(ctx, tx, archive); err != nil {
-			return fmt.Errorf("expire agent session: write archive: %w", err)
-		}
+	if err := archiveSessionTx(ctx, tx, sessionID, reason, "", now); err != nil {
+		return fmt.Errorf("expire agent session: write archive: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -619,6 +599,20 @@ func GetAgentAssignmentByID(ctx context.Context, db *DB, assignmentID string) (*
 		WHERE assignment_id = ?`
 
 	row := db.sql.QueryRowContext(ctx, q, assignmentID)
+	return scanAgentAssignment(row)
+}
+
+// GetActiveAssignmentByTaskID returns the active assignment for a task_id.
+func GetActiveAssignmentByTaskID(ctx context.Context, db *DB, taskID string) (*AgentAssignment, error) {
+	const q = `
+		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id, state, blocked_reason, assignment_substatus,
+		       assignment_version, started_at, ended_at, end_reason, superseded_by
+		FROM agent_assignments
+		WHERE task_id = ? AND ended_at IS NULL
+		ORDER BY started_at DESC
+		LIMIT 1`
+
+	row := db.sql.QueryRowContext(ctx, q, taskID)
 	return scanAgentAssignment(row)
 }
 
@@ -857,19 +851,7 @@ func FinalizeAgentSession(ctx context.Context, db *DB, sessionID, agentID string
 	}
 
 	// SL-1/SL-3: Write session_archives row atomically in the same transaction.
-	archive := &SessionArchive{
-		SessionID: sessionID,
-		AgentID:   session.AgentID,
-		Result:    completion.Status,
-		StartedAt: session.StartedAt,
-		EndedAt:   finishedAt,
-	}
-	if active != nil {
-		archive.TaskID = active.TaskID
-		archive.Repo = active.Repo
-		archive.Branch = active.Branch
-	}
-	if err := writeSessionArchiveTx(ctx, tx, archive); err != nil {
+	if err := archiveSessionTx(ctx, tx, sessionID, completion.Status, "", finishedAt); err != nil {
 		return fmt.Errorf("finalize agent session: write archive: %w", err)
 	}
 
@@ -1148,7 +1130,7 @@ func nextWaitingAssignmentSubstatus(branchState string, approved, ciGreen bool, 
 	if !ciGreen {
 		return AssignmentSubstatusWaitingForCI
 	}
-	if branchState == string(StateMergeReady) || branchState == string(StateClosed) {
+	if branchState == string(StateMergeReady) || branchState == string(StateMerged) {
 		if approved && pendingEvents == 0 && unresolvedThreads == 0 {
 			return AssignmentSubstatusInProgress
 		}

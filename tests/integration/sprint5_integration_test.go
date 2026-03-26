@@ -150,14 +150,14 @@ func TestIntegration_WebhookDedup(t *testing.T) {
 }
 
 // TestIntegration_ReconciliationDriftRepair verifies that the reconciler detects
-// and repairs state drift: a branch in reviewed state with PR closed → closed.
+// and repairs state drift: a branch in review_approved state with PR closed → merged.
 func TestIntegration_ReconciliationDriftRepair(t *testing.T) {
 	db := openDB(t)
 
 	repo, branch := "owner/repo", "drift-branch"
-	id := insertBranch(t, db, repo, branch, state.StateReviewed, "abc123")
+	id := insertBranch(t, db, repo, branch, state.StateReviewApproved, "abc123")
 
-	// GitHub says the PR is closed (drift from reviewed).
+	// GitHub says the PR is closed (drift from review_approved).
 	ghClient := &mockGitHub{
 		closedRepos: map[string]bool{repo + "/" + branch: true},
 	}
@@ -176,8 +176,8 @@ func TestIntegration_ReconciliationDriftRepair(t *testing.T) {
 	cancel()
 	<-done
 
-	if got := getState(t, db, id); got != state.StateClosed {
-		t.Errorf("state: got %q, want %q (drift repair: PR closed)", got, state.StateClosed)
+	if got := getState(t, db, id); got != state.StateMerged {
+		t.Errorf("state: got %q, want %q (drift repair: PR closed)", got, state.StateMerged)
 	}
 }
 
@@ -213,9 +213,9 @@ func TestIntegration_PollingOnlyMode(t *testing.T) {
 	defer cancel()
 	r.Run(runCtx)
 
-	// Branch should have been reviewed.
-	if got := getState(t, db, id); got != state.StateReviewed {
-		t.Errorf("state: got %q, want %q (polling-only mode must work)", got, state.StateReviewed)
+	// Branch should have been review_approved.
+	if got := getState(t, db, id); got != state.StateReviewApproved {
+		t.Errorf("state: got %q, want %q (polling-only mode must work)", got, state.StateReviewApproved)
 	}
 }
 

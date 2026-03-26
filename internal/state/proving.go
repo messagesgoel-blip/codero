@@ -300,7 +300,7 @@ func CountBranchesReviewed(ctx context.Context, db *DB, since time.Time) (int, m
 func CountStaleDetections(ctx context.Context, db *DB, since time.Time) (int, error) {
 	var count int
 	err := db.sql.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM state_transitions WHERE to_state = 'stale_branch' AND created_at >= ?`,
+		`SELECT COUNT(*) FROM state_transitions WHERE to_state = 'stale' AND created_at >= ?`,
 		since,
 	).Scan(&count)
 	if err != nil {

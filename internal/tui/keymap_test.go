@@ -22,6 +22,7 @@ func TestDefaultKeyMap(t *testing.T) {
 		{"Retry", km.Retry.Keys()},
 		{"Logs", km.Logs.Keys()},
 		{"Refresh", km.Refresh.Keys()},
+		{"Chat", km.Chat.Keys()},
 	}
 	for _, b := range bindings {
 		if len(b.keys) == 0 {

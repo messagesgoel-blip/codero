@@ -42,6 +42,7 @@ type ObservabilityServer struct {
 	queue       *scheduler.Queue       // WFQ queue for queue introspection
 	slotCounter *scheduler.SlotCounter // Slot counter for dispatch slot status
 	db          *sql.DB                // SQLite state store for metrics queries
+	pipeline    pipelineRunner         // Delivery pipeline for submit handling
 	startTime   time.Time              // Process start time for uptime calculation
 	mu          sync.RWMutex           // Mutex for thread-safe state access
 	repoPath    string                 // Repo path for gate progress file lookup
@@ -142,6 +143,7 @@ func NewObservabilityServerWithGRPC(redisClient *redis.Client, queue *scheduler.
 	mux.HandleFunc("/ready", obs.handleReady)
 	mux.HandleFunc("/api/v1/agent-metrics", obs.handleAgentMetrics)
 	mux.HandleFunc("/gate", obs.handleGate)
+	mux.HandleFunc("/api/v1/assignments/", obs.handleSubmit)
 
 	// Register dashboard API routes and static file serving.
 	settingsDir := filepath.Dir(os.Getenv("CODERO_DB_PATH"))
@@ -169,6 +171,11 @@ func NewObservabilityServerWithGRPC(redisClient *redis.Client, queue *scheduler.
 	}
 
 	return obs
+}
+
+// SetPipeline registers the delivery pipeline used by the submit endpoint.
+func (o *ObservabilityServer) SetPipeline(p pipelineRunner) {
+	o.pipeline = p
 }
 
 // Start launches the observability HTTP server in a background goroutine.

@@ -69,16 +69,18 @@ func (s *StubGitHubClient) GetPRState(_ context.Context, repo, branch string) (*
 // durable branch records. It is the correctness backstop in all modes and the
 // only ingestion mechanism in polling-only mode.
 type Reconciler struct {
-	db           *state.DB
-	github       GitHubClient
-	repos        []string
-	interval     time.Duration
-	merger       AutoMerger // nil → auto-merge disabled
-	mergeMethod  string     // "merge", "squash", or "rebase"
-	healthMu     sync.RWMutex
-	lastProbeAt  time.Time
-	lastProbeErr string
-	probed       bool
+	db               *state.DB
+	github           GitHubClient
+	repos            []string
+	interval         time.Duration
+	merger           AutoMerger // nil → auto-merge disabled
+	mergeMethod      string     // "merge", "squash", or "rebase"
+	feedbackWriter   feedbackWriter
+	feedbackNotifier feedbackNotifier
+	healthMu         sync.RWMutex
+	lastProbeAt      time.Time
+	lastProbeErr     string
+	probed           bool
 }
 
 // NewReconciler creates a Reconciler.
@@ -90,10 +92,12 @@ func NewReconciler(db *state.DB, github GitHubClient, repos []string, webhookEna
 		interval = WebhookModeInterval
 	}
 	return &Reconciler{
-		db:       db,
-		github:   github,
-		repos:    repos,
-		interval: interval,
+		db:               db,
+		github:           github,
+		repos:            repos,
+		interval:         interval,
+		feedbackWriter:   defaultFeedbackWriter{},
+		feedbackNotifier: defaultFeedbackNotifier{},
 	}
 }
 
@@ -193,7 +197,7 @@ func (r *Reconciler) reconcileBranch(ctx context.Context, b state.BranchRecord) 
 
 	if ghState == nil {
 		// No PR exists. Skip pre-PR states where a PR is not yet expected.
-		if b.State == state.StateCoding || b.State == state.StateLocalReview {
+		if b.State == state.StateSubmitted || b.State == state.StateWaiting {
 			return
 		}
 		r.maybeClose(b, "pr_not_found")
@@ -246,12 +250,13 @@ func (r *Reconciler) reconcileBranch(ctx context.Context, b state.BranchRecord) 
 			"error", err,
 		)
 	}
+	r.maybePushFeedback(ctx, b)
 
 	// Detect: merge_ready conditions revoked → T11.
 	if b.State == state.StateMergeReady {
 		if !ghState.Approved || !ghState.CIGreen ||
 			ghState.PendingEvents > 0 || ghState.UnresolvedThreads > 0 {
-			r.transitionIfValid(b, state.StateCoding, "merge_ready_conditions_revoked")
+			r.transitionIfValid(b, state.StateSubmitted, "merge_ready_conditions_revoked")
 			return
 		}
 		// Conditions still met — attempt auto-merge (idempotent; no-op if disabled).
@@ -259,8 +264,8 @@ func (r *Reconciler) reconcileBranch(ctx context.Context, b state.BranchRecord) 
 		return
 	}
 
-	// Detect: reviewed branch now meets merge_ready conditions → T10.
-	if b.State == state.StateReviewed {
+	// Detect: review_approved branch now meets merge_ready conditions → T10.
+	if b.State == state.StateReviewApproved {
 		if ghState.Approved && ghState.CIGreen &&
 			ghState.PendingEvents == 0 && ghState.UnresolvedThreads == 0 {
 			r.transitionIfValid(b, state.StateMergeReady, "merge_ready_conditions_met")
@@ -289,7 +294,7 @@ func (r *Reconciler) recordGitHubProbe(err error) {
 // the external call to guard against stale snapshots: if another worker has
 // revoked merge_ready or the head hash has changed since this cycle started,
 // the merge is skipped rather than issued against outdated state.
-// On success it transitions the branch to closed (T18). On failure it logs
+// On success it transitions the branch to merged (T18). On failure it logs
 // the error and leaves the branch in merge_ready for the next cycle.
 func (r *Reconciler) maybeMerge(ctx context.Context, b state.BranchRecord, ghState *GitHubState) {
 	if r.merger == nil || ghState.PRNumber == 0 {
@@ -344,28 +349,28 @@ func (r *Reconciler) maybeMerge(ctx context.Context, b state.BranchRecord, ghSta
 		"merge_method", r.mergeMethod,
 	)
 	// PR is merged on GitHub; mirror the terminal state locally (T18).
-	r.transitionIfValid(*current, state.StateClosed, "auto_merged")
+	r.transitionIfValid(*current, state.StateMerged, "auto_merged")
 }
 
 func (r *Reconciler) maybeClose(b state.BranchRecord, trigger string) {
-	// T18: any → closed (terminal).
-	if b.State == state.StateClosed {
+	// T18: any → merged (terminal).
+	if b.State == state.StateMerged {
 		return // already terminal
 	}
-	r.transitionIfValid(b, state.StateClosed, trigger)
+	r.transitionIfValid(b, state.StateMerged, trigger)
 }
 
 func (r *Reconciler) maybeStaleBranch(b state.BranchRecord, newHeadHash string) {
-	// T12: any active → stale_branch. Update head_hash and transition atomically
+	// T12: any active → stale. Update head_hash and transition atomically
 	// to prevent a race where the hash update succeeds but the transition fails.
-	if err := state.UpdateHeadHashAndTransition(r.db, b.ID, newHeadHash, b.State, state.StateStaleBranch, "head_hash_mismatch"); err != nil {
+	if err := state.UpdateHeadHashAndTransition(r.db, b.ID, newHeadHash, b.State, state.StateStale, "head_hash_mismatch"); err != nil {
 		loglib.Info("reconciler: stale branch transition skipped",
 			loglib.FieldEventType, loglib.EventRejection,
 			loglib.FieldComponent, "reconciler",
 			loglib.FieldRepo, b.Repo,
 			loglib.FieldBranch, b.Branch,
 			loglib.FieldFromState, string(b.State),
-			loglib.FieldToState, string(state.StateStaleBranch),
+			loglib.FieldToState, string(state.StateStale),
 			"trigger", "head_hash_mismatch",
 			"error", err,
 		)
@@ -377,7 +382,7 @@ func (r *Reconciler) maybeStaleBranch(b state.BranchRecord, newHeadHash string) 
 		loglib.FieldRepo, b.Repo,
 		loglib.FieldBranch, b.Branch,
 		loglib.FieldFromState, string(b.State),
-		loglib.FieldToState, string(state.StateStaleBranch),
+		loglib.FieldToState, string(state.StateStale),
 		"trigger", "head_hash_mismatch",
 	)
 }

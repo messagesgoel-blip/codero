@@ -1,18 +1,17 @@
 // Package github provides a GitHub REST API client for codero.
 // It implements webhook.GitHubClient and exposes additional methods used by
-// the review runner provider. All calls use net/http with Bearer token auth
-// (same pattern as internal/config/scopes.go — no external SDK dependency).
+// the review runner provider. All calls use google/go-github v69.
 package github
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	gogithub "github.com/google/go-github/v69/github"
 
 	"github.com/codero/codero/internal/webhook"
 )
@@ -48,6 +47,20 @@ func (c *Client) WithHTTPClient(hc *http.Client) *Client {
 	cp := *c
 	cp.http = hc
 	return &cp
+}
+
+// gh returns a go-github client configured with the Client's HTTP client,
+// token, and base URL. A fresh instance is created each call so that tests
+// which swap apiURL between calls always get the correct endpoint.
+func (c *Client) gh() *gogithub.Client {
+	gc := gogithub.NewClient(c.http).WithAuthToken(c.token)
+	baseURL := c.apiURL
+	if !strings.HasSuffix(baseURL, "/") {
+		baseURL += "/"
+	}
+	u, _ := url.Parse(baseURL)
+	gc.BaseURL = u
+	return gc
 }
 
 // PRInfo contains the fields codero needs from a GitHub pull request.
@@ -129,27 +142,17 @@ func (c *Client) GetPRState(ctx context.Context, repo, branch string) (*webhook.
 // branch may be bare ("my-feature") or qualified ("owner:my-feature");
 // bare branches are auto-qualified using the repo owner.
 func (c *Client) FindOpenPR(ctx context.Context, repo, branch string) (*PRInfo, error) {
+	owner, repoName, _ := strings.Cut(repo, "/")
 	headFilter := branch
 	if !strings.Contains(branch, ":") {
-		if owner, _, found := strings.Cut(repo, "/"); found {
-			headFilter = owner + ":" + branch
-		}
+		headFilter = owner + ":" + branch
 	}
-
-	q := url.Values{}
-	q.Set("state", "open")
-	q.Set("head", headFilter)
-	q.Set("per_page", "1")
-	endpoint := fmt.Sprintf("%s/repos/%s/pulls?%s", c.apiURL, repo, q.Encode())
-
-	var pulls []struct {
-		Number int    `json:"number"`
-		State  string `json:"state"`
-		Head   struct {
-			SHA string `json:"sha"`
-		} `json:"head"`
-	}
-	if err := c.getJSON(ctx, endpoint, &pulls); err != nil {
+	pulls, _, err := c.gh().PullRequests.List(ctx, owner, repoName, &gogithub.PullRequestListOptions{
+		State:       "open",
+		Head:        headFilter,
+		ListOptions: gogithub.ListOptions{PerPage: 1},
+	})
+	if err != nil {
 		return nil, fmt.Errorf("find open PR: %w", err)
 	}
 	if len(pulls) == 0 {
@@ -157,42 +160,38 @@ func (c *Client) FindOpenPR(ctx context.Context, repo, branch string) (*PRInfo, 
 	}
 	p := pulls[0]
 	return &PRInfo{
-		Number:  p.Number,
-		HeadSHA: p.Head.SHA,
-		State:   p.State,
+		Number:  p.GetNumber(),
+		HeadSHA: p.GetHead().GetSHA(),
+		State:   p.GetState(),
 	}, nil
 }
 
 // ListPRReviews returns all reviews submitted on a pull request, following
 // GitHub pagination until no further pages remain.
 func (c *Client) ListPRReviews(ctx context.Context, repo string, prNumber int) ([]Review, error) {
-	nextURL := fmt.Sprintf("%s/repos/%s/pulls/%d/reviews?per_page=100", c.apiURL, repo, prNumber)
+	owner, repoName, _ := strings.Cut(repo, "/")
+	opts := &gogithub.ListOptions{Page: 1, PerPage: 100}
 	var all []Review
-	for nextURL != "" {
-		var raw []struct {
-			ID   int64 `json:"id"`
-			User struct {
-				Login string `json:"login"`
-			} `json:"user"`
-			State    string `json:"state"`
-			Body     string `json:"body"`
-			CommitID string `json:"commit_id"`
-		}
-		headers, err := c.getJSONPage(ctx, nextURL, &raw)
+	for {
+		reviews, resp, err := c.gh().PullRequests.ListReviews(ctx, owner, repoName, prNumber, opts)
 		if err != nil {
 			return nil, fmt.Errorf("list PR reviews: %w", err)
 		}
-		for _, r := range raw {
+		for _, r := range reviews {
+			login := r.GetUser().GetLogin()
 			all = append(all, Review{
-				ID:       r.ID,
-				User:     r.User.Login,
-				IsBot:    IsBot(r.User.Login),
-				State:    r.State,
-				Body:     r.Body,
-				CommitID: r.CommitID,
+				ID:       r.GetID(),
+				User:     login,
+				IsBot:    IsBot(login),
+				State:    r.GetState(),
+				Body:     r.GetBody(),
+				CommitID: r.GetCommitID(),
 			})
 		}
-		nextURL = parseLinkNext(headers.Get("Link"))
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
 	}
 	return all, nil
 }
@@ -200,30 +199,32 @@ func (c *Client) ListPRReviews(ctx context.Context, repo string, prNumber int) (
 // ListPRReviewComments returns all inline review comments on a pull request,
 // following GitHub pagination until no further pages remain.
 func (c *Client) ListPRReviewComments(ctx context.Context, repo string, prNumber int) ([]ReviewComment, error) {
-	nextURL := fmt.Sprintf("%s/repos/%s/pulls/%d/comments?per_page=100", c.apiURL, repo, prNumber)
+	owner, repoName, _ := strings.Cut(repo, "/")
+	opts := &gogithub.PullRequestListCommentsOptions{
+		ListOptions: gogithub.ListOptions{Page: 1, PerPage: 100},
+	}
 	var all []ReviewComment
-	for nextURL != "" {
-		var raw []struct {
-			ID   int64 `json:"id"`
-			User struct {
-				Login string `json:"login"`
-			} `json:"user"`
-			Body     string `json:"body"`
-			Path     string `json:"path"`
-			Line     int    `json:"line"`
-			CommitID string `json:"commit_id"`
-		}
-		headers, err := c.getJSONPage(ctx, nextURL, &raw)
+	for {
+		comments, resp, err := c.gh().PullRequests.ListComments(ctx, owner, repoName, prNumber, opts)
 		if err != nil {
 			return nil, fmt.Errorf("list PR review comments: %w", err)
 		}
-		for _, r := range raw {
+		for _, r := range comments {
+			login := r.GetUser().GetLogin()
 			all = append(all, ReviewComment{
-				ID: r.ID, User: r.User.Login, IsBot: IsBot(r.User.Login),
-				Body: r.Body, Path: r.Path, Line: r.Line, CommitID: r.CommitID,
+				ID:       r.GetID(),
+				User:     login,
+				IsBot:    IsBot(login),
+				Body:     r.GetBody(),
+				Path:     r.GetPath(),
+				Line:     r.GetLine(),
+				CommitID: r.GetCommitID(),
 			})
 		}
-		nextURL = parseLinkNext(headers.Get("Link"))
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
 	}
 	return all, nil
 }
@@ -231,24 +232,27 @@ func (c *Client) ListPRReviewComments(ctx context.Context, repo string, prNumber
 // ListCheckRuns returns check runs for the given commit SHA, following GitHub
 // pagination until no further pages remain.
 func (c *Client) ListCheckRuns(ctx context.Context, repo, sha string) ([]CheckRun, error) {
-	nextURL := fmt.Sprintf("%s/repos/%s/commits/%s/check-runs?per_page=100", c.apiURL, repo, sha)
+	owner, repoName, _ := strings.Cut(repo, "/")
+	opts := &gogithub.ListCheckRunsOptions{
+		ListOptions: gogithub.ListOptions{Page: 1, PerPage: 100},
+	}
 	var all []CheckRun
-	for nextURL != "" {
-		var resp struct {
-			CheckRuns []struct {
-				Name       string `json:"name"`
-				Status     string `json:"status"`
-				Conclusion string `json:"conclusion"`
-			} `json:"check_runs"`
-		}
-		headers, err := c.getJSONPage(ctx, nextURL, &resp)
+	for {
+		result, resp, err := c.gh().Checks.ListCheckRunsForRef(ctx, owner, repoName, sha, opts)
 		if err != nil {
 			return nil, fmt.Errorf("list check runs: %w", err)
 		}
-		for _, r := range resp.CheckRuns {
-			all = append(all, CheckRun{Name: r.Name, Status: r.Status, Conclusion: r.Conclusion})
+		for _, r := range result.CheckRuns {
+			all = append(all, CheckRun{
+				Name:       r.GetName(),
+				Status:     r.GetStatus(),
+				Conclusion: r.GetConclusion(),
+			})
 		}
-		nextURL = parseLinkNext(headers.Get("Link"))
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
 	}
 	return all, nil
 }
@@ -263,101 +267,59 @@ func (c *Client) MergePR(ctx context.Context, repo string, prNumber int, sha, me
 	if mergeMethod == "" {
 		mergeMethod = "squash"
 	}
-	url := fmt.Sprintf("%s/repos/%s/pulls/%d/merge", c.apiURL, repo, prNumber)
-	body := struct {
-		SHA         string `json:"sha"`
-		MergeMethod string `json:"merge_method"`
-	}{
+	owner, repoName, _ := strings.Cut(repo, "/")
+	_, _, err := c.gh().PullRequests.Merge(ctx, owner, repoName, prNumber, "", &gogithub.PullRequestOptions{
 		SHA:         sha,
 		MergeMethod: mergeMethod,
-	}
-	return c.putJSON(ctx, url, body)
-}
-
-// putJSON performs an authenticated PUT request with a JSON body and discards
-// the response body on success.
-func (c *Client) putJSON(ctx context.Context, url string, body any) error {
-	b, err := json.Marshal(body)
+	})
 	if err != nil {
-		return fmt.Errorf("marshal request body: %w", err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, strings.NewReader(string(b)))
-	if err != nil {
-		return fmt.Errorf("build request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return fmt.Errorf("http put: %w", err)
-	}
-	defer func() { _, _ = io.Copy(io.Discard, resp.Body); resp.Body.Close() }()
-
-	switch resp.StatusCode {
-	case http.StatusOK, http.StatusCreated:
-		return nil
-	case http.StatusMethodNotAllowed:
-		return fmt.Errorf("PR not mergeable (405)")
-	case http.StatusConflict:
-		return fmt.Errorf("merge conflict or SHA mismatch (409)")
-	default:
-		return fmt.Errorf("github API %s returned HTTP %d", url, resp.StatusCode)
-	}
-}
-
-// getJSON performs an authenticated GET request and JSON-decodes the response.
-func (c *Client) getJSON(ctx context.Context, url string, dst any) error {
-	_, err := c.getJSONPage(ctx, url, dst)
-	return err
-}
-
-// getJSONPage is like getJSON but also returns the response headers so callers
-// can follow Link: rel="next" pagination.
-func (c *Client) getJSONPage(ctx context.Context, url string, dst any) (http.Header, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("build request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("http get: %w", err)
-	}
-	defer func() { _, _ = io.Copy(io.Discard, resp.Body); resp.Body.Close() }()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("github API %s returned HTTP %d", url, resp.StatusCode)
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(dst); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
-	}
-	return resp.Header, nil
-}
-
-// parseLinkNext parses a GitHub Link response header and returns the URL for
-// rel="next", or "" when no next page exists.
-func parseLinkNext(header string) string {
-	for _, part := range strings.Split(header, ",") {
-		seg := strings.SplitN(strings.TrimSpace(part), ";", 2)
-		if len(seg) != 2 {
-			continue
+		errStr := err.Error()
+		if strings.Contains(errStr, "405") {
+			return fmt.Errorf("PR not mergeable (405)")
 		}
-		if !strings.Contains(seg[1], `rel="next"`) {
-			continue
+		if strings.Contains(errStr, "409") {
+			return fmt.Errorf("merge conflict or SHA mismatch (409)")
 		}
-		u := strings.TrimSpace(seg[0])
-		if len(u) >= 2 && u[0] == '<' && u[len(u)-1] == '>' {
-			return u[1 : len(u)-1]
-		}
+		return fmt.Errorf("merge PR: %w", err)
 	}
-	return ""
+	return nil
+}
+
+// CreatePR creates a pull request and returns the PR number.
+func (c *Client) CreatePR(ctx context.Context, repo, head, base, title, body string) (int, error) {
+	owner, repoName, _ := strings.Cut(repo, "/")
+	pr, _, err := c.gh().PullRequests.Create(ctx, owner, repoName, &gogithub.NewPullRequest{
+		Title: gogithub.Ptr(title),
+		Head:  gogithub.Ptr(head),
+		Base:  gogithub.Ptr(base),
+		Body:  gogithub.Ptr(body),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("create PR: %w", err)
+	}
+	return pr.GetNumber(), nil
+}
+
+// PostComment posts a comment on a pull request.
+func (c *Client) PostComment(ctx context.Context, repo string, prNumber int, body string) error {
+	owner, repoName, _ := strings.Cut(repo, "/")
+	_, _, err := c.gh().Issues.CreateComment(ctx, owner, repoName, prNumber, &gogithub.IssueComment{
+		Body: gogithub.Ptr(body),
+	})
+	if err != nil {
+		return fmt.Errorf("post comment: %w", err)
+	}
+	return nil
+}
+
+// GetBranchProtection returns branch protection rules for the given branch.
+func (c *Client) GetBranchProtection(ctx context.Context, repo, branch string) (*gogithub.Protection, error) {
+	owner, repoName, _ := strings.Cut(repo, "/")
+	prot, _, err := c.gh().Repositories.GetBranchProtection(ctx, owner, repoName, branch)
+	if err != nil {
+		return nil, fmt.Errorf("get branch protection: %w", err)
+	}
+	return prot, nil
 }
 
 // countChangesRequested returns the number of distinct reviewers whose current

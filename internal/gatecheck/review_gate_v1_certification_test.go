@@ -59,6 +59,8 @@ func TestCert_RG1_SubstatusEnvAtomicWrite(t *testing.T) {
 		"CODERO_GATE_INVOCATION=hook",
 		"CODERO_CHECK_GOFMT_STATUS=pass",
 		"CODERO_CHECK_GITLEAKS_STATUS=pass",
+		"CODERO_CHECK_GOFMT_EXIT_CODE=",
+		"CODERO_CHECK_GITLEAKS_EXIT_CODE=",
 	}
 	for _, field := range requiredFields {
 		if !strings.Contains(content, field) {
@@ -112,6 +114,9 @@ func TestCert_RG1_SubstatusFailReport(t *testing.T) {
 	}
 	if !strings.Contains(content, "CODERO_CHECK_SEMGREP_FINDINGS_COUNT=3") {
 		t.Error("expected CODERO_CHECK_SEMGREP_FINDINGS_COUNT=3")
+	}
+	if !strings.Contains(content, "CODERO_CHECK_SEMGREP_EXIT_CODE=") {
+		t.Error("expected CODERO_CHECK_SEMGREP_EXIT_CODE")
 	}
 }
 
