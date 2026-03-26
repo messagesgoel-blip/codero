@@ -3,7 +3,9 @@ package webhook_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,6 +35,63 @@ func insertBranch(t *testing.T, db *state.DB, repo, branch string, st state.Stat
 		t.Fatalf("insert branch: %v", err)
 	}
 	return id
+}
+
+func insertAssignment(t *testing.T, db *state.DB, repo, branch, worktree, substatus string) *state.AgentAssignment {
+	t.Helper()
+	ctx := context.Background()
+	sessionID := uuid.New().String()
+	agentID := "agent-" + sessionID[:8]
+	if err := state.RegisterAgentSession(ctx, db, sessionID, agentID, "", ""); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	assignment := &state.AgentAssignment{
+		ID:        uuid.New().String(),
+		SessionID: sessionID,
+		AgentID:   agentID,
+		Repo:      repo,
+		Branch:    branch,
+		Worktree:  worktree,
+		TaskID:    "TASK-" + sessionID[:8],
+		Substatus: substatus,
+	}
+	if err := state.AttachAgentAssignment(ctx, db, assignment); err != nil {
+		t.Fatalf("AttachAgentAssignment: %v", err)
+	}
+	return assignment
+}
+
+func insertLink(t *testing.T, db *state.DB, assignment *state.AgentAssignment) {
+	t.Helper()
+	ctx := context.Background()
+	link := &state.GitHubLink{
+		TaskID:       assignment.TaskID,
+		RepoFullName: assignment.Repo,
+		BranchName:   assignment.Branch,
+		PRNumber:     1,
+		PRState:      "open",
+	}
+	if err := state.UpsertGitHubLink(ctx, db, link); err != nil {
+		t.Fatalf("UpsertGitHubLink: %v", err)
+	}
+}
+
+func insertFeedbackCache(t *testing.T, db *state.DB, assignment *state.AgentAssignment, ci, coderabbit, human string) {
+	t.Helper()
+	ctx := context.Background()
+	fc := &state.FeedbackCache{
+		AssignmentID:        assignment.ID,
+		SessionID:           assignment.SessionID,
+		TaskID:              assignment.TaskID,
+		CISnapshot:          ci,
+		CoderabbitSnapshot:  coderabbit,
+		HumanReviewSnapshot: human,
+		CacheHash:           uuid.New().String(),
+		SourceStatus:        "{}",
+	}
+	if err := state.UpsertFeedbackCache(ctx, db, fc); err != nil {
+		t.Fatalf("UpsertFeedbackCache: %v", err)
+	}
 }
 
 func getDBState(t *testing.T, db *state.DB, id string) state.State {
@@ -420,6 +479,119 @@ func TestReconciler_AutoMerge_DisabledWhenNoPRNumber(t *testing.T) {
 	// Should still reach merge_ready even without merging.
 	if got := getDBState(t, db, id); got != state.StateMergeReady {
 		t.Errorf("state: got %q, want merge_ready", got)
+	}
+}
+
+func TestReconciler_PushesCIFeedback(t *testing.T) {
+	db := openTestDB(t)
+	repo, branch := "owner/repo", "feat/ci-feedback"
+	headHash := "abc123"
+	insertBranch(t, db, repo, branch, state.StateReviewed, headHash)
+
+	worktree := t.TempDir()
+	assignment := insertAssignment(t, db, repo, branch, worktree, state.AssignmentSubstatusWaitingForCI)
+	insertLink(t, db, assignment)
+	insertFeedbackCache(t, db, assignment, `[{"file":"main.go","line":12,"message":"CI failed"}]`, "", "")
+
+	rec := webhook.NewReconciler(db, &mockGitHubClient{
+		state: map[string]*webhook.GitHubState{
+			repo + "/" + branch: {Repo: repo, Branch: branch, PROpen: true, HeadHash: headHash},
+		},
+	}, []string{repo}, false)
+
+	rec.RunOnce(context.Background())
+
+	data, err := os.ReadFile(filepath.Join(worktree, ".codero", "FEEDBACK.md"))
+	if err != nil {
+		t.Fatalf("read FEEDBACK.md: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "CI Failures") {
+		t.Fatalf("FEEDBACK.md missing CI Failures section:\n%s", content)
+	}
+	if !strings.Contains(content, "CI failed") {
+		t.Fatalf("FEEDBACK.md missing CI message:\n%s", content)
+	}
+}
+
+func TestReconciler_PushesCodeReviewFeedback(t *testing.T) {
+	db := openTestDB(t)
+	repo, branch := "owner/repo", "feat/cr-feedback"
+	headHash := "def456"
+	insertBranch(t, db, repo, branch, state.StateReviewed, headHash)
+
+	worktree := t.TempDir()
+	assignment := insertAssignment(t, db, repo, branch, worktree, state.AssignmentSubstatusWaitingForCI)
+	insertLink(t, db, assignment)
+	insertFeedbackCache(t, db, assignment, "", `[{"message":"CodeRabbit wants changes"}]`, "")
+
+	rec := webhook.NewReconciler(db, &mockGitHubClient{
+		state: map[string]*webhook.GitHubState{
+			repo + "/" + branch: {Repo: repo, Branch: branch, PROpen: true, HeadHash: headHash},
+		},
+	}, []string{repo}, false)
+
+	rec.RunOnce(context.Background())
+
+	data, err := os.ReadFile(filepath.Join(worktree, ".codero", "FEEDBACK.md"))
+	if err != nil {
+		t.Fatalf("read FEEDBACK.md: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "Code Review") {
+		t.Fatalf("FEEDBACK.md missing Code Review section:\n%s", content)
+	}
+}
+
+func TestReconciler_NoActionableFeedbackSkipsWrite(t *testing.T) {
+	db := openTestDB(t)
+	repo, branch := "owner/repo", "feat/clean"
+	headHash := "clean123"
+	insertBranch(t, db, repo, branch, state.StateReviewed, headHash)
+
+	worktree := t.TempDir()
+	assignment := insertAssignment(t, db, repo, branch, worktree, state.AssignmentSubstatusWaitingForCI)
+	insertLink(t, db, assignment)
+	insertFeedbackCache(t, db, assignment, `{"status":"success"}`, "", "")
+
+	rec := webhook.NewReconciler(db, &mockGitHubClient{
+		state: map[string]*webhook.GitHubState{
+			repo + "/" + branch: {Repo: repo, Branch: branch, PROpen: true, HeadHash: headHash},
+		},
+	}, []string{repo}, false)
+
+	rec.RunOnce(context.Background())
+
+	if _, err := os.Stat(filepath.Join(worktree, ".codero", "FEEDBACK.md")); !os.IsNotExist(err) {
+		t.Fatalf("expected FEEDBACK.md to be absent, got err=%v", err)
+	}
+}
+
+func TestReconciler_ActionableFeedbackUpdatesSubstatus(t *testing.T) {
+	db := openTestDB(t)
+	repo, branch := "owner/repo", "feat/substatus"
+	headHash := "sub123"
+	insertBranch(t, db, repo, branch, state.StateReviewed, headHash)
+
+	worktree := t.TempDir()
+	assignment := insertAssignment(t, db, repo, branch, worktree, state.AssignmentSubstatusWaitingForMergeApproval)
+	insertLink(t, db, assignment)
+	insertFeedbackCache(t, db, assignment, `[{"message":"Needs revision"}]`, "", "")
+
+	rec := webhook.NewReconciler(db, &mockGitHubClient{
+		state: map[string]*webhook.GitHubState{
+			repo + "/" + branch: {Repo: repo, Branch: branch, PROpen: true, HeadHash: headHash},
+		},
+	}, []string{repo}, false)
+
+	rec.RunOnce(context.Background())
+
+	updated, err := state.GetAgentAssignmentByID(context.Background(), db, assignment.ID)
+	if err != nil {
+		t.Fatalf("GetAgentAssignmentByID: %v", err)
+	}
+	if updated.Substatus != state.AssignmentSubstatusNeedsRevision {
+		t.Fatalf("substatus: got %q, want %q", updated.Substatus, state.AssignmentSubstatusNeedsRevision)
 	}
 }
 

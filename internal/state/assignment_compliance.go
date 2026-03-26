@@ -19,6 +19,7 @@ const (
 	RuleIDHeartbeatProgress       = "RULE-004"
 
 	AssignmentSubstatusInProgress                = "in_progress"
+	AssignmentSubstatusNeedsRevision             = "needs_revision"
 	AssignmentSubstatusWaitingForCI              = "waiting_for_ci"
 	AssignmentSubstatusWaitingForMergeApproval   = "waiting_for_merge_approval"
 	AssignmentSubstatusBlockedCredentialFailure  = "blocked_credential_failure"
@@ -120,6 +121,7 @@ var defaultAgentRuleDefinitions = map[string]agentRuleDefinition{
 
 var activeAssignmentSubstatusSet = map[string]struct{}{
 	AssignmentSubstatusInProgress:              {},
+	AssignmentSubstatusNeedsRevision:           {},
 	AssignmentSubstatusWaitingForCI:            {},
 	AssignmentSubstatusWaitingForMergeApproval: {},
 }

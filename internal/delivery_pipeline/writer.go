@@ -34,11 +34,15 @@ type FeedbackItem struct {
 
 // FeedbackPackage is the structured payload for feedback/current.json.
 type FeedbackPackage struct {
-	GateFindings   []FeedbackItem `json:"gate_findings,omitempty"`
-	CodeReview     []FeedbackItem `json:"code_review,omitempty"`
-	CIFailures     []FeedbackItem `json:"ci_failures,omitempty"`
-	ReviewComments []FeedbackItem `json:"review_comments,omitempty"`
-	GeneratedAt    time.Time      `json:"generated_at"`
+	GateFindings   []FeedbackItem    `json:"gate_findings,omitempty"`
+	CodeReview     []FeedbackItem    `json:"code_review,omitempty"`
+	CIFailures     []FeedbackItem    `json:"ci_failures,omitempty"`
+	ReviewComments []FeedbackItem    `json:"review_comments,omitempty"`
+	Sections       []FeedbackSection `json:"sections,omitempty"`
+	CacheHash      string            `json:"cache_hash,omitempty"`
+	Truncated      bool              `json:"truncated,omitempty"`
+	GeneratedAt    time.Time         `json:"generated_at"`
+	SkipTruncate   bool              `json:"-"`
 }
 
 // WriteTASK writes <worktree>/.codero/TASK.md with the task details.
@@ -86,7 +90,13 @@ func WriteFEEDBACK(worktree string, feedback FeedbackPackage) error {
 	}
 
 	content := buildFeedbackContent(feedback)
-	content = truncateFeedback(content, feedbackMaxSize())
+	if !feedback.SkipTruncate {
+		maxSize := feedbackMaxSize()
+		if maxSize > 0 && len(content) > maxSize {
+			feedback.Truncated = true
+			content = truncateFeedback(content, maxSize)
+		}
+	}
 
 	feedbackDir := filepath.Join(worktree, coderoDir, feedbackDirName)
 	if err := os.MkdirAll(feedbackDir, 0o755); err != nil {
@@ -126,12 +136,28 @@ func ClearFEEDBACK(worktree string) error {
 }
 
 func buildFeedbackContent(feedback FeedbackPackage) string {
+	if len(feedback.Sections) > 0 {
+		return renderFeedbackSections(feedback.Sections)
+	}
 	var b strings.Builder
 	b.WriteString("# FEEDBACK\n\n")
 	writeSection(&b, "Gate Findings", feedback.GateFindings)
 	writeSection(&b, "Code Review", feedback.CodeReview)
 	writeSection(&b, "CI Failures", feedback.CIFailures)
 	writeSection(&b, "Review Comments", feedback.ReviewComments)
+	return b.String()
+}
+
+func renderFeedbackSections(sections []FeedbackSection) string {
+	var b strings.Builder
+	b.WriteString("# FEEDBACK\n\n")
+	if len(sections) == 0 {
+		b.WriteString("_No feedback available yet._\n")
+		return b.String()
+	}
+	for _, section := range sections {
+		writeSection(&b, section.Title, section.Items)
+	}
 	return b.String()
 }
 

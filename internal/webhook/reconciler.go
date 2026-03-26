@@ -69,16 +69,18 @@ func (s *StubGitHubClient) GetPRState(_ context.Context, repo, branch string) (*
 // durable branch records. It is the correctness backstop in all modes and the
 // only ingestion mechanism in polling-only mode.
 type Reconciler struct {
-	db           *state.DB
-	github       GitHubClient
-	repos        []string
-	interval     time.Duration
-	merger       AutoMerger // nil → auto-merge disabled
-	mergeMethod  string     // "merge", "squash", or "rebase"
-	healthMu     sync.RWMutex
-	lastProbeAt  time.Time
-	lastProbeErr string
-	probed       bool
+	db               *state.DB
+	github           GitHubClient
+	repos            []string
+	interval         time.Duration
+	merger           AutoMerger // nil → auto-merge disabled
+	mergeMethod      string     // "merge", "squash", or "rebase"
+	feedbackWriter   feedbackWriter
+	feedbackNotifier feedbackNotifier
+	healthMu         sync.RWMutex
+	lastProbeAt      time.Time
+	lastProbeErr     string
+	probed           bool
 }
 
 // NewReconciler creates a Reconciler.
@@ -90,10 +92,12 @@ func NewReconciler(db *state.DB, github GitHubClient, repos []string, webhookEna
 		interval = WebhookModeInterval
 	}
 	return &Reconciler{
-		db:       db,
-		github:   github,
-		repos:    repos,
-		interval: interval,
+		db:               db,
+		github:           github,
+		repos:            repos,
+		interval:         interval,
+		feedbackWriter:   defaultFeedbackWriter{},
+		feedbackNotifier: defaultFeedbackNotifier{},
 	}
 }
 
@@ -246,6 +250,7 @@ func (r *Reconciler) reconcileBranch(ctx context.Context, b state.BranchRecord) 
 			"error", err,
 		)
 	}
+	r.maybePushFeedback(ctx, b)
 
 	// Detect: merge_ready conditions revoked → T11.
 	if b.State == state.StateMergeReady {
