@@ -2,6 +2,7 @@ package gatecheck
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -86,6 +87,17 @@ const (
 	GroupOther    Group = "other"
 )
 
+// Finding captures a single structured issue from a check runner.
+type Finding struct {
+	File     string `json:"file,omitempty"`
+	Line     int    `json:"line,omitempty"`
+	Column   int    `json:"column,omitempty"`
+	Severity string `json:"severity,omitempty"`
+	RuleID   string `json:"rule_id,omitempty"`
+	Message  string `json:"message,omitempty"`
+	Snippet  string `json:"snippet,omitempty"`
+}
+
 type Profile string
 
 const (
@@ -99,9 +111,11 @@ type CheckResult struct {
 	ID            string      `json:"id"`
 	Name          string      `json:"name"`
 	Group         Group       `json:"group"`
+	Tier          string      `json:"tier,omitempty"`
 	Required      bool        `json:"required"`
 	Enabled       bool        `json:"enabled"`
 	Status        CheckStatus `json:"status"`
+	ExitCode      int         `json:"exit_code,omitempty"`
 	ReasonCode    ReasonCode  `json:"reason_code,omitempty"`
 	Reason        string      `json:"reason,omitempty"`
 	ToolName      string      `json:"tool_name,omitempty"`
@@ -111,6 +125,7 @@ type CheckResult struct {
 	Details       string      `json:"details,omitempty"`
 	FindingsCount int         `json:"findings_count"`
 	Truncated     bool        `json:"truncated,omitempty"`
+	Findings      []Finding   `json:"findings,omitempty"`
 }
 
 // Summary aggregates counts and overall status from a set of CheckResults.
@@ -130,10 +145,14 @@ type Summary struct {
 
 // Report is the top-level output of a gate engine run.
 type Report struct {
-	Summary    Summary       `json:"summary"`
-	Checks     []CheckResult `json:"checks"`
-	RunAt      time.Time     `json:"run_at"`
-	Invocation string        `json:"invocation,omitempty"`
+	Summary       Summary       `json:"summary"`
+	Checks        []CheckResult `json:"checks"`
+	RunAt         time.Time     `json:"run_at"`
+	Invocation    string        `json:"invocation,omitempty"`
+	Result        CheckStatus   `json:"result,omitempty"`
+	TotalFindings int           `json:"total_findings,omitempty"`
+	DurationMS    int64         `json:"duration_ms,omitempty"`
+	Blocked       bool          `json:"blocked,omitempty"`
 }
 
 // ComputeSummary builds a Summary from a slice of CheckResults and profile.
@@ -170,6 +189,64 @@ func ComputeSummary(checks []CheckResult, profile Profile, allowRequiredSkip boo
 		s.OverallStatus = StatusPass
 	}
 	return s
+}
+
+// FinalizeReport derives pipeline-level metadata and structured findings.
+func FinalizeReport(report Report) Report {
+	report.Checks = FinalizeChecks(report.Checks)
+	report.TotalFindings = totalFindings(report.Checks)
+	report.DurationMS = totalDurationMS(report)
+	report.Blocked = report.Summary.Failed > 0 || report.Summary.RequiredFailed > 0
+	if report.Summary.OverallStatus == StatusFail {
+		report.Result = StatusFail
+	} else {
+		report.Result = StatusPass
+	}
+	return report
+}
+
+// FinalizeChecks annotates checks with tiers, exit codes, and structured findings.
+func FinalizeChecks(checks []CheckResult) []CheckResult {
+	for i := range checks {
+		if checks[i].Tier == "" {
+			if checks[i].Required {
+				checks[i].Tier = "required"
+			} else {
+				checks[i].Tier = "optional"
+			}
+		}
+		if checks[i].ExitCode == 0 && checks[i].Status == StatusFail {
+			checks[i].ExitCode = 1
+		}
+		if checks[i].Details != "" {
+			checks[i].Findings = buildFindings(checks[i].Details)
+		}
+	}
+	return checks
+}
+
+func buildFindings(details string) []Finding {
+	lines := strings.Split(details, "\n")
+	findings := make([]Finding, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		findings = append(findings, Finding{Message: line})
+		if len(findings) >= MaxFindingsPerCheck {
+			break
+		}
+	}
+	return findings
+}
+
+func totalFindings(checks []CheckResult) int {
+	total := 0
+	for _, c := range checks {
+		total += c.FindingsCount
+	}
+	return total
 }
 
 func isInfraReason(code ReasonCode) bool {

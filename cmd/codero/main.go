@@ -23,6 +23,7 @@ import (
 	"github.com/codero/codero/internal/scheduler"
 	"github.com/codero/codero/internal/session"
 	"github.com/codero/codero/internal/state"
+	"github.com/codero/codero/internal/tmux"
 	"github.com/codero/codero/internal/webhook"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -352,6 +353,7 @@ func daemonCmd(configPath *string) *cobra.Command {
 			}()
 
 			expiryWorker := scheduler.NewExpiryWorker(db, queue, stream)
+			expiryWorker.TmuxChecker = tmux.RealExecutor{}
 			reconciler := webhook.NewReconciler(db, gh, cfg.Repos, cfg.Webhook.Enabled)
 			if cfg.AutoMerge.Enabled {
 				reconciler.WithAutoMerge(gh, cfg.AutoMerge.Method)

@@ -11,6 +11,8 @@ import (
 const (
 	// DefaultSubstatusPath is where gate-substatus.env is written.
 	DefaultSubstatusPath = ".codero/gate-check/gate-substatus.env"
+	// HeartbeatSubstatusPath is the pipeline heartbeat location.
+	HeartbeatSubstatusPath = ".codero/gate-heartbeat/gate-substatus.env"
 )
 
 // WriteSubstatus atomically writes gate-substatus.env from a completed Report.
@@ -50,6 +52,7 @@ func WriteSubstatus(path string, report Report) error {
 		fmt.Fprintf(&b, "CODERO_CHECK_%s_STATUS=%s\n", key, string(c.Status))
 		fmt.Fprintf(&b, "CODERO_CHECK_%s_DURATION_MS=%d\n", key, c.DurationMS)
 		fmt.Fprintf(&b, "CODERO_CHECK_%s_FINDINGS_COUNT=%d\n", key, c.FindingsCount)
+		fmt.Fprintf(&b, "CODERO_CHECK_%s_EXIT_CODE=%d\n", key, c.ExitCode)
 	}
 
 	// Atomic write: temp file + rename.

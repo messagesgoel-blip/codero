@@ -184,6 +184,29 @@ func writeFile(t *testing.T, dir, rel, content string) string {
 	return abs
 }
 
+func writeExecutable(t *testing.T, dir, rel, content string) string {
+	t.Helper()
+	abs := filepath.Join(dir, rel)
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(abs, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return abs
+}
+
+func findCheck(t *testing.T, report gatecheck.Report, id string) gatecheck.CheckResult {
+	t.Helper()
+	for _, c := range report.Checks {
+		if c.ID == id {
+			return c
+		}
+	}
+	t.Fatalf("check %q not found", id)
+	return gatecheck.CheckResult{}
+}
+
 func TestEngine_ProfileOff_MinimalChecks(t *testing.T) {
 	dir := makeRepo(t)
 	writeFile(t, dir, "hello.go", "package main\n")
@@ -210,6 +233,129 @@ func TestEngine_ProfileOff_MinimalChecks(t *testing.T) {
 				t.Errorf("profile=off check %q: got status %q, want skip or disabled", c.ID, c.Status)
 			}
 		}
+	}
+}
+
+func TestRunPipeline_GitleaksFailBlocked(t *testing.T) {
+	dir := makeRepo(t)
+	writeFile(t, dir, "main.go", "package main\n\nfunc main() {}\n")
+	mustRun(t, dir, "git", "add", "main.go")
+
+	tool := writeExecutable(t, dir, "bin/gitleaks", "#!/bin/sh\necho leak-found\nexit 1\n")
+
+	cfg := gatecheck.EngineConfig{
+		Profile:      gatecheck.ProfilePortable,
+		GitleaksPath: tool,
+		Invocation:   "codero",
+	}
+	engine := gatecheck.NewEngine(cfg)
+
+	report, err := engine.RunPipeline(context.Background(), dir, nil)
+	if err != nil {
+		t.Fatalf("RunPipeline: %v", err)
+	}
+	if report.Result != gatecheck.StatusFail {
+		t.Errorf("result: got %q, want fail", report.Result)
+	}
+	if !report.Blocked {
+		t.Error("expected blocked=true on gitleaks failure")
+	}
+
+	check := findCheck(t, *report, "gitleaks-staged")
+	if check.Status != gatecheck.StatusFail {
+		t.Errorf("gitleaks status: got %q, want fail", check.Status)
+	}
+
+	substatus := filepath.Join(dir, gatecheck.HeartbeatSubstatusPath)
+	if _, err := os.Stat(substatus); err != nil {
+		t.Fatalf("expected substatus at %s: %v", substatus, err)
+	}
+}
+
+func TestRunPipeline_CleanPass(t *testing.T) {
+	dir := makeRepo(t)
+	writeFile(t, dir, "main.go", "package main\n\nfunc main() {}\n")
+	mustRun(t, dir, "git", "add", "main.go")
+
+	tool := writeExecutable(t, dir, "bin/gitleaks", "#!/bin/sh\nexit 0\n")
+
+	cfg := gatecheck.EngineConfig{
+		Profile:      gatecheck.ProfilePortable,
+		GitleaksPath: tool,
+		Invocation:   "codero",
+	}
+	engine := gatecheck.NewEngine(cfg)
+
+	report, err := engine.RunPipeline(context.Background(), dir, nil)
+	if err != nil {
+		t.Fatalf("RunPipeline: %v", err)
+	}
+	if report.Result != gatecheck.StatusPass {
+		t.Errorf("result: got %q, want pass", report.Result)
+	}
+	if report.Blocked {
+		t.Error("expected blocked=false on clean pass")
+	}
+}
+
+func TestRunPipeline_DisabledCheckShowsSkip(t *testing.T) {
+	dir := makeRepo(t)
+	writeFile(t, dir, "main.go", "package main\n\nfunc main() {}\n")
+	mustRun(t, dir, "git", "add", "main.go")
+
+	tool := writeExecutable(t, dir, "bin/gitleaks", "#!/bin/sh\nexit 1\n")
+
+	cfg := gatecheck.EngineConfig{
+		Profile:      gatecheck.ProfileOff,
+		GitleaksPath: tool,
+		Invocation:   "codero",
+	}
+	engine := gatecheck.NewEngine(cfg)
+
+	report, err := engine.RunPipeline(context.Background(), dir, nil)
+	if err != nil {
+		t.Fatalf("RunPipeline: %v", err)
+	}
+	check := findCheck(t, *report, "gitleaks-staged")
+	if check.Status != gatecheck.StatusSkip {
+		t.Errorf("gitleaks status: got %q, want skip", check.Status)
+	}
+}
+
+func TestRunPipeline_FindingsTruncated(t *testing.T) {
+	dir := makeRepo(t)
+	writeFile(t, dir, "main.go", "package main\n\nfunc main() {}\n")
+	mustRun(t, dir, "git", "add", "main.go")
+
+	var b strings.Builder
+	for i := 0; i < 75; i++ {
+		b.WriteString("finding ")
+		b.WriteString(strings.Repeat("x", 3))
+		b.WriteString("\n")
+	}
+	script := "#!/bin/sh\ncat <<'EOF'\n" + b.String() + "EOF\nexit 1\n"
+	tool := writeExecutable(t, dir, "bin/gitleaks", script)
+
+	cfg := gatecheck.EngineConfig{
+		Profile:      gatecheck.ProfilePortable,
+		GitleaksPath: tool,
+		Invocation:   "codero",
+	}
+	engine := gatecheck.NewEngine(cfg)
+
+	report, err := engine.RunPipeline(context.Background(), dir, nil)
+	if err != nil {
+		t.Fatalf("RunPipeline: %v", err)
+	}
+	check := findCheck(t, *report, "gitleaks-staged")
+	if check.FindingsCount != 75 {
+		t.Errorf("findings_count: got %d, want 75", check.FindingsCount)
+	}
+	if !check.Truncated {
+		t.Error("expected truncated=true for findings > 50")
+	}
+	if len(check.Findings) != gatecheck.MaxFindingsPerCheck {
+		t.Errorf("findings length: got %d, want %d", len(check.Findings), gatecheck.MaxFindingsPerCheck)
 	}
 }
 
