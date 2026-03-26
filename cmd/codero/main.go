@@ -15,6 +15,7 @@ import (
 	"github.com/codero/codero/internal/daemon"
 	daemongrpc "github.com/codero/codero/internal/daemon/grpc"
 	"github.com/codero/codero/internal/delivery"
+	deliverypipeline "github.com/codero/codero/internal/delivery_pipeline"
 	"github.com/codero/codero/internal/gate"
 	ghclient "github.com/codero/codero/internal/github"
 	loglib "github.com/codero/codero/internal/log"
@@ -380,6 +381,22 @@ func daemonCmd(configPath *string) *cobra.Command {
 				return err
 			}
 
+			pipeline := deliverypipeline.NewPipeline(deliverypipeline.PipelineDeps{
+				StateDB: db,
+				GitHub:  gh,
+			})
+			if err := pipeline.ClearStaleLocks(ctx); err != nil {
+				loglib.Warn("codero: delivery pipeline stale lock sweep failed",
+					loglib.FieldEventType, loglib.EventStartup,
+					loglib.FieldComponent, "daemon",
+					"error", err,
+				)
+			}
+			loglib.Info("codero: delivery pipeline initialized",
+				loglib.FieldEventType, loglib.EventStartup,
+				loglib.FieldComponent, "daemon",
+			)
+
 			// Create the gRPC daemon surface (Daemon Spec v2 §7).
 			grpcSrv := daemongrpc.NewServer(daemongrpc.ServerConfig{
 				DB:           db,
@@ -393,6 +410,7 @@ func daemonCmd(configPath *string) *cobra.Command {
 			obs := daemon.NewObservabilityServerWithGRPC(client, queue, slotCounter, db.Unwrap(),
 				cfg.APIServer.Addr, cfg.APIServer.ReadTimeout, cfg.APIServer.WriteTimeout,
 				cfg.DashboardBasePath, version, grpcSrv.GRPCServer())
+			obs.SetPipeline(pipeline)
 			obs.Start()
 			wg.Add(1)
 			go func() {

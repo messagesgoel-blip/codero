@@ -42,6 +42,7 @@ type ObservabilityServer struct {
 	queue       *scheduler.Queue       // WFQ queue for queue introspection
 	slotCounter *scheduler.SlotCounter // Slot counter for dispatch slot status
 	db          *sql.DB                // SQLite state store for metrics queries
+	pipeline    pipelineRunner         // Delivery pipeline for submit handling
 	startTime   time.Time              // Process start time for uptime calculation
 	mu          sync.RWMutex           // Mutex for thread-safe state access
 	repoPath    string                 // Repo path for gate progress file lookup
@@ -170,6 +171,11 @@ func NewObservabilityServerWithGRPC(redisClient *redis.Client, queue *scheduler.
 	}
 
 	return obs
+}
+
+// SetPipeline registers the delivery pipeline used by the submit endpoint.
+func (o *ObservabilityServer) SetPipeline(p pipelineRunner) {
+	o.pipeline = p
 }
 
 // Start launches the observability HTTP server in a background goroutine.

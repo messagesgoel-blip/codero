@@ -2,13 +2,14 @@ package daemon
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 
@@ -51,7 +52,8 @@ func seedAssignment(t *testing.T, obs *ObservabilityServer, sessionID, assignmen
 
 func TestHandleSubmit_202(t *testing.T) {
 	db := setupSubmitTestDB(t)
-	obs := &ObservabilityServer{db: db.Unwrap()}
+	pipeline := &fakePipeline{}
+	obs := &ObservabilityServer{db: db.Unwrap(), pipeline: pipeline}
 
 	seedAssignment(t, obs, "test-sess", "assign-1", "")
 
@@ -75,11 +77,14 @@ func TestHandleSubmit_202(t *testing.T) {
 	if resp["assignment_id"] != "assign-1" {
 		t.Errorf("expected assignment_id=assign-1, got %q", resp["assignment_id"])
 	}
+	if pipeline.called == 0 {
+		t.Errorf("expected pipeline to be invoked")
+	}
 }
 
 func TestHandleSubmit_404(t *testing.T) {
 	db := setupSubmitTestDB(t)
-	obs := &ObservabilityServer{db: db.Unwrap()}
+	obs := &ObservabilityServer{db: db.Unwrap(), pipeline: &fakePipeline{}}
 
 	body, _ := json.Marshal(submitRequest{SessionID: "no-such-sess"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/assignments/nonexistent/submit", bytes.NewReader(body))
@@ -94,7 +99,7 @@ func TestHandleSubmit_404(t *testing.T) {
 
 func TestHandleSubmit_403(t *testing.T) {
 	db := setupSubmitTestDB(t)
-	obs := &ObservabilityServer{db: db.Unwrap()}
+	obs := &ObservabilityServer{db: db.Unwrap(), pipeline: &fakePipeline{}}
 
 	seedAssignment(t, obs, "owner-sess", "assign-2", "")
 
@@ -111,18 +116,11 @@ func TestHandleSubmit_403(t *testing.T) {
 
 func TestHandleSubmit_409(t *testing.T) {
 	db := setupSubmitTestDB(t)
-	obs := &ObservabilityServer{db: db.Unwrap()}
+	pipeline := &fakePipeline{err: deliverypipeline.ErrPipelineBusy}
+	obs := &ObservabilityServer{db: db.Unwrap(), pipeline: pipeline}
 
 	worktreeDir := t.TempDir()
 	seedAssignment(t, obs, "test-sess", "assign-3", worktreeDir)
-
-	// Pre-acquire the delivery lock.
-	if err := deliverypipeline.Lock(worktreeDir, "test-sess", "assign-3"); err != nil {
-		t.Fatalf("pre-lock: %v", err)
-	}
-	t.Cleanup(func() {
-		os.RemoveAll(filepath.Join(worktreeDir, ".codero"))
-	})
 
 	body, _ := json.Marshal(submitRequest{SessionID: "test-sess"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/assignments/assign-3/submit", bytes.NewReader(body))
@@ -137,7 +135,8 @@ func TestHandleSubmit_409(t *testing.T) {
 
 func TestHandleSubmit_DeliveryStateUpdated(t *testing.T) {
 	db := setupSubmitTestDB(t)
-	obs := &ObservabilityServer{db: db.Unwrap()}
+	pipeline := &fakePipeline{db: db.Unwrap()}
+	obs := &ObservabilityServer{db: db.Unwrap(), pipeline: pipeline}
 
 	seedAssignment(t, obs, "test-sess", "assign-4", "")
 
@@ -171,7 +170,8 @@ func TestHandleSubmit_DeliveryStateUpdated(t *testing.T) {
 
 func TestHandleSubmit_LazyAssignment(t *testing.T) {
 	db := setupSubmitTestDB(t)
-	obs := &ObservabilityServer{db: db.Unwrap()}
+	pipeline := &fakePipeline{db: db.Unwrap()}
+	obs := &ObservabilityServer{db: db.Unwrap(), pipeline: pipeline}
 
 	// Seed session without assignment.
 	_, err := obs.db.Exec(
@@ -228,4 +228,32 @@ func TestHandleSubmit_LazyAssignment(t *testing.T) {
 	if worktree == "" {
 		t.Error("worktree should be stored on lazy assignment")
 	}
+	if pipeline.called == 0 {
+		t.Error("expected pipeline to be invoked for lazy assignment")
+	}
+}
+
+type fakePipeline struct {
+	called       int
+	lastID       string
+	lastWorktree string
+	err          error
+	db           *sql.DB
+}
+
+func (f *fakePipeline) Submit(ctx context.Context, assignmentID, worktree string) error {
+	f.called++
+	f.lastID = assignmentID
+	f.lastWorktree = worktree
+	if f.db != nil {
+		_, _ = f.db.ExecContext(ctx,
+			`UPDATE agent_assignments
+			 SET delivery_state = 'staging',
+			     revision_count = revision_count + 1,
+			     last_submit_at = ?
+			 WHERE assignment_id = ?`,
+			time.Now().UTC(), assignmentID,
+		)
+	}
+	return f.err
 }

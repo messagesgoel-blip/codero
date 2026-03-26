@@ -1,14 +1,15 @@
 package daemon
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"os/exec"
 	"strings"
-	"time"
 
 	deliverypipeline "github.com/codero/codero/internal/delivery_pipeline"
 )
@@ -19,6 +20,10 @@ type submitRequest struct {
 	Summary   string `json:"summary,omitempty"`
 	Files     string `json:"files,omitempty"`
 	Worktree  string `json:"worktree,omitempty"`
+}
+
+type pipelineRunner interface {
+	Submit(ctx context.Context, assignmentID, worktree string) error
 }
 
 // handleSubmit handles POST /api/v1/assignments/{id}/submit.
@@ -120,32 +125,19 @@ func (o *ObservabilityServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Check delivery lock.
-	if worktree != "" && deliverypipeline.IsLocked(worktree) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusConflict)
-		fmt.Fprintf(w, `{"error":"delivery pipeline already running"}`)
+	if o.pipeline == nil {
+		http.Error(w, `{"error":"delivery pipeline not initialized"}`, http.StatusInternalServerError)
 		return
 	}
-
-	// Update delivery state atomically.
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = o.db.ExecContext(r.Context(),
-		`UPDATE agent_assignments
-		 SET delivery_state = 'staging',
-		     last_submit_at = ?,
-		     revision_count = revision_count + 1
-		 WHERE assignment_id = ?`,
-		now, assignmentID,
-	)
-	if err != nil {
-		http.Error(w, `{"error":"update failed"}`, http.StatusInternalServerError)
+	if err := o.pipeline.Submit(r.Context(), assignmentID, worktree); err != nil {
+		if errors.Is(err, deliverypipeline.ErrPipelineBusy) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			fmt.Fprintf(w, `{"error":"delivery pipeline already running"}`)
+			return
+		}
+		http.Error(w, fmt.Sprintf(`{"error":"pipeline error: %s"}`, err.Error()), http.StatusInternalServerError)
 		return
-	}
-
-	// Acquire delivery lock if worktree is available.
-	if worktree != "" {
-		_ = deliverypipeline.Lock(worktree, req.SessionID, assignmentID)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
