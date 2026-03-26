@@ -50,13 +50,14 @@ func makeEvent(eventType, repo string, payload map[string]any) GitHubEvent {
 }
 
 func TestEventProcessor_PullRequest_Closed(t *testing.T) {
-	db, _ := setupProcessorDB(t, "owner/repo", "feat", state.StateReviewed)
+	db, _ := setupProcessorDB(t, "owner/repo", "feat", state.StateReviewApproved)
 	stream := setupStream(t, db)
 	proc := NewEventProcessor(db, stream)
 
 	payload := map[string]any{
 		"action": "closed",
 		"pull_request": map[string]any{
+			"merged": true,
 			"head": map[string]any{
 				"ref": "feat",
 				"sha": "newhash",
@@ -73,13 +74,13 @@ func TestEventProcessor_PullRequest_Closed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetBranch: %v", err)
 	}
-	if rec.State != state.StateClosed {
-		t.Errorf("expected closed, got %s", rec.State)
+	if rec.State != state.StateMerged {
+		t.Errorf("expected merged, got %s", rec.State)
 	}
 }
 
 func TestEventProcessor_PullRequest_Synchronize(t *testing.T) {
-	db, _ := setupProcessorDB(t, "owner/repo", "feat", state.StateReviewed)
+	db, _ := setupProcessorDB(t, "owner/repo", "feat", state.StateReviewApproved)
 	stream := setupStream(t, db)
 	proc := NewEventProcessor(db, stream)
 
@@ -102,8 +103,8 @@ func TestEventProcessor_PullRequest_Synchronize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetBranch: %v", err)
 	}
-	if rec.State != state.StateStaleBranch {
-		t.Errorf("expected stale_branch, got %s", rec.State)
+	if rec.State != state.StateStale {
+		t.Errorf("expected stale, got %s", rec.State)
 	}
 	if rec.HeadHash != "newhash456" {
 		t.Errorf("head_hash: want newhash456, got %s", rec.HeadHash)
@@ -111,7 +112,7 @@ func TestEventProcessor_PullRequest_Synchronize(t *testing.T) {
 }
 
 func TestEventProcessor_PRReview_Approved(t *testing.T) {
-	db, _ := setupProcessorDB(t, "owner/repo", "feat", state.StateReviewed)
+	db, _ := setupProcessorDB(t, "owner/repo", "feat", state.StateReviewApproved)
 	stream := setupStream(t, db)
 	proc := NewEventProcessor(db, stream)
 
@@ -143,7 +144,7 @@ func TestEventProcessor_PRReview_Approved(t *testing.T) {
 }
 
 func TestEventProcessor_CheckRun_Success(t *testing.T) {
-	db, _ := setupProcessorDB(t, "owner/repo", "feat", state.StateReviewed)
+	db, _ := setupProcessorDB(t, "owner/repo", "feat", state.StateReviewApproved)
 	stream := setupStream(t, db)
 	proc := NewEventProcessor(db, stream)
 
@@ -173,7 +174,7 @@ func TestEventProcessor_CheckRun_Success(t *testing.T) {
 }
 
 func TestEventProcessor_UnknownEventType_Noop(t *testing.T) {
-	db, _ := setupProcessorDB(t, "owner/repo", "feat", state.StateReviewed)
+	db, _ := setupProcessorDB(t, "owner/repo", "feat", state.StateReviewApproved)
 	stream := setupStream(t, db)
 	proc := NewEventProcessor(db, stream)
 
@@ -208,7 +209,7 @@ func insertTestSessionAndAssignment(t *testing.T, db *state.DB, sessionID, assig
 }
 
 func TestProcessEvent_PROpened_UpdatesGitHubLink(t *testing.T) {
-	db, _ := setupProcessorDB(t, "owner/repo", "feat", state.StateReviewed)
+	db, _ := setupProcessorDB(t, "owner/repo", "feat", state.StateReviewApproved)
 	stream := setupStream(t, db)
 	proc := NewEventProcessor(db, stream)
 
@@ -264,7 +265,7 @@ func TestProcessEvent_PROpened_UpdatesGitHubLink(t *testing.T) {
 }
 
 func TestProcessEvent_CheckRun_InvalidatesFeedbackCache(t *testing.T) {
-	db, _ := setupProcessorDB(t, "owner/repo", "feat", state.StateReviewed)
+	db, _ := setupProcessorDB(t, "owner/repo", "feat", state.StateReviewApproved)
 	stream := setupStream(t, db)
 	proc := NewEventProcessor(db, stream)
 
@@ -338,7 +339,7 @@ func TestProcessEvent_CheckRun_InvalidatesFeedbackCache(t *testing.T) {
 }
 
 func TestProcessEvent_Review_InvalidatesFeedbackCache(t *testing.T) {
-	db, _ := setupProcessorDB(t, "owner/repo", "feat", state.StateReviewed)
+	db, _ := setupProcessorDB(t, "owner/repo", "feat", state.StateReviewApproved)
 	stream := setupStream(t, db)
 	proc := NewEventProcessor(db, stream)
 

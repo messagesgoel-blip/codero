@@ -17,7 +17,7 @@ type BranchFSM struct {
 // NewBranchFSM creates a branch FSM starting from the provided state.
 func NewBranchFSM(initial State) *BranchFSM {
 	if initial == "" {
-		initial = StateCoding
+		initial = StateSubmitted
 	}
 	return &BranchFSM{
 		FSM: fsm.NewFSM(

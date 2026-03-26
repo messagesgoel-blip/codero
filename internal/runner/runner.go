@@ -282,7 +282,7 @@ func (r *ReviewRunner) processEntry(ctx context.Context, repo, branch string) er
 	return r.handleReviewSuccess(ctx, rec, repo, branch, holderID, runID, resp)
 }
 
-// handleReviewSuccess normalizes findings, delivers them, and transitions to reviewed (T08).
+// handleReviewSuccess normalizes findings, delivers them, and transitions to review_approved (T08).
 func (r *ReviewRunner) handleReviewSuccess(
 	ctx context.Context,
 	rec *state.BranchRecord,
@@ -357,9 +357,9 @@ func (r *ReviewRunner) handleReviewSuccess(
 		)
 	}
 
-	// Transition: cli_reviewing → reviewed (T08).
-	if err := state.TransitionBranch(r.db, rec.ID, state.StateCLIReviewing, state.StateReviewed, "review_completed"); err != nil {
-		return fmt.Errorf("transition to reviewed: %w", err)
+	// Transition: cli_reviewing → review_approved (T08).
+	if err := state.TransitionBranch(r.db, rec.ID, state.StateCLIReviewing, state.StateReviewApproved, "review_completed"); err != nil {
+		return fmt.Errorf("transition to review_approved: %w", err)
 	}
 
 	loglib.Info("runner: review completed",
@@ -368,7 +368,7 @@ func (r *ReviewRunner) handleReviewSuccess(
 		loglib.FieldRepo, repo,
 		loglib.FieldBranch, branch,
 		loglib.FieldFromState, string(state.StateCLIReviewing),
-		loglib.FieldToState, string(state.StateReviewed),
+		loglib.FieldToState, string(state.StateReviewApproved),
 		"findings", len(findings),
 		"run_id", runID,
 	)

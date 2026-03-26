@@ -124,22 +124,22 @@ Examples:
 	return cmd
 }
 
-// applyNoPR transitions the branch to closed if it is in a post-PR state,
+// applyNoPR transitions the branch to merged if it is in a post-PR state,
 // matching the reconciler's behaviour when a PR is not found.
 func applyNoPR(db *state.DB, rec *state.BranchRecord) {
-	if rec.State == state.StateCoding || rec.State == state.StateLocalReview {
+	if rec.State == state.StateSubmitted || rec.State == state.StateWaiting {
 		fmt.Printf("Branch is in %s — no PR expected yet, nothing to do.\n", rec.State)
 		return
 	}
-	if rec.State == state.StateClosed {
-		fmt.Println("Branch is already closed.")
+	if rec.State == state.StateMerged {
+		fmt.Println("Branch is already merged.")
 		return
 	}
-	if err := state.TransitionBranch(db, rec.ID, rec.State, state.StateClosed, "poll_pr_not_found"); err != nil {
-		fmt.Printf("Warning: could not transition to closed: %v\n", err)
+	if err := state.TransitionBranch(db, rec.ID, rec.State, state.StateMerged, "poll_pr_not_found"); err != nil {
+		fmt.Printf("Warning: could not transition to merged: %v\n", err)
 		return
 	}
-	fmt.Printf("Transitioned %s -> closed (no open PR found).\n", rec.State)
+	fmt.Printf("Transitioned %s -> merged (no open PR found).\n", rec.State)
 }
 
 // whyCmd explains why a branch is in its current state by showing the branch

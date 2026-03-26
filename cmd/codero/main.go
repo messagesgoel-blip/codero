@@ -748,7 +748,7 @@ func autoRecordGateOutcomes(ctx context.Context, result gate.Result, repoPath, c
 	}
 }
 
-// registerCmd registers a branch for local review or queue submission.
+// registerCmd registers a branch for pre-commit waiting or queue submission.
 func registerCmd() *cobra.Command {
 	var (
 		branch    string
@@ -764,7 +764,7 @@ func registerCmd() *cobra.Command {
 
 This command:
 1. Records the branch in the local state store
-2. Transitions to local_review (default) or queued_cli (with --skip-local)
+2. Transitions to waiting (default) or queued_cli (with --skip-local)
 3. Enables tracking and scoring for dispatch
 
 If no branch is provided, uses the current git branch.`,
@@ -797,7 +797,7 @@ If no branch is provided, uses the current git branch.`,
 			}
 			defer db.Close()
 
-			targetState := state.StateLocalReview
+			targetState := state.StateWaiting
 			trigger := "codero-cli register"
 
 			if skipLocal {
@@ -810,7 +810,7 @@ If no branch is provided, uses the current git branch.`,
 				if errors.Is(err, state.ErrBranchNotFound) {
 					fmt.Printf("Branch %s/%s not found in state store.\n", repo, branch)
 					fmt.Println("Branches are typically registered via webhook or daemon submit.")
-					fmt.Println("For local_review, ensure the branch has been submitted first.")
+					fmt.Println("For waiting, ensure the branch has been submitted first.")
 					return fmt.Errorf("branch not registered")
 				}
 				return fmt.Errorf("check branch: %w", err)
@@ -829,7 +829,7 @@ If no branch is provided, uses the current git branch.`,
 			if skipLocal {
 				fmt.Println("Branch is in queue for review dispatch.")
 			} else {
-				fmt.Println("Branch is in local_review - run commit-gate before committing.")
+				fmt.Println("Branch is in waiting - run commit-gate before committing.")
 			}
 			return nil
 		},
@@ -837,7 +837,7 @@ If no branch is provided, uses the current git branch.`,
 
 	cmd.Flags().StringVarP(&repo, "repo", "R", "", "repository (owner/repo)")
 	cmd.Flags().IntVarP(&priority, "priority", "p", 10, "queue priority (0-20)")
-	cmd.Flags().BoolVar(&skipLocal, "skip-local", false, "skip local_review and go directly to queue")
+	cmd.Flags().BoolVar(&skipLocal, "skip-local", false, "skip waiting and go directly to queue")
 
 	return cmd
 }

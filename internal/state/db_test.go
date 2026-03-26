@@ -92,7 +92,7 @@ func TestOpen_BranchStatesSchema(t *testing.T) {
 	// Insert a minimal row to verify all NOT NULL columns have defaults.
 	_, err := db.Unwrap().Exec(`
 		INSERT INTO branch_states (id, repo, branch, state)
-		VALUES ('test-uuid-1', 'acme/api', 'main', 'coding')
+		VALUES ('test-uuid-1', 'acme/api', 'main', 'submitted')
 	`)
 	if err != nil {
 		t.Fatalf("insert branch_state: %v", err)
@@ -137,8 +137,8 @@ func TestOpen_BranchStatesSchema(t *testing.T) {
 	if ownerSessionID != "" {
 		t.Errorf("owner_session_id default: got %q, want %q", ownerSessionID, "")
 	}
-	if state != "coding" {
-		t.Errorf("state: got %q, want %q", state, "coding")
+	if state != "submitted" {
+		t.Errorf("state: got %q, want %q", state, "submitted")
 	}
 }
 
@@ -148,7 +148,7 @@ func TestOpen_StateTransitionsSchema(t *testing.T) {
 	// Insert branch first (FK constraint).
 	_, err := db.Unwrap().Exec(`
 		INSERT INTO branch_states (id, repo, branch, state)
-		VALUES ('test-uuid-2', 'acme/api', 'feat/x', 'coding')
+		VALUES ('test-uuid-2', 'acme/api', 'feat/x', 'submitted')
 	`)
 	if err != nil {
 		t.Fatalf("insert branch_state: %v", err)
@@ -156,7 +156,7 @@ func TestOpen_StateTransitionsSchema(t *testing.T) {
 
 	_, err = db.Unwrap().Exec(`
 		INSERT INTO state_transitions (branch_state_id, from_state, to_state, trigger)
-		VALUES ('test-uuid-2', 'coding', 'queued_cli', 'codero-cli submit')
+		VALUES ('test-uuid-2', 'submitted', 'queued_cli', 'codero-cli submit')
 	`)
 	if err != nil {
 		t.Fatalf("insert state_transition: %v", err)
@@ -170,8 +170,8 @@ func TestOpen_StateTransitionsSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("select state_transition: %v", err)
 	}
-	if fromState != "coding" || toState != "queued_cli" || trigger != "codero-cli submit" {
-		t.Errorf("transition row: got (%q, %q, %q), want (coding, queued_cli, codero-cli submit)",
+	if fromState != "submitted" || toState != "queued_cli" || trigger != "codero-cli submit" {
+		t.Errorf("transition row: got (%q, %q, %q), want (submitted, queued_cli, codero-cli submit)",
 			fromState, toState, trigger)
 	}
 }
@@ -182,7 +182,7 @@ func TestOpen_ForeignKeyEnforced(t *testing.T) {
 	// Inserting a transition for a non-existent branch_state_id must fail.
 	_, err := db.Unwrap().Exec(`
 		INSERT INTO state_transitions (branch_state_id, from_state, to_state, trigger)
-		VALUES ('nonexistent-id', 'coding', 'queued_cli', 'test')
+		VALUES ('nonexistent-id', 'submitted', 'queued_cli', 'test')
 	`)
 	if err == nil {
 		t.Error("expected FK violation error, got nil")
@@ -367,7 +367,7 @@ func TestOpen_UniqueConstraint(t *testing.T) {
 	insert := func() error {
 		_, err := db.Unwrap().Exec(`
 			INSERT INTO branch_states (id, repo, branch, state)
-			VALUES ('id-' || hex(randomblob(8)), 'acme/api', 'main', 'coding')
+			VALUES ('id-' || hex(randomblob(8)), 'acme/api', 'main', 'submitted')
 		`)
 		return err
 	}

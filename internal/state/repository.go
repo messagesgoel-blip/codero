@@ -135,7 +135,7 @@ func ListActiveBranches(db *DB) ([]BranchRecord, error) {
 		       queue_priority, submission_time, lease_id, lease_expires_at,
 		       created_at, updated_at
 		FROM branch_states
-		WHERE state IN ('coding','local_review','queued_cli','cli_reviewing','reviewed','merge_ready')
+		WHERE state IN ('submitted','waiting','queued_cli','cli_reviewing','review_approved','merge_ready')
 		ORDER BY updated_at ASC`
 
 	rows, err := db.sql.Query(q)
@@ -157,7 +157,7 @@ func ListExpiredSessions(db *DB, ttl time.Duration) ([]BranchRecord, error) {
 		       queue_priority, submission_time, lease_id, lease_expires_at,
 		       created_at, updated_at
 		FROM branch_states
-		WHERE state IN ('coding','local_review','queued_cli','cli_reviewing','reviewed','merge_ready')
+		WHERE state IN ('submitted','waiting','queued_cli','cli_reviewing','review_approved','merge_ready')
 		  AND owner_session_last_seen IS NOT NULL
 		  AND owner_session_last_seen < ?
 		ORDER BY owner_session_last_seen ASC`

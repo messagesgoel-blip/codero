@@ -668,7 +668,7 @@ func TestCert_S9_ComplianceViolations(t *testing.T) {
 
 func TestCert_S10_Queue(t *testing.T) {
 	h, db := newTestHandler(t)
-	seedBranch(t, db, "acme/api", "feat/q1", "coding")
+	seedBranch(t, db, "acme/api", "feat/q1", "submitted")
 	seedBranch(t, db, "acme/api", "feat/q2", "queued_cli")
 
 	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/queue", nil)
@@ -687,7 +687,7 @@ func TestCert_S10_Queue(t *testing.T) {
 func TestCert_S10_QueueStats(t *testing.T) {
 	h, db := newTestHandler(t)
 	seedBranch(t, db, "acme/api", "feat/s1", "queued_cli")
-	seedBranch(t, db, "acme/api", "feat/s2", "coding")
+	seedBranch(t, db, "acme/api", "feat/s2", "submitted")
 	seedBranch(t, db, "acme/api", "feat/s3", "blocked")
 
 	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/queue/stats", nil)

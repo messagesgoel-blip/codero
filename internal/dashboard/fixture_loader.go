@@ -25,7 +25,7 @@ type FixtureSessionEntry struct {
 	Worktree   string `json:"worktree,omitempty"`
 	TaskID     string `json:"task_id,omitempty"`
 	Mode       string `json:"mode,omitempty"`
-	State      string `json:"state"`       // legacy branch_states status (e.g. "coding")
+	State      string `json:"state"`       // branch_states status (e.g. "submitted")
 	PRNumber   int    `json:"pr_number"`   // optional; 0 = no PR (legacy branch_states only)
 	OwnerAgent string `json:"owner_agent"` // optional display label (legacy)
 }
@@ -194,7 +194,7 @@ func SeedFixtureSessions(ctx context.Context, db *sql.DB, entries []FixtureSessi
 		}
 		state := e.State
 		if state == "" {
-			state = "coding"
+			state = "submitted"
 		}
 		id := fixtureBranchStateID(e.Repo, e.Branch)
 		// nosemgrep: go.lang.security.audit.sqli.gosql-sqli.gosql-sqli

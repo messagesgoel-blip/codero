@@ -55,7 +55,7 @@ func (p BranchPane) View() string {
 		lines = append(lines, p.theme.Muted.Render(fmt.Sprintf("  commit:  %s", short)))
 		lines = append(lines, p.theme.Muted.Render(fmt.Sprintf("  retries: %d/%d", r.RetryCount, r.MaxRetries)))
 		// Show approval/CI indicators for post-review states; show ✗ when unmet.
-		postReview := r.State == state.StateReviewed || r.State == state.StateMergeReady
+		postReview := r.State == state.StateReviewApproved || r.State == state.StateMergeReady
 		if r.Approved {
 			lines = append(lines, p.theme.Pass.Render("  ✓ approved"))
 		} else if postReview {

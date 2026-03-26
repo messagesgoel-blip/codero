@@ -55,8 +55,8 @@ func TestLoadFixtureDir_WithSessions(t *testing.T) {
 	db := openTestDB(t)
 	dir := t.TempDir()
 	sessions := []dashboard.FixtureSessionEntry{
-		{SessionID: "sess-1", AgentID: "copilot", Repo: "acme/api", Branch: "feat/auth", State: "coding"},
-		{SessionID: "sess-2", AgentID: "opencode", Repo: "acme/api", Branch: "feat/db", State: "local_review"},
+		{SessionID: "sess-1", AgentID: "copilot", Repo: "acme/api", Branch: "feat/auth", State: "submitted"},
+		{SessionID: "sess-2", AgentID: "opencode", Repo: "acme/api", Branch: "feat/db", State: "waiting"},
 	}
 	writeJSON(t, filepath.Join(dir, "sessions.json"), sessions)
 
@@ -92,7 +92,7 @@ func TestLoadFixtureDir_WithActivity(t *testing.T) {
 	db := openTestDB(t)
 	dir := t.TempDir()
 	events := []dashboard.FixtureActivityEntry{
-		{Repo: "acme/api", Branch: "feat/auth", EventType: "state_transition", Payload: `{"from":"queued_cli","to":"coding"}`},
+		{Repo: "acme/api", Branch: "feat/auth", EventType: "state_transition", Payload: `{"from":"queued_cli","to":"submitted"}`},
 		{Repo: "acme/api", Branch: "feat/auth", EventType: "system", Payload: `{"msg":"fixture event"}`},
 	}
 	writeJSON(t, filepath.Join(dir, "activity.json"), events)
@@ -144,7 +144,7 @@ func TestLoadFixtureDir_InvalidActivityMalformedJSON(t *testing.T) {
 func TestSeedFixtureSessions_IdempotentOnReplace(t *testing.T) {
 	db := openTestDB(t)
 	entries := []dashboard.FixtureSessionEntry{
-		{SessionID: "sess-abc", AgentID: "agent-abc", Repo: "acme/api", Branch: "feat/x", State: "coding"},
+		{SessionID: "sess-abc", AgentID: "agent-abc", Repo: "acme/api", Branch: "feat/x", State: "submitted"},
 	}
 	// Seeding twice should not error (INSERT OR REPLACE).
 	if err := dashboard.SeedFixtureSessions(context.Background(), db, entries); err != nil {

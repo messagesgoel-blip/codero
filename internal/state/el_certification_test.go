@@ -18,10 +18,10 @@ func TestEL01_StateMachineCoverage(t *testing.T) {
 	ctx := context.Background()
 
 	states := []string{
-		"coding", "queued_cli", "queued_agent",
-		"cli_reviewing", "agent_reviewing",
-		"changes_requested", "approved",
-		"merging", "merged", "blocked", "error",
+		"submitted", "waiting", "queued_cli",
+		"cli_reviewing", "review_approved",
+		"merge_ready", "merged",
+		"blocked", "abandoned", "expired", "stale",
 	}
 
 	for _, s := range states {
@@ -43,14 +43,14 @@ func TestEL02_TransitionAuditLog(t *testing.T) {
 
 	_, err := db.Unwrap().ExecContext(ctx, `
 		INSERT INTO branch_states (id, repo, branch, state)
-		VALUES ('el2-bs', 'el-test/repo', 'el2-branch', 'coding')`)
+		VALUES ('el2-bs', 'el-test/repo', 'el2-branch', 'submitted')`)
 	if err != nil {
 		t.Fatalf("insert branch state: %v", err)
 	}
 
 	_, err = db.Unwrap().ExecContext(ctx, `
 		INSERT INTO state_transitions (branch_state_id, from_state, to_state, trigger)
-		VALUES ('el2-bs', 'coding', 'queued_cli', 'codero-cli submit')`)
+		VALUES ('el2-bs', 'submitted', 'queued_cli', 'codero-cli submit')`)
 	if err != nil {
 		t.Fatalf("insert transition: %v", err)
 	}
@@ -297,10 +297,10 @@ func TestEL12_SubmitCreatesReviewRun(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
-	// Set up: a branch in "coding" state, a session, and an assignment.
+	// Set up: a branch in "submitted" state, a session, and an assignment.
 	_, err := db.Unwrap().ExecContext(ctx, `
 		INSERT INTO branch_states (id, repo, branch, state)
-		VALUES ('el12-bs', 'el-test/repo', 'el12-branch', 'coding')`)
+		VALUES ('el12-bs', 'el-test/repo', 'el12-branch', 'submitted')`)
 	if err != nil {
 		t.Fatalf("insert branch_state: %v", err)
 	}
@@ -388,7 +388,7 @@ func TestEL16_20_SessionOwnership(t *testing.T) {
 
 	_, err := db.Unwrap().ExecContext(ctx, `
 		INSERT INTO branch_states (id, repo, branch, state, owner_session_id, owner_agent)
-		VALUES ('el16-bs', 'el-test/repo', 'el16-branch', 'coding', 'sess-owner', 'agent-owner')`)
+		VALUES ('el16-bs', 'el-test/repo', 'el16-branch', 'submitted', 'sess-owner', 'agent-owner')`)
 	if err != nil {
 		t.Fatalf("insert: %v", err)
 	}

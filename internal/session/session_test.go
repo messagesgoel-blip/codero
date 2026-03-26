@@ -33,7 +33,7 @@ func TestHeartbeatRefreshesOwnerAgent(t *testing.T) {
 	if _, err := db.Unwrap().Exec(
 		`INSERT INTO branch_states (id, repo, branch, state)
 		 VALUES (?, ?, ?, ?)`,
-		"branch-heartbeat", repo, branch, string(state.StateCoding),
+		"branch-heartbeat", repo, branch, string(state.StateSubmitted),
 	); err != nil {
 		t.Fatalf("seed branch state: %v", err)
 	}

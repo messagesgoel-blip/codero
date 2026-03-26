@@ -1130,7 +1130,7 @@ func nextWaitingAssignmentSubstatus(branchState string, approved, ciGreen bool, 
 	if !ciGreen {
 		return AssignmentSubstatusWaitingForCI
 	}
-	if branchState == string(StateMergeReady) || branchState == string(StateClosed) {
+	if branchState == string(StateMergeReady) || branchState == string(StateMerged) {
 		if approved && pendingEvents == 0 && unresolvedThreads == 0 {
 			return AssignmentSubstatusInProgress
 		}

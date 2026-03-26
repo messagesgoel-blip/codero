@@ -32,10 +32,10 @@ func TestBranchFSM_InvalidTransitions(t *testing.T) {
 		from State
 		to   State
 	}{
-		{StateClosed, StateCoding},
-		{StateCoding, StateReviewed},
-		{StatePaused, StateReviewed},
-		{StateStaleBranch, StateReviewed},
+		{StateMerged, StateSubmitted},
+		{StateSubmitted, StateReviewApproved},
+		{StateExpired, StateReviewApproved},
+		{StateStale, StateReviewApproved},
 	}
 
 	for _, tt := range invalid {
@@ -52,7 +52,7 @@ func TestBranchFSM_InvalidTransitions(t *testing.T) {
 }
 
 func TestBranchFSM_Visualize(t *testing.T) {
-	f := NewBranchFSM(StateCoding)
+	f := NewBranchFSM(StateSubmitted)
 	dot := f.Visualize()
 	if dot == "" {
 		t.Fatal("expected DOT output")
@@ -60,7 +60,7 @@ func TestBranchFSM_Visualize(t *testing.T) {
 	if !strings.Contains(dot, "digraph BranchFSM") {
 		t.Fatalf("DOT missing header: %s", dot)
 	}
-	if !strings.Contains(dot, "coding -> local_review") {
+	if !strings.Contains(dot, "submitted -> waiting") {
 		t.Fatalf("DOT missing edge: %s", dot)
 	}
 }

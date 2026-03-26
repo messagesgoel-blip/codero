@@ -29,7 +29,7 @@ func gateCheckReportPath() string {
 	return gatecheck.DefaultReportPath
 }
 
-const activeSessionStatesSQL = "('coding', 'local_review', 'queued_cli', 'cli_reviewing', 'reviewed', 'merge_ready', 'blocked', 'paused')"
+const activeSessionStatesSQL = "('submitted', 'waiting', 'queued_cli', 'cli_reviewing', 'review_approved', 'merge_ready', 'blocked', 'expired')"
 
 func tableExists(ctx context.Context, db *sql.DB, table string) (bool, error) {
 	row := db.QueryRowContext(ctx,
@@ -909,7 +909,7 @@ func sessionActivityState(state string) string {
 	switch state {
 	case "blocked":
 		return "blocked"
-	case "queued_cli", "cli_reviewing", "paused":
+	case "queued_cli", "cli_reviewing", "waiting", "expired":
 		return "waiting"
 	default:
 		return "active"
@@ -1077,22 +1077,28 @@ func lookupPRNumber(ctx context.Context, db *sql.DB, repo, branch string) int {
 // sessionPhaseLabel maps a raw branch state to a human-readable phase label.
 func sessionPhaseLabel(state string) string {
 	switch state {
-	case "coding":
-		return "coding"
-	case "local_review":
-		return "local review"
+	case "submitted":
+		return "submitted"
+	case "waiting":
+		return "waiting"
 	case "queued_cli":
 		return "queued for review"
 	case "cli_reviewing":
 		return "review in progress"
-	case "reviewed":
-		return "reviewed"
+	case "review_approved":
+		return "review approved"
 	case "merge_ready":
 		return "merge ready"
+	case "merged":
+		return "merged"
 	case "blocked":
 		return "blocked"
-	case "paused":
-		return "paused"
+	case "expired":
+		return "expired"
+	case "abandoned":
+		return "abandoned"
+	case "stale":
+		return "stale"
 	default:
 		return "unknown"
 	}

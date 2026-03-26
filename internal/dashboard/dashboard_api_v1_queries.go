@@ -480,7 +480,7 @@ func queryQueue(ctx context.Context, db *sql.DB) ([]QueueItem, error) {
 		SELECT id, repo, branch, state, queue_priority, owner_session_id,
 		       submission_time, created_at
 		FROM branch_states
-		WHERE state IN ('queued_cli', 'cli_reviewing', 'merge_ready', 'coding', 'local_review', 'reviewed')
+		WHERE state IN ('queued_cli', 'cli_reviewing', 'merge_ready', 'submitted', 'waiting', 'review_approved')
 		ORDER BY queue_priority DESC, created_at ASC`)
 	if err != nil {
 		return nil, err
@@ -511,7 +511,7 @@ func queryQueueStats(ctx context.Context, db *sql.DB) (pending, active, blocked,
 	err = db.QueryRowContext(ctx, `
 		SELECT
 			COALESCE(SUM(CASE WHEN state IN ('queued_cli', 'merge_ready') THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN state IN ('coding', 'local_review', 'cli_reviewing', 'reviewed') THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN state IN ('submitted', 'waiting', 'cli_reviewing', 'review_approved') THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN state = 'blocked' THEN 1 ELSE 0 END), 0),
 			COUNT(*)
 		FROM branch_states`).Scan(&pending, &active, &blocked, &total)

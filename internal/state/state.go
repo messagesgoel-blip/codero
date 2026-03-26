@@ -9,17 +9,17 @@ import (
 type State string
 
 const (
-	StateCoding       State = "coding"
-	StateLocalReview  State = "local_review"
-	StateQueuedCLI    State = "queued_cli"
-	StateCLIReviewing State = "cli_reviewing"
-	StateReviewed     State = "reviewed"
-	StateMergeReady   State = "merge_ready"
-	StateStaleBranch  State = "stale_branch"
-	StateAbandoned    State = "abandoned"
-	StateBlocked      State = "blocked"
-	StatePaused       State = "paused"
-	StateClosed       State = "closed"
+	StateSubmitted      State = "submitted"
+	StateWaiting        State = "waiting"
+	StateQueuedCLI      State = "queued_cli"
+	StateCLIReviewing   State = "cli_reviewing"
+	StateReviewApproved State = "review_approved"
+	StateMergeReady     State = "merge_ready"
+	StateStale          State = "stale"
+	StateAbandoned      State = "abandoned"
+	StateBlocked        State = "blocked"
+	StateExpired        State = "expired"
+	StateMerged         State = "merged"
 )
 
 // ErrInvalidTransition is returned when an illegal state transition is attempted.
@@ -28,70 +28,70 @@ var ErrInvalidTransition = errors.New("invalid state transition")
 // transitions defines all 20 valid transitions from the canonical state machine.
 // Map key: source state; Map value: set of allowed destination states.
 var transitions = map[State]map[State]bool{
-	StateCoding: {
-		StateLocalReview: true, // T02
-		StateQueuedCLI:   true, // T05
-		StateStaleBranch: true, // T12 (any active)
-		StateAbandoned:   true, // T14 (any active)
-		StateBlocked:     true, // T16 (any active)
-		StateClosed:      true, // T18 (any)
+	StateSubmitted: {
+		StateWaiting:   true, // T02
+		StateQueuedCLI: true, // T05
+		StateStale:     true, // T12 (any active)
+		StateAbandoned: true, // T14 (any active)
+		StateBlocked:   true, // T16 (any active)
+		StateMerged:    true, // T18 (any)
 	},
-	StateLocalReview: {
-		StateCoding:      true, // T03
-		StateQueuedCLI:   true, // T04
-		StateStaleBranch: true, // T12 (any active)
-		StateAbandoned:   true, // T14 (any active)
-		StateBlocked:     true, // T16 (any active)
-		StateClosed:      true, // T18 (any)
+	StateWaiting: {
+		StateSubmitted: true, // T03
+		StateQueuedCLI: true, // T04
+		StateStale:     true, // T12 (any active)
+		StateAbandoned: true, // T14 (any active)
+		StateBlocked:   true, // T16 (any active)
+		StateMerged:    true, // T18 (any)
 	},
 	StateQueuedCLI: {
 		StateCLIReviewing: true, // T06
-		StatePaused:       true, // T19
-		StateStaleBranch:  true, // T12 (any active)
+		StateExpired:      true, // T19
+		StateStale:        true, // T12 (any active)
 		StateAbandoned:    true, // T14 (any active)
 		StateBlocked:      true, // T16 (any active)
-		StateClosed:       true, // T18 (any)
+		StateMerged:       true, // T18 (any)
 	},
 	StateCLIReviewing: {
-		StateQueuedCLI:   true, // T07
-		StateReviewed:    true, // T08
-		StateStaleBranch: true, // T12 (any active)
-		StateAbandoned:   true, // T14 (any active)
-		StateBlocked:     true, // T16 (any active)
-		StateClosed:      true, // T18 (any)
+		StateQueuedCLI:      true, // T07
+		StateReviewApproved: true, // T08
+		StateStale:          true, // T12 (any active)
+		StateAbandoned:      true, // T14 (any active)
+		StateBlocked:        true, // T16 (any active)
+		StateMerged:         true, // T18 (any)
 	},
-	StateReviewed: {
-		StateCoding:      true, // T09
-		StateMergeReady:  true, // T10
-		StateStaleBranch: true, // T12 (any active)
-		StateAbandoned:   true, // T14 (any active)
-		StateBlocked:     true, // T16 (any active)
-		StateClosed:      true, // T18 (any)
+	StateReviewApproved: {
+		StateSubmitted:  true, // T09
+		StateMergeReady: true, // T10
+		StateStale:      true, // T12 (any active)
+		StateAbandoned:  true, // T14 (any active)
+		StateBlocked:    true, // T16 (any active)
+		StateMerged:     true, // T18 (any)
 	},
 	StateMergeReady: {
-		StateCoding:      true, // T11
-		StateStaleBranch: true, // T12 (any active)
-		StateAbandoned:   true, // T14 (any active)
-		StateBlocked:     true, // T16 (any active)
-		StateClosed:      true, // T18 (any)
+		StateSubmitted: true, // T11
+		StateStale:     true, // T12 (any active)
+		StateAbandoned: true, // T14 (any active)
+		StateBlocked:   true, // T16 (any active)
+		StateMerged:    true, // T18 (any)
 	},
-	StateStaleBranch: {
+	StateStale: {
 		StateQueuedCLI: true, // T13
-		StateClosed:    true, // T18 (any)
+		StateMerged:    true, // T18 (any)
 	},
 	StateAbandoned: {
 		StateQueuedCLI: true, // T15
-		StateClosed:    true, // T18 (any)
+		StateMerged:    true, // T18 (any)
 	},
 	StateBlocked: {
 		StateQueuedCLI: true, // T17
-		StateClosed:    true, // T18 (any)
+		StateMerged:    true, // T18 (any)
 	},
-	StatePaused: {
+	StateExpired: {
 		StateQueuedCLI: true, // T20
-		StateClosed:    true, // T18 (any)
+		StateMerged:    true, // T18 (any)
 	},
-	StateClosed: {}, // Terminal state, no outbound transitions
+	StateMerged: {}, // Terminal state, no outbound transitions
 }
 
 // ValidateTransition checks if a transition from "from" to "to" is legal.
@@ -109,15 +109,15 @@ func ValidateTransition(from, to State) error {
 // progressing through the lifecycle. The SQL IN clauses in ListActiveBranches
 // and ListExpiredSessions must be kept in sync with this list.
 var ActiveStates = []State{
-	StateCoding,
-	StateLocalReview,
+	StateSubmitted,
+	StateWaiting,
 	StateQueuedCLI,
 	StateCLIReviewing,
-	StateReviewed,
+	StateReviewApproved,
 	StateMergeReady,
 }
 
-// IsTerminal reports whether the state is a terminal state (closed).
+// IsTerminal reports whether the state is a terminal state (merged).
 func IsTerminal(s State) bool {
-	return s == StateClosed
+	return s == StateMerged
 }

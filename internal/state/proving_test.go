@@ -66,8 +66,8 @@ func TestProvingScorecard_WithData(t *testing.T) {
 	_, err = db.sql.Exec(`
 		INSERT INTO state_transitions (branch_state_id, from_state, to_state, trigger, created_at)
 		VALUES 
-			('bs-1', 'merge_ready', 'stale_branch', 'head_mismatch', ?),
-			('bs-2', 'coding', 'stale_branch', 'stale_detected', ?),
+			('bs-1', 'merge_ready', 'stale', 'head_mismatch', ?),
+			('bs-2', 'submitted', 'stale', 'stale_detected', ?),
 			('bs-3', 'cli_reviewing', 'queued_cli', 'lease_expired', ?)
 	`, now.AddDate(0, 0, -10), now.AddDate(0, 0, -15), now.AddDate(0, 0, -20))
 	if err != nil {

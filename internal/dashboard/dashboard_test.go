@@ -235,7 +235,7 @@ func TestOverview_WithRuns(t *testing.T) {
 func TestOverview_BlockedCount(t *testing.T) {
 	h, db := newTestHandler(t)
 	seedBranch(t, db, "acme/api", "fix/bug", "blocked")
-	seedBranch(t, db, "acme/api", "feat/x", "coding")
+	seedBranch(t, db, "acme/api", "feat/x", "submitted")
 
 	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/overview", nil)
 	var ov dashboard.OverviewResponse
@@ -271,7 +271,7 @@ func TestRepos_Empty(t *testing.T) {
 
 func TestRepos_WithBranches(t *testing.T) {
 	h, db := newTestHandler(t)
-	seedBranch(t, db, "acme/api", "main", "coding")
+	seedBranch(t, db, "acme/api", "main", "submitted")
 	seedBranch(t, db, "acme/ui", "feat/x", "merge_ready")
 
 	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/repos", nil)
@@ -331,7 +331,7 @@ func TestActivity_Empty(t *testing.T) {
 
 func TestActivity_WithEvents(t *testing.T) {
 	h, db := newTestHandler(t)
-	seedDeliveryEvent(t, db, 1, "acme/api", "main", "state_transition", `{"to_state":"reviewed"}`)
+	seedDeliveryEvent(t, db, 1, "acme/api", "main", "state_transition", `{"to_state":"review_approved"}`)
 	seedDeliveryEvent(t, db, 2, "acme/api", "main", "finding_bundle", `{"message":"semgrep blocked"}`)
 
 	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/activity", nil)

@@ -11,26 +11,26 @@ func TestValidateTransition_Valid(t *testing.T) {
 		from State
 		to   State
 	}{
-		{"T02: coding -> local_review", StateCoding, StateLocalReview},
-		{"T05: coding -> queued_cli", StateCoding, StateQueuedCLI},
-		{"T03: local_review -> coding", StateLocalReview, StateCoding},
-		{"T04: local_review -> queued_cli", StateLocalReview, StateQueuedCLI},
+		{"T02: submitted -> waiting", StateSubmitted, StateWaiting},
+		{"T05: submitted -> queued_cli", StateSubmitted, StateQueuedCLI},
+		{"T03: waiting -> submitted", StateWaiting, StateSubmitted},
+		{"T04: waiting -> queued_cli", StateWaiting, StateQueuedCLI},
 		{"T06: queued_cli -> cli_reviewing", StateQueuedCLI, StateCLIReviewing},
-		{"T19: queued_cli -> paused", StateQueuedCLI, StatePaused},
+		{"T19: queued_cli -> expired", StateQueuedCLI, StateExpired},
 		{"T07: cli_reviewing -> queued_cli", StateCLIReviewing, StateQueuedCLI},
-		{"T08: cli_reviewing -> reviewed", StateCLIReviewing, StateReviewed},
-		{"T09: reviewed -> coding", StateReviewed, StateCoding},
-		{"T10: reviewed -> merge_ready", StateReviewed, StateMergeReady},
-		{"T11: merge_ready -> coding", StateMergeReady, StateCoding},
-		{"T12: merge_ready -> stale_branch", StateMergeReady, StateStaleBranch},
-		{"T13: stale_branch -> queued_cli", StateStaleBranch, StateQueuedCLI},
-		{"T14: coding -> abandoned", StateCoding, StateAbandoned},
+		{"T08: cli_reviewing -> review_approved", StateCLIReviewing, StateReviewApproved},
+		{"T09: review_approved -> submitted", StateReviewApproved, StateSubmitted},
+		{"T10: review_approved -> merge_ready", StateReviewApproved, StateMergeReady},
+		{"T11: merge_ready -> submitted", StateMergeReady, StateSubmitted},
+		{"T12: merge_ready -> stale", StateMergeReady, StateStale},
+		{"T13: stale -> queued_cli", StateStale, StateQueuedCLI},
+		{"T14: submitted -> abandoned", StateSubmitted, StateAbandoned},
 		{"T15: abandoned -> queued_cli", StateAbandoned, StateQueuedCLI},
-		{"T16: coding -> blocked", StateCoding, StateBlocked},
+		{"T16: submitted -> blocked", StateSubmitted, StateBlocked},
 		{"T17: blocked -> queued_cli", StateBlocked, StateQueuedCLI},
-		{"T18: coding -> closed", StateCoding, StateClosed},
-		{"T20: paused -> queued_cli", StatePaused, StateQueuedCLI},
-		{"T18: stale_branch -> closed", StateStaleBranch, StateClosed},
+		{"T18: submitted -> merged", StateSubmitted, StateMerged},
+		{"T20: expired -> queued_cli", StateExpired, StateQueuedCLI},
+		{"T18: stale -> merged", StateStale, StateMerged},
 	}
 
 	for _, tt := range tests {
@@ -48,11 +48,11 @@ func TestValidateTransition_Invalid(t *testing.T) {
 		from State
 		to   State
 	}{
-		{"coding -> reviewed", StateCoding, StateReviewed},
+		{"submitted -> review_approved", StateSubmitted, StateReviewApproved},
 		{"merge_ready -> cli_reviewing", StateMergeReady, StateCLIReviewing},
-		{"closed -> coding", StateClosed, StateCoding},
-		{"paused -> cli_reviewing", StatePaused, StateCLIReviewing},
-		{"stale_branch -> reviewed", StateStaleBranch, StateReviewed},
+		{"merged -> submitted", StateMerged, StateSubmitted},
+		{"expired -> cli_reviewing", StateExpired, StateCLIReviewing},
+		{"stale -> review_approved", StateStale, StateReviewApproved},
 	}
 
 	for _, tt := range tests {
@@ -69,10 +69,10 @@ func TestValidateTransition_Invalid(t *testing.T) {
 }
 
 func TestIsTerminal(t *testing.T) {
-	if !IsTerminal(StateClosed) {
-		t.Errorf("expected IsTerminal(StateClosed) to be true")
+	if !IsTerminal(StateMerged) {
+		t.Errorf("expected IsTerminal(StateMerged) to be true")
 	}
-	if IsTerminal(StateCoding) {
-		t.Errorf("expected IsTerminal(StateCoding) to be false")
+	if IsTerminal(StateSubmitted) {
+		t.Errorf("expected IsTerminal(StateSubmitted) to be false")
 	}
 }

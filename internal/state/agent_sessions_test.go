@@ -632,7 +632,7 @@ func TestMonitorAgentAssignmentRules_HeartbeatLostPath(t *testing.T) {
 			owner_agent, owner_session_id, owner_session_last_seen
 		)
 		VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?, ?, datetime('now'))`,
-		"branch-monitor-lost", "acme/api", "feat/monitor-lost", "coding", "agent-1", "sess-monitor-lost",
+		"branch-monitor-lost", "acme/api", "feat/monitor-lost", "submitted", "agent-1", "sess-monitor-lost",
 	)
 	if err != nil {
 		t.Fatalf("seed branch state: %v", err)
@@ -708,7 +708,7 @@ func TestMonitorAgentAssignmentRules_BranchHoldForceCancel(t *testing.T) {
 			owner_agent, owner_session_id, owner_session_last_seen
 		)
 		VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?, ?, datetime('now'))`,
-		"branch-monitor-cancel", "acme/api", "feat/monitor-cancel", "coding", "agent-1", "sess-monitor-cancel",
+		"branch-monitor-cancel", "acme/api", "feat/monitor-cancel", "submitted", "agent-1", "sess-monitor-cancel",
 	)
 	if err != nil {
 		t.Fatalf("seed branch state: %v", err)
@@ -771,7 +771,7 @@ func TestReconcileAgentAssignmentWaitingState(t *testing.T) {
 			owner_agent, owner_session_id, owner_session_last_seen
 		)
 		VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?, ?, datetime('now'))`,
-		"branch-wait-reconcile", "acme/api", "feat/wait-reconcile", "reviewed", "agent-1", "sess-wait-reconcile",
+		"branch-wait-reconcile", "acme/api", "feat/wait-reconcile", "review_approved", "agent-1", "sess-wait-reconcile",
 	)
 	if err != nil {
 		t.Fatalf("seed branch state: %v", err)
@@ -1605,7 +1605,7 @@ func TestEmitAssignmentUpdate_StaleEmitAfterMonitorLostRejected(t *testing.T) {
 			owner_agent, owner_session_id, owner_session_last_seen
 		)
 		VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?, ?, datetime('now'))`,
-		"branch-monitor-stale", "acme/api", "feat/monitor-stale", "coding", "agent-a", "sess-monitor-stale",
+		"branch-monitor-stale", "acme/api", "feat/monitor-stale", "submitted", "agent-a", "sess-monitor-stale",
 	)
 	if err != nil {
 		t.Fatalf("seed branch state: %v", err)
@@ -1738,7 +1738,7 @@ func TestEmitAssignmentUpdate_VersionIncrementsOnReconcile(t *testing.T) {
 			owner_agent, owner_session_id, owner_session_last_seen
 		)
 		VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?, ?, datetime('now'))`,
-		"branch-reconcile-version", "acme/api", "feat/reconcile-version", "reviewed", "agent-a", "sess-reconcile-version",
+		"branch-reconcile-version", "acme/api", "feat/reconcile-version", "review_approved", "agent-a", "sess-reconcile-version",
 	)
 	if err != nil {
 		t.Fatalf("seed branch state: %v", err)

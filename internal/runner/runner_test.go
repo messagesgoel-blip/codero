@@ -104,9 +104,9 @@ func TestRunner_SuccessPath(t *testing.T) {
 	defer cancel()
 	r.Run(runCtx)
 
-	// Branch should be in reviewed state.
-	if got := getState(t, db, id); got != state.StateReviewed {
-		t.Errorf("state: got %q, want %q", got, state.StateReviewed)
+	// Branch should be in review_approved state.
+	if got := getState(t, db, id); got != state.StateReviewApproved {
+		t.Errorf("state: got %q, want %q", got, state.StateReviewApproved)
 	}
 
 	// Findings should be persisted.
@@ -219,13 +219,13 @@ func TestRunner_FailurePath_Blocked(t *testing.T) {
 func TestRunner_SkipsNonQueuedBranch(t *testing.T) {
 	db, client, _ := setupDeps(t)
 	repo := "owner/repo"
-	branch := "coding-branch"
+	branch := "submitted-branch"
 
-	// Insert a branch in coding state.
+	// Insert a branch in submitted state.
 	id := uuid.New().String()
 	_, err := db.Unwrap().Exec(`
 		INSERT INTO branch_states (id, repo, branch, head_hash, state, max_retries, queue_priority)
-		VALUES (?, ?, ?, 'abc123', 'coding', 3, 0)
+		VALUES (?, ?, ?, 'abc123', 'submitted', 3, 0)
 	`, id, repo, branch)
 	if err != nil {
 		t.Fatalf("insert: %v", err)
@@ -243,9 +243,9 @@ func TestRunner_SkipsNonQueuedBranch(t *testing.T) {
 	defer cancel()
 	r.Run(runCtx)
 
-	// State should remain coding (runner skips non-queued_cli).
-	if got := getState(t, db, id); got != state.StateCoding {
-		t.Errorf("state: got %q, want %q (runner should skip non-queued_cli)", got, state.StateCoding)
+	// State should remain submitted (runner skips non-queued_cli).
+	if got := getState(t, db, id); got != state.StateSubmitted {
+		t.Errorf("state: got %q, want %q (runner should skip non-queued_cli)", got, state.StateSubmitted)
 	}
 }
 
@@ -274,7 +274,7 @@ func TestRunner_StateTransitionsAuditLogged(t *testing.T) {
 		t.Fatalf("count transitions: %v", err)
 	}
 	if count < 2 {
-		t.Errorf("expected >=2 audit log entries (queued_cli->cli_reviewing, cli_reviewing->reviewed), got %d", count)
+		t.Errorf("expected >=2 audit log entries (queued_cli->cli_reviewing, cli_reviewing->review_approved), got %d", count)
 	}
 }
 
@@ -380,9 +380,9 @@ func TestRunner_SetsOwnerAgent(t *testing.T) {
 	defer cancel()
 	r.Run(runCtx)
 
-	// Branch should be reviewed and owner_agent set.
-	if got := getState(t, db, id); got != state.StateReviewed {
-		t.Errorf("state: got %q, want %q", got, state.StateReviewed)
+	// Branch should be review_approved and owner_agent set.
+	if got := getState(t, db, id); got != state.StateReviewApproved {
+		t.Errorf("state: got %q, want %q", got, state.StateReviewApproved)
 	}
 	if got := getOwnerAgent(t, db, id); got != "test-agent-007" {
 		t.Errorf("owner_agent: got %q, want %q", got, "test-agent-007")
@@ -411,8 +411,8 @@ func TestRunner_AttachesSession(t *testing.T) {
 	defer cancel()
 	r.Run(runCtx)
 
-	if got := getState(t, db, id); got != state.StateReviewed {
-		t.Errorf("state: got %q, want %q", got, state.StateReviewed)
+	if got := getState(t, db, id); got != state.StateReviewApproved {
+		t.Errorf("state: got %q, want %q", got, state.StateReviewApproved)
 	}
 	if got := getOwnerSessionID(t, db, id); got != "sess-abc" {
 		t.Errorf("owner_session_id: got %q, want %q", got, "sess-abc")

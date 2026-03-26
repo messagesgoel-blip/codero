@@ -68,9 +68,9 @@ func (p *EventProcessor) ProcessEvent(ctx context.Context, ev GitHubEvent) error
 }
 
 // handlePullRequest processes pull_request events.
-// "closed" events transition the branch to closed (T18).
+// "closed" events transition the branch to merged/abandoned (T18).
 // "synchronize" events detect a new head hash (force-push / new commit) and
-// transition to stale_branch (T12) so the runner re-reviews.
+// transition to stale (T12) so the runner re-reviews.
 func (p *EventProcessor) handlePullRequest(ctx context.Context, ev GitHubEvent) error {
 	action, _ := ev.Payload["action"].(string)
 	branch := prBranch(ev.Payload)
@@ -93,8 +93,14 @@ func (p *EventProcessor) handlePullRequest(ctx context.Context, ev GitHubEvent) 
 
 	switch action {
 	case "closed":
-		if rec.State != state.StateClosed {
-			if err := state.TransitionBranch(p.db, rec.ID, rec.State, state.StateClosed, "pr_closed_webhook"); err != nil {
+		targetState := state.StateAbandoned
+		trigger := "pr_closed_webhook"
+		if prMerged(ev.Payload) {
+			targetState = state.StateMerged
+			trigger = "pr_merged_webhook"
+		}
+		if rec.State != targetState {
+			if err := state.TransitionBranch(p.db, rec.ID, rec.State, targetState, trigger); err != nil {
 				loglib.Info("webhook: pr_closed transition skipped",
 					loglib.FieldEventType, loglib.EventRejection,
 					loglib.FieldComponent, "webhook",
@@ -103,7 +109,11 @@ func (p *EventProcessor) handlePullRequest(ctx context.Context, ev GitHubEvent) 
 					"error", err,
 				)
 			} else {
-				_, _ = p.stream.AppendSystem(ctx, ev.Repo, branch, headHash, "pr_closed", "pull_request closed via webhook")
+				eventReason := "pr_closed"
+				if targetState == state.StateMerged {
+					eventReason = "pr_merged"
+				}
+				_, _ = p.stream.AppendSystem(ctx, ev.Repo, branch, headHash, eventReason, "pull_request closed via webhook")
 				loglib.Info("webhook: pr_closed transition applied",
 					loglib.FieldEventType, loglib.EventTransition,
 					loglib.FieldComponent, "webhook",
@@ -115,7 +125,7 @@ func (p *EventProcessor) handlePullRequest(ctx context.Context, ev GitHubEvent) 
 
 	case "synchronize":
 		if headHash != "" && headHash != rec.HeadHash {
-			if err := state.UpdateHeadHashAndTransition(p.db, rec.ID, headHash, rec.State, state.StateStaleBranch, "synchronize_webhook"); err != nil {
+			if err := state.UpdateHeadHashAndTransition(p.db, rec.ID, headHash, rec.State, state.StateStale, "synchronize_webhook"); err != nil {
 				loglib.Info("webhook: synchronize transition skipped",
 					loglib.FieldEventType, loglib.EventRejection,
 					loglib.FieldComponent, "webhook",
@@ -366,6 +376,16 @@ func prHeadSHA(payload map[string]any) string {
 	}
 	sha, _ := head["sha"].(string)
 	return sha
+}
+
+// prMerged extracts the merged boolean from a pull_request payload.
+func prMerged(payload map[string]any) bool {
+	pr, _ := payload["pull_request"].(map[string]any)
+	if pr == nil {
+		return false
+	}
+	merged, _ := pr["merged"].(bool)
+	return merged
 }
 
 // checkRunBranch extracts the branch from a check_run payload via check_suite.

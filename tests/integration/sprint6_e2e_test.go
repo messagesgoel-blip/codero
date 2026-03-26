@@ -1,9 +1,9 @@
 // Package integration provides the Sprint 6 end-to-end lifecycle test.
 // This test validates the full Sprint 6 state machine flow including:
-// - Branch registration into local_review
+// - Branch registration into waiting
 // - Commit-gate path semantics
 // - Transition to queued_cli
-// - Review cycle to reviewed
+// - Review cycle to review_approved
 // - Merge-ready computation
 // - Event delivery and queue visibility
 package integration_test
@@ -59,10 +59,10 @@ func defaultTestConfig() Sprint6E2ETestConfig {
 }
 
 // TestSprint6_E2E_Lifecycle validates the complete Sprint 6 flow:
-// 1. Register branch into local_review
+// 1. Register branch into waiting
 // 2. Execute commit-gate path (simulated pass)
 // 3. Transition to queued_cli
-// 4. Dispatch/review cycle to reviewed
+// 4. Dispatch/review cycle to review_approved
 // 5. Update readiness signals to merge_ready
 // 6. Verify events/delivery records and queue visibility
 func TestSprint6_E2E_Lifecycle(t *testing.T) {
@@ -78,23 +78,23 @@ func TestSprint6_E2E_Lifecycle(t *testing.T) {
 	q := scheduler.NewQueue(client)
 	lm := scheduler.NewLeaseManager(client)
 
-	// Step 1: Register branch (simulating T01: new -> coding)
-	branchID := registerBranch(t, db, cfg, state.StateCoding)
+	// Step 1: Register branch (simulating T01: new -> submitted)
+	branchID := registerBranch(t, db, cfg, state.StateSubmitted)
 
 	// Verify initial state
-	assertBranchState(t, db, branchID, state.StateCoding)
+	assertBranchState(t, db, branchID, state.StateSubmitted)
 
-	// Step 2: Transition to local_review (T02: coding -> local_review)
-	err := state.TransitionBranch(db, branchID, state.StateCoding, state.StateLocalReview, "agent_ready_for_review")
+	// Step 2: Transition to waiting (T02: submitted -> waiting)
+	err := state.TransitionBranch(db, branchID, state.StateSubmitted, state.StateWaiting, "agent_ready_for_review")
 	if err != nil {
 		t.Fatalf("T02 transition failed: %v", err)
 	}
-	assertBranchState(t, db, branchID, state.StateLocalReview)
+	assertBranchState(t, db, branchID, state.StateWaiting)
 
 	// Step 3: Simulate commit-gate pass (both pre-commit loops pass)
 	// In real flow: LiteLLM pass -> CodeRabbit pass
-	// For test: directly transition to queued_cli (T04: local_review -> queued_cli)
-	err = state.TransitionBranch(db, branchID, state.StateLocalReview, state.StateQueuedCLI, "commit_gate_passed")
+	// For test: directly transition to queued_cli (T04: waiting -> queued_cli)
+	err = state.TransitionBranch(db, branchID, state.StateWaiting, state.StateQueuedCLI, "commit_gate_passed")
 	if err != nil {
 		t.Fatalf("T04 transition failed: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestSprint6_E2E_Lifecycle(t *testing.T) {
 		t.Errorf("queue length: got %d, want 1", queueLen)
 	}
 
-	// Step 4: Run review cycle (T06: queued_cli -> cli_reviewing -> reviewed)
+	// Step 4: Run review cycle (T06: queued_cli -> cli_reviewing -> review_approved)
 	// Create stub provider that returns no findings (clean review)
 	provider := runner.NewStubProvider(0)
 
@@ -134,8 +134,8 @@ func TestSprint6_E2E_Lifecycle(t *testing.T) {
 	defer cancel()
 	r.Run(runCtx)
 
-	// Verify transition to reviewed (T08)
-	assertBranchState(t, db, branchID, state.StateReviewed)
+	// Verify transition to review_approved (T08)
+	assertBranchState(t, db, branchID, state.StateReviewApproved)
 
 	// Verify review run was recorded
 	runs, err := listReviewRuns(db, cfg.Repo, cfg.Branch)
@@ -149,14 +149,14 @@ func TestSprint6_E2E_Lifecycle(t *testing.T) {
 	}
 
 	// Step 5: Update merge readiness signals
-	// T10: reviewed -> merge_ready requires all conditions
+	// T10: review_approved -> merge_ready requires all conditions
 	err = state.UpdateMergeReadiness(db, branchID, true, true, 0, 0)
 	if err != nil {
 		t.Fatalf("update merge readiness: %v", err)
 	}
 
 	// Transition to merge_ready (T10)
-	err = state.TransitionBranch(db, branchID, state.StateReviewed, state.StateMergeReady, "merge_ready_computed")
+	err = state.TransitionBranch(db, branchID, state.StateReviewApproved, state.StateMergeReady, "merge_ready_computed")
 	if err != nil {
 		t.Fatalf("T10 transition failed: %v", err)
 	}
@@ -195,23 +195,23 @@ func TestSprint6_InvalidTransition_Rejection(t *testing.T) {
 	cfg := defaultTestConfig()
 	db := openTestDB(t)
 
-	// Register branch in coding state
-	branchID := registerBranch(t, db, cfg, state.StateCoding)
+	// Register branch in submitted state
+	branchID := registerBranch(t, db, cfg, state.StateSubmitted)
 
-	// Attempt invalid transition: coding -> merge_ready (not allowed)
-	err := state.TransitionBranch(db, branchID, state.StateCoding, state.StateMergeReady, "invalid_test")
+	// Attempt invalid transition: submitted -> merge_ready (not allowed)
+	err := state.TransitionBranch(db, branchID, state.StateSubmitted, state.StateMergeReady, "invalid_test")
 	if !errors.Is(err, state.ErrInvalidTransition) {
-		t.Errorf("expected ErrInvalidTransition for coding -> merge_ready, got: %v", err)
+		t.Errorf("expected ErrInvalidTransition for submitted -> merge_ready, got: %v", err)
 	}
 
-	// Attempt invalid transition: coding -> cli_reviewing (skip queue)
-	err = state.TransitionBranch(db, branchID, state.StateCoding, state.StateCLIReviewing, "invalid_test")
+	// Attempt invalid transition: submitted -> cli_reviewing (skip queue)
+	err = state.TransitionBranch(db, branchID, state.StateSubmitted, state.StateCLIReviewing, "invalid_test")
 	if !errors.Is(err, state.ErrInvalidTransition) {
-		t.Errorf("expected ErrInvalidTransition for coding -> cli_reviewing, got: %v", err)
+		t.Errorf("expected ErrInvalidTransition for submitted -> cli_reviewing, got: %v", err)
 	}
 
 	// State should remain unchanged
-	assertBranchState(t, db, branchID, state.StateCoding)
+	assertBranchState(t, db, branchID, state.StateSubmitted)
 }
 
 // TestSprint6_LeaseExpiry_RetrySemantics verifies T07: lease expiry increments
@@ -310,7 +310,7 @@ func TestSprint6_LeaseExpiry_BlockedTransition(t *testing.T) {
 
 // TestSprint6_MergeReady_Guardrails verifies that merge_ready conditions
 // are correctly persisted and the transition is valid in the state machine.
-// Note: T10 (reviewed -> merge_ready) is always a valid transition in the state machine.
+// Note: T10 (review_approved -> merge_ready) is always a valid transition in the state machine.
 // The actual guardrail (conditions check) is enforced by the reconciler/watch in production.
 func TestSprint6_MergeReady_Guardrails(t *testing.T) {
 	cfg := defaultTestConfig()
@@ -336,7 +336,7 @@ func TestSprint6_MergeReady_Guardrails(t *testing.T) {
 			testCfg := cfg
 			testCfg.Branch = cfg.Branch + "-" + tc.name
 
-			branchID := registerBranch(t, db, testCfg, state.StateReviewed)
+			branchID := registerBranch(t, db, testCfg, state.StateReviewApproved)
 
 			err := state.UpdateMergeReadiness(db, branchID, tc.approved, tc.ciGreen, tc.pendingEvents, tc.unresolvedThreads)
 			if err != nil {
@@ -344,7 +344,7 @@ func TestSprint6_MergeReady_Guardrails(t *testing.T) {
 			}
 
 			// T10 transition is allowed in state machine; guardrail is enforced by reconciler.
-			err = state.TransitionBranch(db, branchID, state.StateReviewed, state.StateMergeReady, "test")
+			err = state.TransitionBranch(db, branchID, state.StateReviewApproved, state.StateMergeReady, "test")
 			if err != nil {
 				t.Fatalf("T10 transition failed: %v", err)
 			}
@@ -648,22 +648,22 @@ func listReviewRuns(db *state.DB, repo, branch string) ([]state.ReviewRun, error
 // --- Heartbeat gate integration tests ---
 
 // TestSprint6_HeartbeatGate_CodingToQueuedCLI validates the full
-// coding -> local_review -> commit-gate (pass) -> queued_cli lifecycle
+// submitted -> waiting -> commit-gate (pass) -> queued_cli lifecycle
 // using the shared heartbeat gate client with a stub heartbeat script.
 func TestSprint6_HeartbeatGate_CodingToQueuedCLI(t *testing.T) {
 	cfg := defaultTestConfig()
 	db := openTestDB(t)
 
-	// Register branch in coding state (T01: new -> coding)
-	branchID := registerBranch(t, db, cfg, state.StateCoding)
-	assertBranchState(t, db, branchID, state.StateCoding)
+	// Register branch in submitted state (T01: new -> submitted)
+	branchID := registerBranch(t, db, cfg, state.StateSubmitted)
+	assertBranchState(t, db, branchID, state.StateSubmitted)
 
-	// T02: coding -> local_review (agent signals working tree changes ready)
-	err := state.TransitionBranch(db, branchID, state.StateCoding, state.StateLocalReview, "agent_ready_for_review")
+	// T02: submitted -> waiting (agent signals working tree changes ready)
+	err := state.TransitionBranch(db, branchID, state.StateSubmitted, state.StateWaiting, "agent_ready_for_review")
 	if err != nil {
 		t.Fatalf("T02 failed: %v", err)
 	}
-	assertBranchState(t, db, branchID, state.StateLocalReview)
+	assertBranchState(t, db, branchID, state.StateWaiting)
 
 	// Simulate shared heartbeat gate: PENDING then PASS.
 	repoPath := t.TempDir()
@@ -701,8 +701,8 @@ COMMENTS: none
 		t.Errorf("LiteLLMStatus: got %q, want pass", gateResult.LiteLLMStatus)
 	}
 
-	// T04: local_review -> queued_cli (both pre-commit loops passed)
-	err = state.TransitionBranch(db, branchID, state.StateLocalReview, state.StateQueuedCLI, "commit_gate_passed")
+	// T04: waiting -> queued_cli (both pre-commit loops passed)
+	err = state.TransitionBranch(db, branchID, state.StateWaiting, state.StateQueuedCLI, "commit_gate_passed")
 	if err != nil {
 		t.Fatalf("T04 failed: %v", err)
 	}
@@ -710,14 +710,14 @@ COMMENTS: none
 }
 
 // TestSprint6_HeartbeatGate_FailBlocksTransition validates that a FAIL gate
-// result prevents the local_review -> queued_cli transition.
+// result prevents the waiting -> queued_cli transition.
 func TestSprint6_HeartbeatGate_FailBlocksTransition(t *testing.T) {
 	cfg := defaultTestConfig()
 	cfg.Branch = cfg.Branch + "-fail-test"
 	db := openTestDB(t)
 
-	branchID := registerBranch(t, db, cfg, state.StateLocalReview)
-	assertBranchState(t, db, branchID, state.StateLocalReview)
+	branchID := registerBranch(t, db, cfg, state.StateWaiting)
+	assertBranchState(t, db, branchID, state.StateWaiting)
 
 	repoPath := t.TempDir()
 	gateResult, err := runStubGate(t, repoPath, []string{`STATUS: FAIL
@@ -737,12 +737,12 @@ BLOCK: missing unit tests
 	}
 
 	// On FAIL: agent should NOT transition to queued_cli;
-	// T03 applies: local_review -> coding (fix and re-submit).
-	err = state.TransitionBranch(db, branchID, state.StateLocalReview, state.StateCoding, "commit_gate_failed")
+	// T03 applies: waiting -> submitted (fix and re-submit).
+	err = state.TransitionBranch(db, branchID, state.StateWaiting, state.StateSubmitted, "commit_gate_failed")
 	if err != nil {
 		t.Fatalf("T03 (fail path) failed: %v", err)
 	}
-	assertBranchState(t, db, branchID, state.StateCoding)
+	assertBranchState(t, db, branchID, state.StateSubmitted)
 
 	// Verify blocker comments are accessible.
 	if len(gateResult.Comments) == 0 {

@@ -43,7 +43,7 @@ func TestFromBranchRecord(t *testing.T) {
 
 func TestFromBranchRecords(t *testing.T) {
 	records := []state.BranchRecord{
-		{ID: "a", Repo: "r", Branch: "b1", State: state.StateCoding},
+		{ID: "a", Repo: "r", Branch: "b1", State: state.StateSubmitted},
 		{ID: "b", Repo: "r", Branch: "b2", State: state.StateMergeReady},
 	}
 	items := adapters.FromBranchRecords(records)
@@ -58,7 +58,7 @@ func TestFromBranchRecords(t *testing.T) {
 func TestFromBranchRecord_LongBranch(t *testing.T) {
 	r := state.BranchRecord{
 		Branch: "feat/COD-999-this-is-a-very-long-branch-name-that-exceeds-24-chars",
-		State:  state.StateCoding,
+		State:  state.StateSubmitted,
 	}
 	item := adapters.FromBranchRecord(r)
 	if item.Branch != r.Branch {

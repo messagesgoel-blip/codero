@@ -91,7 +91,7 @@ func TestExpiryWorker_SessionExpiry_Abandoned(t *testing.T) {
 	db, client, _ := setupExpiryDeps(t)
 
 	repo, branch := "owner/repo", "expired-session"
-	id := insertBranchWithState(t, db, repo, branch, state.StateCoding, 3, 0)
+	id := insertBranchWithState(t, db, repo, branch, state.StateSubmitted, 3, 0)
 
 	// Set last_seen far in the past (past SessionHeartbeatTTL).
 	pastTime := time.Now().Add(-scheduler.SessionHeartbeatTTL - 60*time.Second)
@@ -130,7 +130,7 @@ func TestExpiryWorker_SessionExpiry_SkipsRecent(t *testing.T) {
 	db, client, _ := setupExpiryDeps(t)
 
 	repo, branch := "owner/repo", "active-session"
-	id := insertBranchWithState(t, db, repo, branch, state.StateCoding, 3, 0)
+	id := insertBranchWithState(t, db, repo, branch, state.StateSubmitted, 3, 0)
 
 	// Set last_seen very recently.
 	setSessionLastSeen(t, db, id, time.Now())
@@ -143,8 +143,8 @@ func TestExpiryWorker_SessionExpiry_SkipsRecent(t *testing.T) {
 	worker.RunSessionExpiryCycle(ctx)
 
 	// State should remain unchanged.
-	if got := getBranchState(t, db, id); got != state.StateCoding {
-		t.Errorf("state: got %q, want %q (should not expire recent session)", got, state.StateCoding)
+	if got := getBranchState(t, db, id); got != state.StateSubmitted {
+		t.Errorf("state: got %q, want %q (should not expire recent session)", got, state.StateSubmitted)
 	}
 }
 
