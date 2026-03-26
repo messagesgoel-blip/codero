@@ -10,8 +10,8 @@ DoD passes, spec-targeted tests proving those criteria have been run, and the op
 has signed off.
 
 Status note (2026-03-26 UTC): the `feat/COD-060-owneragent-population` tranche has
-completed MIG-037 through MIG-040 and the cleanup pass. The branch is now
-merge-ready; there is no pending migration tranche on this worktree.
+completed MIG-037 through MIG-040 and the cleanup pass. The branch has been
+merged to main; there is no pending migration tranche on this worktree.
 
 ## Status values
 
@@ -38,7 +38,7 @@ merge-ready; there is no pending migration tranche on this worktree.
 | EL-V1 | impl/execution-loop-v1-cert | Copilot | done | 2026-03-25T10:38:32Z | 2026-03-25T16:00:00Z | All 24 criteria pass. Signed off 2026-03-25. |
 | RV-V1 | impl/realtime-views-v1-cert | Copilot | done | 2026-03-25T11:47:02Z | 2026-03-25T16:00:00Z | All 18 criteria pass. Signed off 2026-03-25. |
 | LC-V1 | impl/litellm-chat-v1-cert | Copilot | done | 2026-03-25T14:05:36Z | 2026-03-25T16:00:00Z | All 14 criteria pass. Signed off 2026-03-25. |
-| UI-001 | feat/UI-001-tui-live-shell | Codex | review | 2026-03-25T18:52:19Z | 2026-03-25T19:04:04Z | First bounded v1.2.4 shell slice: wire `codero tui` to the state DB, refresh delivery events and live sessions from canonical dashboard/state sources, and expose merge blocker summary in persistent shell chrome. |
+| UI-001 | feat/UI-001-tui-live-shell | Codex | done | 2026-03-25T18:52:19Z | 2026-03-26T21:17:26Z | First bounded v1.2.4 shell slice merged on main at `f6d8fc7`: wire `codero tui` to the state DB, refresh delivery events and live sessions from canonical dashboard/state sources, and expose merge blocker summary in persistent shell chrome. |
 | COD-060 | feat/COD-060-owneragent-population | claude-sonnet-4-6 | done | 2026-03-25T19:58:03Z | 2026-03-25T20:08:23Z | `session.Heartbeat()` now refreshes `branch_states.owner_agent` for active assignments; local gates passed and evidence lives under `/srv/storage/local/codero/test1`. |
 | MIG-037 | feat/COD-060-owneragent-population | claude-sonnet-4-6 | done | 2026-03-26T12:00:00Z | 2026-03-26T12:30:00Z | Delivery pipeline contract tests: happy path, gate failure, push failure, lock lifecycle, concurrent submit 409, feedback schema. Contract: `docs/contracts/delivery-pipeline-contract.md`. |
 | MIG-038 | feat/COD-060-owneragent-population | claude-sonnet-4-6 | done | 2026-03-26T12:00:00Z | 2026-03-26T12:30:00Z | Session lifecycle contract tests: tmux heartbeat, archival, lazy assignment. Contract: `docs/contracts/session-lifecycle-contract.md`. |
