@@ -26,9 +26,14 @@ type KeyMap struct {
 	Tab3    key.Binding
 	Tab4    key.Binding
 
-	Retry  key.Binding
-	Logs   key.Binding
-	Branch key.Binding
+	Retry    key.Binding
+	Logs     key.Binding
+	Branch   key.Binding
+	Chat     key.Binding
+	Overview key.Binding
+	Session  key.Binding
+	Pipeline key.Binding
+	Archives key.Binding
 
 	Search  key.Binding
 	Palette key.Binding
@@ -61,9 +66,14 @@ func DefaultKeyMap() KeyMap {
 		Tab3:    key.NewBinding(key.WithKeys("3"), key.WithHelp("3", "queue")),
 		Tab4:    key.NewBinding(key.WithKeys("4"), key.WithHelp("4", "findings")),
 
-		Retry:  key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "retry gate")),
-		Logs:   key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "logs")),
-		Branch: key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "branch view")),
+		Retry:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "retry gate")),
+		Logs:     key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "logs")),
+		Branch:   key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "branch view")),
+		Chat:     key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "chat")),
+		Overview: key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "overview")),
+		Session:  key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "session drill")),
+		Pipeline: key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "pipeline")),
+		Archives: key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "archives")),
 
 		Search:  key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
 		Palette: key.NewBinding(key.WithKeys("ctrl+p", ":"), key.WithHelp("C-p/:", "command palette")),
@@ -75,5 +85,5 @@ func DefaultKeyMap() KeyMap {
 
 // ShortHelp returns the minimal key hints for the bottom bar.
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.NextPane, k.NextTab, k.Retry, k.Logs, k.Palette, k.Quit}
+	return []key.Binding{k.Overview, k.Session, k.Pipeline, k.Archives, k.NextPane, k.Retry, k.Logs, k.Chat, k.Palette, k.Quit}
 }

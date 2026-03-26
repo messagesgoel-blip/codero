@@ -148,8 +148,8 @@ func (c *Client) FindOpenPR(ctx context.Context, repo, branch string) (*PRInfo, 
 		headFilter = owner + ":" + branch
 	}
 	pulls, _, err := c.gh().PullRequests.List(ctx, owner, repoName, &gogithub.PullRequestListOptions{
-		State: "open",
-		Head:  headFilter,
+		State:       "open",
+		Head:        headFilter,
 		ListOptions: gogithub.ListOptions{PerPage: 1},
 	})
 	if err != nil {

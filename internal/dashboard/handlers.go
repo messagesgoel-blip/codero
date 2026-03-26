@@ -76,6 +76,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/chat/history/", h.handleChatHistoryByID)
 	mux.HandleFunc("/api/v1/dashboard/manual-review-upload", h.handleUpload)
 	mux.HandleFunc("/api/v1/dashboard/events", h.handleSSE)
+	mux.HandleFunc("/api/v1/dashboard/pipeline", h.handlePipeline)
 
 	// §3 Session endpoints
 	mux.HandleFunc("/api/v1/dashboard/sessions", h.handleSessions)

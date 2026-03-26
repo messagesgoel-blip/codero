@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -32,9 +33,39 @@ func openLCTestDB(t *testing.T) *sql.DB {
 
 func newLCTestHandler(t *testing.T) (*dashboard.Handler, *sql.DB) {
 	t.Helper()
+	if !lctestHasExplicitChatBackendEnv() {
+		for _, key := range []string{
+			"OPENAI_API_KEY",
+			"LITELLM_API_KEY",
+			"LITELLM_MASTER_KEY",
+		} {
+			t.Setenv(key, "")
+		}
+	}
 	db := openLCTestDB(t)
 	store := dashboard.NewSettingsStore(t.TempDir())
 	return dashboard.NewHandler(db, store), db
+}
+
+func lctestHasExplicitChatBackendEnv() bool {
+	for _, key := range []string{
+		"CODERO_CHAT_LITELLM_URL",
+		"CODERO_CHAT_LITELLM_API_URL",
+		"CODERO_CHAT_LITELLM_API_KEY",
+		"CODERO_CHAT_LITELLM_MODEL",
+		"CODERO_LITELLM_URL",
+		"CODERO_LITELLM_API_KEY",
+		"CODERO_LITELLM_MASTER_KEY",
+		"LITELLM_PROXY_URL",
+		"LITELLM_URL",
+		"LITELLM_API_KEY",
+		"LITELLM_MASTER_KEY",
+	} {
+		if v, ok := os.LookupEnv(key); ok && strings.TrimSpace(v) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func serveLCHandler(t *testing.T, h *dashboard.Handler) *httptest.Server {
@@ -607,15 +638,17 @@ func TestLC_5_UnreachableGraceful(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	// Should get 200 with fallback, not a crash
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 (graceful fallback), got %d", resp.StatusCode)
+	// Should get a clean 503 error response, not a crash.
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 when LiteLLM is unreachable, got %d", resp.StatusCode)
 	}
 
-	var cr dashboard.ChatResponse
-	json.NewDecoder(resp.Body).Decode(&cr)
-	if cr.Provider != "fallback" {
-		t.Fatalf("expected fallback provider when unreachable, got %q", cr.Provider)
+	var er dashboard.ErrorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&er); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(er.Error), "unavailable") {
+		t.Fatalf("expected unavailable error, got %q", er.Error)
 	}
 }
 

@@ -2,7 +2,9 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -10,37 +12,42 @@ import (
 	"github.com/codero/codero/internal/tui/adapters"
 )
 
-var pipelineDefaultSteps = []string{
-	"init", "schema-validate", "secret-scan", "lint-staged", "type-check",
-	"unit-tests", "integration", "coverage-check", "dependency-audit",
-	"license-scan", "size-check", "conflict-markers", "whitespace",
-	"newline-eof", "branch-protection", "review-approval", "ci-status",
-	"deploy-preview", "smoke-test", "security-scan", "changelog", "merge-ready",
+var pipelineKanbanColumns = []string{
+	"SUBMITTED",
+	"GATING",
+	"COMMITTED",
+	"PUSHED",
+	"PR_ACTIVE",
+	"MONITORING",
+	"MERGE_READY",
+	"MERGED",
 }
 
-// PipelinePane renders the pipeline progress column from the current gate report.
+var pipelineKanbanColumnGroups = [][]string{
+	{"SUBMITTED", "GATING", "COMMITTED", "PUSHED"},
+	{"PR_ACTIVE", "MONITORING", "MERGE_READY", "MERGED"},
+}
+
+// PipelinePane renders the delivery pipeline kanban.
 type PipelinePane struct {
-	vm       adapters.CheckReportViewModel
-	theme    Theme
-	width    int
-	height   int
-	activeIx int
+	vm     adapters.CheckReportViewModel
+	cards  []pipelineCard
+	theme  Theme
+	width  int
+	height int
 }
 
 func NewPipelinePane(theme Theme) PipelinePane {
-	return PipelinePane{theme: theme, activeIx: 0}
+	return PipelinePane{theme: theme}
 }
 
 func (p PipelinePane) Init() tea.Cmd { return nil }
 
 func (p PipelinePane) Update(msg tea.Msg) (PipelinePane, tea.Cmd) {
 	switch msg.(type) {
-	case tickMsg:
-		if len(p.vm.Checks) == 0 && len(pipelineDefaultSteps) > 0 {
-			p.activeIx = (p.activeIx + 1) % len(pipelineDefaultSteps)
-		}
 	case checksRefreshMsg:
-		p.activeIx = -1
+		// Preserve the legacy gate view model for compatibility, but the board is
+		// driven by delivery cards when available.
 	}
 	return p, nil
 }
@@ -52,135 +59,115 @@ func (p *PipelinePane) SetSize(w, h int) {
 
 func (p *PipelinePane) SetVM(vm adapters.CheckReportViewModel) {
 	p.vm = vm
-	if len(vm.Checks) > 0 {
-		p.activeIx = -1
-	}
+}
+
+func (p *PipelinePane) SetCards(cards []pipelineCard) {
+	p.cards = append([]pipelineCard(nil), cards...)
+	sort.SliceStable(p.cards, func(i, j int) bool {
+		if p.cards[i].Checkpoint != p.cards[j].Checkpoint {
+			return p.cards[i].Checkpoint < p.cards[j].Checkpoint
+		}
+		if p.cards[i].Branch != p.cards[j].Branch {
+			return p.cards[i].Branch < p.cards[j].Branch
+		}
+		return p.cards[i].AgentID < p.cards[j].AgentID
+	})
 }
 
 func (p PipelinePane) View() string {
 	if p.width <= 2 || p.height <= 0 {
 		return ""
 	}
-	w := p.width - 2
-	lines := make([]string, 0, p.height)
 
-	lines = append(lines, p.theme.PaneHeader.Width(w).Render("PIPELINE"))
-	lines = append(lines, p.theme.Muted.Render(strings.Repeat("─", w)))
+	contentW := maxInt(0, p.width-2)
+	contentH := maxInt(0, p.height-2)
+	header := p.theme.PaneHeader.Width(contentW).Render("PIPELINE KANBAN")
+	sep := p.theme.Muted.Render(strings.Repeat("─", contentW))
+	bodyH := maxInt(2, contentH-2)
+	groupH := maxInt(4, bodyH/2)
+	if len(pipelineKanbanColumnGroups) == 1 {
+		groupH = bodyH
+	}
 
-	steps := p.pipelineSteps()
-	passCount := 0
-	failCount := 0
-	for _, step := range steps {
-		switch step.status {
-		case "pass":
-			passCount++
-		case "fail":
-			failCount++
+	buckets := p.cardsByStage()
+	rows := []string{header, sep}
+	for groupIdx, group := range pipelineKanbanColumnGroups {
+		if groupIdx > 0 {
+			rows = append(rows, p.theme.Muted.Render(strings.Repeat("─", contentW)))
 		}
-	}
-
-	summary := fmt.Sprintf("  %d steps", len(steps))
-	if passCount > 0 || failCount > 0 {
-		summary += fmt.Sprintf("  %d✓", passCount)
-		if failCount > 0 {
-			summary += fmt.Sprintf("  %d✕", failCount)
+		cols := make([]string, 0, len(group))
+		gap := 2
+		colW := maxInt(10, (contentW-(gap*(len(group)-1)))/len(group))
+		for _, stage := range group {
+			cols = append(cols, p.renderKanbanColumn(stage, buckets[stage], colW, groupH))
 		}
-	}
-	lines = append(lines, "")
-	lines = append(lines, p.theme.Muted.Render(summary))
-	lines = append(lines, "")
-
-	for i, step := range steps {
-		lines = append(lines, p.renderStep(step, i == p.activeIx, i < p.activeIx, w))
+		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, cols...))
 	}
 
-	if len(steps) == 0 {
-		lines = append(lines, p.theme.Muted.Render("  (waiting…)"))
+	if len(p.cards) == 0 {
+		rows = append(rows, "")
+		rows = append(rows, p.theme.Muted.Render("  No active assignments"))
 	}
 
-	lines = append(lines, "")
-	lines = append(lines, p.theme.Muted.Render(strings.Repeat("─", w)))
-	lines = append(lines, p.theme.Muted.Render("  ✓ Pass ● ✕ Fail"))
-	lines = append(lines, p.theme.Muted.Render("  ↷ Skip ● ○ Idle"))
-
-	for len(lines) < p.height {
-		lines = append(lines, "")
+	for len(rows) < p.height {
+		rows = append(rows, "")
 	}
-	return lipgloss.NewStyle().Width(p.width).Render(strings.Join(lines[:minInt(len(lines), p.height)], "\n"))
+	return lipgloss.NewStyle().Width(p.width).Render(strings.Join(rows[:minInt(len(rows), p.height)], "\n"))
 }
 
-type pipelineStep struct {
-	name     string
-	status   string
-	duration int64
-}
-
-func (p PipelinePane) pipelineSteps() []pipelineStep {
-	if len(p.vm.Checks) == 0 {
-		steps := make([]pipelineStep, len(pipelineDefaultSteps))
-		for i, name := range pipelineDefaultSteps {
-			status := "idle"
-			if i == p.activeIx {
-				status = "running"
+func (p PipelinePane) cardsByStage() map[string][]pipelineCard {
+	buckets := make(map[string][]pipelineCard, len(pipelineKanbanColumns))
+	for _, stage := range pipelineKanbanColumns {
+		buckets[stage] = nil
+	}
+	for _, card := range p.cards {
+		stage := strings.ToUpper(strings.TrimSpace(card.Checkpoint))
+		if stage == "" {
+			stage = "SUBMITTED"
+		}
+		if _, ok := buckets[stage]; !ok {
+			stage = "SUBMITTED"
+		}
+		buckets[stage] = append(buckets[stage], card)
+	}
+	for _, stage := range pipelineKanbanColumns {
+		sort.SliceStable(buckets[stage], func(i, j int) bool {
+			if buckets[stage][i].StageSec != buckets[stage][j].StageSec {
+				return buckets[stage][i].StageSec > buckets[stage][j].StageSec
 			}
-			steps[i] = pipelineStep{name: name, status: status}
-		}
-		return steps
-	}
-	steps := make([]pipelineStep, 0, len(p.vm.Checks))
-	for _, c := range p.vm.Checks {
-		steps = append(steps, pipelineStep{
-			name:     c.Name,
-			status:   c.Status,
-			duration: c.DurMS,
+			if buckets[stage][i].Branch != buckets[stage][j].Branch {
+				return buckets[stage][i].Branch < buckets[stage][j].Branch
+			}
+			return buckets[stage][i].AgentID < buckets[stage][j].AgentID
 		})
 	}
-	return steps
+	return buckets
 }
 
-func (p PipelinePane) renderStep(step pipelineStep, isActive, isPast bool, width int) string {
-	icon := "○"
-	style := p.theme.Muted
-	switch step.status {
-	case "pass":
-		icon = "✓"
-		style = p.theme.Pass
-	case "fail":
-		icon = "✕"
-		style = p.theme.Fail
-	case "skip":
-		icon = "↷"
-		style = p.theme.Warning
-	case "disabled":
-		icon = "–"
-		style = p.theme.Disabled
-	case "running":
-		icon = "●"
-		style = p.theme.Running
+func (p PipelinePane) renderKanbanColumn(stage string, cards []pipelineCard, width, height int) string {
+	if width < 10 {
+		width = 10
 	}
-	if isActive && step.status == "idle" {
-		icon = "●"
-		style = p.theme.Running
+	lines := make([]string, 0, height)
+	lines = append(lines, p.theme.ListHeader.Width(width).Render(fmt.Sprintf(" %s ", stage)))
+	lines = append(lines, p.theme.Muted.Render(strings.Repeat("─", width)))
+	if len(cards) == 0 {
+		lines = append(lines, p.theme.Muted.Render("  · idle"))
+	} else {
+		for _, card := range cards {
+			lines = append(lines, p.renderPipelineCard(card, width))
+		}
 	}
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+	return lipgloss.NewStyle().Width(width).Height(height).Render(strings.Join(lines[:minInt(len(lines), height)], "\n"))
+}
 
-	nameW := width - 4
-	if step.duration > 0 {
-		nameW -= 6 // space for duration
-	}
-	if nameW < 4 {
-		nameW = 4
-	}
-
-	label := fmt.Sprintf(" %s %-*s", icon, nameW, truncStr(step.name, nameW))
-	if step.duration > 0 {
-		label += fmt.Sprintf(" %3dms", step.duration)
-	}
-
-	if isActive {
-		return p.theme.ListSelected.Width(width).Render(label)
-	}
-	if isPast {
-		style = style.Copy().Faint(true)
-	}
-	return style.Render(label)
+func (p PipelinePane) renderPipelineCard(card pipelineCard, width int) string {
+	branch := truncStr(card.Branch, maxInt(6, width-10))
+	agent := truncStr(card.AgentID, maxInt(6, width-10))
+	dur := time.Duration(card.StageSec) * time.Second
+	label := fmt.Sprintf("  %s %s v%d %s", agent, branch, card.Version, dur.Truncate(time.Second))
+	return p.theme.Base.Render(label)
 }

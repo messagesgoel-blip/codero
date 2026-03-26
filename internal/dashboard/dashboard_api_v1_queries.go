@@ -592,3 +592,83 @@ func querySessionArchives(ctx context.Context, db *sql.DB, limit int) ([]Archive
 	}
 	return out, rows.Err()
 }
+
+// ─── Pipeline query (MIG-035) ─────────────────────────────────────────────
+
+func queryPipeline(ctx context.Context, db *sql.DB) ([]PipelineCard, error) {
+	hasSessions, err := tableExists(ctx, db, "agent_sessions")
+	if err != nil {
+		return nil, err
+	}
+	if !hasSessions {
+		return []PipelineCard{}, nil
+	}
+
+	hasAssignments, err := tableExists(ctx, db, "agent_assignments")
+	if err != nil {
+		return nil, err
+	}
+	if !hasAssignments {
+		return []PipelineCard{}, nil
+	}
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT s.session_id, s.agent_id, COALESCE(a.repo, ''), COALESCE(a.branch, ''),
+		       COALESCE(a.assignment_substatus, ''), a.version, a.started_at, s.last_seen_at
+		FROM agent_sessions s
+		LEFT JOIN agent_assignments a ON a.session_id = s.session_id AND a.ended_at IS NULL
+		WHERE s.ended_at IS NULL
+		ORDER BY s.started_at DESC
+		LIMIT 20`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []PipelineCard
+	for rows.Next() {
+		var card PipelineCard
+		var substatus sql.NullString
+		var version sql.NullInt64
+		var startedAt, updatedAt sql.NullTime
+		if err := rows.Scan(&card.SessionID, &card.AgentID, &card.Repo, &card.Branch,
+			&substatus, &version, &startedAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		card.Checkpoint = deriveCheckpointFromSubstatus(substatus.String)
+		if version.Valid {
+			card.Version = int(version.Int64)
+		}
+		if startedAt.Valid {
+			card.StartedAt = startedAt.Time
+		}
+		if updatedAt.Valid {
+			card.UpdatedAt = updatedAt.Time
+		}
+		if !card.StartedAt.IsZero() && !card.UpdatedAt.IsZero() {
+			card.StageSec = int64(card.UpdatedAt.Sub(card.StartedAt).Seconds())
+		}
+		out = append(out, card)
+	}
+	if out == nil {
+		out = []PipelineCard{}
+	}
+	return out, rows.Err()
+}
+
+func deriveCheckpointFromSubstatus(substatus string) string {
+	switch substatus {
+	case "in_progress", "needs_revision":
+		return "GATING"
+	case "waiting_for_ci":
+		return "PUSHED"
+	case "waiting_for_merge_approval":
+		return "PR_ACTIVE"
+	case "terminal_finished", "terminal_waiting_comments", "terminal_waiting_next_task":
+		return "MERGED"
+	case "blocked_credential_failure", "blocked_merge_conflict", "blocked_external_dependency", "blocked_ci_failure", "blocked_policy":
+		return "MONITORING"
+	default:
+		return "SUBMITTED"
+	}
+}

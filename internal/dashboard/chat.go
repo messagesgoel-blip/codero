@@ -1,8 +1,6 @@
 package dashboard
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,6 +11,7 @@ import (
 	"time"
 
 	loglib "github.com/codero/codero/internal/log"
+	"github.com/openai/openai-go"
 )
 
 const (
@@ -174,7 +173,8 @@ func (h *Handler) handleChat(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) postChat(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
-	if !h.chatCfg.Enabled {
+	cfg := h.runtimeChatConfig()
+	if !cfg.Enabled {
 		writeError(w, http.StatusServiceUnavailable, "chat is disabled", "chat_disabled")
 		return
 	}
@@ -196,7 +196,7 @@ func (h *Handler) postChat(w http.ResponseWriter, r *http.Request) {
 	req.ConversationID = strings.TrimSpace(req.ConversationID)
 	req.ContextScope = strings.TrimSpace(req.ContextScope)
 	if req.ContextScope == "" {
-		req.ContextScope = h.chatCfg.ContextScopeDefault
+		req.ContextScope = cfg.ContextScopeDefault
 	}
 	if req.Prompt == "" {
 		writeError(w, http.StatusBadRequest, "prompt must not be empty", "validation_error")
@@ -207,25 +207,29 @@ func (h *Handler) postChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Expand quick queries (§4.4)
-	if h.chatCfg.QuickQueriesEnabled {
+	if cfg.QuickQueriesEnabled {
 		if expanded, ok := ExpandQuickQuery(req.Prompt); ok {
 			req.Prompt = expanded
 		}
 	}
 
-	// Get or create conversation for multi-turn
+	// Get or create conversation for multi-turn.
 	convo := h.convos.GetOrCreate(req.ConversationID)
 	req.ConversationID = convo.ID
 
-	// Record user message in conversation history
-	h.convos.Append(convo.ID, "user", req.Prompt)
-
+	contextMarkdown := h.assembleChatContextMarkdown(r.Context(), req.ContextScope)
 	snapshot := h.collectChatSnapshot(r.Context(), req.Tab)
 	if req.Stream {
-		h.streamChat(w, r, req, snapshot)
+		h.streamChat(w, r, req, snapshot, contextMarkdown, cfg)
 		return
 	}
-	writeJSON(w, http.StatusOK, h.chatResponse(r.Context(), req, snapshot))
+
+	resp, err := h.chatResponse(r.Context(), req, snapshot, contextMarkdown, cfg)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "chat backend unavailable", "chat_backend_unavailable")
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) collectChatSnapshot(ctx context.Context, focus string) dashboardChatSnapshot {
@@ -294,12 +298,10 @@ func (h *Handler) collectChatSnapshot(ctx context.Context, focus string) dashboa
 	return snap
 }
 
-func (h *Handler) chatResponse(ctx context.Context, req ChatRequest, snapshot dashboardChatSnapshot) ChatResponse {
-	reply, provider, model := h.askLiteLLM(ctx, req, snapshot)
-
-	// Record assistant reply in conversation history
-	if req.ConversationID != "" {
-		h.convos.Append(req.ConversationID, "assistant", reply)
+func (h *Handler) chatResponse(ctx context.Context, req ChatRequest, snapshot dashboardChatSnapshot, contextMarkdown string, cfg ChatConfig) (ChatResponse, error) {
+	reply, provider, model, err := h.askLiteLLM(ctx, req, snapshot, contextMarkdown, cfg)
+	if err != nil {
+		return ChatResponse{}, err
 	}
 
 	return ChatResponse{
@@ -310,7 +312,7 @@ func (h *Handler) chatResponse(ctx context.Context, req ChatRequest, snapshot da
 		Suggestions:    dashboardChatSuggestions(req.Tab, req.Prompt, snapshot),
 		Actions:        dashboardChatActions(req.Tab, snapshot),
 		GeneratedAt:    time.Now().UTC(),
-	}
+	}, nil
 }
 
 func loadGateCheckSnapshot() *GateCheckReport {
@@ -329,10 +331,15 @@ func loadGateCheckSnapshot() *GateCheckReport {
 	return &rpt
 }
 
-func (h *Handler) streamChat(w http.ResponseWriter, r *http.Request, req ChatRequest, snapshot dashboardChatSnapshot) {
+func (h *Handler) streamChat(w http.ResponseWriter, r *http.Request, req ChatRequest, snapshot dashboardChatSnapshot, contextMarkdown string, cfg ChatConfig) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		writeJSON(w, http.StatusOK, h.chatResponse(r.Context(), req, snapshot))
+		resp, err := h.chatResponse(r.Context(), req, snapshot, contextMarkdown, cfg)
+		if err != nil {
+			writeError(w, http.StatusServiceUnavailable, "chat backend unavailable", "chat_backend_unavailable")
+			return
+		}
+		writeJSON(w, http.StatusOK, resp)
 		return
 	}
 
@@ -342,12 +349,19 @@ func (h *Handler) streamChat(w http.ResponseWriter, r *http.Request, req ChatReq
 	w.Header().Set("X-Accel-Buffering", "no")
 	setCORSHeaders(w)
 
-	if final, streamed := h.streamLiteLLM(w, flusher, r.Context(), req, snapshot); streamed {
+	if final, streamed, err := h.streamLiteLLM(w, flusher, r.Context(), req, snapshot, contextMarkdown, cfg); err != nil {
+		writeError(w, http.StatusServiceUnavailable, "chat backend unavailable", "chat_backend_unavailable")
+		return
+	} else if streamed {
 		writeSSEEvent(w, flusher, "done", final)
 		return
 	}
 
-	final := h.chatResponse(r.Context(), req, snapshot)
+	final, err := h.chatResponse(r.Context(), req, snapshot, contextMarkdown, cfg)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "chat backend unavailable", "chat_backend_unavailable")
+		return
+	}
 	streamLocalReply(w, flusher, final.Reply)
 	writeSSEEvent(w, flusher, "done", final)
 }
@@ -364,105 +378,59 @@ type liteLLMStreamResponse struct {
 	} `json:"choices"`
 }
 
-func (h *Handler) streamLiteLLM(w http.ResponseWriter, flusher http.Flusher, ctx context.Context, req ChatRequest, snapshot dashboardChatSnapshot) (ChatResponse, bool) {
-	model := dashboardChatModel()
-	endpoint := dashboardChatEndpoint()
-	key := dashboardChatKey()
-	if endpoint == "" || model == "" || key == "" {
-		return ChatResponse{}, false
+func (h *Handler) streamLiteLLM(w http.ResponseWriter, flusher http.Flusher, ctx context.Context, req ChatRequest, snapshot dashboardChatSnapshot, contextMarkdown string, cfg ChatConfig) (ChatResponse, bool, error) {
+	if !h.chatBackendAvailable(cfg) {
+		return ChatResponse{}, false, nil
 	}
 
-	messages := h.buildChatMessages(req, snapshot)
-	body, err := json.Marshal(liteLLMChatRequest{
-		Model:       model,
-		Messages:    messages,
-		Temperature: 0.2,
-		MaxTokens:   700,
-		Stream:      true,
-	})
-	if err != nil {
-		loglib.Warn("dashboard: chat marshal failed",
-			loglib.FieldComponent, "dashboard", "error", err)
-		return ChatResponse{}, false
-	}
+	history := h.chatHistoryForConversation(req.ConversationID)
+	messages := h.buildOpenAIChatMessages(req, history, contextMarkdown, cfg)
 
-	reqCtx, cancel := context.WithTimeout(ctx, dashboardChatTimeout)
+	client := h.buildOpenAIClient(cfg)
+	reqCtx, cancel := h.chatTimeoutContext(ctx, cfg)
 	defer cancel()
 
-	httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		loglib.Warn("dashboard: chat request build failed",
-			loglib.FieldComponent, "dashboard", "error", err)
-		return ChatResponse{}, false
+	stream := client.Chat.Completions.NewStreaming(reqCtx, openai.ChatCompletionNewParams{
+		Model:       cfg.LiteLLMModel,
+		Messages:    messages,
+		Temperature: openai.Float(cfg.LiteLLMTemperature),
+		MaxTokens:   openai.Int(int64(cfg.LiteLLMMaxTokens)),
+	})
+	if stream == nil {
+		return ChatResponse{}, false, fmt.Errorf("openai streaming client unavailable")
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "text/event-stream")
-	httpReq.Header.Set("Authorization", "Bearer "+key)
+	defer stream.Close()
 
-	resp, err := http.DefaultClient.Do(httpReq)
-	if err != nil {
-		loglib.Warn("dashboard: chat request failed",
-			loglib.FieldComponent, "dashboard", "error", err)
-		return ChatResponse{}, false
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		data, _ := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
-		loglib.Warn("dashboard: chat non-2xx response",
-			loglib.FieldComponent, "dashboard", "status", resp.StatusCode, "body", truncateForLog(string(data)))
-		return ChatResponse{}, false
-	}
-
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 1024), 1024*1024)
 	var reply strings.Builder
 	var emitted bool
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || !strings.HasPrefix(line, "data:") {
-			continue
+	for stream.Next() {
+		chunk := stream.Current()
+		for _, choice := range chunk.Choices {
+			if content := strings.TrimSpace(choice.Delta.Content); content != "" {
+				emitted = true
+				reply.WriteString(choice.Delta.Content)
+				writeSSEEvent(w, flusher, "delta", map[string]string{"delta": choice.Delta.Content})
+			}
 		}
-		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if payload == "[DONE]" {
-			break
-		}
-		var ev liteLLMStreamResponse
-		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
-			continue
-		}
-		chunk := dashboardChatStreamChunk(ev)
-		if chunk == "" {
-			continue
-		}
-		emitted = true
-		reply.WriteString(chunk)
-		writeSSEEvent(w, flusher, "delta", map[string]string{"delta": chunk})
 	}
-	if err := scanner.Err(); err != nil {
-		loglib.Warn("dashboard: chat stream scan failed",
-			loglib.FieldComponent, "dashboard", "error", err)
+	if err := stream.Err(); err != nil {
+		return ChatResponse{}, false, err
 	}
 	if !emitted {
-		return ChatResponse{}, false
+		return ChatResponse{}, false, fmt.Errorf("empty streaming response")
 	}
 
 	final := ChatResponse{
 		Reply:          reply.String(),
 		Provider:       "litellm",
-		Model:          model,
+		Model:          cfg.LiteLLMModel,
 		ConversationID: req.ConversationID,
 		Suggestions:    dashboardChatSuggestions(req.Tab, req.Prompt, snapshot),
 		Actions:        dashboardChatActions(req.Tab, snapshot),
 		GeneratedAt:    time.Now().UTC(),
 	}
-
-	// Record streamed assistant reply in conversation history
-	if req.ConversationID != "" {
-		h.convos.Append(req.ConversationID, "assistant", final.Reply)
-	}
-
-	return final, true
+	h.appendConversationTurn(req.ConversationID, req.Prompt, final.Reply)
+	return final, true, nil
 }
 
 func dashboardChatStreamChunk(ev liteLLMStreamResponse) string {
@@ -530,74 +498,42 @@ func splitChatChunks(reply string) []string {
 	return parts
 }
 
-func (h *Handler) askLiteLLM(ctx context.Context, req ChatRequest, snapshot dashboardChatSnapshot) (reply, provider, model string) {
-	model = dashboardChatModel()
-	endpoint := dashboardChatEndpoint()
-	key := dashboardChatKey()
-	if endpoint == "" || model == "" || key == "" {
-		return dashboardChatFallbackReply(req, snapshot), "fallback", "local-summary"
+func (h *Handler) askLiteLLM(ctx context.Context, req ChatRequest, snapshot dashboardChatSnapshot, contextMarkdown string, cfg ChatConfig) (reply, provider, model string, err error) {
+	if !h.chatBackendAvailable(cfg) {
+		reply = dashboardChatFallbackReply(req, snapshot)
+		h.appendConversationTurn(req.ConversationID, req.Prompt, reply)
+		return reply, "fallback", "local-summary", nil
 	}
 
-	// Build multi-turn messages: system + prior history + current user prompt
-	messages := h.buildChatMessages(req, snapshot)
+	history := h.chatHistoryForConversation(req.ConversationID)
+	messages := h.buildOpenAIChatMessages(req, history, contextMarkdown, cfg)
 
-	body, err := json.Marshal(liteLLMChatRequest{
-		Model:       model,
-		Messages:    messages,
-		Temperature: 0.2,
-		MaxTokens:   700,
-		Stream:      false,
-	})
-	if err != nil {
-		loglib.Warn("dashboard: chat marshal failed",
-			loglib.FieldComponent, "dashboard", "error", err)
-		return dashboardChatFallbackReply(req, snapshot), "fallback", "local-summary"
-	}
-
-	reqCtx, cancel := context.WithTimeout(ctx, dashboardChatTimeout)
+	client := h.buildOpenAIClient(cfg)
+	reqCtx, cancel := h.chatTimeoutContext(ctx, cfg)
 	defer cancel()
 
-	httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, bytes.NewReader(body))
+	resp, err := client.Chat.Completions.New(reqCtx, openai.ChatCompletionNewParams{
+		Model:       cfg.LiteLLMModel,
+		Messages:    messages,
+		Temperature: openai.Float(cfg.LiteLLMTemperature),
+		MaxTokens:   openai.Int(int64(cfg.LiteLLMMaxTokens)),
+	})
 	if err != nil {
-		loglib.Warn("dashboard: chat request build failed",
-			loglib.FieldComponent, "dashboard", "error", err)
-		return dashboardChatFallbackReply(req, snapshot), "fallback", "local-summary"
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+key)
-
-	resp, err := http.DefaultClient.Do(httpReq)
-	if err != nil {
-		loglib.Warn("dashboard: chat request failed",
-			loglib.FieldComponent, "dashboard", "error", err)
-		return dashboardChatFallbackReply(req, snapshot), "fallback", "local-summary"
-	}
-	defer resp.Body.Close()
-
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
-	if err != nil {
-		loglib.Warn("dashboard: chat response read failed",
-			loglib.FieldComponent, "dashboard", "error", err)
-		return dashboardChatFallbackReply(req, snapshot), "fallback", "local-summary"
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		loglib.Warn("dashboard: chat non-2xx response",
-			loglib.FieldComponent, "dashboard", "status", resp.StatusCode, "body", truncateForLog(string(data)))
-		return dashboardChatFallbackReply(req, snapshot), "fallback", "local-summary"
+		return "", "", "", err
 	}
 
-	var parsed liteLLMChatResponse
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		loglib.Warn("dashboard: chat response parse failed",
-			loglib.FieldComponent, "dashboard", "error", err)
-		return dashboardChatFallbackReply(req, snapshot), "fallback", "local-summary"
+	for _, choice := range resp.Choices {
+		if content := strings.TrimSpace(choice.Message.Content); content != "" {
+			reply = content
+			break
+		}
 	}
-
-	reply = dashboardChatReplyFromLLM(parsed)
 	if strings.TrimSpace(reply) == "" {
-		return dashboardChatFallbackReply(req, snapshot), "fallback", "local-summary"
+		return "", "", "", fmt.Errorf("empty chat completion")
 	}
-	return reply, "litellm", model
+
+	h.appendConversationTurn(req.ConversationID, req.Prompt, reply)
+	return reply, "litellm", cfg.LiteLLMModel, nil
 }
 
 // buildChatMessages constructs the LiteLLM messages array including

@@ -5,8 +5,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/codero/codero/internal/gatecheck"
 )
@@ -357,6 +359,70 @@ func TestRunPipeline_FindingsTruncated(t *testing.T) {
 	if len(check.Findings) != gatecheck.MaxFindingsPerCheck {
 		t.Errorf("findings length: got %d, want %d", len(check.Findings), gatecheck.MaxFindingsPerCheck)
 	}
+}
+
+func TestRunPipeline_WritesSubstatusEnv(t *testing.T) {
+	dir := makeRepo(t)
+	writeFile(t, dir, "main.go", "package main\n\nfunc main() {}\n")
+	mustRun(t, dir, "git", "add", "main.go")
+
+	tool := writeExecutable(t, dir, "bin/gitleaks", "#!/bin/sh\nexit 0\n")
+
+	cfg := gatecheck.EngineConfig{
+		Profile:      gatecheck.ProfilePortable,
+		GitleaksPath: tool,
+	}
+	engine := gatecheck.NewEngine(cfg)
+
+	report, err := engine.RunPipeline(context.Background(), dir, nil)
+	if err != nil {
+		t.Fatalf("RunPipeline: %v", err)
+	}
+
+	substatusPath := filepath.Join(dir, gatecheck.HeartbeatSubstatusPath)
+	data, err := os.ReadFile(substatusPath)
+	if err != nil {
+		t.Fatalf("read substatus: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	fields := make(map[string]string, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			t.Fatalf("invalid env line: %q", line)
+		}
+		fields[parts[0]] = parts[1]
+	}
+
+	check := findCheck(t, *report, "file-size")
+	key := strings.ToUpper(strings.ReplaceAll(check.ID, "-", "_"))
+
+	assertField := func(key, want string) {
+		got, ok := fields[key]
+		if !ok {
+			t.Fatalf("missing %s in substatus env", key)
+		}
+		if got != want {
+			t.Fatalf("%s: got %q, want %q", key, got, want)
+		}
+	}
+
+	assertField("CODERO_GATE_RESULT", string(report.Result))
+	assertField("CODERO_GATE_BLOCKED", strconv.FormatBool(report.Blocked))
+	assertField("CODERO_GATE_FINDINGS_COUNT", strconv.Itoa(report.TotalFindings))
+	assertField("CODERO_GATE_DURATION_MS", strconv.FormatInt(report.DurationMS, 10))
+	assertField("CODERO_GATE_INVOCATION", "codero")
+	assertField("CODERO_GATE_TIMESTAMP", report.RunAt.Format(time.RFC3339))
+
+	assertField("CODERO_CHECK_"+key+"_STATUS", string(check.Status))
+	assertField("CODERO_CHECK_"+key+"_DURATION_MS", strconv.FormatInt(check.DurationMS, 10))
+	assertField("CODERO_CHECK_"+key+"_FINDINGS_COUNT", strconv.Itoa(check.FindingsCount))
+	assertField("CODERO_CHECK_"+key+"_EXIT_CODE", strconv.Itoa(check.ExitCode))
 }
 
 func TestEngine_MissingTool_GitleaksDisabled(t *testing.T) {

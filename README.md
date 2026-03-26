@@ -49,6 +49,37 @@ Install pre-commit hook for a repo:
 - `docs/adr/`
 - `CONTRIBUTING.md`
 
+## Contract Tests
+
+Contract tests validate key system behaviors against documented contracts:
+
+| Contract | Test File | Coverage |
+|----------|-----------|----------|
+| Delivery Pipeline | `tests/contract/delivery_pipeline_contract_test.go` | Submit-to-merge flow, lock lifecycle, feedback schema |
+| Session Lifecycle | `tests/contract/session_lifecycle_contract_test.go` | Registration, heartbeat, assignment, archival |
+| Dashboard API | `tests/contract/dashboard_api_contract_test.go` | REST endpoints, response schemas |
+| Queue Operations | `internal/scheduler/queue_test.go` | WFQ scheduling, lease management |
+
+Run contract tests:
+
+```bash
+make contract
+# or
+go test ./tests/contract/... -v
+```
+
+## Integration Tests
+
+Integration tests validate end-to-end flows with mock external dependencies:
+
+| Test | Description |
+|------|-------------|
+| MIG-039 | Submit-to-merge happy path and gate failure path |
+
+```bash
+go test ./tests/integration/... -v
+```
+
 ## CLI Commands Quick Reference
 
 ```bash

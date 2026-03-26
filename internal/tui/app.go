@@ -63,6 +63,28 @@ type (
 	errMsg           struct{ err error }
 )
 
+type overviewSessionRow struct {
+	Session         dashboard.ActiveSession
+	Checkpoint      string
+	HeartbeatAgeSec int64
+}
+
+type pipelineCard struct {
+	SessionID  string
+	AgentID    string
+	Branch     string
+	Checkpoint string
+	Version    int
+	StageSec   int64
+}
+
+type missionControlHealth struct {
+	Status       string
+	UptimeSec    int64
+	RedisStatus  string
+	GitHubStatus string
+}
+
 // Config is provided by the command layer to configure the TUI program.
 type Config struct {
 	RepoPath  string
@@ -79,6 +101,10 @@ type Config struct {
 	// StateDB is the optional state database handle used for session/archive/compliance views.
 	// When nil, the DB-backed views render a "no data" placeholder.
 	StateDB *state.DB
+	// DaemonBaseURL is the local daemon URL used for health checks.
+	DaemonBaseURL string
+	// SettingsDir points at the state directory that holds dashboard-settings.json.
+	SettingsDir string
 }
 
 // Model is the root Bubble Tea model for the Codero TUI.
@@ -106,7 +132,8 @@ type Model struct {
 	rightVP    viewport.Model
 	rightReady bool
 
-	pipelinePane PipelinePane
+	pipelinePane  PipelinePane
+	pipelineCards []pipelineCard
 
 	focused   FocusedPane
 	activeTab Tab
@@ -119,21 +146,29 @@ type Model struct {
 	searchActive bool
 	searchInput  textinput.Model
 
-	cliMessages    []terminalMessage
-	cliInput       textinput.Model
-	cliBusy        bool
-	cliHistory     []string
-	cliHistoryIdx  int
-	cliSuggestions []dashboard.ChatSuggestion
-	cliActions     []dashboard.ChatAction
+	cliMessages        []terminalMessage
+	cliInput           textinput.Model
+	cliBusy            bool
+	cliHistory         []string
+	cliHistoryIdx      int
+	cliSuggestions     []dashboard.ChatSuggestion
+	cliActions         []dashboard.ChatAction
+	chatActive         bool
+	chatPrevFocus      FocusedPane
+	chatConversationID string
 
 	lastUpdated time.Time
 	statusMsg   string
 	err         error
 
-	branchRecord   *state.BranchRecord
-	activeSessions []dashboard.ActiveSession
-	blockReasons   []dashboard.BlockReason
+	branchRecord              *state.BranchRecord
+	activeSessions            []dashboard.ActiveSession
+	overviewRows              []overviewSessionRow
+	overviewSelected          int
+	overviewSelectedSessionID string
+	missionHealth             missionControlHealth
+	queueDepth                int
+	blockReasons              []dashboard.BlockReason
 }
 
 // New constructs the root TUI model from a Config.
@@ -222,6 +257,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.gateVM = vm
 		m.gatePane.SetVM(vm)
 		m.lastUpdated = msg.t
+		m.outputLines = nil
 		cmds = append(cmds, m.loadLiveShellCmds())
 		// Refresh DB-backed views when their tab is active.
 		if m.cfg.StateDB != nil {
@@ -244,26 +280,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case queueRefreshMsg:
 		m.queuePane.SetItems(msg.items)
+		m.queueDepth = len(msg.items)
+		m.outputLines = nil
+		m.refreshOverviewViewport()
 
 	case branchRefreshMsg:
 		m.branchRecord = msg.record
 		m.branchPane.SetRecord(msg.record)
+		m.outputLines = nil
 
 	case eventsRefreshMsg:
 		var cmd tea.Cmd
 		m.eventsPane, cmd = m.eventsPane.Update(msg)
 		cmds = append(cmds, cmd)
+		m.outputLines = nil
 
 	case checksRefreshMsg:
 		m.checksVM = msg.vm
 		m.checksPane.SetVM(msg.vm)
 		m.pipelinePane.SetVM(msg.vm)
+		m.outputLines = nil
 
 	case activeSessionsRefreshMsg:
 		m.activeSessions = msg.sessions
+		m.outputLines = nil
+		if len(msg.overviewRows) > 0 || len(msg.pipelineCards) > 0 || msg.health.Status != "" {
+			m.overviewRows = msg.overviewRows
+			m.pipelineCards = msg.pipelineCards
+			m.missionHealth = msg.health
+			m.pipelinePane.SetCards(msg.pipelineCards)
+			m.syncOverviewSelection()
+			m.refreshOverviewViewport()
+		}
 
 	case blockReasonsRefreshMsg:
 		m.blockReasons = msg.reasons
+		m.outputLines = nil
 
 	case outputMsg:
 		m.outputLines = msg.lines
@@ -279,12 +331,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cliBusy = false
 		m.cliSuggestions = msg.response.Suggestions
 		m.cliActions = msg.response.Actions
+		if strings.TrimSpace(msg.response.ConversationID) != "" {
+			m.chatConversationID = strings.TrimSpace(msg.response.ConversationID)
+		}
 		content := strings.TrimSpace(msg.response.Reply)
 		if content == "" {
 			content = "No assistant response was returned."
 		}
 		meta := assistantMeta(msg.response.Provider, msg.response.Model)
-		if len(m.cliMessages) > 0 && m.cliMessages[len(m.cliMessages)-1].Role == "assistant" && m.cliMessages[len(m.cliMessages)-1].Content == "…" {
+		if len(m.cliMessages) > 0 && m.cliMessages[len(m.cliMessages)-1].Role == "assistant" && m.cliMessages[len(m.cliMessages)-1].Meta == "streaming" {
+			m.cliMessages[len(m.cliMessages)-1] = terminalMessage{Role: "assistant", Meta: meta, Content: content}
+		} else if len(m.cliMessages) > 0 && m.cliMessages[len(m.cliMessages)-1].Role == "assistant" && m.cliMessages[len(m.cliMessages)-1].Content != "" {
 			m.cliMessages[len(m.cliMessages)-1] = terminalMessage{Role: "assistant", Meta: meta, Content: content}
 		} else {
 			m.cliMessages = append(m.cliMessages, terminalMessage{Role: "assistant", Meta: meta, Content: content})
@@ -296,12 +353,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cliSuggestions = nil
 		m.cliActions = nil
 		errText := "Review assistant unavailable: " + msg.err.Error()
-		if len(m.cliMessages) > 0 && m.cliMessages[len(m.cliMessages)-1].Role == "assistant" && m.cliMessages[len(m.cliMessages)-1].Content == "…" {
+		if len(m.cliMessages) > 0 && m.cliMessages[len(m.cliMessages)-1].Role == "assistant" && m.cliMessages[len(m.cliMessages)-1].Meta == "streaming" {
+			m.cliMessages[len(m.cliMessages)-1] = terminalMessage{Role: "error", Meta: "fallback", Content: errText}
+		} else if len(m.cliMessages) > 0 && m.cliMessages[len(m.cliMessages)-1].Role == "assistant" && m.cliMessages[len(m.cliMessages)-1].Content != "" {
 			m.cliMessages[len(m.cliMessages)-1] = terminalMessage{Role: "error", Meta: "fallback", Content: errText}
 		} else {
 			m.cliMessages = append(m.cliMessages, terminalMessage{Role: "error", Meta: "fallback", Content: errText})
 		}
 		m.truncateCLIHistory()
+
+	case terminalChatStreamStartMsg:
+		m.cliBusy = true
+		if msg.stream == nil {
+			return m, nil
+		}
+		return m, readTerminalChatStreamCmd(msg.stream)
+
+	case terminalChatStreamDeltaMsg:
+		m.cliBusy = true
+		if msg.delta != "" {
+			m.applyChatStreamingDelta(msg.delta)
+		}
+		if msg.stream != nil {
+			return m, readTerminalChatStreamCmd(msg.stream)
+		}
+		return m, nil
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -343,11 +419,57 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
 
+	case m.chatActive:
+		return m.handleChatKey(msg)
+
+	case key.Matches(msg, m.keys.Chat):
+		m.chatActive = true
+		m.chatPrevFocus = m.focused
+		m.cliInput.Focus()
+		return m, nil
+
+	case key.Matches(msg, m.keys.Overview):
+		m.activeTab = TabOutput
+		m.focused = PaneCenter
+		return m, nil
+
+	case key.Matches(msg, m.keys.Session):
+		if row, ok := m.selectedOverviewRow(); ok {
+			m.activeTab = TabSessionDrill
+			m.focused = PaneCenter
+			return m, m.loadSelectedSessionDetailCmd(row)
+		}
+		m.activeTab = TabSessionDrill
+		m.focused = PaneCenter
+		return m, nil
+
+	case key.Matches(msg, m.keys.Pipeline):
+		m.focused = PanePipeline
+		return m, nil
+
+	case key.Matches(msg, m.keys.Archives):
+		m.activeTab = TabArchives
+		m.focused = PaneCenter
+		return m, nil
+
 	case key.Matches(msg, m.keys.NextPane):
 		m.focused = FocusedPane((int(m.focused) + 1) % paneCount)
 
 	case key.Matches(msg, m.keys.PrevPane):
 		m.focused = FocusedPane((int(m.focused) - 1 + paneCount) % paneCount)
+
+	case msg.String() == "esc" && m.activeTab == TabSessionDrill:
+		m.activeTab = TabOutput
+		m.focused = PaneCenter
+		return m, nil
+
+	case m.activeTab == TabOutput && m.focused == PaneCenter && key.Matches(msg, m.keys.Up):
+		m.moveOverviewSelection(-1)
+		return m, nil
+
+	case m.activeTab == TabOutput && m.focused == PaneCenter && key.Matches(msg, m.keys.Down):
+		m.moveOverviewSelection(1)
+		return m, nil
 
 	case key.Matches(msg, m.keys.Refresh):
 		vm := adapters.FromProgressEnv(m.cfg.RepoPath)
@@ -389,12 +511,15 @@ func (m Model) handleTerminalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.cliMessages = nil
 				m.cliSuggestions = nil
 				m.cliActions = nil
+				m.chatConversationID = ""
+				m.cliBusy = false
 				return m, nil
 			}
 			if len(msgs) == 0 {
 				if len(m.cliMessages) > 0 && m.cliMessages[len(m.cliMessages)-1].Content == "…" {
 					m.cliMessages = m.cliMessages[:len(m.cliMessages)-1]
 				}
+				m.cliBusy = false
 				return m, nil
 			}
 			m.cliMessages = m.cliMessages[:len(m.cliMessages)-1]
@@ -402,12 +527,16 @@ func (m Model) handleTerminalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cliSuggestions = suggestions
 			m.cliActions = actions
 			m.truncateCLIHistory()
+			m.cliBusy = false
 			return m, nil
 		}
 		m.cliBusy = true
 		m.cliSuggestions = nil
 		m.cliActions = nil
-		return m, dashboardChatCmd(m.cfg.Context, cmd, m.chatContextTab())
+		if len(m.cliMessages) == 0 || m.cliMessages[len(m.cliMessages)-1].Role != "assistant" || m.cliMessages[len(m.cliMessages)-1].Meta != "streaming" {
+			m.cliMessages = append(m.cliMessages, terminalMessage{Role: "assistant", Meta: "streaming", Content: "…"})
+		}
+		return m, dashboardChatStreamCmd(m.cfg.Context, cmd, m.chatContextTab(), m.chatConversationID)
 
 	case "esc":
 		m.cliInput.SetValue("")
@@ -455,6 +584,40 @@ func (m Model) handleTerminalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, teaCmd
 }
 
+func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.chatActive = false
+		m.focused = m.chatPrevFocus
+		m.cliInput.SetValue("")
+		m.cliHistoryIdx = -1
+		return m, nil
+	case "enter":
+		return m.handleTerminalKey(msg)
+	}
+
+	var teaCmd tea.Cmd
+	m.cliInput, teaCmd = m.cliInput.Update(msg)
+	return m, teaCmd
+}
+
+func (m *Model) applyChatStreamingDelta(delta string) {
+	if len(m.cliMessages) == 0 {
+		m.cliMessages = append(m.cliMessages, terminalMessage{Role: "assistant", Meta: "streaming", Content: delta})
+		return
+	}
+	last := &m.cliMessages[len(m.cliMessages)-1]
+	if last.Role == "assistant" && last.Meta == "streaming" {
+		if last.Content == "…" || last.Content == "" {
+			last.Content = delta
+			return
+		}
+		last.Content += delta
+		return
+	}
+	m.cliMessages = append(m.cliMessages, terminalMessage{Role: "assistant", Meta: "streaming", Content: delta})
+}
+
 func (m *Model) truncateCLIHistory() {
 	if len(m.cliMessages) > maxCLIHistoryMessages {
 		retained := append([]terminalMessage(nil), m.cliMessages[len(m.cliMessages)-maxCLIHistoryMessages:]...)
@@ -494,6 +657,9 @@ func (m Model) chatContextTab() string {
 func (m Model) View() string {
 	if m.layout.TotalW == 0 {
 		return "initializing…\n"
+	}
+	if m.chatActive {
+		return m.renderChatPane()
 	}
 
 	top := m.renderTopBar()
@@ -553,6 +719,9 @@ func (m Model) renderCenter() string {
 
 	var content string
 	switch m.activeTab {
+	case TabOutput:
+		m.refreshOverviewViewport()
+		content = m.outputVP.View()
 	case TabSessionDrill:
 		m.sessionDrillPane.SetSize(innerW, innerH)
 		content = m.sessionDrillPane.View()
@@ -614,11 +783,11 @@ func (m *Model) applyLayout() {
 	if !m.outputReady {
 		m.outputVP = viewport.New(l.CenterW-2, l.ContentH-5)
 		m.outputReady = true
-		m.outputVP.SetContent(m.buildOutputContent())
 	} else {
 		m.outputVP.Width = l.CenterW - 2
 		m.outputVP.Height = l.ContentH - 5
 	}
+	m.refreshOverviewViewport()
 	if !m.rightReady {
 		m.rightVP = viewport.New(l.RightW-2, l.ContentH-3)
 		m.rightReady = true
@@ -629,20 +798,177 @@ func (m *Model) applyLayout() {
 }
 
 func (m Model) buildOutputContent() string {
-	vm := m.gateVM
+	rows := m.overviewRows
+	if len(rows) == 0 && len(m.activeSessions) > 0 {
+		rows = make([]overviewSessionRow, 0, len(m.activeSessions))
+		for _, session := range m.activeSessions {
+			rows = append(rows, overviewSessionRow{
+				Session:         session,
+				Checkpoint:      normalizeStageName(session.ActivityState),
+				HeartbeatAgeSec: int64(time.Since(session.LastHeartbeatAt).Seconds()),
+			})
+		}
+	}
+	contentW := m.outputVP.Width
+	if contentW <= 0 {
+		contentW = maxInt(60, m.layout.CenterW-2)
+	}
+
 	var sb strings.Builder
-	sb.WriteString(m.theme.PaneTitle.Render("Gate Summary") + "\n\n")
-	sb.WriteString(m.theme.Base.Render("  Status:  ") + renderStatusInline(m.theme, vm) + "\n")
-	sb.WriteString(m.theme.Muted.Render(fmt.Sprintf("  RunID:   %s", vm.RunID)) + "\n")
-	sb.WriteString(m.theme.Muted.Render(fmt.Sprintf("  Elapsed: %s", adapters.ElapsedLabel(vm.ElapsedSec))) + "\n")
-	sb.WriteString(m.theme.Base.Render(fmt.Sprintf("  Bar:     %s", vm.ProgressBar)) + "\n")
-	if len(vm.Comments) > 0 {
-		sb.WriteString("\n" + m.theme.Fail.Render("  Blockers:") + "\n")
-		for _, c := range vm.Comments {
-			sb.WriteString(m.theme.Warning.Render("    • "+c) + "\n")
+	sb.WriteString(m.theme.PaneTitle.Render("MISSION CONTROL OVERVIEW") + "\n")
+	sb.WriteString(m.renderHealthBar(contentW) + "\n\n")
+	sb.WriteString(m.theme.Muted.Render(fmt.Sprintf("  Active sessions: %d  Queue depth: %d", len(rows), m.queueDepth)) + "\n\n")
+	sb.WriteString(m.renderOverviewHeader(contentW) + "\n")
+	if len(rows) == 0 {
+		sb.WriteString(m.theme.Muted.Render("  No active sessions\n"))
+		return sb.String()
+	}
+	for i, row := range rows {
+		sb.WriteString(m.renderOverviewRow(row, contentW, i == m.overviewSelected))
+		if i < len(rows)-1 {
+			sb.WriteString("\n")
 		}
 	}
 	return sb.String()
+}
+
+func (m Model) renderHealthBar(width int) string {
+	chip := func(style lipgloss.Style, label, value string) string {
+		return lipgloss.NewStyle().Background(m.theme.ChipBackground).Foreground(m.theme.ChipForeground).Padding(0, 1).Render(
+			style.Render(fmt.Sprintf("%s %s", label, value)),
+		)
+	}
+
+	daemonStatus := chip(m.statusStyle(m.missionHealth.Status), "daemon", fmt.Sprintf("%s %s", m.missionHealth.Status, formatUptime(m.missionHealth.UptimeSec)))
+	redisStatus := chip(m.statusStyle(m.missionHealth.RedisStatus), "redis", m.missionHealth.RedisStatus)
+	ghStatus := chip(m.statusStyle(m.missionHealth.GitHubStatus), "github", m.missionHealth.GitHubStatus)
+	queueStatus := chip(m.theme.Warning, "queue", fmt.Sprintf("%d", m.queueDepth))
+
+	bar := lipgloss.JoinHorizontal(lipgloss.Left, daemonStatus, " ", redisStatus, " ", ghStatus, " ", queueStatus)
+	return lipgloss.NewStyle().Width(width).Render(bar)
+}
+
+func (m Model) renderOverviewHeader(width int) string {
+	_ = width
+	return m.theme.ListHeader.Render("  AGENT_ID      SESSION   CHECKPOINT   DURATION   REPO/BRANCH                    HEARTBEAT")
+}
+
+func (m Model) renderOverviewRow(row overviewSessionRow, width int, selected bool) string {
+	agent := truncStr(row.Session.AgentID, 12)
+	sessionID := truncStr(row.Session.SessionID, 8)
+	checkpoint := truncStr(row.Checkpoint, 11)
+	duration := adapters.ElapsedLabel(int(row.Session.ElapsedSec))
+	repoBranch := row.Session.Repo
+	if row.Session.Branch != "" {
+		if repoBranch != "" {
+			repoBranch += "/"
+		}
+		repoBranch += row.Session.Branch
+	}
+	repoBranch = truncStr(repoBranch, maxInt(20, width-48))
+	heartbeat := fmt.Sprintf("%ds", maxInt(0, int(row.HeartbeatAgeSec)))
+	heartbeatStyled := m.heartbeatAgeStyle(row.HeartbeatAgeSec).Render(heartbeat)
+
+	raw := fmt.Sprintf("  %-12s %-8s %-11s %-9s %-*s %s",
+		agent, sessionID, checkpoint, duration, maxInt(20, width-48), repoBranch, heartbeatStyled)
+	if selected {
+		return m.theme.ListSelected.Render(raw)
+	}
+	return m.theme.ListNormal.Render(raw)
+}
+
+func (m Model) heartbeatAgeStyle(ageSec int64) lipgloss.Style {
+	switch {
+	case ageSec < 30:
+		return m.theme.Pass
+	case ageSec < 60:
+		return m.theme.Warning
+	default:
+		return m.theme.Fail
+	}
+}
+
+func (m Model) statusStyle(status string) lipgloss.Style {
+	status = strings.ToLower(strings.TrimSpace(status))
+	switch {
+	case status == "ok" || status == "connected":
+		return m.theme.Pass
+	case status == "degraded" || status == "disconnected":
+		return m.theme.Warning
+	case strings.HasPrefix(status, "error") || status == "failed":
+		return m.theme.Fail
+	default:
+		return m.theme.Muted
+	}
+}
+
+func (m Model) syncOverviewSelection() {
+	if len(m.overviewRows) == 0 {
+		m.overviewSelected = 0
+		m.overviewSelectedSessionID = ""
+		return
+	}
+	if m.overviewSelectedSessionID != "" {
+		for i, row := range m.overviewRows {
+			if row.Session.SessionID == m.overviewSelectedSessionID {
+				m.overviewSelected = i
+				return
+			}
+		}
+	}
+	if m.overviewSelected < 0 {
+		m.overviewSelected = 0
+	}
+	if m.overviewSelected >= len(m.overviewRows) {
+		m.overviewSelected = len(m.overviewRows) - 1
+	}
+	m.overviewSelectedSessionID = m.overviewRows[m.overviewSelected].Session.SessionID
+}
+
+func (m *Model) moveOverviewSelection(delta int) {
+	if len(m.overviewRows) == 0 {
+		return
+	}
+	m.overviewSelected += delta
+	if m.overviewSelected < 0 {
+		m.overviewSelected = 0
+	}
+	if m.overviewSelected >= len(m.overviewRows) {
+		m.overviewSelected = len(m.overviewRows) - 1
+	}
+	m.overviewSelectedSessionID = m.overviewRows[m.overviewSelected].Session.SessionID
+	m.refreshOverviewViewport()
+}
+
+func (m Model) selectedOverviewRow() (overviewSessionRow, bool) {
+	if len(m.overviewRows) == 0 {
+		return overviewSessionRow{}, false
+	}
+	if m.overviewSelected < 0 {
+		return overviewSessionRow{}, false
+	}
+	if m.overviewSelected >= len(m.overviewRows) {
+		return overviewSessionRow{}, false
+	}
+	return m.overviewRows[m.overviewSelected], true
+}
+
+func (m *Model) refreshOverviewViewport() {
+	if !m.outputReady {
+		return
+	}
+	if len(m.outputLines) > 0 {
+		m.outputVP.SetContent(strings.Join(m.outputLines, "\n"))
+		return
+	}
+	m.outputVP.SetContent(m.buildOutputContent())
+}
+
+func formatUptime(seconds int64) string {
+	if seconds <= 0 {
+		return "0s"
+	}
+	return (time.Duration(seconds) * time.Second).Truncate(time.Second).String()
 }
 
 // retryGateCmd re-invokes the current codero binary with commit-gate.

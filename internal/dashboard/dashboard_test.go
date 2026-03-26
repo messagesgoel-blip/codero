@@ -591,44 +591,22 @@ func TestChat_FallsBackWithoutLiteLLM(t *testing.T) {
 	seedAgentAssignment(t, db, "assign-chat", "sess-chat", "agent-chat", "acme/api", "feat/live", "", "", startedAt)
 	seedRun(t, db, "run-chat", "acme/api", "feat/live", "litellm", "completed", 12*time.Second)
 
-	// Point the dashboard at a dead endpoint so the handler exercises the
-	// deterministic fallback path while still returning a useful summary.
+	// Point the dashboard at a dead endpoint and verify the handler returns a
+	// clean error instead of crashing or fabricating a reply.
 	t.Setenv("CODERO_LITELLM_URL", "http://127.0.0.1:1/v1/chat/completions")
 	t.Setenv("CODERO_LITELLM_MODEL", "dashboard-test")
 	t.Setenv("CODERO_LITELLM_MASTER_KEY", "test-key")
 
 	rec := doRequest(t, h, http.MethodPost, "/api/v1/dashboard/chat", strings.NewReader(`{"prompt":"queue","tab":"queue","stream":true}`))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("want 503, got %d: %s", rec.Code, rec.Body.String())
 	}
-	body := rec.Body.String()
-	if !strings.Contains(body, "event: delta") || !strings.Contains(body, "event: done") {
-		t.Fatalf("expected fallback stream events, got: %s", body)
+	var errResp dashboard.ErrorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("decode error response: %v", err)
 	}
-	doneIdx := strings.LastIndex(body, "event: done")
-	if doneIdx < 0 {
-		t.Fatal("missing done event")
-	}
-	doneDataIdx := strings.Index(body[doneIdx:], "data: ")
-	if doneDataIdx < 0 {
-		t.Fatal("missing done payload")
-	}
-	donePayload := strings.TrimSpace(body[doneIdx+doneDataIdx+len("data: "):])
-	donePayload = strings.TrimSpace(strings.TrimSuffix(donePayload, "\n\n"))
-	donePayload = strings.TrimSpace(strings.TrimPrefix(donePayload, "data: "))
-	donePayload = strings.TrimSpace(strings.TrimSuffix(donePayload, "\n"))
-	var resp dashboard.ChatResponse
-	if err := json.Unmarshal([]byte(donePayload), &resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if resp.Provider != "fallback" {
-		t.Fatalf("provider = %q, want fallback", resp.Provider)
-	}
-	if !strings.Contains(resp.Reply, "Top active session") {
-		t.Fatalf("fallback reply missing live snapshot details: %q", resp.Reply)
-	}
-	if len(resp.Actions) == 0 || !strings.Contains(resp.Actions[0].Prompt, "review") {
-		t.Fatalf("fallback actions are not review scoped: %+v", resp.Actions)
+	if !strings.Contains(strings.ToLower(errResp.Error), "unavailable") {
+		t.Fatalf("error response = %q, want unavailable message", errResp.Error)
 	}
 }
 
