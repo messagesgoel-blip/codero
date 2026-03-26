@@ -8,7 +8,6 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -250,10 +249,14 @@ func (h *Handler) handleGateChecks(w http.ResponseWriter, r *http.Request) {
 	}
 	setCORSHeaders(w)
 
-	reportPath := gateCheckReportPath()
-
-	data, err := os.ReadFile(reportPath) //nolint:gosec
+	data, reportPath, err := LoadGateCheckReportData("")
 	if err != nil {
+		loglib.Warn("dashboard: gate-check report read failed",
+			loglib.FieldComponent, "dashboard", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to read gate-check report", "read_error")
+		return
+	}
+	if data == nil {
 		// No report yet — return an empty envelope so the dashboard can
 		// distinguish "not yet run" from an actual error.
 		writeJSON(w, http.StatusOK, map[string]interface{}{

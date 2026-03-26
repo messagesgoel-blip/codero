@@ -63,7 +63,7 @@ func main() {
 		preflightCmd(),
 		dailySnapshotCmd(&configPath),
 		exitGateCmd(&configPath),
-		tuiCmd(),
+		tuiCmd(&configPath),
 		dashboardCmd(&configPath),
 		portsCmd(&configPath),
 		pollCmd(&configPath),
