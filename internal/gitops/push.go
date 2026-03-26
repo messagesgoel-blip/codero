@@ -2,6 +2,7 @@ package gitops
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -64,15 +65,38 @@ func isNonFastForward(err error) bool {
 // shellRebase runs `git fetch && git rebase` via shell since go-git lacks rebase.
 func shellRebase(worktreePath, remote, branch string) error {
 	fetch := exec.Command("git", "-C", worktreePath, "fetch", remote, branch)
+	fetch.Env = sanitizedGitEnv()
 	if out, err := fetch.CombinedOutput(); err != nil {
 		return fmt.Errorf("fetch: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 
 	rebase := exec.Command("git", "-C", worktreePath, "rebase", remote+"/"+branch)
+	rebase.Env = sanitizedGitEnv()
 	if out, err := rebase.CombinedOutput(); err != nil {
 		abort := exec.Command("git", "-C", worktreePath, "rebase", "--abort")
+		abort.Env = sanitizedGitEnv()
 		_ = abort.Run()
 		return fmt.Errorf("conflict: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
+}
+
+func sanitizedGitEnv() []string {
+	deny := map[string]struct{}{
+		"GIT_DIR":                          {},
+		"GIT_WORK_TREE":                    {},
+		"GIT_INDEX_FILE":                   {},
+		"GIT_COMMON_DIR":                   {},
+		"GIT_ALTERNATE_OBJECT_DIRECTORIES": {},
+		"GIT_OBJECT_DIRECTORY":             {},
+	}
+	env := make([]string, 0, len(os.Environ()))
+	for _, kv := range os.Environ() {
+		key := strings.SplitN(kv, "=", 2)[0]
+		if _, blocked := deny[key]; blocked {
+			continue
+		}
+		env = append(env, kv)
+	}
+	return env
 }

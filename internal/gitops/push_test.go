@@ -170,26 +170,6 @@ func TestPush_ConflictError(t *testing.T) {
 	}
 }
 
-func sanitizedGitEnv() []string {
-	deny := map[string]struct{}{
-		"GIT_DIR":                          {},
-		"GIT_WORK_TREE":                    {},
-		"GIT_INDEX_FILE":                   {},
-		"GIT_COMMON_DIR":                   {},
-		"GIT_ALTERNATE_OBJECT_DIRECTORIES": {},
-		"GIT_OBJECT_DIRECTORY":             {},
-	}
-	env := make([]string, 0, len(os.Environ()))
-	for _, kv := range os.Environ() {
-		key := strings.SplitN(kv, "=", 2)[0]
-		if _, blocked := deny[key]; blocked {
-			continue
-		}
-		env = append(env, kv)
-	}
-	return env
-}
-
 func runGitRaw(t *testing.T, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
