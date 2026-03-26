@@ -15,6 +15,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	agentLaunchNow  = time.Now
+	agentLaunchUUID = func() string { return uuid.New().String() }
+)
+
 // agentCmd is the parent command for agent management.
 func agentCmd(configPath *string) *cobra.Command {
 	cmd := &cobra.Command{
@@ -112,7 +117,7 @@ func runAgentLaunch(ctx context.Context, cfg *AgentLaunchConfig, store *session.
 
 	// Step 1: Parse arguments (already done by cobra)
 	// Step 2: Generate session UUID
-	sessionID := uuid.New().String()
+	sessionID := agentLaunchUUID()
 
 	// Step 3: Compute tmux session name (SL-11)
 	tmuxName := tmux.SessionName(cfg.AgentID, sessionID)
@@ -138,12 +143,13 @@ func runAgentLaunch(ctx context.Context, cfg *AgentLaunchConfig, store *session.
 	// Step 7: Write SESSION.md to worktree
 	coderoDir := filepath.Join(worktreePath, ".codero")
 	_ = os.MkdirAll(coderoDir, 0o755)
+	startedAt := agentLaunchNow().UTC()
 	sessionMD := fmt.Sprintf(`# Codero Session
 - CODERO_SESSION_ID=%s
 - CODERO_AGENT_ID=%s
 - CODERO_TMUX_NAME=%s
 - CODERO_STARTED_AT=%s
-`, sessionID, cfg.AgentID, tmuxName, time.Now().UTC().Format(time.RFC3339))
+`, sessionID, cfg.AgentID, tmuxName, startedAt.Format(time.RFC3339))
 	_ = os.WriteFile(filepath.Join(coderoDir, "SESSION.md"), []byte(sessionMD), 0o644)
 
 	// Step 8: Write AGENT.md to worktree
@@ -188,7 +194,7 @@ touch "$WORKTREE/.codero/feedback/pending" 2>/dev/null || true
 		Status:     result,
 		Substatus:  "terminal_finished",
 		Summary:    fmt.Sprintf("wrapper exit (code=%d)", exitCode),
-		FinishedAt: time.Now().UTC(),
+		FinishedAt: agentLaunchNow().UTC(),
 	})
 	if endErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: session end failed: %v\n", endErr)

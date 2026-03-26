@@ -867,6 +867,7 @@ func sessionRegisterCmd(configPath *string) *cobra.Command {
 		sessionID string
 		agentID   string
 		mode      string
+		tmuxName  string
 	)
 
 	cmd := &cobra.Command{
@@ -891,10 +892,21 @@ func sessionRegisterCmd(configPath *string) *cobra.Command {
 			if mode == "" {
 				mode = resolveSessionModeFromEnv("agent")
 			}
+			if tmuxName == "" {
+				tmuxName = os.Getenv("CODERO_TMUX_NAME")
+			}
 
-			secret, err := store.Register(cmd.Context(), sessionID, agentID, mode)
-			if err != nil {
-				return err
+			var (
+				secret      string
+				registerErr error
+			)
+			if tmuxName != "" {
+				secret, registerErr = store.RegisterWithTmux(cmd.Context(), sessionID, agentID, mode, tmuxName)
+			} else {
+				secret, registerErr = store.Register(cmd.Context(), sessionID, agentID, mode)
+			}
+			if registerErr != nil {
+				return registerErr
 			}
 			fmt.Printf("session_id: %s\n", sessionID)
 			fmt.Printf("heartbeat_secret: %s\n", secret)
@@ -905,6 +917,7 @@ func sessionRegisterCmd(configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&sessionID, "session-id", "", "session identifier (defaults to CODERO_SESSION_ID or auto-generated)")
 	cmd.Flags().StringVar(&agentID, "agent-id", "", "agent identifier (defaults to CODERO_AGENT_ID)")
 	cmd.Flags().StringVar(&mode, "mode", "", "session mode label (default: agent)")
+	cmd.Flags().StringVar(&tmuxName, "tmux-name", "", "tmux session name (optional)")
 
 	return cmd
 }
