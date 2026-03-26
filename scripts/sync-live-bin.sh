@@ -5,6 +5,16 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC_BIN="${CODERO_BUILD_BIN:-${ROOT_DIR}/codero}"
 LIVE_BIN="${CODERO_LIVE_BIN:-}"
 PATH_BIN="${CODERO_PATH_BIN:-}"
+SYNC_ENV="${CODERO_SYNC_ENV:-${ROOT_DIR}/.codero/sync.env}"
+
+if [ -f "$SYNC_ENV" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$SYNC_ENV"
+  set +a
+  LIVE_BIN="${CODERO_LIVE_BIN:-$LIVE_BIN}"
+  PATH_BIN="${CODERO_PATH_BIN:-$PATH_BIN}"
+fi
 
 if [ ! -f "$SRC_BIN" ]; then
   echo "sync-live-bin: source binary not found: ${SRC_BIN}" >&2
