@@ -13,6 +13,8 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
+const testBranch = "master"
+
 // setupPushTest creates a bare remote and a clone with an initial commit.
 // Returns (clonePath, barePath).
 func setupPushTest(t *testing.T) (string, string) {
@@ -51,7 +53,7 @@ func setupPushTest(t *testing.T) (string, string) {
 	// Push initial commit to set up remote tracking
 	err = repo.Push(&git.PushOptions{
 		RemoteName: "origin",
-		RefSpecs:   []config.RefSpec{"refs/heads/master:refs/heads/master"},
+		RefSpecs:   []config.RefSpec{"refs/heads/" + testBranch + ":refs/heads/" + testBranch},
 	})
 	if err != nil {
 		t.Fatalf("initial push: %v", err)
@@ -90,13 +92,13 @@ func TestPush_Success(t *testing.T) {
 	})
 
 	// Push should succeed
-	if err := Push(cloneDir, "origin", "master"); err != nil {
+	if err := Push(cloneDir, "origin", testBranch); err != nil {
 		t.Fatalf("expected push to succeed: %v", err)
 	}
 
 	// Verify the bare remote received the commit
 	bareRepo, _ := git.PlainOpen(bareDir)
-	ref, err := bareRepo.Reference("refs/heads/master", true)
+	ref, err := bareRepo.Reference("refs/heads/"+testBranch, true)
 	if err != nil {
 		t.Fatalf("read bare ref: %v", err)
 	}
@@ -114,7 +116,7 @@ func TestPush_RebaseRetry(t *testing.T) {
 
 	// Create a second clone via shell git
 	clone2Dir := filepath.Join(t.TempDir(), "clone2")
-	cmd := exec.Command("git", "clone", bareDir, clone2Dir)
+	cmd := exec.Command("git", "clone", "--branch", testBranch, bareDir, clone2Dir)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("clone2: %s: %v", out, err)
 	}
@@ -127,7 +129,7 @@ func TestPush_RebaseRetry(t *testing.T) {
 	os.WriteFile(filepath.Join(clone2Dir, "other.txt"), []byte("from clone2"), 0644)
 	runGit(t, clone2Dir, "add", "other.txt")
 	runGit(t, clone2Dir, "commit", "-m", "clone2 commit")
-	runGit(t, clone2Dir, "push", "origin", "master")
+	runGit(t, clone2Dir, "push", "origin", testBranch)
 
 	// In clone1: add yet another different file (no conflict)
 	repo, _ := git.PlainOpen(cloneDir)
@@ -140,13 +142,13 @@ func TestPush_RebaseRetry(t *testing.T) {
 	})
 
 	// Push from clone1 — should fail initially but succeed after rebase-retry
-	if err := Push(cloneDir, "origin", "master"); err != nil {
+	if err := Push(cloneDir, "origin", testBranch); err != nil {
 		t.Fatalf("expected push with rebase-retry to succeed: %v", err)
 	}
 
 	// Verify bare remote has both commits
 	bareRepo, _ := git.PlainOpen(bareDir)
-	ref, _ := bareRepo.Reference("refs/heads/master", true)
+	ref, _ := bareRepo.Reference("refs/heads/"+testBranch, true)
 	commit, _ := bareRepo.CommitObject(ref.Hash())
 	if commit.Message != "clone1 commit" {
 		t.Errorf("expected bare HEAD message %q, got %q", "clone1 commit", commit.Message)
@@ -158,7 +160,7 @@ func TestPush_ConflictError(t *testing.T) {
 
 	// Create a second clone via shell git
 	clone2Dir := filepath.Join(t.TempDir(), "clone2")
-	cmd := exec.Command("git", "clone", bareDir, clone2Dir)
+	cmd := exec.Command("git", "clone", "--branch", testBranch, bareDir, clone2Dir)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("clone2: %s: %v", out, err)
 	}
@@ -171,7 +173,7 @@ func TestPush_ConflictError(t *testing.T) {
 	os.WriteFile(filepath.Join(clone2Dir, "README.md"), []byte("clone2 version"), 0644)
 	runGit(t, clone2Dir, "add", "README.md")
 	runGit(t, clone2Dir, "commit", "-m", "clone2 conflict")
-	runGit(t, clone2Dir, "push", "origin", "master")
+	runGit(t, clone2Dir, "push", "origin", testBranch)
 
 	// In clone1: modify the same file with different content
 	repo, _ := git.PlainOpen(cloneDir)
@@ -184,7 +186,7 @@ func TestPush_ConflictError(t *testing.T) {
 	})
 
 	// Push from clone1 — should fail with conflict/rebase error
-	err := Push(cloneDir, "origin", "master")
+	err := Push(cloneDir, "origin", testBranch)
 	if err == nil {
 		t.Fatal("expected push to fail due to conflict")
 	}
