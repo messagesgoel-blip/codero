@@ -613,8 +613,9 @@ func queryPipeline(ctx context.Context, db *sql.DB) ([]PipelineCard, error) {
 	}
 
 	rows, err := db.QueryContext(ctx, `
-		SELECT s.session_id, s.agent_id, COALESCE(a.repo, ''), COALESCE(a.branch, ''),
-		       COALESCE(a.assignment_substatus, ''), a.version, a.started_at, s.last_seen_at
+		SELECT s.session_id, s.agent_id, COALESCE(a.assignment_id, ''), COALESCE(a.task_id, ''),
+		       COALESCE(a.repo, ''), COALESCE(a.branch, ''), COALESCE(a.state, ''),
+		       COALESCE(a.assignment_substatus, ''), COALESCE(a.assignment_version, 0), a.started_at, s.last_seen_at
 		FROM agent_sessions s
 		LEFT JOIN agent_assignments a ON a.session_id = s.session_id AND a.ended_at IS NULL
 		WHERE s.ended_at IS NULL
@@ -628,26 +629,20 @@ func queryPipeline(ctx context.Context, db *sql.DB) ([]PipelineCard, error) {
 	var out []PipelineCard
 	for rows.Next() {
 		var card PipelineCard
-		var substatus sql.NullString
-		var version sql.NullInt64
 		var startedAt, updatedAt sql.NullTime
-		if err := rows.Scan(&card.SessionID, &card.AgentID, &card.Repo, &card.Branch,
-			&substatus, &version, &startedAt, &updatedAt); err != nil {
+		var version int
+		if err := rows.Scan(&card.SessionID, &card.AgentID, &card.AssignmentID, &card.TaskID, &card.Repo, &card.Branch, &card.State, &card.Substatus, &version, &startedAt, &updatedAt); err != nil {
 			return nil, err
 		}
-		card.Checkpoint = deriveCheckpointFromSubstatus(substatus.String)
-		if version.Valid {
-			card.Version = int(version.Int64)
-		}
+		card.Checkpoint = pipelineCardStageLabel(card.Substatus, card.State)
+		card.Version = version
 		if startedAt.Valid {
 			card.StartedAt = startedAt.Time
 		}
 		if updatedAt.Valid {
 			card.UpdatedAt = updatedAt.Time
 		}
-		if !card.StartedAt.IsZero() && !card.UpdatedAt.IsZero() {
-			card.StageSec = int64(card.UpdatedAt.Sub(card.StartedAt).Seconds())
-		}
+		card.StageSec = pipelineCardDuration(card.StartedAt, card.UpdatedAt)
 		out = append(out, card)
 	}
 	if out == nil {
