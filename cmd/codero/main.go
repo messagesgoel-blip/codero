@@ -72,6 +72,7 @@ func main() {
 		proveCmd(&configPath),
 		taskCmd(&configPath),
 		contextCmd(),
+		submitCmd(&configPath),
 	)
 
 	if err := root.Execute(); err != nil {

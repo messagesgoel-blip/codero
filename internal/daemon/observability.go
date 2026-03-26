@@ -142,6 +142,7 @@ func NewObservabilityServerWithGRPC(redisClient *redis.Client, queue *scheduler.
 	mux.HandleFunc("/ready", obs.handleReady)
 	mux.HandleFunc("/api/v1/agent-metrics", obs.handleAgentMetrics)
 	mux.HandleFunc("/gate", obs.handleGate)
+	mux.HandleFunc("/api/v1/assignments/", obs.handleSubmit)
 
 	// Register dashboard API routes and static file serving.
 	settingsDir := filepath.Dir(os.Getenv("CODERO_DB_PATH"))
