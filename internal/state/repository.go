@@ -199,7 +199,7 @@ func ListExpiredLeases(db *DB) ([]BranchRecord, error) {
 // The transition is rejected (ErrInvalidTransition) if not permitted by the canonical
 // state machine. The from-state is verified against the current DB record.
 func TransitionBranch(db *DB, id string, from, to State, trigger string) error {
-	if err := ValidateTransition(from, to); err != nil {
+	if err := validateBranchFSMTransition(from, to); err != nil {
 		return err
 	}
 
@@ -233,8 +233,8 @@ func TransitionBranch(db *DB, id string, from, to State, trigger string) error {
 
 	// Append audit record.
 	_, err = tx.Exec(
-		`INSERT INTO state_transitions (branch_state_id, from_state, to_state, trigger)
-		 VALUES (?, ?, ?, ?)`,
+		`INSERT INTO state_transitions (branch_state_id, from_state, to_state, trigger, created_at)
+		 VALUES (?, ?, ?, ?, datetime('now'))`,
 		id, string(from), string(to), trigger,
 	)
 	if err != nil {
