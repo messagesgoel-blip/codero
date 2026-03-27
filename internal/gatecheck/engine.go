@@ -31,44 +31,9 @@ func NewEngine(cfg EngineConfig) *Engine {
 // with appropriate status and reason codes.
 func (e *Engine) Run(ctx context.Context) Report {
 	staged := e.stagedFiles(ctx)
-
-	var checks []CheckResult
-	var infraCount int
-
-	runners := e.buildRunners()
-	for _, r := range runners {
-		result := r(ctx, e.cfg, staged)
-		if isInfraReason(result.ReasonCode) {
-			infraCount++
-			if infraCount > e.cfg.MaxInfraBypass {
-				result.Status = StatusFail
-				result.ReasonCode = ReasonInfraBypass
-				result.Reason = fmt.Sprintf("infra bypass budget exceeded (%d/%d): %s",
-					infraCount, e.cfg.MaxInfraBypass, result.Reason)
-			}
-		}
-		if (result.Status == StatusSkip || result.Status == StatusDisabled) && result.ReasonCode == "" {
-			result.ReasonCode = ReasonNotApplicable
-			if result.Reason == "" {
-				result.Reason = "not applicable"
-			}
-		}
-		if result.Status == StatusFail && result.ReasonCode == "" {
-			result.ReasonCode = ReasonCheckFailed
-		}
-		checks = append(checks, result)
-	}
-
-	EnforceFindingsCap(checks)
-
-	summary := ComputeSummary(checks, e.cfg.Profile, e.cfg.AllowRequiredSkip)
-	report := Report{
-		Summary:    summary,
-		Checks:     checks,
-		RunAt:      time.Now().UTC(),
-		Invocation: e.cfg.Invocation,
-	}
-	return FinalizeReport(report)
+	checks := executeRunners(ctx, e.cfg, e.buildRunners(), staged, nil)
+	report := finalizeChecks(checks, e.cfg)
+	return report
 }
 
 // RunPipeline executes all checks inside the given worktree and writes
@@ -89,22 +54,43 @@ func (e *Engine) RunPipeline(ctx context.Context, worktree string, stagedFiles [
 
 	progressPath := filepath.Join(worktree, HeartbeatProgressPath)
 	engine := NewEngine(cfg)
-
-	// Run checks with progress reporting.
-	pipelineStart := time.Now()
 	staged := engine.stagedFiles(ctx)
-	runners := engine.buildRunners()
+
+	pipelineStart := time.Now()
+	onProgress := func(i, total int) {
+		pct := 0
+		if total > 0 {
+			pct = (i * 100) / total
+		}
+		if err := WriteProgress(progressPath, fmt.Sprintf("check_%d", i+1), pct, time.Since(pipelineStart).Milliseconds()); err != nil {
+			log.Printf("gatecheck: write progress %s: %v", progressPath, err)
+		}
+	}
+
+	checks := executeRunners(ctx, cfg, engine.buildRunners(), staged, onProgress)
+
+	if err := WriteProgress(progressPath, "complete", 100, time.Since(pipelineStart).Milliseconds()); err != nil {
+		log.Printf("gatecheck: write progress %s: %v", progressPath, err)
+	}
+
+	report := finalizeChecks(checks, cfg)
+
+	substatusPath := filepath.Join(worktree, HeartbeatSubstatusPath)
+	if err := WriteSubstatus(substatusPath, report); err != nil {
+		return &report, fmt.Errorf("run pipeline: write substatus: %w", err)
+	}
+	return &report, nil
+}
+
+// executeRunners runs all check runners, normalizes results, and applies infra bypass limits.
+// onProgress is called before each runner with (index, total); nil disables progress callbacks.
+func executeRunners(ctx context.Context, cfg EngineConfig, runners []func(context.Context, EngineConfig, []string) CheckResult, staged []string, onProgress func(int, int)) []CheckResult {
 	var checks []CheckResult
 	var infraCount int
 	for i, r := range runners {
-		pct := 0
-		if len(runners) > 0 {
-			pct = (i * 100) / len(runners)
+		if onProgress != nil {
+			onProgress(i, len(runners))
 		}
-		if err := WriteProgress(progressPath, fmt.Sprintf("check_%d", i+1), pct, time.Since(pipelineStart).Milliseconds()); err != nil {
-			log.Printf("gatecheck: write progress: %v", err)
-		}
-
 		result := r(ctx, cfg, staged)
 		if isInfraReason(result.ReasonCode) {
 			infraCount++
@@ -126,24 +112,19 @@ func (e *Engine) RunPipeline(ctx context.Context, worktree string, stagedFiles [
 		}
 		checks = append(checks, result)
 	}
-	if err := WriteProgress(progressPath, "complete", 100, time.Since(pipelineStart).Milliseconds()); err != nil {
-		log.Printf("gatecheck: write progress: %v", err)
-	}
+	return checks
+}
 
+// finalizeChecks applies the findings cap, computes summary, and returns the final report.
+func finalizeChecks(checks []CheckResult, cfg EngineConfig) Report {
 	EnforceFindingsCap(checks)
 	summary := ComputeSummary(checks, cfg.Profile, cfg.AllowRequiredSkip)
-	report := FinalizeReport(Report{
+	return FinalizeReport(Report{
 		Summary:    summary,
 		Checks:     checks,
 		RunAt:      time.Now().UTC(),
 		Invocation: cfg.Invocation,
 	})
-
-	substatusPath := filepath.Join(worktree, HeartbeatSubstatusPath)
-	if err := WriteSubstatus(substatusPath, report); err != nil {
-		return &report, fmt.Errorf("run pipeline: write substatus: %w", err)
-	}
-	return &report, nil
 }
 
 // stagedFiles returns the list of staged files for this engine run.

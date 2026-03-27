@@ -1,7 +1,7 @@
 // renderers/chat.js — Chat page (full + floating mode) renderer.
 
 import store from '../store.js';
-import { apiFetch, apiPost } from '../api.js';
+import { apiFetch } from '../api.js';
 import { esc, $, setHtml, html, debounce } from '../utils.js';
 import { glassCard, skeleton, toast } from '../components.js';
 
@@ -148,7 +148,7 @@ async function sendMessage(inputEl) {
   // Append user message
   const userMsg = { role: 'user', content: prompt, ts: Date.now() };
   const updatedMessages = [...chat.messages, userMsg];
-  store.set({ chat: { messages: updatedMessages, streaming: true } });
+  store.set({ chat: { messages: updatedMessages, streaming: true, conversationId: chat.conversationId } });
 
   inputEl.value = '';
   inputEl.style.height = 'auto';
@@ -188,6 +188,7 @@ async function sendMessage(inputEl) {
       chat: {
         messages: [...current.messages, errMsg],
         streaming: false,
+        conversationId: current.conversationId,
       },
     });
     toast('Chat request failed: ' + err.message, 'error');
@@ -208,7 +209,7 @@ async function handleStreamingResponse(resp) {
   const placeholderIdx = current.messages.length;
   const placeholder = { role: 'assistant', content: '', ts: Date.now() };
   store.set({
-    chat: { messages: [...current.messages, placeholder], streaming: true },
+    chat: { messages: [...current.messages, placeholder], streaming: true, conversationId: current.conversationId },
   });
 
   try {
@@ -239,15 +240,17 @@ async function handleStreamingResponse(resp) {
       }
 
       // Update the placeholder message in-place
-      const msgs = [...store.state.chat.messages];
+      const chatNow = store.state.chat;
+      const msgs = [...chatNow.messages];
       if (msgs[placeholderIdx]) {
         msgs[placeholderIdx] = { ...msgs[placeholderIdx], content: accumulated };
-        store.set({ chat: { messages: msgs, streaming: true } });
+        store.set({ chat: { messages: msgs, streaming: true, conversationId: chatNow.conversationId } });
       }
     }
   } finally {
     reader.releaseLock();
-    store.set({ chat: { streaming: false } });
+    const final = store.state.chat;
+    store.set({ chat: { ...final, streaming: false } });
   }
 }
 

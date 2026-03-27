@@ -296,7 +296,13 @@ func (p *Pipeline) Submit(ctx context.Context, assignmentID, worktree string) er
 
 	if monitorResult.hasActionableFeedback() {
 		fb, err := BuildFeedback(monitorResult.feedbackSources())
-		if err == nil && fb != nil {
+		if err != nil {
+			loglib.Warn("delivery pipeline: build feedback failed",
+				loglib.FieldComponent, "delivery_pipeline",
+				"error", err.Error(),
+				"assignment", assignmentID,
+			)
+		} else if fb != nil {
 			if writeErr := p.deps.Writer.WriteFEEDBACK(worktree, *fb); writeErr != nil {
 				loglib.Warn("delivery pipeline: write feedback failed",
 					loglib.FieldComponent, "delivery_pipeline",
@@ -546,12 +552,13 @@ func (p *Pipeline) archiveSession(ctx context.Context, assignment *state.AgentAs
 		result = "merged"
 	}
 	now := time.Now().UTC()
+	archiveID := fmt.Sprintf("%s-archive-%d", assignment.ID, now.UnixNano())
 	_, err := p.deps.StateDB.Unwrap().ExecContext(ctx,
 		`INSERT OR IGNORE INTO session_archives
 			(archive_id, session_id, agent_id, task_id, repo, branch, result, started_at, ended_at, archived_at)
 		VALUES
 			(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		assignment.ID+"-archive", assignment.SessionID, assignment.AgentID,
+		archiveID, assignment.SessionID, assignment.AgentID,
 		assignment.TaskID, assignment.Repo, assignment.Branch,
 		result, assignment.StartedAt, now, now,
 	)
