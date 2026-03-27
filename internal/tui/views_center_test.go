@@ -80,22 +80,16 @@ func TestChecksPane_View_ShowsTotalLinesAnalyzed(t *testing.T) {
 	}
 }
 
-func TestTerminalCLI_ShowsPrompt(t *testing.T) {
+func TestStatusBar_ShowsMergeAndHints(t *testing.T) {
 	cfg := makeCfg(false)
 	m := tui.New(cfg)
 
 	newModel, _ := m.Update(makeWindowSize(120, 40))
 	view := newModel.(tui.Model).View()
 
-	if !strings.Contains(view, "REVIEW ASSISTANT") {
-		t.Error("terminal area should contain 'REVIEW ASSISTANT'")
-	}
-	if !strings.Contains(strings.ToLower(view), "type a command or message…") {
-		t.Error("terminal area should contain the command prompt placeholder")
-	}
-	for _, want := range []string{"status", "help", "run gate", "queue"} {
-		if !strings.Contains(strings.ToLower(view), want) {
-			t.Fatalf("terminal area should contain %q\nfull view:\n%s", want, view)
+	for _, want := range []string{"Merge:", "q quit", "c chat", "interval"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("status bar should contain %q\nfull view:\n%s", want, view)
 		}
 	}
 }

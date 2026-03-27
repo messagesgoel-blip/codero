@@ -73,21 +73,20 @@ func TestView_ShowsMockStyleTitle(t *testing.T) {
 	}
 }
 
-func TestView_ShowsCommandStrip(t *testing.T) {
+func TestView_ShowsStatusBar(t *testing.T) {
 	cfg := makeCfg(false)
 	m := tui.New(cfg)
 
 	newModel, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	view := newModel.(tui.Model).View()
 	for _, want := range []string{
-		"type a command or message…",
-		"status",
-		"help",
-		"run gate",
-		"queue",
+		"Merge:",
+		"q quit",
+		"c chat",
+		"interval",
 	} {
-		if !strings.Contains(strings.ToLower(view), strings.ToLower(want)) {
-			t.Fatalf("expected command strip to contain %q\nfull view:\n%s", want, view)
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected status bar to contain %q\nfull view:\n%s", want, view)
 		}
 	}
 }

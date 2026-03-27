@@ -668,7 +668,7 @@ func (m Model) View() string {
 	pipeline := m.renderPipeline()
 	right := m.renderRight()
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, center, pipeline, right)
-	bottom := renderTerminalCLI(m)
+	bottom := renderStatusBar(m)
 	return lipgloss.JoinVertical(lipgloss.Left, top, body, bottom)
 }
 

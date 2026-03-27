@@ -168,6 +168,46 @@ func renderTerminalCLI(m Model) string {
 	return t.BottomBar.Width(width).Render(strings.Join(lines[:height], "\n"))
 }
 
+func renderStatusBar(m Model) string {
+	l := m.layout
+	t := m.theme
+	width := l.TotalW
+	height := l.BottomBarH
+	if width <= 0 || height <= 0 {
+		return ""
+	}
+
+	lines := make([]string, 0, height)
+
+	// Line 1: Merge status with severity counts
+	mergeLabel := mergeStatusLabel(m)
+	sevCounts := ""
+	if s := m.checksVM.Summary; s.Failed > 0 {
+		sevCounts = t.Fail.Render(fmt.Sprintf(" · %d failed", s.Failed))
+	}
+	line1 := " " + t.Muted.Render("Merge:") + " " + mergeLabel + sevCounts
+	lines = append(lines, lipgloss.NewStyle().Width(width).Render(line1))
+
+	// Line 2: Key hints
+	hints := t.Muted.Render(" o overview · s session · p pipeline · a archives · c chat · Tab pane · C-r refresh · q quit")
+	lines = append(lines, lipgloss.NewStyle().Width(width).Render(hints))
+
+	// Line 3: Status line
+	parts := make([]string, 0, 3)
+	if !m.lastUpdated.IsZero() {
+		parts = append(parts, fmt.Sprintf("updated %ds ago", int(time.Since(m.lastUpdated).Seconds())))
+	}
+	parts = append(parts, fmt.Sprintf("interval %s", m.cfg.Interval.Truncate(time.Millisecond)))
+	status := t.Muted.Render(" " + strings.Join(parts, " · "))
+	lines = append(lines, lipgloss.NewStyle().Width(width).Render(status))
+
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+
+	return t.BottomBar.Width(width).Render(strings.Join(lines[:height], "\n"))
+}
+
 func commandChip(t Theme, label string) string {
 	bg := t.ChipBackground
 	if bg == "" {
