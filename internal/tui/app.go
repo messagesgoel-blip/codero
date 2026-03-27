@@ -429,6 +429,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
+	case m.chatState.SlashPopupActive:
+		return m.handleSlashPopupKey(msg)
+	case m.activeTab == TabChat:
+		return m.handleChatTabKey(msg)
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
 
@@ -727,6 +731,8 @@ func (m Model) renderCenter() string {
 	case TabConfig:
 		m.configPane.SetSize(innerW, innerH)
 		content = m.configPane.View()
+	case TabChat:
+		content = m.renderChatTab(innerW, innerH)
 	default:
 		m.logsArchPane.SetSize(innerW, innerH)
 		content = m.logsArchPane.View()

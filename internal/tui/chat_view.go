@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/codero/codero/internal/dashboard"
 )
@@ -188,69 +187,4 @@ func chatContextScopeForTab(tab string) string {
 	default:
 		return "all"
 	}
-}
-
-func (m Model) renderChatPane() string {
-	l := m.layout
-	if l.TotalW <= 0 || l.TotalH <= 0 {
-		return ""
-	}
-
-	t := m.theme
-	headerLeft := t.PaneHeader.Render(" REVIEW CHAT ")
-	metaParts := []string{m.chatContextTab()}
-	if conv := strings.TrimSpace(m.chatConversationID); conv != "" {
-		metaParts = append(metaParts, "conversation "+conv)
-	}
-	if m.cliBusy {
-		metaParts = append(metaParts, "streaming")
-	}
-	metaText := t.Muted.Render(strings.Join(metaParts, " · "))
-	headerRight := t.Muted.Render(fmt.Sprintf("%d messages", len(m.cliMessages)))
-	spacerW := l.TotalW - lipgloss.Width(headerLeft) - lipgloss.Width(metaText) - lipgloss.Width(headerRight) - 2
-	if spacerW < 1 {
-		spacerW = 1
-	}
-
-	lines := make([]string, 0, l.TotalH)
-	lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Left, headerLeft, strings.Repeat(" ", spacerW), metaText, " ", headerRight))
-	lines = append(lines, t.Muted.Render(strings.Repeat("─", l.TotalW)))
-
-	reserved := 3
-	chips := make([]string, 0, len(m.cliSuggestions))
-	for _, s := range m.cliSuggestions {
-		label := strings.TrimSpace(s.Label)
-		if label == "" {
-			label = strings.TrimSpace(s.Prompt)
-		}
-		if label == "" {
-			continue
-		}
-		chips = append(chips, commandChip(t, label))
-	}
-	if len(chips) > 0 {
-		reserved++
-	}
-
-	threadHeight := maxInt(1, l.TotalH-reserved)
-	lines = append(lines, m.renderTerminalThread(l.TotalW, threadHeight)...)
-
-	if len(chips) > 0 {
-		lines = append(lines, "  "+strings.Join(chips, " "))
-	}
-
-	input := t.Accent.Render(" ❯") + t.Base.Render(" ") + t.PaletteInput.Render(m.cliInput.View())
-	if m.cliBusy {
-		input += " " + t.Warning.Render("● thinking…")
-	}
-	lines = append(lines, input)
-
-	for len(lines) < l.TotalH {
-		lines = append(lines, "")
-	}
-	if len(lines) > l.TotalH {
-		lines = lines[:l.TotalH]
-	}
-
-	return t.BottomBar.Width(l.TotalW).Height(l.TotalH).Render(strings.Join(lines, "\n"))
 }
