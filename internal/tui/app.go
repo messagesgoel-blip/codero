@@ -234,6 +234,7 @@ func New(cfg Config) Model {
 		m.checksVM = vm
 		m.checksPane.SetVM(vm)
 		m.pipelinePane.SetVM(vm)
+		m.gatePane.SetChecksVM(vm)
 	}
 	return m
 }
@@ -310,6 +311,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.checksVM = msg.vm
 		m.checksPane.SetVM(msg.vm)
 		m.pipelinePane.SetVM(msg.vm)
+		m.gatePane.SetChecksVM(msg.vm)
 		m.outputLines = nil
 
 	case activeSessionsRefreshMsg:
