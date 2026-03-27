@@ -1,66 +1,83 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" class="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>codero dashboard</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
+<title>Codero Dashboard</title>
 <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-<div class="shell">
+<div class="app">
+  <!-- Sidebar -->
   <aside class="sidebar">
-    <div class="sidebar-logo"><span>codero</span></div>
+    <div class="sidebar-header">
+      <div class="sidebar-logo">codero</div>
+    </div>
     <nav class="sidebar-nav">
-      <button class="nav-item active" id="nav-overview" aria-label="Overview" onclick="navigateTo('overview')">
-        <span class="nav-icon" aria-hidden="true">&#x25A3;</span><span>Overview</span>
-      </button>
-      <button class="nav-item" id="nav-agents" aria-label="Agents" onclick="navigateTo('agents')">
-        <span class="nav-icon" aria-hidden="true">&#x2699;</span><span>Agents</span>
-        <span class="nav-badge" id="badge-agents">&mdash;</span>
-      </button>
-      <button class="nav-item" id="nav-events" aria-label="Events" onclick="navigateTo('events')">
-        <span class="nav-icon" aria-hidden="true">&#x25C9;</span><span>Events</span>
-      </button>
-      <button class="nav-item" id="nav-findings" aria-label="Findings" onclick="navigateTo('findings')">
-        <span class="nav-icon" aria-hidden="true">&#x26A0;</span><span>Findings</span>
-      </button>
-      <button class="nav-item" id="nav-architecture" aria-label="Architecture" onclick="navigateTo('architecture')">
-        <span class="nav-icon" aria-hidden="true">&#x2302;</span><span>Architecture</span>
-      </button>
-      <button class="nav-item" id="nav-settings" aria-label="Settings" onclick="navigateTo('settings')">
-        <span class="nav-icon" aria-hidden="true">&#x2630;</span><span>Settings</span>
-      </button>
+      <a class="nav-item active" data-tab="overview" href="#overview">
+        <span class="nav-icon">&#9673;</span><span class="nav-label">Overview</span>
+      </a>
+      <a class="nav-item" data-tab="sessions" href="#sessions">
+        <span class="nav-icon">&#9881;</span><span class="nav-label">Sessions</span>
+      </a>
+      <a class="nav-item" data-tab="pipeline" href="#pipeline">
+        <span class="nav-icon">&#9654;</span><span class="nav-label">Pipeline</span>
+      </a>
+      <a class="nav-item" data-tab="tasks" href="#tasks">
+        <span class="nav-icon">&#9776;</span><span class="nav-label">Tasks</span>
+      </a>
+      <a class="nav-item" data-tab="gate" href="#gate">
+        <span class="nav-icon">&#9888;</span><span class="nav-label">Gate</span>
+      </a>
+      <a class="nav-item" data-tab="chat" href="#chat">
+        <span class="nav-icon">&#9993;</span><span class="nav-label">Chat</span>
+      </a>
+      <a class="nav-item" data-tab="archives" href="#archives">
+        <span class="nav-icon">&#9201;</span><span class="nav-label">Archives</span>
+      </a>
+      <a class="nav-item" data-tab="settings" href="#settings">
+        <span class="nav-icon">&#9881;</span><span class="nav-label">Settings</span>
+      </a>
     </nav>
   </aside>
-  <div class="main-area">
-    <div class="main-content">
+
+  <!-- Main -->
+  <div class="main">
+    <header class="header">
+      <div class="header-title" id="header-title">Overview</div>
+      <div class="header-actions">
+        <button class="header-btn" id="btn-cmd-palette" title="Search (Cmd+K)">&#8984;K</button>
+        <button class="header-btn" id="btn-chat-toggle" title="Chat assistant">&#9993;</button>
+        <button class="header-btn" id="btn-theme" title="Toggle theme">&#9789;</button>
+      </div>
+    </header>
+
+    <div class="content">
       <div class="page active" id="page-overview"></div>
-      <div class="page" id="page-agents"></div>
-      <div class="page" id="page-events"></div>
-      <div class="page" id="page-findings"></div>
-      <div class="page" id="page-architecture"></div>
+      <div class="page" id="page-sessions"></div>
+      <div class="page" id="page-pipeline"></div>
+      <div class="page" id="page-tasks"></div>
+      <div class="page" id="page-gate"></div>
+      <div class="page" id="page-chat"></div>
+      <div class="page" id="page-archives"></div>
       <div class="page" id="page-settings"></div>
     </div>
+
     <div class="health-bar" id="health-bar">
-      <span class="health-dot" id="hb-db-dot"></span>
-      <span id="hb-db-label">db</span>
-      <span class="health-dot" id="hb-sessions-dot"></span>
-      <span id="hb-sessions-label">sessions</span>
-      <span class="health-dot" id="hb-gates-dot"></span>
-      <span id="hb-gates-label">gates</span>
-      <span id="hb-agents-label"></span>
-      <span id="hb-refreshed"></span>
-      <div class="theme-toggle">
-        <button data-theme="system" onclick="setTheme('system')">sys</button>
-        <button data-theme="dark" onclick="setTheme('dark')">dark</button>
-        <button data-theme="light" onclick="setTheme('light')">light</button>
-      </div>
+      <span><span class="health-dot unknown" id="hb-db-dot"></span> DB</span>
+      <span><span class="health-dot unknown" id="hb-redis-dot"></span> Redis</span>
+      <span><span class="health-dot unknown" id="hb-gh-dot"></span> GitHub</span>
+      <span id="hb-agents">0 agents</span>
+      <span id="hb-time" style="margin-left:auto"></span>
+      <span id="hb-sse-status"></span>
     </div>
   </div>
 </div>
-<script src="./app.js"></script>
+
+<!-- Floating chat button (visible on all pages except chat) -->
+<button class="chat-floating-btn" id="chat-floating-btn" style="display:none" title="Open chat">&#9993;</button>
+<div class="chat-floating-panel glass-card" id="chat-floating-panel" style="display:none"></div>
+
+<script type="module" src="./js/main.js"></script>
 </body>
 </html>
