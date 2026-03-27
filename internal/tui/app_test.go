@@ -125,3 +125,35 @@ func TestAdapterFromPath(t *testing.T) {
 		t.Errorf("expected pending, got %q", vm.Status)
 	}
 }
+
+func TestView_ChatTab_NoPanic(t *testing.T) {
+	m := tui.New(tui.Config{
+		RepoPath: t.TempDir(),
+		Repo:     "test",
+		Branch:   "main",
+		Theme:    tui.DefaultTheme,
+	})
+	m1, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	// Switch to chat tab - 'c' key
+	m2, _ := m1.(tui.Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	output := m2.(tui.Model).View()
+	if output == "" {
+		t.Error("chat tab view should not be empty")
+	}
+}
+
+func TestView_ConfigTab_NoPanic(t *testing.T) {
+	m := tui.New(tui.Config{
+		RepoPath: t.TempDir(),
+		Repo:     "test",
+		Branch:   "main",
+		Theme:    tui.DefaultTheme,
+	})
+	m1, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	// Switch to config tab - 'i' key
+	m2, _ := m1.(tui.Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	output := m2.(tui.Model).View()
+	if output == "" {
+		t.Error("config tab view should not be empty")
+	}
+}
