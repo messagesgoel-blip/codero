@@ -86,7 +86,54 @@ func (e *Engine) RunPipeline(ctx context.Context, worktree string, stagedFiles [
 		cfg.Invocation = "codero"
 	}
 
-	report := NewEngine(cfg).Run(ctx)
+	progressPath := filepath.Join(worktree, HeartbeatProgressPath)
+	engine := NewEngine(cfg)
+
+	// Run checks with progress reporting.
+	pipelineStart := time.Now()
+	staged := engine.stagedFiles(ctx)
+	runners := engine.buildRunners()
+	var checks []CheckResult
+	var infraCount int
+	for i, r := range runners {
+		pct := 0
+		if len(runners) > 0 {
+			pct = (i * 100) / len(runners)
+		}
+		_ = WriteProgress(progressPath, fmt.Sprintf("check_%d", i+1), pct, time.Since(pipelineStart).Milliseconds())
+
+		result := r(ctx, cfg, staged)
+		if isInfraReason(result.ReasonCode) {
+			infraCount++
+			if infraCount > cfg.MaxInfraBypass {
+				result.Status = StatusFail
+				result.ReasonCode = ReasonInfraBypass
+				result.Reason = fmt.Sprintf("infra bypass budget exceeded (%d/%d): %s",
+					infraCount, cfg.MaxInfraBypass, result.Reason)
+			}
+		}
+		if (result.Status == StatusSkip || result.Status == StatusDisabled) && result.ReasonCode == "" {
+			result.ReasonCode = ReasonNotApplicable
+			if result.Reason == "" {
+				result.Reason = "not applicable"
+			}
+		}
+		if result.Status == StatusFail && result.ReasonCode == "" {
+			result.ReasonCode = ReasonCheckFailed
+		}
+		checks = append(checks, result)
+	}
+	_ = WriteProgress(progressPath, "complete", 100, time.Since(pipelineStart).Milliseconds())
+
+	EnforceFindingsCap(checks)
+	summary := ComputeSummary(checks, cfg.Profile, cfg.AllowRequiredSkip)
+	report := FinalizeReport(Report{
+		Summary:    summary,
+		Checks:     checks,
+		RunAt:      time.Now().UTC(),
+		Invocation: cfg.Invocation,
+	})
+
 	substatusPath := filepath.Join(worktree, HeartbeatSubstatusPath)
 	if err := WriteSubstatus(substatusPath, report); err != nil {
 		return &report, fmt.Errorf("run pipeline: write substatus: %w", err)

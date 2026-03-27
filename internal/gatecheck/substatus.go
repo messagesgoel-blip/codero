@@ -13,6 +13,8 @@ const (
 	DefaultSubstatusPath = ".codero/gate-check/gate-substatus.env"
 	// HeartbeatSubstatusPath is the pipeline heartbeat location.
 	HeartbeatSubstatusPath = ".codero/gate-heartbeat/gate-substatus.env"
+	// HeartbeatProgressPath is the real-time progress file updated during execution.
+	HeartbeatProgressPath = ".codero/gate-heartbeat/progress.env"
 )
 
 // WriteSubstatus atomically writes gate-substatus.env from a completed Report.
@@ -74,6 +76,25 @@ func totalDurationMS(r Report) int64 {
 		total += c.DurationMS
 	}
 	return total
+}
+
+// WriteProgress writes a progress.env file with the current check name,
+// progress percentage, and elapsed time. The file is overwritten on each call.
+func WriteProgress(path string, checkName string, progress int, elapsedMS int64) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create progress directory: %w", err)
+	}
+	content := fmt.Sprintf("CODERO_CHECK_CURRENT=%s\nCODERO_CHECK_PROGRESS=%d\nCODERO_CHECK_ELAPSED_MS=%d\n",
+		checkName, progress, elapsedMS)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("write progress temp: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("rename progress: %w", err)
+	}
+	return nil
 }
 
 // EnforceFindingsCap applies the MaxFindingsPerCheck cap to a slice of checks.

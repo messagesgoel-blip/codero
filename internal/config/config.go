@@ -544,3 +544,66 @@ func firstNonEmptyEnv(keys ...string) string {
 	}
 	return ""
 }
+
+// LoadEnvFile loads key=value pairs from $HOME/.codero/config.env and sets them
+// as environment variables (without overwriting existing values). This provides
+// a machine-global config source per Gate Config v1.
+func LoadEnvFile() error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil // No home dir, skip silently
+	}
+	path := filepath.Join(home, ".codero", "config.env")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // File doesn't exist, that's fine
+		}
+		return fmt.Errorf("read config.env: %w", err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		// Don't overwrite existing env — shell env takes precedence
+		if os.Getenv(key) == "" {
+			os.Setenv(key, value)
+		}
+	}
+	return nil
+}
+
+// DriftEntry records a config key where the env value differs from the file value.
+type DriftEntry struct {
+	Key      string
+	EnvValue string
+	YAMLKey  string
+}
+
+// DetectDrift compares a loaded Config against current environment variables and
+// returns any keys where the env value would override the file value.
+func DetectDrift(c *Config) []DriftEntry {
+	var drifts []DriftEntry
+	check := func(envKey, yamlKey, fileVal string) {
+		envVal := os.Getenv(envKey)
+		if envVal != "" && envVal != fileVal && fileVal != "" {
+			drifts = append(drifts, DriftEntry{Key: envKey, EnvValue: envVal, YAMLKey: yamlKey})
+		}
+	}
+	check("GITHUB_TOKEN", "github_token", c.GitHubToken)
+	check("CODERO_REDIS_ADDR", "redis.addr", c.Redis.Addr)
+	check("CODERO_REDIS_PASS", "redis.password", c.Redis.Password)
+	check("CODERO_OBSERVABILITY_PORT", "observability_port", strconv.Itoa(c.ObservabilityPort))
+	check("CODERO_DASHBOARD_BASE_PATH", "dashboard_base_path", c.DashboardBasePath)
+	if c.APIServer.Addr != "" {
+		check("CODERO_API_ADDR", "api_server.addr", c.APIServer.Addr)
+	}
+	return drifts
+}
