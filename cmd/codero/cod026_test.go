@@ -189,22 +189,22 @@ func TestGateStatusJSON_ParityWithGateEndpoint(t *testing.T) {
 
 func TestResolveTheme_Dark(t *testing.T) {
 	theme := resolveTheme("dark")
-	if theme.Name != "dark" {
-		t.Errorf("dark theme should have Name=dark, got %q", theme.Name)
+	if theme.Name != "securecode" {
+		t.Errorf("dark theme should have Name=securecode, got %q", theme.Name)
 	}
 }
 
 func TestResolveTheme_Dracula(t *testing.T) {
 	theme := resolveTheme("dracula")
-	if theme.Name != "dark" {
-		t.Errorf("dracula should use DefaultTheme (Name=dark), got %q", theme.Name)
+	if theme.Name != "securecode" {
+		t.Errorf("dracula should use DefaultTheme (Name=securecode), got %q", theme.Name)
 	}
 }
 
 func TestResolveTheme_System(t *testing.T) {
 	theme := resolveTheme("system")
-	if theme.Name != "dark" {
-		t.Errorf("system should use DefaultTheme (Name=dark), got %q", theme.Name)
+	if theme.Name != "securecode" {
+		t.Errorf("system should use DefaultTheme (Name=securecode), got %q", theme.Name)
 	}
 }
 
