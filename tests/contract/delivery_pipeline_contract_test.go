@@ -136,10 +136,15 @@ func (m *mockGateRunner) RunPipeline(ctx context.Context, worktree string, stage
 
 // mockGitHub implements deliverypipeline.GitHubClient for testing.
 type mockGitHub struct {
-	prNumber int
-	created  bool
-	err      error
-	calls    int
+	prNumber         int
+	created          bool
+	err              error
+	calls            int
+	ciPassed         bool
+	ciPending        bool
+	approved         bool
+	changesRequested bool
+	mergeErr         error
 }
 
 func (m *mockGitHub) CreatePRIfEnabled(ctx context.Context, repo, head, base, title, body string) (int, bool, error) {
@@ -156,6 +161,42 @@ func (m *mockGitHub) CreatePRIfEnabled(ctx context.Context, repo, head, base, ti
 func (m *mockGitHub) TriggerCodeRabbitReview(ctx context.Context, repo string, prNumber int) error {
 	m.calls++
 	return nil
+}
+
+func (m *mockGitHub) FindOpenPR(ctx context.Context, repo, branch string) (*deliverypipeline.PRInfo, error) {
+	if m.prNumber == 0 {
+		return nil, nil
+	}
+	return &deliverypipeline.PRInfo{Number: m.prNumber, HeadSHA: "abc123"}, nil
+}
+
+func (m *mockGitHub) ListCheckRuns(ctx context.Context, repo, sha string) ([]deliverypipeline.CheckRunInfo, error) {
+	status := "completed"
+	conclusion := "failure"
+	if m.ciPassed {
+		conclusion = "success"
+	}
+	if m.ciPending {
+		status = "in_progress"
+		conclusion = ""
+	}
+	return []deliverypipeline.CheckRunInfo{{Name: "ci", Status: status, Conclusion: conclusion}}, nil
+}
+
+func (m *mockGitHub) ListPRReviews(ctx context.Context, repo string, prNumber int) ([]deliverypipeline.ReviewInfo, error) {
+	var reviews []deliverypipeline.ReviewInfo
+	if m.approved {
+		reviews = append(reviews, deliverypipeline.ReviewInfo{State: "APPROVED", User: "human"})
+	}
+	if m.changesRequested {
+		reviews = append(reviews, deliverypipeline.ReviewInfo{State: "CHANGES_REQUESTED", User: "human"})
+	}
+	return reviews, nil
+}
+
+func (m *mockGitHub) MergePR(ctx context.Context, repo string, prNumber int, sha, mergeMethod string) error {
+	m.calls++
+	return m.mergeErr
 }
 
 // mockWriter implements deliverypipeline.Writer for testing.
@@ -192,7 +233,7 @@ func TestMIG037_HappyPath_SubmitGatePassCommitPushPR(t *testing.T) {
 
 	gitOps := &mockGitOps{commitSHA: "abc123"}
 	gateRunner := &mockGateRunner{report: &gatecheck.Report{Result: gatecheck.StatusPass}}
-	gh := &mockGitHub{created: true}
+	gh := &mockGitHub{created: true, ciPassed: true, approved: true}
 	writer := &mockWriter{}
 	notifier := &mockNotifier{}
 

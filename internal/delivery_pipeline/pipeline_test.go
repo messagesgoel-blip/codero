@@ -81,10 +81,16 @@ func (f *fakeGateRunner) RunPipeline(ctx context.Context, worktree string, stage
 }
 
 type fakeGitHub struct {
-	created   bool
-	prNumber  int
-	err       error
-	seenCalls int
+	created          bool
+	prNumber         int
+	err              error
+	seenCalls        int
+	ciPassed         bool
+	ciPending        bool
+	approved         bool
+	changesRequested bool
+	mergeErr         error
+	headSHA          string
 }
 
 func (f *fakeGitHub) CreatePRIfEnabled(ctx context.Context, repo, head, base, title, body string) (int, bool, error) {
@@ -101,6 +107,46 @@ func (f *fakeGitHub) CreatePRIfEnabled(ctx context.Context, repo, head, base, ti
 func (f *fakeGitHub) TriggerCodeRabbitReview(ctx context.Context, repo string, prNumber int) error {
 	f.seenCalls++
 	return nil
+}
+
+func (f *fakeGitHub) FindOpenPR(ctx context.Context, repo, branch string) (*PRInfo, error) {
+	if f.prNumber == 0 {
+		return nil, nil
+	}
+	sha := f.headSHA
+	if sha == "" {
+		sha = "abc123"
+	}
+	return &PRInfo{Number: f.prNumber, HeadSHA: sha}, nil
+}
+
+func (f *fakeGitHub) ListCheckRuns(ctx context.Context, repo, sha string) ([]CheckRunInfo, error) {
+	status := "completed"
+	conclusion := "failure"
+	if f.ciPassed {
+		conclusion = "success"
+	}
+	if f.ciPending {
+		status = "in_progress"
+		conclusion = ""
+	}
+	return []CheckRunInfo{{Name: "ci", Status: status, Conclusion: conclusion}}, nil
+}
+
+func (f *fakeGitHub) ListPRReviews(ctx context.Context, repo string, prNumber int) ([]ReviewInfo, error) {
+	var reviews []ReviewInfo
+	if f.approved {
+		reviews = append(reviews, ReviewInfo{State: "APPROVED", User: "human"})
+	}
+	if f.changesRequested {
+		reviews = append(reviews, ReviewInfo{State: "CHANGES_REQUESTED", User: "human"})
+	}
+	return reviews, nil
+}
+
+func (f *fakeGitHub) MergePR(ctx context.Context, repo string, prNumber int, sha, mergeMethod string) error {
+	f.seenCalls++
+	return f.mergeErr
 }
 
 type fakeWriter struct {
@@ -166,7 +212,7 @@ func TestPipeline_HappyPath(t *testing.T) {
 		},
 	}
 	gate := &fakeGateRunner{report: &gatecheck.Report{Result: gatecheck.StatusPass}}
-	gh := &fakeGitHub{created: true}
+	gh := &fakeGitHub{created: true, ciPassed: true, approved: true}
 	writer := &fakeWriter{}
 	notifier := &fakeNotifier{}
 
