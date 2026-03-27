@@ -83,7 +83,7 @@ func TestDashboardChatStreamCmd_ParsesDeltaAndDone(t *testing.T) {
 func TestRenderChatPane_ShowsThreadAndInput(t *testing.T) {
 	m := New(Config{Theme: DefaultTheme})
 	m.layout = Compute(100, 24)
-	m.chatActive = true
+	m.activeTab = TabChat
 	m.chatConversationID = "conv-7"
 	m.cliBusy = true
 	m.cliInput.SetValue("How many active sessions?")

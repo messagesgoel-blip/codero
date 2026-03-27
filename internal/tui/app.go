@@ -26,17 +26,19 @@ import (
 type Tab int
 
 const (
-	TabLogs Tab = iota // INTERACTIVE LOGS & ARCHITECTURE VISUALIZATION (default)
-	TabOutput
+	TabLogs     Tab = iota // INTERACTIVE LOGS & ARCHITECTURE VISUALIZATION (default)
+	TabOverview            // was TabOutput
 	TabEvents
 	TabQueue
+	TabChat // NEW
 	TabSessionDrill
 	TabArchives
 	TabCompliance
+	TabConfig // NEW
 	tabCount
 )
 
-var tabLabels = [tabCount]string{"logs & arch", "output", "events", "queue", "session", "archives", "compliance"}
+var tabLabels = [tabCount]string{"logs & arch", "overview", "events", "queue", "chat", "session", "archives", "compliance", "config"}
 
 // FocusedPane identifies which pane has keyboard focus.
 type FocusedPane int
@@ -96,7 +98,7 @@ type Config struct {
 	WatchMode bool
 	InitialVM adapters.GateViewModel
 	// InitialTab sets the center-pane tab that is active when the TUI starts.
-	// Defaults to TabOutput when zero value.
+	// Defaults to TabLogs when zero value.
 	InitialTab Tab
 	// StateDB is the optional state database handle used for session/archive/compliance views.
 	// When nil, the DB-backed views render a "no data" placeholder.
@@ -105,6 +107,13 @@ type Config struct {
 	DaemonBaseURL string
 	// SettingsDir points at the state directory that holds dashboard-settings.json.
 	SettingsDir string
+}
+
+// ChatUIState encapsulates slash-popup state for the chat tab.
+type ChatUIState struct {
+	SlashPopupActive bool
+	SlashPopupIdx    int
+	SlashPopupFilter string
 }
 
 // Model is the root Bubble Tea model for the Codero TUI.
@@ -137,6 +146,7 @@ type Model struct {
 
 	focused   FocusedPane
 	activeTab Tab
+	prevTab   Tab
 	gateVM    adapters.GateViewModel
 	checksVM  adapters.CheckReportViewModel
 
@@ -153,8 +163,7 @@ type Model struct {
 	cliHistoryIdx      int
 	cliSuggestions     []dashboard.ChatSuggestion
 	cliActions         []dashboard.ChatAction
-	chatActive         bool
-	chatPrevFocus      FocusedPane
+	chatState          ChatUIState
 	chatConversationID string
 
 	lastUpdated time.Time
@@ -419,17 +428,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
 
-	case m.chatActive:
-		return m.handleChatKey(msg)
-
 	case key.Matches(msg, m.keys.Chat):
-		m.chatActive = true
-		m.chatPrevFocus = m.focused
+		m.prevTab = m.activeTab
+		m.activeTab = TabChat
+		m.focused = PaneCenter
 		m.cliInput.Focus()
 		return m, nil
 
 	case key.Matches(msg, m.keys.Overview):
-		m.activeTab = TabOutput
+		m.activeTab = TabOverview
 		m.focused = PaneCenter
 		return m, nil
 
@@ -459,15 +466,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.focused = FocusedPane((int(m.focused) - 1 + paneCount) % paneCount)
 
 	case msg.String() == "esc" && m.activeTab == TabSessionDrill:
-		m.activeTab = TabOutput
+		m.activeTab = TabOverview
 		m.focused = PaneCenter
 		return m, nil
 
-	case m.activeTab == TabOutput && m.focused == PaneCenter && key.Matches(msg, m.keys.Up):
+	case m.activeTab == TabOverview && m.focused == PaneCenter && key.Matches(msg, m.keys.Up):
 		m.moveOverviewSelection(-1)
 		return m, nil
 
-	case m.activeTab == TabOutput && m.focused == PaneCenter && key.Matches(msg, m.keys.Down):
+	case m.activeTab == TabOverview && m.focused == PaneCenter && key.Matches(msg, m.keys.Down):
 		m.moveOverviewSelection(1)
 		return m, nil
 
@@ -584,23 +591,6 @@ func (m Model) handleTerminalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, teaCmd
 }
 
-func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		m.chatActive = false
-		m.focused = m.chatPrevFocus
-		m.cliInput.SetValue("")
-		m.cliHistoryIdx = -1
-		return m, nil
-	case "enter":
-		return m.handleTerminalKey(msg)
-	}
-
-	var teaCmd tea.Cmd
-	m.cliInput, teaCmd = m.cliInput.Update(msg)
-	return m, teaCmd
-}
-
 func (m *Model) applyChatStreamingDelta(delta string) {
 	if len(m.cliMessages) == 0 {
 		m.cliMessages = append(m.cliMessages, terminalMessage{Role: "assistant", Meta: "streaming", Content: delta})
@@ -647,8 +637,10 @@ func (m Model) chatContextTab() string {
 		return "events"
 	case TabQueue:
 		return "queue"
-	case TabOutput:
+	case TabOverview:
 		return "overview"
+	case TabChat:
+		return "chat"
 	default:
 		return "review"
 	}
@@ -657,9 +649,6 @@ func (m Model) chatContextTab() string {
 func (m Model) View() string {
 	if m.layout.TotalW == 0 {
 		return "initializing…\n"
-	}
-	if m.chatActive {
-		return m.renderChatPane()
 	}
 
 	top := m.renderTopBar()
@@ -719,7 +708,7 @@ func (m Model) renderCenter() string {
 
 	var content string
 	switch m.activeTab {
-	case TabOutput:
+	case TabOverview:
 		m.refreshOverviewViewport()
 		content = m.outputVP.View()
 	case TabSessionDrill:

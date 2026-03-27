@@ -230,7 +230,7 @@ func TestResolveInitialTab(t *testing.T) {
 		want  tui.Tab
 	}{
 		{"gate", tui.TabLogs},
-		{"output", tui.TabOutput},
+		{"output", tui.TabOverview},
 		{"events", tui.TabEvents},
 		{"queue", tui.TabQueue},
 		{"findings", tui.TabLogs}, // findings now routes to primary logs & arch view
