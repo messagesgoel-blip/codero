@@ -1,0 +1,56 @@
+[
+  {
+    "id": "run-auth-001",
+    "repo": "acme/api",
+    "branch": "feat/auth-refactor",
+    "provider": "litellm",
+    "status": "completed",
+    "started_at": "2026-03-26T10:00:00Z",
+    "finished_at": "2026-03-26T10:25:00Z"
+  },
+  {
+    "id": "run-auth-002",
+    "repo": "acme/api",
+    "branch": "feat/auth-refactor",
+    "provider": "coderabbit",
+    "status": "completed",
+    "started_at": "2026-03-26T08:30:00Z",
+    "finished_at": "2026-03-26T08:45:00Z"
+  },
+  {
+    "id": "run-db-001",
+    "repo": "acme/api",
+    "branch": "feat/db-migration",
+    "provider": "litellm",
+    "status": "running",
+    "started_at": "2026-03-26T12:00:00Z"
+  },
+  {
+    "id": "run-db-002",
+    "repo": "acme/api",
+    "branch": "feat/db-migration",
+    "provider": "coderabbit",
+    "status": "failed",
+    "started_at": "2026-03-26T09:00:00Z",
+    "finished_at": "2026-03-26T09:15:00Z",
+    "error": "CI checks failed: test coverage below threshold"
+  },
+  {
+    "id": "run-cache-001",
+    "repo": "acme/cache",
+    "branch": "feat/redis-cluster",
+    "provider": "litellm",
+    "status": "completed",
+    "started_at": "2026-03-26T07:00:00Z",
+    "finished_at": "2026-03-26T07:18:00Z"
+  },
+  {
+    "id": "run-ui-001",
+    "repo": "acme/web",
+    "branch": "feat/dashboard-v2",
+    "provider": "copilot",
+    "status": "completed",
+    "started_at": "2026-03-26T11:00:00Z",
+    "finished_at": "2026-03-26T11:32:00Z"
+  }
+]
