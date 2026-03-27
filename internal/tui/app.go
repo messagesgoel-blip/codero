@@ -671,26 +671,174 @@ func (m Model) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, top, body, bottom)
 }
 
+// fitToWidth joins alwaysShow segments unconditionally, then appends
+// optionalSegments from left to right, dropping trailing ones if the
+// total rendered width would exceed width.
+func fitToWidth(alwaysShow, optionalSegments []string, width int) string {
+	all := append(append([]string{}, alwaysShow...), optionalSegments...)
+	for len(all) > len(alwaysShow) {
+		joined := strings.Join(all, "")
+		if lipgloss.Width(joined) <= width {
+			return joined
+		}
+		all = all[:len(all)-1]
+	}
+	return strings.Join(alwaysShow, "")
+}
+
+// topBarPRNumber returns the first PR number associated with the configured
+// repo/branch from the active sessions list, or 0 if none is found.
+func (m Model) topBarPRNumber() int {
+	for _, s := range m.activeSessions {
+		if s.PRNumber > 0 && s.Repo == m.cfg.Repo && s.Branch == m.cfg.Branch {
+			return s.PRNumber
+		}
+	}
+	return 0
+}
+
+// topBarSeverityCounts returns (critical, high) counts derived from the
+// checksVM bucket logic: critical = failing+required, high = failing+!required.
+func (m Model) topBarSeverityCounts() (critical, high int) {
+	for _, c := range m.checksVM.Checks {
+		if c.DisplayState == "failing" {
+			if c.Required {
+				critical++
+			} else {
+				high++
+			}
+		}
+	}
+	return critical, high
+}
+
+// topBarMergeStatusPill returns a colored pill string for the current merge
+// status, following the same priority as mergeStatusLabel.
+func (m Model) topBarMergeStatusPill() string {
+	failBg := lipgloss.Color("#3D1214")
+	failFg := lipgloss.Color("#F85149")
+	warnBg := lipgloss.Color("#3D2508")
+	warnFg := lipgloss.Color("#D29922")
+	passBg := lipgloss.Color("#0D2B0D")
+	passFg := lipgloss.Color("#3FB950")
+	mutedFg := lipgloss.Color("#7D8590")
+
+	pill := func(bg lipgloss.Color, fg lipgloss.Color, label string) string {
+		return lipgloss.NewStyle().
+			Background(bg).
+			Foreground(fg).
+			Bold(true).
+			Padding(0, 1).
+			Render(label)
+	}
+
+	switch {
+	case len(m.blockReasons) > 0:
+		return pill(failBg, failFg, "MERGE BLOCKED")
+	case m.checksVM.Summary.Failed > 0:
+		return pill(warnBg, warnFg, "CHECKS FAILING")
+	case m.branchRecord != nil && m.branchRecord.State == state.StateMergeReady:
+		return pill(passBg, passFg, "MERGE READY")
+	default:
+		return lipgloss.NewStyle().Foreground(mutedFg).Render("PENDING")
+	}
+}
+
 func (m Model) renderTopBar() string {
 	l := m.layout
-	title := m.theme.Title.Render(" COMMAND TERMINAL — CODERO")
+	t := m.theme
+
 	dots := lipgloss.JoinHorizontal(
 		lipgloss.Left,
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5F56")).Render("●"),
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#FFBD2E")).Render("●"),
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#27C93F")).Render("●"),
 	)
-
+	title := t.Title.Render(" COMMAND TERMINAL — CODERO")
 	currentTime := time.Now().Format("15:04:05")
-	right := m.theme.Muted.Render(currentTime + " ")
+	timeStr := t.Muted.Render(" " + currentTime + " ")
 
-	spacerW := l.TotalW - lipgloss.Width(dots) - lipgloss.Width(title) - lipgloss.Width(right) - 2
-	if spacerW < 0 {
-		spacerW = 0
+	// Repo/branch context label
+	repoBranch := ""
+	if m.cfg.Repo != "" || m.cfg.Branch != "" {
+		rb := m.cfg.Repo
+		if m.cfg.Branch != "" {
+			if rb != "" {
+				rb += ":"
+			}
+			rb += m.cfg.Branch
+		}
+		repoBranch = rb
 	}
-	spacer := strings.Repeat(" ", spacerW)
 
-	bar := lipgloss.JoinHorizontal(lipgloss.Left, " ", dots, title, spacer, right)
+	// Optional segment: task ID
+	taskID := os.Getenv("CODERO_TASK_ID")
+	var segTaskID string
+	if taskID != "" {
+		segTaskID = t.Accent.Render(" · " + taskID)
+	}
+
+	// Optional segment: repo:branch
+	var segRepoBranch string
+	if repoBranch != "" {
+		segRepoBranch = t.Muted.Render(" · " + repoBranch)
+	}
+
+	// Optional segment: PR number
+	var segPR string
+	if pr := m.topBarPRNumber(); pr > 0 {
+		segPR = t.Accent.Render(fmt.Sprintf(" · PR #%d", pr))
+	}
+
+	// Optional segment: merge status pill
+	segMerge := " · " + m.topBarMergeStatusPill()
+
+	// Optional segment: severity counts
+	critical, high := m.topBarSeverityCounts()
+	var segSeverity string
+	if critical > 0 || high > 0 {
+		parts := make([]string, 0, 2)
+		if critical > 0 {
+			parts = append(parts, " "+t.SeverityPillStyle("critical").Render(fmt.Sprintf("● %d Critical", critical)))
+		}
+		if high > 0 {
+			parts = append(parts, " "+t.SeverityPillStyle("high").Render(fmt.Sprintf("● %d High", high)))
+		}
+		segSeverity = strings.Join(parts, "")
+	}
+
+	// Build left+center content with graceful degradation.
+	// Always shown: dots + title; optional segments dropped right-to-left.
+	alwaysLeft := []string{" ", dots, title}
+	optSegs := make([]string, 0, 5)
+	if segRepoBranch != "" {
+		optSegs = append(optSegs, segRepoBranch)
+	}
+	if segTaskID != "" {
+		optSegs = append(optSegs, segTaskID)
+	}
+	if segPR != "" {
+		optSegs = append(optSegs, segPR)
+	}
+	optSegs = append(optSegs, segMerge)
+	if segSeverity != "" {
+		optSegs = append(optSegs, segSeverity)
+	}
+
+	// Reserve space for the right-aligned time string plus a small margin.
+	availableW := l.TotalW - lipgloss.Width(timeStr) - 1
+	if availableW < 0 {
+		availableW = 0
+	}
+	leftContent := fitToWidth(alwaysLeft, optSegs, availableW)
+
+	// Pad between left content and time to fill the total width.
+	padW := l.TotalW - lipgloss.Width(leftContent) - lipgloss.Width(timeStr)
+	if padW < 0 {
+		padW = 0
+	}
+	bar := leftContent + strings.Repeat(" ", padW) + timeStr
+
 	return lipgloss.NewStyle().
 		Width(l.TotalW).
 		Background(lipgloss.Color("#1E1F2E")).
