@@ -21,7 +21,7 @@ const (
 	minPipelineW = 16
 	minRightW    = 24
 	topBarH      = 1
-	bottomBarH   = 12
+	bottomBarH   = 3
 )
 
 // Compute derives pane dimensions from total terminal size.

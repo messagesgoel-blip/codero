@@ -73,21 +73,20 @@ func TestView_ShowsMockStyleTitle(t *testing.T) {
 	}
 }
 
-func TestView_ShowsCommandStrip(t *testing.T) {
+func TestView_ShowsStatusBar(t *testing.T) {
 	cfg := makeCfg(false)
 	m := tui.New(cfg)
 
 	newModel, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	view := newModel.(tui.Model).View()
 	for _, want := range []string{
-		"type a command or message…",
-		"status",
-		"help",
-		"run gate",
-		"queue",
+		"Merge:",
+		"q quit",
+		"c chat",
+		"interval",
 	} {
-		if !strings.Contains(strings.ToLower(view), strings.ToLower(want)) {
-			t.Fatalf("expected command strip to contain %q\nfull view:\n%s", want, view)
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected status bar to contain %q\nfull view:\n%s", want, view)
 		}
 	}
 }
@@ -124,5 +123,37 @@ func TestAdapterFromPath(t *testing.T) {
 	vm := tui.AdapterFromPath("/nonexistent")
 	if vm.Status != gate.StatusPending {
 		t.Errorf("expected pending, got %q", vm.Status)
+	}
+}
+
+func TestView_ChatTab_NoPanic(t *testing.T) {
+	m := tui.New(tui.Config{
+		RepoPath: t.TempDir(),
+		Repo:     "test",
+		Branch:   "main",
+		Theme:    tui.DefaultTheme,
+	})
+	m1, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	// Switch to chat tab - 'c' key
+	m2, _ := m1.(tui.Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	output := m2.(tui.Model).View()
+	if output == "" {
+		t.Error("chat tab view should not be empty")
+	}
+}
+
+func TestView_ConfigTab_NoPanic(t *testing.T) {
+	m := tui.New(tui.Config{
+		RepoPath: t.TempDir(),
+		Repo:     "test",
+		Branch:   "main",
+		Theme:    tui.DefaultTheme,
+	})
+	m1, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	// Switch to config tab - 'i' key
+	m2, _ := m1.(tui.Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	output := m2.(tui.Model).View()
+	if output == "" {
+		t.Error("config tab view should not be empty")
 	}
 }

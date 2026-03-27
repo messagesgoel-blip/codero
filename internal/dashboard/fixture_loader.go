@@ -38,6 +38,19 @@ type FixtureActivityEntry struct {
 	Payload   string `json:"payload"`    // JSON string
 }
 
+// FixtureRunEntry describes one seeded review run for fixture mode.
+// This populates the review_runs table so the overview panel shows real metrics.
+type FixtureRunEntry struct {
+	ID         string `json:"id"`
+	Repo       string `json:"repo"`
+	Branch     string `json:"branch"`
+	Provider   string `json:"provider"`
+	Status     string `json:"status"` // e.g. "completed", "failed", "running"
+	StartedAt  string `json:"started_at"`
+	FinishedAt string `json:"finished_at,omitempty"`
+	Error      string `json:"error,omitempty"`
+}
+
 // FixtureDirResult holds the optional report path resolved from a fixture directory.
 type FixtureDirResult struct {
 	// ReportPath is non-empty when the fixture directory contains report.json.
@@ -85,6 +98,18 @@ func LoadFixtureDir(ctx context.Context, db *sql.DB, dir string) (FixtureDirResu
 	if len(events) > 0 {
 		if err := SeedFixtureActivity(db, events); err != nil {
 			return result, fmt.Errorf("fixture_loader: seed activity: %w", err)
+		}
+	}
+
+	// Seed review runs.
+	runsFile := filepath.Join(absDir, "runs.json")
+	runs, err := readJSONFile[[]FixtureRunEntry](runsFile)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return result, fmt.Errorf("fixture_loader: read runs.json: %w", err)
+	}
+	if len(runs) > 0 {
+		if err := SeedFixtureRuns(ctx, db, runs); err != nil {
+			return result, fmt.Errorf("fixture_loader: seed runs: %w", err)
 		}
 	}
 
@@ -285,4 +310,59 @@ func readJSONFile[T any](path string) (T, error) {
 		return zero, fmt.Errorf("parse %q: %w", path, err)
 	}
 	return v, nil
+}
+
+// SeedFixtureRuns inserts review_run rows for each run entry.
+// The created_at timestamp is set to now so runs appear in "today's runs" queries.
+// The started_at and finished_at retain their fixture values for realistic duration display.
+func SeedFixtureRuns(ctx context.Context, db *sql.DB, entries []FixtureRunEntry) error {
+	now := time.Now().UTC()
+	for i, e := range entries {
+		if e.ID == "" {
+			return fmt.Errorf("fixture_loader: runs[%d]: id is required", i)
+		}
+		if e.Repo == "" {
+			return fmt.Errorf("fixture_loader: runs[%d]: repo is required", i)
+		}
+		if e.Branch == "" {
+			return fmt.Errorf("fixture_loader: runs[%d]: branch is required", i)
+		}
+		if e.Provider == "" {
+			return fmt.Errorf("fixture_loader: runs[%d]: provider is required", i)
+		}
+		if e.Status == "" {
+			return fmt.Errorf("fixture_loader: runs[%d]: status is required", i)
+		}
+		if e.StartedAt == "" {
+			return fmt.Errorf("fixture_loader: runs[%d]: started_at is required", i)
+		}
+
+		startedAt, err := time.Parse(time.RFC3339, e.StartedAt)
+		if err != nil {
+			return fmt.Errorf("fixture_loader: runs[%d]: parse started_at: %w", i, err)
+		}
+
+		var finishedAt sql.NullTime
+		if e.FinishedAt != "" {
+			fa, err := time.Parse(time.RFC3339, e.FinishedAt)
+			if err != nil {
+				return fmt.Errorf("fixture_loader: runs[%d]: parse finished_at: %w", i, err)
+			}
+			finishedAt = sql.NullTime{Time: fa, Valid: true}
+		}
+
+		headHash := "fixture-head-" + e.ID[:min(8, len(e.ID))]
+		// nosemgrep: go.lang.security.audit.sqli.gosql-sqli.gosql-sqli
+		_, err = db.ExecContext(ctx, `
+			INSERT OR REPLACE INTO review_runs
+				(id, repo, branch, head_hash, provider, status, started_at, finished_at, error, created_at)
+			VALUES (?,?,?,?,?,?,?,?,?,?)`,
+			e.ID, e.Repo, e.Branch, headHash, e.Provider, e.Status,
+			startedAt, finishedAt, e.Error, now,
+		)
+		if err != nil {
+			return fmt.Errorf("fixture_loader: insert run %q: %w", e.ID, err)
+		}
+	}
+	return nil
 }

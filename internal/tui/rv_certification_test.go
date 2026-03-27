@@ -131,16 +131,18 @@ func TestRV_TUIConfig_RequiredFields(t *testing.T) {
 	_ = m // should compile and not panic
 }
 
-// Tab enumeration includes all 7 required tabs.
+// Tab enumeration includes all 9 required tabs.
 func TestRV_TabEnum_AllPresent(t *testing.T) {
 	tabs := []tui.Tab{
 		tui.TabLogs,
-		tui.TabOutput,
+		tui.TabOverview,
 		tui.TabEvents,
 		tui.TabQueue,
+		tui.TabChat,
 		tui.TabSessionDrill,
 		tui.TabArchives,
 		tui.TabCompliance,
+		tui.TabConfig,
 	}
 	seen := make(map[tui.Tab]bool)
 	for _, tab := range tabs {
@@ -149,7 +151,7 @@ func TestRV_TabEnum_AllPresent(t *testing.T) {
 		}
 		seen[tab] = true
 	}
-	if len(seen) != 7 {
-		t.Errorf("expected 7 unique tabs, got %d", len(seen))
+	if len(seen) != 9 {
+		t.Errorf("expected 9 unique tabs, got %d", len(seen))
 	}
 }

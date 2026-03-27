@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/codero/codero/internal/state"
@@ -53,20 +55,20 @@ var DefaultTheme = newDefaultTheme()
 var AltTheme = newAltTheme()
 
 func newDefaultTheme() Theme {
-	fg := lipgloss.Color("#CDD6F4")
-	muted := lipgloss.Color("#6272A4")
-	accent := lipgloss.Color("#BD93F9")
-	pass := lipgloss.Color("#50FA7B")
-	fail := lipgloss.Color("#FF5555")
-	running := lipgloss.Color("#F1FA8C")
-	warn := lipgloss.Color("#FFB86C")
-	border := lipgloss.Color("#3C3C5A")
-	activeBorder := lipgloss.Color("#7B68EE")
-	selected := lipgloss.Color("#2A2B3D")
-	paneTitle := lipgloss.Color("#BD93F9")
-	bgPane := lipgloss.Color("#1E1F2E")
-	bgPalette := lipgloss.Color("#1A1B26")
-	headerBg := lipgloss.Color("#282A36")
+	fg := lipgloss.Color("#E6EDF3")
+	muted := lipgloss.Color("#7D8590")
+	accent := lipgloss.Color("#58A6FF")
+	pass := lipgloss.Color("#3FB950")
+	fail := lipgloss.Color("#F85149")
+	running := lipgloss.Color("#E3B341")
+	warn := lipgloss.Color("#D29922")
+	border := lipgloss.Color("#21262D")
+	activeBorder := lipgloss.Color("#58A6FF")
+	selected := lipgloss.Color("#1C2128")
+	paneTitle := lipgloss.Color("#58A6FF")
+	bgPane := lipgloss.Color("#161B22")
+	bgPalette := lipgloss.Color("#0D1117")
+	headerBg := lipgloss.Color("#161B22")
 
 	return Theme{
 		Base:              lipgloss.NewStyle().Foreground(fg),
@@ -95,13 +97,14 @@ func newDefaultTheme() Theme {
 		GatePipeline:      lipgloss.NewStyle().Foreground(muted).Italic(true),
 		Palette:           lipgloss.NewStyle().Background(bgPalette).BorderStyle(lipgloss.RoundedBorder()).BorderForeground(activeBorder).Padding(0, 1),
 		PaletteInput:      lipgloss.NewStyle().Foreground(fg),
-		ChipBackground:    lipgloss.Color("#31384A"),
-		ChipForeground:    lipgloss.Color("#A3A6B8"),
+		ChipBackground:    lipgloss.Color("#21262D"),
+		ChipForeground:    lipgloss.Color("#C9D1D9"),
 		Title:             lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Bold(true),
-		Name:              "dark",
+		Name:              "securecode",
 	}
 }
 
+// TODO(theme-switching): unused until runtime theme switching is implemented
 func newAltTheme() Theme {
 	fg := lipgloss.Color("#E8E8E8")
 	muted := lipgloss.Color("#888888")
@@ -200,6 +203,22 @@ func (t Theme) StateStyle(s state.State) lipgloss.Style {
 		return t.Fail
 	case state.StateSubmitted:
 		return t.Base
+	default:
+		return t.Muted
+	}
+}
+
+// SeverityPillStyle returns a styled pill for security severity levels.
+func (t Theme) SeverityPillStyle(severity string) lipgloss.Style {
+	switch strings.ToLower(strings.TrimSpace(severity)) {
+	case "critical":
+		return lipgloss.NewStyle().Background(lipgloss.Color("#3D1214")).Foreground(lipgloss.Color("#F85149")).Bold(true).Padding(0, 1)
+	case "high":
+		return lipgloss.NewStyle().Background(lipgloss.Color("#3D2508")).Foreground(lipgloss.Color("#D29922")).Bold(true).Padding(0, 1)
+	case "medium":
+		return lipgloss.NewStyle().Background(lipgloss.Color("#3D3508")).Foreground(lipgloss.Color("#E3B341")).Bold(true).Padding(0, 1)
+	case "low":
+		return lipgloss.NewStyle().Background(lipgloss.Color("#0D2B45")).Foreground(lipgloss.Color("#58A6FF")).Bold(true).Padding(0, 1)
 	default:
 		return t.Muted
 	}

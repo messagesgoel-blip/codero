@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -172,5 +173,196 @@ func TestCoveragePath_EnvOverride(t *testing.T) {
 	}
 	if got := *h.CoveragePct; got < 99.9 || got > 100.1 {
 		t.Errorf("CoveragePct = %.2f, want 100.0", got)
+	}
+}
+
+func TestPercentile_SyntheticFixture(t *testing.T) {
+	tests := []struct {
+		name     string
+		sorted   []float64
+		p        float64
+		expected float64
+	}{
+		{
+			name:     "single value p50",
+			sorted:   []float64{10},
+			p:        0.50,
+			expected: 10,
+		},
+		{
+			name:     "two values p50",
+			sorted:   []float64{10, 20},
+			p:        0.50,
+			expected: 15, // midpoint
+		},
+		{
+			name:     "three values p50",
+			sorted:   []float64{10, 20, 30},
+			p:        0.50,
+			expected: 20, // exact middle
+		},
+		{
+			name:     "five values p50",
+			sorted:   []float64{5, 10, 15, 20, 30},
+			p:        0.50,
+			expected: 15,
+		},
+		{
+			name:     "five values p90",
+			sorted:   []float64{5, 10, 15, 20, 30},
+			p:        0.90,
+			expected: 26, // 0.9 * 4 = 3.6 → interpolate between index 3 (20) and 4 (30)
+		},
+		{
+			name:     "five values p0",
+			sorted:   []float64{5, 10, 15, 20, 30},
+			p:        0.0,
+			expected: 5,
+		},
+		{
+			name:     "five values p100",
+			sorted:   []float64{5, 10, 15, 20, 30},
+			p:        1.0,
+			expected: 30,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := percentile(tt.sorted, tt.p)
+			if got != tt.expected {
+				t.Errorf("percentile(%v, %.2f) = %.2f, want %.2f", tt.sorted, tt.p, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestQueryETADetail_SyntheticFixture(t *testing.T) {
+	db := openDashboardQueryTestDB(t)
+	ctx := context.Background()
+
+	// Seed completed runs with varying durations
+	now := time.Now().UTC()
+	// Create runs with durations: 10, 20, 30, 40, 60 minutes
+	durations := []int{10, 20, 30, 40, 60}
+	for i, dur := range durations {
+		started := now.Add(-time.Duration(24*i) * time.Hour).Add(-time.Duration(dur) * time.Minute)
+		finished := started.Add(time.Duration(dur) * time.Minute)
+		// nosemgrep: go.lang.security.audit.sqli.gosql-sqli.gosql-sqli
+		_, err := db.Exec(`INSERT INTO review_runs
+			(id, repo, branch, provider, status, started_at, finished_at, created_at)
+			VALUES (?,?,?,?,?,?,?,?)`,
+			fmt.Sprintf("run-%d", i), "acme/api", "feat/COD-001-test", "litellm", "completed", started, finished, started)
+		if err != nil {
+			t.Fatalf("seed run %d: %v", i, err)
+		}
+	}
+
+	// Add a running run (currently 5 minutes elapsed)
+	runningStarted := now.Add(-5 * time.Minute)
+	// nosemgrep: go.lang.security.audit.sqli.gosql-sqli.gosql-sqli
+	_, err := db.Exec(`INSERT INTO review_runs
+		(id, repo, branch, provider, status, started_at, created_at)
+		VALUES (?,?,?,?,?,?,?)`,
+		"run-running", "acme/api", "feat/COD-002-active", "litellm", "running", runningStarted, runningStarted)
+	if err != nil {
+		t.Fatalf("seed running run: %v", err)
+	}
+
+	detail := queryETADetail(ctx, db, "", "")
+	if detail == nil {
+		t.Fatal("expected non-nil ETADetail")
+	}
+
+	// With durations [10, 20, 30, 40, 60]:
+	// avg = (10+20+30+40+60)/5 = 32
+	// p50 (index 2) = 30
+	// p90 (index 3.6) = 40 + 0.6*(60-40) = 52
+	// elapsed = 5
+	// eta = 30 - 5 = 25
+
+	if detail.AvgMin != 32 {
+		t.Errorf("AvgMin = %d, want 32", detail.AvgMin)
+	}
+	if detail.P50Min != 30 {
+		t.Errorf("P50Min = %d, want 30", detail.P50Min)
+	}
+	if detail.P90Min != 52 {
+		t.Errorf("P90Min = %d, want 52", detail.P90Min)
+	}
+	if detail.ElapsedMin != 5 {
+		t.Errorf("ElapsedMin = %d, want 5", detail.ElapsedMin)
+	}
+	if detail.ETAMin != 25 {
+		t.Errorf("ETAMin = %d, want 25", detail.ETAMin)
+	}
+}
+
+func TestQueryETADetail_BranchPrefixFilter(t *testing.T) {
+	db := openDashboardQueryTestDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Seed runs on different branch prefixes with different duration patterns
+	// feat/fix/* branches: quick fixes with durations 5, 10, 15 minutes
+	// feat/refactor/* branches: larger work with durations 30, 60, 90 minutes
+	seedRunWithDuration := func(id, branch string, dur int, started time.Time) {
+		finished := started.Add(time.Duration(dur) * time.Minute)
+		// nosemgrep: go.lang.security.audit.sqli.gosql-sqli.gosql-sqli
+		_, err := db.Exec(`INSERT INTO review_runs
+			(id, repo, branch, provider, status, started_at, finished_at, created_at)
+			VALUES (?,?,?,?,?,?,?,?)`,
+			id, "acme/api", branch, "litellm", "completed", started, finished, started)
+		if err != nil {
+			t.Fatalf("seed run %s: %v", id, err)
+		}
+	}
+
+	seedRunWithDuration("fix-1", "feat/fix/bug-001", 5, now.Add(-2*time.Hour))
+	seedRunWithDuration("fix-2", "feat/fix/bug-002", 10, now.Add(-3*time.Hour))
+	seedRunWithDuration("fix-3", "feat/fix/bug-003", 15, now.Add(-4*time.Hour))
+
+	seedRunWithDuration("refactor-1", "feat/refactor/api-001", 30, now.Add(-26*time.Hour))
+	seedRunWithDuration("refactor-2", "feat/refactor/api-002", 60, now.Add(-27*time.Hour))
+	seedRunWithDuration("refactor-3", "feat/refactor/api-003", 90, now.Add(-28*time.Hour))
+
+	// Query with branch_prefix=feat/fix/
+	detailFix := queryETADetail(ctx, db, "", "feat/fix/")
+	if detailFix == nil {
+		t.Fatal("expected non-nil ETADetail for feat/fix/")
+	}
+	// avg = (5+10+15)/3 = 10, p50 = 10
+	if detailFix.P50Min != 10 {
+		t.Errorf("feat/fix/ P50Min = %d, want 10", detailFix.P50Min)
+	}
+
+	// Query with branch_prefix=feat/refactor/
+	detailRefactor := queryETADetail(ctx, db, "", "feat/refactor/")
+	if detailRefactor == nil {
+		t.Fatal("expected non-nil ETADetail for feat/refactor/")
+	}
+	// avg = (30+60+90)/3 = 60, p50 = 60
+	if detailRefactor.P50Min != 60 {
+		t.Errorf("feat/refactor/ P50Min = %d, want 60", detailRefactor.P50Min)
+	}
+
+	// Query without prefix (all runs combined)
+	detailAll := queryETADetail(ctx, db, "", "")
+	if detailAll == nil {
+		t.Fatal("expected non-nil ETADetail for all runs")
+	}
+	// avg = (5+10+15+30+60+90)/6 = 35
+	if detailAll.AvgMin != 35 {
+		t.Errorf("all runs AvgMin = %d, want 35", detailAll.AvgMin)
+	}
+}
+
+func TestQueryETADetail_NoHistory(t *testing.T) {
+	db := openDashboardQueryTestDB(t)
+	ctx := context.Background()
+
+	detail := queryETADetail(ctx, db, "", "")
+	if detail != nil {
+		t.Errorf("expected nil ETADetail with no history, got %+v", detail)
 	}
 }

@@ -235,10 +235,8 @@ func resolveInitialTab(view string) tui.Tab {
 		return tui.TabEvents
 	case "queue":
 		return tui.TabQueue
-	case "output":
-		return tui.TabOutput
-	case "overview", "mission", "control":
-		return tui.TabOutput
+	case "output", "overview", "mission", "control":
+		return tui.TabOverview
 	default:
 		// "logs", "gate", "findings", and unknown values default to the primary
 		// logs & architecture view.

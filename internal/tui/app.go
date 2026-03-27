@@ -26,17 +26,19 @@ import (
 type Tab int
 
 const (
-	TabLogs Tab = iota // INTERACTIVE LOGS & ARCHITECTURE VISUALIZATION (default)
-	TabOutput
+	TabLogs     Tab = iota // INTERACTIVE LOGS & ARCHITECTURE VISUALIZATION (default)
+	TabOverview            // was TabOutput
 	TabEvents
 	TabQueue
+	TabChat // NEW
 	TabSessionDrill
 	TabArchives
 	TabCompliance
+	TabConfig // NEW
 	tabCount
 )
 
-var tabLabels = [tabCount]string{"logs & arch", "output", "events", "queue", "session", "archives", "compliance"}
+var tabLabels = [tabCount]string{"logs & arch", "overview", "events", "queue", "chat", "session", "archives", "compliance", "config"}
 
 // FocusedPane identifies which pane has keyboard focus.
 type FocusedPane int
@@ -96,7 +98,7 @@ type Config struct {
 	WatchMode bool
 	InitialVM adapters.GateViewModel
 	// InitialTab sets the center-pane tab that is active when the TUI starts.
-	// Defaults to TabOutput when zero value.
+	// Defaults to TabLogs when zero value.
 	InitialTab Tab
 	// StateDB is the optional state database handle used for session/archive/compliance views.
 	// When nil, the DB-backed views render a "no data" placeholder.
@@ -105,6 +107,13 @@ type Config struct {
 	DaemonBaseURL string
 	// SettingsDir points at the state directory that holds dashboard-settings.json.
 	SettingsDir string
+}
+
+// ChatUIState encapsulates slash-popup state for the chat tab.
+type ChatUIState struct {
+	SlashPopupActive bool
+	SlashPopupIdx    int
+	SlashPopupFilter string
 }
 
 // Model is the root Bubble Tea model for the Codero TUI.
@@ -124,6 +133,7 @@ type Model struct {
 	sessionDrillPane SessionDrillPane
 	archivesPane     ArchivesPane
 	compliancePane   CompliancePane
+	configPane       ConfigPane
 
 	outputVP    viewport.Model
 	outputLines []string
@@ -137,6 +147,8 @@ type Model struct {
 
 	focused   FocusedPane
 	activeTab Tab
+	prevTab   Tab
+	prevFocus FocusedPane
 	gateVM    adapters.GateViewModel
 	checksVM  adapters.CheckReportViewModel
 
@@ -153,8 +165,7 @@ type Model struct {
 	cliHistoryIdx      int
 	cliSuggestions     []dashboard.ChatSuggestion
 	cliActions         []dashboard.ChatAction
-	chatActive         bool
-	chatPrevFocus      FocusedPane
+	chatState          ChatUIState
 	chatConversationID string
 
 	lastUpdated time.Time
@@ -206,6 +217,7 @@ func New(cfg Config) Model {
 		sessionDrillPane: NewSessionDrillPane(theme),
 		archivesPane:     NewArchivesPane(theme),
 		compliancePane:   NewCompliancePane(theme),
+		configPane:       NewConfigPane(theme),
 		gateVM:           cfg.InitialVM,
 		paletteInput:     palette,
 		searchInput:      search,
@@ -223,6 +235,7 @@ func New(cfg Config) Model {
 		m.checksVM = vm
 		m.checksPane.SetVM(vm)
 		m.pipelinePane.SetVM(vm)
+		m.gatePane.SetChecksVM(vm)
 	}
 	return m
 }
@@ -299,6 +312,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.checksVM = msg.vm
 		m.checksPane.SetVM(msg.vm)
 		m.pipelinePane.SetVM(msg.vm)
+		m.gatePane.SetChecksVM(msg.vm)
 		m.outputLines = nil
 
 	case activeSessionsRefreshMsg:
@@ -405,6 +419,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 	m.compliancePane, cmd = m.compliancePane.Update(msg)
 	cmds = append(cmds, cmd)
+	m.configPane, cmd = m.configPane.Update(msg)
+	cmds = append(cmds, cmd)
 
 	if m.outputReady {
 		m.outputVP, cmd = m.outputVP.Update(msg)
@@ -416,20 +432,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
+	// Quit is always available, even in chat/popup.
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
 
-	case m.chatActive:
-		return m.handleChatKey(msg)
+	case m.chatState.SlashPopupActive:
+		return m.handleSlashPopupKey(msg)
+	case m.activeTab == TabChat:
+		return m.handleChatTabKey(msg)
 
 	case key.Matches(msg, m.keys.Chat):
-		m.chatActive = true
-		m.chatPrevFocus = m.focused
+		m.prevTab = m.activeTab
+		m.prevFocus = m.focused
+		m.activeTab = TabChat
+		m.focused = PaneCenter
 		m.cliInput.Focus()
 		return m, nil
 
 	case key.Matches(msg, m.keys.Overview):
-		m.activeTab = TabOutput
+		m.activeTab = TabOverview
 		m.focused = PaneCenter
 		return m, nil
 
@@ -452,6 +473,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.focused = PaneCenter
 		return m, nil
 
+	case key.Matches(msg, m.keys.Config):
+		m.prevTab = m.activeTab
+		m.prevFocus = m.focused
+		m.activeTab = TabConfig
+		m.focused = PaneCenter
+		return m, nil
+
 	case key.Matches(msg, m.keys.NextPane):
 		m.focused = FocusedPane((int(m.focused) + 1) % paneCount)
 
@@ -459,15 +487,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.focused = FocusedPane((int(m.focused) - 1 + paneCount) % paneCount)
 
 	case msg.String() == "esc" && m.activeTab == TabSessionDrill:
-		m.activeTab = TabOutput
+		m.activeTab = TabOverview
 		m.focused = PaneCenter
 		return m, nil
 
-	case m.activeTab == TabOutput && m.focused == PaneCenter && key.Matches(msg, m.keys.Up):
+	case m.activeTab == TabOverview && m.focused == PaneCenter && key.Matches(msg, m.keys.Up):
 		m.moveOverviewSelection(-1)
 		return m, nil
 
-	case m.activeTab == TabOutput && m.focused == PaneCenter && key.Matches(msg, m.keys.Down):
+	case m.activeTab == TabOverview && m.focused == PaneCenter && key.Matches(msg, m.keys.Down):
 		m.moveOverviewSelection(1)
 		return m, nil
 
@@ -479,6 +507,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.loadLiveShellCmds()
 
 	case key.Matches(msg, m.keys.Retry):
+		if m.activeTab == TabConfig {
+			m.configPane.Refresh()
+			return m, nil
+		}
 		if m.gateVM.IsFinal {
 			return m, retryGateCmd(m.cfg.RepoPath)
 		}
@@ -487,7 +519,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, openLogsCmd(m.cfg.RepoPath)
 	}
 
-	return m.handleTerminalKey(msg)
+	if m.activeTab == TabChat {
+		return m.handleTerminalKey(msg)
+	}
+	return m, nil
 }
 
 func (m Model) handleTerminalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -584,23 +619,6 @@ func (m Model) handleTerminalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, teaCmd
 }
 
-func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		m.chatActive = false
-		m.focused = m.chatPrevFocus
-		m.cliInput.SetValue("")
-		m.cliHistoryIdx = -1
-		return m, nil
-	case "enter":
-		return m.handleTerminalKey(msg)
-	}
-
-	var teaCmd tea.Cmd
-	m.cliInput, teaCmd = m.cliInput.Update(msg)
-	return m, teaCmd
-}
-
 func (m *Model) applyChatStreamingDelta(delta string) {
 	if len(m.cliMessages) == 0 {
 		m.cliMessages = append(m.cliMessages, terminalMessage{Role: "assistant", Meta: "streaming", Content: delta})
@@ -647,8 +665,20 @@ func (m Model) chatContextTab() string {
 		return "events"
 	case TabQueue:
 		return "queue"
-	case TabOutput:
+	case TabOverview:
 		return "overview"
+	case TabChat:
+		// Use the originating tab's scope so chat requests retain context.
+		switch m.prevTab {
+		case TabEvents:
+			return "events"
+		case TabQueue:
+			return "queue"
+		case TabOverview:
+			return "overview"
+		default:
+			return "all"
+		}
 	default:
 		return "review"
 	}
@@ -658,9 +688,6 @@ func (m Model) View() string {
 	if m.layout.TotalW == 0 {
 		return "initializing…\n"
 	}
-	if m.chatActive {
-		return m.renderChatPane()
-	}
 
 	top := m.renderTopBar()
 	left := m.renderLeft()
@@ -668,30 +695,191 @@ func (m Model) View() string {
 	pipeline := m.renderPipeline()
 	right := m.renderRight()
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, center, pipeline, right)
-	bottom := renderTerminalCLI(m)
+	bottom := renderStatusBar(m)
 	return lipgloss.JoinVertical(lipgloss.Left, top, body, bottom)
+}
+
+// fitToWidth joins alwaysShow segments unconditionally, then appends
+// optionalSegments from left to right, dropping trailing ones if the
+// total rendered width would exceed width. If even alwaysShow exceeds
+// width, the result is truncated to fit.
+func fitToWidth(alwaysShow, optionalSegments []string, width int) string {
+	all := append(append([]string{}, alwaysShow...), optionalSegments...)
+	for len(all) > len(alwaysShow) {
+		joined := strings.Join(all, "")
+		if lipgloss.Width(joined) <= width {
+			return joined
+		}
+		all = all[:len(all)-1]
+	}
+	joined := strings.Join(alwaysShow, "")
+	if lipgloss.Width(joined) > width {
+		if width <= 0 {
+			return ""
+		}
+		// Truncate by runes to fit within width columns.
+		runes := []rune(joined)
+		for len(runes) > 0 && lipgloss.Width(string(runes)) > width {
+			runes = runes[:len(runes)-1]
+		}
+		return string(runes)
+	}
+	return joined
+}
+
+// topBarPRNumber returns the first PR number associated with the configured
+// repo/branch from the active sessions list, or 0 if none is found.
+func (m Model) topBarPRNumber() int {
+	for _, s := range m.activeSessions {
+		if s.PRNumber > 0 && s.Repo == m.cfg.Repo && s.Branch == m.cfg.Branch {
+			return s.PRNumber
+		}
+	}
+	return 0
+}
+
+// topBarSeverityCounts returns (critical, high) counts derived from the
+// checksVM bucket logic: critical = failing+required, high = failing+!required.
+func (m Model) topBarSeverityCounts() (critical, high int) {
+	for _, c := range m.checksVM.Checks {
+		if c.DisplayState == "failing" {
+			if c.Required {
+				critical++
+			} else {
+				high++
+			}
+		}
+	}
+	return critical, high
+}
+
+// topBarMergeStatusPill returns a colored pill string for the current merge
+// status, following the same priority as mergeStatusLabel.
+func (m Model) topBarMergeStatusPill() string {
+	failBg := lipgloss.Color("#3D1214")
+	failFg := lipgloss.Color("#F85149")
+	warnBg := lipgloss.Color("#3D2508")
+	warnFg := lipgloss.Color("#D29922")
+	passBg := lipgloss.Color("#0D2B0D")
+	passFg := lipgloss.Color("#3FB950")
+	mutedFg := lipgloss.Color("#7D8590")
+
+	pill := func(bg lipgloss.Color, fg lipgloss.Color, label string) string {
+		return lipgloss.NewStyle().
+			Background(bg).
+			Foreground(fg).
+			Bold(true).
+			Padding(0, 1).
+			Render(label)
+	}
+
+	switch {
+	case len(m.blockReasons) > 0:
+		return pill(failBg, failFg, "MERGE BLOCKED")
+	case m.checksVM.Summary.Failed > 0:
+		return pill(warnBg, warnFg, "CHECKS FAILING")
+	case m.branchRecord != nil && m.branchRecord.State == state.StateMergeReady:
+		return pill(passBg, passFg, "MERGE READY")
+	default:
+		return lipgloss.NewStyle().Foreground(mutedFg).Render("PENDING")
+	}
 }
 
 func (m Model) renderTopBar() string {
 	l := m.layout
-	title := m.theme.Title.Render(" COMMAND TERMINAL — CODERO")
+	t := m.theme
+
 	dots := lipgloss.JoinHorizontal(
 		lipgloss.Left,
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5F56")).Render("●"),
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#FFBD2E")).Render("●"),
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#27C93F")).Render("●"),
 	)
-
+	title := t.Title.Render(" COMMAND TERMINAL — CODERO")
 	currentTime := time.Now().Format("15:04:05")
-	right := m.theme.Muted.Render(currentTime + " ")
+	timeStr := t.Muted.Render(" " + currentTime + " ")
 
-	spacerW := l.TotalW - lipgloss.Width(dots) - lipgloss.Width(title) - lipgloss.Width(right) - 2
-	if spacerW < 0 {
-		spacerW = 0
+	// Repo/branch context label
+	repoBranch := ""
+	if m.cfg.Repo != "" || m.cfg.Branch != "" {
+		rb := m.cfg.Repo
+		if m.cfg.Branch != "" {
+			if rb != "" {
+				rb += ":"
+			}
+			rb += m.cfg.Branch
+		}
+		repoBranch = rb
 	}
-	spacer := strings.Repeat(" ", spacerW)
 
-	bar := lipgloss.JoinHorizontal(lipgloss.Left, " ", dots, title, spacer, right)
+	// Optional segment: task ID
+	taskID := os.Getenv("CODERO_TASK_ID")
+	var segTaskID string
+	if taskID != "" {
+		segTaskID = t.Accent.Render(" · " + taskID)
+	}
+
+	// Optional segment: repo:branch
+	var segRepoBranch string
+	if repoBranch != "" {
+		segRepoBranch = t.Muted.Render(" · " + repoBranch)
+	}
+
+	// Optional segment: PR number
+	var segPR string
+	if pr := m.topBarPRNumber(); pr > 0 {
+		segPR = t.Accent.Render(fmt.Sprintf(" · PR #%d", pr))
+	}
+
+	// Optional segment: merge status pill
+	segMerge := " · " + m.topBarMergeStatusPill()
+
+	// Optional segment: severity counts
+	critical, high := m.topBarSeverityCounts()
+	var segSeverity string
+	if critical > 0 || high > 0 {
+		parts := make([]string, 0, 2)
+		if critical > 0 {
+			parts = append(parts, " "+t.SeverityPillStyle("critical").Render(fmt.Sprintf("● %d Critical", critical)))
+		}
+		if high > 0 {
+			parts = append(parts, " "+t.SeverityPillStyle("high").Render(fmt.Sprintf("● %d High", high)))
+		}
+		segSeverity = strings.Join(parts, "")
+	}
+
+	// Build left+center content with graceful degradation.
+	// Always shown: dots + title; optional segments dropped right-to-left.
+	alwaysLeft := []string{" ", dots, title}
+	optSegs := make([]string, 0, 5)
+	if segRepoBranch != "" {
+		optSegs = append(optSegs, segRepoBranch)
+	}
+	if segTaskID != "" {
+		optSegs = append(optSegs, segTaskID)
+	}
+	if segPR != "" {
+		optSegs = append(optSegs, segPR)
+	}
+	optSegs = append(optSegs, segMerge)
+	if segSeverity != "" {
+		optSegs = append(optSegs, segSeverity)
+	}
+
+	// Reserve space for the right-aligned time string plus a small margin.
+	availableW := l.TotalW - lipgloss.Width(timeStr) - 1
+	if availableW < 0 {
+		availableW = 0
+	}
+	leftContent := fitToWidth(alwaysLeft, optSegs, availableW)
+
+	// Pad between left content and time to fill the total width.
+	padW := l.TotalW - lipgloss.Width(leftContent) - lipgloss.Width(timeStr)
+	if padW < 0 {
+		padW = 0
+	}
+	bar := leftContent + strings.Repeat(" ", padW) + timeStr
+
 	return lipgloss.NewStyle().
 		Width(l.TotalW).
 		Background(lipgloss.Color("#1E1F2E")).
@@ -719,7 +907,7 @@ func (m Model) renderCenter() string {
 
 	var content string
 	switch m.activeTab {
-	case TabOutput:
+	case TabOverview:
 		m.refreshOverviewViewport()
 		content = m.outputVP.View()
 	case TabSessionDrill:
@@ -731,6 +919,11 @@ func (m Model) renderCenter() string {
 	case TabCompliance:
 		m.compliancePane.SetSize(innerW, innerH)
 		content = m.compliancePane.View()
+	case TabConfig:
+		m.configPane.SetSize(innerW, innerH)
+		content = m.configPane.View()
+	case TabChat:
+		content = m.renderChatTab(innerW, innerH)
 	default:
 		m.logsArchPane.SetSize(innerW, innerH)
 		content = m.logsArchPane.View()
@@ -773,13 +966,14 @@ func (m *Model) applyLayout() {
 	m.logsArchPane.SetSize(l.CenterW-2, l.ContentH-2)
 	m.pipelinePane.SetSize(l.PipelineW-2, l.ContentH-2)
 	m.paletteInput.Width = maxInt(24, l.TotalW-48)
-	m.cliInput.Width = maxInt(24, l.TotalW-48)
+	m.cliInput.Width = maxInt(24, l.CenterW-8)
 	m.queuePane.SetSize(l.CenterW-2, l.ContentH-5)
 	m.eventsPane.SetSize(l.CenterW-2, l.ContentH-5)
 	m.checksPane.SetSize(l.RightW-2, l.ContentH-2)
 	m.sessionDrillPane.SetSize(l.CenterW-2, l.ContentH-5)
 	m.archivesPane.SetSize(l.CenterW-2, l.ContentH-5)
 	m.compliancePane.SetSize(l.CenterW-2, l.ContentH-5)
+	m.configPane.SetSize(l.CenterW-2, l.ContentH-5)
 	if !m.outputReady {
 		m.outputVP = viewport.New(l.CenterW-2, l.ContentH-5)
 		m.outputReady = true

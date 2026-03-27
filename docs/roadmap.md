@@ -365,7 +365,7 @@ Evidence: pilot rerun batch 2 evidence directory (local CI run artifacts, not tr
 ---
 
 ### v1.2.4 — UI Modernization + Feedback Loop Hardening
-**Status:** In progress
+**Status:** Completed
 **Scope:** TUI/dashboard visual refresh + infra/docs/log/session clarity; feedback-loop hardening shipped
 **Spec:** `docs/roadmaps/v1.2.4-backlog.md`
 
@@ -373,33 +373,19 @@ Key items:
 - ✅ COD-NEW-A: Post-push CI watcher (`ci-watch.sh`) — completed (PR #60)
 - ✅ COD-NEW-B: Pre-push test gate (`pre-push` hook) — completed (PR #60)
 - ✅ COD-NEW-C: Autonomous finish-loop (`codero-finish.sh`) — completed (PR #62)
-- COD-055: Finish-loop stabilization follow-up (`codero-finish.sh`) — in progress (PR #63 open)
-- UI-001: TUI layout and visual design modernization (Bubble Tea)
-- UI-002: Dashboard UI component refresh
-- UI-003: Current activity session panel for the GUI
-- INFRA-001: Clarify `/gate` vs `/gate-check` endpoint naming in docs
-- LOG-001: Define structured heartbeat/log states for the full pre-commit step matrix via `gate-checks` (in progress — COD-057)
-- DOC-001: Gate-check activation guide
+- ✅ COD-055: Finish-loop stabilization follow-up (`codero-finish.sh`) — completed (PR #63)
+- ✅ COD-059: Dashboard live fields — security score, coverage, ETA, PR number, owner agent (PR #67)
+- ✅ COD-060: OwnerAgent population at session start (PR #71; closeout follow-up PR #109)
+- ✅ COD-061: Coverage upload integration (PR #72)
+- ✅ UI-001: TUI layout and visual design modernization + live shell follow-up (PR #66, PR #108)
+- ✅ UI-002: Dashboard UI component refresh (PR #78)
+- ✅ UI-003: Current activity session panel for the GUI (PR #79)
+- ✅ LOG-001: Structured heartbeat/log states for the full pre-commit step matrix (PR #65)
+- ✅ INFRA-001: Clarify `/gate` vs `/gate-check` endpoint naming in docs
+- ✅ DOC-001: Gate-check activation guide
+- ✅ COD-062: ETA calibration and per-repo history
 
-**Active implementation direction (2026-03-20):**
-- TUI is the current UI focus for v1.2.4; dashboard follow-up should preserve parity but is not the lead surface for the next slice.
-- Preserve the current Codero strengths: review assistant shell, findings/routing pane, pipeline pane, and event stream/architecture pane.
-- Rework the TUI shell around:
-  - a compact operator top strip
-  - shared panel/metric primitives
-  - a true mode-aware bottom action bar
-  - stronger selected-row and active-pane treatment
-  - centered help/detail overlays where a persistent pane would add clutter
-- Current UI-001 gap audit should drive the first implementation slice:
-  - fix SSE / `DeliveryEvent` flow and log rendering first
-  - add the persistent merge-status footer from `BlockReason`
-  - bind live agent row state and findings detail data
-  - add the missing findings/history/detail affordances before extra polish
-- Borrow implementation ideas from existing terminal UIs rather than inventing new interaction patterns:
-  - `gh-dash`: Bubble Tea workflow ergonomics, selected-row treatment, action hints
-  - `campfire`: realtime event/log presentation
-  - `kue`: overview/detail/modals and contextual help flow
-  - `lazygcs`: search/preview navigation patterns
-  - `k9s` / `lazydocker`: dense operator framing and split-pane discipline
-  - `Helius`: visual density, metric cards, and status/command bar ideas only; do not copy code
-- Dashboard follow-up should align terminology and hierarchy with the final TUI shell and may borrow density/quick-action ideas from Cacheflow dashboard polish work.
+**Current implementation direction:**
+- The original UI-001 gap audit is closed and kept above as historical context only.
+- v1.2.4 is complete and retained here as a historical release record.
+- Preserve the completed UI/Dashboard/TUI slices as reference material for future work, but do not treat them as open backlog.

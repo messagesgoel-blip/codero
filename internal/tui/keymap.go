@@ -34,6 +34,7 @@ type KeyMap struct {
 	Session  key.Binding
 	Pipeline key.Binding
 	Archives key.Binding
+	Config   key.Binding
 
 	Search  key.Binding
 	Palette key.Binding
@@ -74,6 +75,7 @@ func DefaultKeyMap() KeyMap {
 		Session:  key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "session drill")),
 		Pipeline: key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "pipeline")),
 		Archives: key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "archives")),
+		Config:   key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "config")),
 
 		Search:  key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
 		Palette: key.NewBinding(key.WithKeys("ctrl+p", ":"), key.WithHelp("C-p/:", "command palette")),
@@ -85,5 +87,5 @@ func DefaultKeyMap() KeyMap {
 
 // ShortHelp returns the minimal key hints for the bottom bar.
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Overview, k.Session, k.Pipeline, k.Archives, k.NextPane, k.Retry, k.Logs, k.Chat, k.Palette, k.Quit}
+	return []key.Binding{k.Overview, k.Session, k.Pipeline, k.Archives, k.Config, k.NextPane, k.Retry, k.Logs, k.Chat, k.Palette, k.Quit}
 }

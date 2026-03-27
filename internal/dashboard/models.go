@@ -326,6 +326,16 @@ type SecurityScoreStats struct {
 	Total    int     `json:"total"`
 }
 
+// ETADetail holds calibrated ETA estimates derived from review_runs history.
+// Percentiles are computed from completed run durations; eta_min = p50 - elapsed.
+type ETADetail struct {
+	AvgMin     int `json:"avg_min"`     // Simple mean of completed run durations
+	P50Min     int `json:"p50_min"`     // Median (50th percentile) duration
+	P90Min     int `json:"p90_min"`     // 90th percentile duration
+	ElapsedMin int `json:"elapsed_min"` // Minutes elapsed for current running run
+	ETAMin     int `json:"eta_min"`     // Remaining time estimate (p50 - elapsed)
+}
+
 // DashboardHealth is the response for GET /api/v1/dashboard/health.
 // It reports DB connectivity, per-feed freshness, live agent count, and
 // best-effort metrics derived from local files (security score, coverage, ETA).
@@ -338,7 +348,8 @@ type DashboardHealth struct {
 	ReconciliationStatus string              `json:"reconciliation_status"`
 	SecurityScore        *SecurityScoreStats `json:"security_score,omitempty"`
 	CoveragePct          *float64            `json:"coverage_pct,omitempty"`
-	ETAMin               *int                `json:"eta_min,omitempty"`
+	ETAMin               *int                `json:"eta_min,omitempty"`    // Backwards compat; mirrors ETADetail.ETAMin
+	ETADetail            *ETADetail          `json:"eta_detail,omitempty"` // Calibrated ETA with percentiles
 	GeneratedAt          time.Time           `json:"generated_at"`
 	SchemaVersion        string              `json:"schema_version"`
 }

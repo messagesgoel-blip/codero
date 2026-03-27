@@ -27,6 +27,7 @@ const authAgentCount = 2
 // GatePane renders the left pane: agent progress rows + relay orchestration.
 type GatePane struct {
 	vm       adapters.GateViewModel
+	checksVM adapters.CheckReportViewModel
 	sessions []dashboard.ActiveSession
 	selected int
 	theme    Theme
@@ -161,11 +162,27 @@ func (p GatePane) View() string {
 		}
 	}
 
-	// ── relay orchestration section (bottom of left pane) ─────────────────────
-	// Only render if there's enough vertical space remaining.
-	remaining := p.height - len(lines)
+	// ── gate mini-panel (bottom of left pane) ────────────────────────────────
+	miniPanel := p.renderGateMiniPanel()
+	miniLines := 0
+	if miniPanel != "" {
+		miniLines = strings.Count(miniPanel, "\n") + 1
+	}
+
+	if miniLines > p.height {
+		miniLines = p.height
+	}
+
+	// ── relay orchestration section (above mini-panel) ────────────────────────
+	// Only render if there's enough vertical space remaining after reserving
+	// space for the mini-panel.
+	relayReserve := miniLines
+	if miniLines == 0 {
+		relayReserve = 0
+	}
+	remaining := p.height - len(lines) - relayReserve
 	if remaining >= 6 {
-		for len(lines) < p.height-6 {
+		for len(lines) < p.height-6-relayReserve {
 			lines = append(lines, "")
 		}
 		lines = append(lines, p.theme.PaneHeader.Width(w).Render("RELAY ORCHESTRATION"))
@@ -178,6 +195,30 @@ func (p GatePane) View() string {
 		}
 	}
 
+	// Fill to leave exactly miniLines rows at the bottom for the mini-panel.
+	if miniPanel != "" {
+		targetH := p.height - miniLines
+		if targetH < 0 {
+			targetH = 0
+		}
+		for len(lines) < targetH {
+			lines = append(lines, "")
+		}
+		if len(lines) > targetH {
+			lines = lines[:targetH]
+		}
+		// Append mini-panel lines, truncating to available space.
+		mlSlice := strings.Split(miniPanel, "\n")
+		allowed := p.height - len(lines)
+		if allowed < 0 {
+			allowed = 0
+		}
+		if len(mlSlice) > allowed {
+			mlSlice = mlSlice[:allowed]
+		}
+		lines = append(lines, mlSlice...)
+	}
+
 	for len(lines) < p.height {
 		lines = append(lines, "")
 	}
@@ -185,8 +226,128 @@ func (p GatePane) View() string {
 	return lipgloss.NewStyle().Width(p.width).Render(content)
 }
 
-func (p *GatePane) SetSize(w, h int)                { p.width = w; p.height = h }
-func (p *GatePane) SetVM(vm adapters.GateViewModel) { p.vm = vm }
+func (p *GatePane) SetSize(w, h int)                             { p.width = w; p.height = h }
+func (p *GatePane) SetVM(vm adapters.GateViewModel)              { p.vm = vm }
+func (p *GatePane) SetChecksVM(vm adapters.CheckReportViewModel) { p.checksVM = vm }
+
+// renderGateMiniPanel renders the "LAST GATE RUN" mini-panel showing per-check
+// status icons, durations, and a total summary line. Returns an empty string
+// when checksVM has no checks.
+func (p GatePane) renderGateMiniPanel() string {
+	if len(p.checksVM.Checks) == 0 {
+		return ""
+	}
+
+	w := p.width - 2
+	if w < 10 {
+		w = 10
+	}
+
+	// Determine border color: red if any check has failed, otherwise muted.
+	anyFail := false
+	for _, c := range p.checksVM.Checks {
+		if c.DisplayState == "failing" {
+			anyFail = true
+			break
+		}
+	}
+
+	borderColor := lipgloss.Color("#21262D") // default border
+	if anyFail {
+		borderColor = lipgloss.Color("#F85149") // theme.Fail foreground
+	}
+
+	innerW := w - 4 // account for border chars + padding
+	if innerW < 4 {
+		innerW = 4
+	}
+
+	var sb strings.Builder
+
+	// Header
+	titleLine := "─ LAST GATE RUN "
+	rightPad := w - 2 - lipgloss.Width(titleLine)
+	if rightPad < 0 {
+		rightPad = 0
+	}
+	borderFG := lipgloss.NewStyle().Foreground(borderColor)
+	sb.WriteString(borderFG.Render("┌"+titleLine+strings.Repeat("─", rightPad)+"┐") + "\n")
+
+	// Per-check rows
+	var totalMS int64
+	passCount := 0
+	for _, c := range p.checksVM.Checks {
+		var icon string
+		var iconStyle lipgloss.Style
+		switch c.DisplayState {
+		case "passing":
+			icon = "✓"
+			iconStyle = p.theme.Pass
+			passCount++
+		case "failing":
+			icon = "✗"
+			iconStyle = p.theme.Fail
+		default:
+			icon = "○"
+			iconStyle = p.theme.Muted
+		}
+		totalMS += c.DurMS
+
+		dur := ""
+		if c.DurMS > 0 {
+			dur = adapters.FormatDurationMS(c.DurMS)
+		}
+
+		nameW := innerW - lipgloss.Width(dur) - 3 // 3 = space + icon + space
+		if nameW < 1 {
+			// Not enough room for name + duration — drop duration.
+			dur = ""
+			nameW = maxInt(1, innerW-3)
+		}
+		name := truncStr(c.Name, nameW)
+		if name == "" {
+			name = truncStr(c.ID, nameW)
+		}
+
+		leftPart := fmt.Sprintf(" %-*s ", nameW, name)
+		row := borderFG.Render("│") +
+			" " + iconStyle.Render(icon) + leftPart +
+			p.theme.Muted.Render(dur) +
+			" " + borderFG.Render("│")
+		sb.WriteString(row + "\n")
+	}
+
+	// Divider
+	sb.WriteString(borderFG.Render("│"+strings.Repeat("─", w-2)+"│") + "\n")
+
+	// Summary line
+	totalStr := adapters.FormatDurationMS(totalMS)
+	if totalStr == "" {
+		totalStr = "—"
+	}
+	summary := fmt.Sprintf(" total: %-6s  %d/%d pass", totalStr, passCount, len(p.checksVM.Checks))
+	maxSummaryW := w - 3 // borders + 1 trailing space
+	if maxSummaryW < 1 {
+		maxSummaryW = 1
+	}
+	if lipgloss.Width(summary) > maxSummaryW {
+		summary = fmt.Sprintf(" %d/%d pass", passCount, len(p.checksVM.Checks))
+	}
+	if lipgloss.Width(summary) > maxSummaryW {
+		summary = summary[:maxSummaryW]
+	}
+	summaryPad := w - 2 - lipgloss.Width(summary) - 1
+	if summaryPad < 0 {
+		summaryPad = 0
+	}
+	summaryLine := borderFG.Render("│") + p.theme.Base.Render(summary) + strings.Repeat(" ", summaryPad) + borderFG.Render("│")
+	sb.WriteString(summaryLine + "\n")
+
+	// Footer
+	sb.WriteString(borderFG.Render("└" + strings.Repeat("─", w-2) + "┘"))
+
+	return sb.String()
+}
 
 func (p GatePane) activityStateStyle(activity string) lipgloss.Style {
 	switch activity {

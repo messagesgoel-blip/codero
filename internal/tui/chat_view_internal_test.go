@@ -80,10 +80,10 @@ func TestDashboardChatStreamCmd_ParsesDeltaAndDone(t *testing.T) {
 	}
 }
 
-func TestRenderChatPane_ShowsThreadAndInput(t *testing.T) {
+func TestRenderChatTab_ShowsThreadAndInput(t *testing.T) {
 	m := New(Config{Theme: DefaultTheme})
 	m.layout = Compute(100, 24)
-	m.chatActive = true
+	m.activeTab = TabChat
 	m.chatConversationID = "conv-7"
 	m.cliBusy = true
 	m.cliInput.SetValue("How many active sessions?")
@@ -94,17 +94,15 @@ func TestRenderChatPane_ShowsThreadAndInput(t *testing.T) {
 		{Role: "assistant", Meta: "streaming", Content: "Working on it"},
 	}
 
-	view := m.renderChatPane()
+	view := m.renderChatTab(100, 24)
 	for _, want := range []string{
-		"REVIEW CHAT",
-		"conversation conv-7",
-		"streaming",
+		"Codero Chat",
 		"status",
 		"How many active sessions?",
 		"Working on it",
 	} {
 		if !strings.Contains(view, want) {
-			t.Fatalf("rendered chat pane missing %q\n%s", want, view)
+			t.Fatalf("rendered chat tab missing %q\n%s", want, view)
 		}
 	}
 }

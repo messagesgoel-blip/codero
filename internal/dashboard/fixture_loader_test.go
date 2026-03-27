@@ -174,6 +174,51 @@ func TestSeedFixtureActivity_SeqIncrement(t *testing.T) {
 	}
 }
 
+func TestLoadFixtureDir_WithRuns(t *testing.T) {
+	db := openTestDB(t)
+	dir := t.TempDir()
+	runs := []dashboard.FixtureRunEntry{
+		{ID: "run-1", Repo: "acme/api", Branch: "feat/auth", Provider: "litellm", Status: "completed", StartedAt: "2026-03-26T10:00:00Z", FinishedAt: "2026-03-26T10:15:00Z"},
+		{ID: "run-2", Repo: "acme/api", Branch: "feat/db", Provider: "coderabbit", Status: "failed", StartedAt: "2026-03-26T11:00:00Z", FinishedAt: "2026-03-26T11:10:00Z"},
+	}
+	writeJSON(t, filepath.Join(dir, "runs.json"), runs)
+
+	if _, err := dashboard.LoadFixtureDir(context.Background(), db, dir); err != nil {
+		t.Fatalf("LoadFixtureDir: %v", err)
+	}
+
+	// Verify via the handler that overview returns runs_today > 0.
+	h := dashboard.NewHandler(db, dashboard.NewSettingsStore(t.TempDir()))
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/overview", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d — body: %s", rec.Code, rec.Body.String())
+	}
+	var resp dashboard.OverviewResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.RunsToday != 2 {
+		t.Errorf("want 2 runs_today, got %d", resp.RunsToday)
+	}
+	// Pass rate: 1 completed out of 2 = 50%
+	if resp.PassRate < 49.9 || resp.PassRate > 50.1 {
+		t.Errorf("want pass_rate ~50.0, got %.2f", resp.PassRate)
+	}
+}
+
+func TestLoadFixtureDir_InvalidRunsMissingID(t *testing.T) {
+	db := openTestDB(t)
+	dir := t.TempDir()
+	runs := []dashboard.FixtureRunEntry{
+		{ID: "", Repo: "acme/api", Branch: "feat/x", Provider: "litellm", Status: "completed", StartedAt: "2026-03-26T10:00:00Z"},
+	}
+	writeJSON(t, filepath.Join(dir, "runs.json"), runs)
+
+	if _, err := dashboard.LoadFixtureDir(context.Background(), db, dir); err == nil {
+		t.Fatal("expected error for missing id, got nil")
+	}
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 func writeJSON(t *testing.T, path string, v any) {

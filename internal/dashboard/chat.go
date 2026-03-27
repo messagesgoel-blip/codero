@@ -87,6 +87,7 @@ type dashboardChatPromptHealth struct {
 	SecurityScore    *SecurityScoreStats              `json:"security_score,omitempty"`
 	CoveragePct      *float64                         `json:"coverage_pct,omitempty"`
 	ETAMin           *int                             `json:"eta_min,omitempty"`
+	ETADetail        *ETADetail                       `json:"eta_detail,omitempty"`
 	GeneratedAt      time.Time                        `json:"generated_at"`
 }
 
@@ -664,6 +665,7 @@ func sanitizeDashboardChatSnapshot(snapshot dashboardChatSnapshot) dashboardChat
 			SecurityScore:    snapshot.Health.SecurityScore,
 			CoveragePct:      snapshot.Health.CoveragePct,
 			ETAMin:           snapshot.Health.ETAMin,
+			ETADetail:        snapshot.Health.ETADetail,
 			GeneratedAt:      snapshot.Health.GeneratedAt,
 		},
 		GeneratedAt: snapshot.GeneratedAt,
