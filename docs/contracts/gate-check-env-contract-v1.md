@@ -66,3 +66,11 @@ Any other value (including empty string) resolves to `false`.
 ## Report Path Precedence
 
 `--report-path` > `CODERO_GATE_CHECK_REPORT_PATH` > `.codero/gate-check/last-report.json`
+
+---
+
+## Optional Check Activation
+
+For a concise operator guide on enabling optional checks (`forbidden-paths`, `lockfile-sync`, `exec-bit-policy`), see:
+
+- **`docs/runbooks/gate-check-activation.md`** — Env vars, examples, and expected output for each optional check

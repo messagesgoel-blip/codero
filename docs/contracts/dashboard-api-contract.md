@@ -207,6 +207,12 @@ resolved `report_path` so the UI can explain the missing data.
 **UI rule:** render the ordered `report.checks[]` list directly; do not infer per-step
 state from freeform log text.
 
+**Not to be confused with `/gate`.** The `/gate` endpoint (observability daemon, port 15080)
+returns AI review gate heartbeat progress for Copilot and LiteLLM polling. This endpoint
+(`/api/v1/dashboard/gate-checks`) returns the canonical local pre-commit check report
+(semgrep, gitleaks, file-size, etc.). See `docs/contracts/gate-heartbeat-contract.md`
+for the AI review gate surface.
+
 ---
 
 ## GET /api/v1/dashboard/active-sessions

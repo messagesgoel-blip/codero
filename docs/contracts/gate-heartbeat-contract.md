@@ -148,3 +148,56 @@ The shared `internal/gate` Go package provides:
 
 Both the CLI (`commit-gate` command) and the dashboard UI (`/gate` endpoint)
 use `gate.RenderBar()` for identical visual output.
+
+---
+
+## Related Surfaces
+
+### `/gate` vs `/api/v1/dashboard/gate-checks`
+
+**NOT to be confused with.** These are two distinct surfaces:
+
+| Aspect | `/gate` (this contract) | `/api/v1/dashboard/gate-checks` |
+|--------|-------------------------|--------------------------------|
+| **Purpose** | AI review gate heartbeat progress | Canonical local gate-check report |
+| **Data source** | `.codero/gate-heartbeat/progress.env` | `.codero/gate-check/last-report.json` |
+| **Checks** | Copilot, LiteLLM (AI providers) | semgrep, gitleaks, file-size, merge-markers, etc. |
+| **Server** | Observability daemon (port 15080) | Dashboard API |
+| **Content-Type** | `text/plain` (KEY: VALUE lines) | `application/json` |
+| **Use case** | Poll AI review gate status during commit | Display local pre-commit check results in UI |
+
+### Example: `/gate` Response
+
+```text
+STATUS: PENDING
+RUN_ID: 20260326-142055-a1b2c3
+ELAPSED_SEC: 12
+POLL_AFTER_SEC: 5
+PROGRESS_BAR: [● copilot:running] [○ litellm:pending]
+CURRENT_GATE: copilot
+COPILOT_STATUS: running
+LITELLM_STATUS: pending
+```
+
+### Example: `/api/v1/dashboard/gate-checks` Response
+
+```json
+{
+  "report_path": ".codero/gate-check/last-report.json",
+  "report": {
+    "summary": {
+      "overall_status": "pass",
+      "passed": 4,
+      "failed": 0,
+      "skipped": 5,
+      "total": 13
+    },
+    "checks": [
+      { "id": "semgrep", "status": "pass", "duration_ms": 234 },
+      { "id": "gitleaks-staged", "status": "pass", "duration_ms": 89 }
+    ]
+  }
+}
+```
+
+See `docs/contracts/gate-check-schema-v1.md` and `docs/contracts/dashboard-api-contract.md` for the local checks contract.

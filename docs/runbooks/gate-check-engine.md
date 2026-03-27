@@ -83,6 +83,8 @@ Set via `--profile` flag or `CODERO_GATES_PROFILE` env var. `fast` is accepted a
 | `config-validation` | config | ✓ | Validates staged `.json` and `.yaml`/`.yml` files |
 | `lockfile-sync` | config | – | Requires `CODERO_ENFORCE_LOCKFILE_SYNC=1`; checks `go.mod`↔`go.sum` and `package.json`↔`package-lock.json` |
 | `exec-bit-policy` | config | – | Requires `CODERO_ENFORCE_EXECUTABLE_POLICY=1`; non-`.sh` files must not have `+x` |
+
+**For activation instructions and examples,** see `docs/runbooks/gate-check-activation.md`.
 | `gofmt` | format | – | Runs `gofmt -l` on staged `.go` files; `disabled` if gofmt missing |
 | `gitleaks-staged` | security | ✓ | Runs `gitleaks protect --staged`; `disabled` if gitleaks missing |
 | `semgrep` | security | – | Runs `semgrep --config auto`; `disabled` if semgrep missing |

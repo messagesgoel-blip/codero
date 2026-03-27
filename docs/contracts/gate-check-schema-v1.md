@@ -123,3 +123,25 @@ Exit code 2 is a distinct class from gate failure. Consumers that distinguish ga
 This schema is the single source of truth for CLI JSON, dashboard `/gate-checks`,
 and TUI adapters. Any future change requires a schema version bump and updated
 contract tests.
+
+---
+
+## Related Surfaces
+
+### `/api/v1/dashboard/gate-checks` vs `/gate`
+
+**NOT to be confused with.** These are two distinct surfaces:
+
+| Aspect | `/api/v1/dashboard/gate-checks` (this contract) | `/gate` |
+|--------|--------------------------------------------------|---------|
+| **Purpose** | Canonical local gate-check report | AI review gate heartbeat progress |
+| **Data source** | `.codero/gate-check/last-report.json` | `.codero/gate-heartbeat/progress.env` |
+| **Checks** | semgrep, gitleaks, file-size, merge-markers, etc. | Copilot, LiteLLM (AI providers) |
+| **Server** | Dashboard API | Observability daemon (port 15080) |
+| **Content-Type** | `application/json` | `text/plain` (KEY: VALUE lines) |
+| **Use case** | Display local pre-commit check results in UI | Poll AI review gate status during commit |
+
+The `/gate` endpoint returns **AI review gate** progress (Copilot → LiteLLM polling).
+This contract defines the **local pre-commit checks** (semgrep, gitleaks, etc.).
+
+See `docs/contracts/gate-heartbeat-contract.md` for the AI review gate heartbeat contract.

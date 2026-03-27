@@ -13,6 +13,11 @@ Status note (2026-03-26 UTC): the `feat/COD-060-owneragent-population` tranche h
 completed MIG-037 through MIG-040 and the cleanup pass. The branch has been
 merged to main; there is no pending migration tranche on this worktree.
 
+Status note (2026-03-26 UTC): INFRA-001 documentation clarification complete. Added
+"Related Surfaces" sections to gate-heartbeat-contract.md, gate-check-schema-v1.md,
+and dashboard-api-contract.md clearly distinguishing `/gate` (AI review heartbeat)
+from `/api/v1/dashboard/gate-checks` (canonical local checks report).
+
 ## Status values
 
 - `planned`

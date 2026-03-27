@@ -1196,7 +1196,11 @@ func queryDashboardHealth(ctx context.Context, db *sql.DB) (DashboardHealth, err
 	}
 	h.SecurityScore = computeSecurityScore(reportPath)
 	h.CoveragePct = parseCoverageFilePath(coveragePath)
-	h.ETAMin = queryETAMinutes(ctx, db, "")
+	etaDetail := queryETADetail(ctx, db, "", "")
+	if etaDetail != nil {
+		h.ETAMin = &etaDetail.ETAMin
+		h.ETADetail = etaDetail
+	}
 
 	return h, nil
 }
@@ -1342,34 +1346,99 @@ func parseCoverageFilePath(path string) *float64 {
 	return &pct
 }
 
-// queryETAMinutes estimates remaining minutes for the active review run in repo.
-// It computes the average completed run duration over the last 7 days, then
-// subtracts the elapsed time of the current running run. Returns nil when there
-// is no historical data.
-func queryETAMinutes(ctx context.Context, db *sql.DB, repo string) *int {
-	var avgMin sql.NullFloat64
-	if err := db.QueryRowContext(ctx, `
-		SELECT ROUND(AVG((julianday(finished_at) - julianday(started_at)) * 1440))
+// queryETADetail estimates remaining minutes for the active review run using
+// calibrated percentile metrics. It computes avg, p50, and p90 from completed
+// run durations over the last 7 days, filtered by repo and/or branch prefix.
+// Returns nil when there is no historical data.
+func queryETADetail(ctx context.Context, db *sql.DB, repo, branchPrefix string) *ETADetail {
+	// Fetch completed run durations in minutes
+	rows, err := db.QueryContext(ctx, `
+		SELECT ROUND((julianday(finished_at) - julianday(started_at)) * 1440)
 		FROM review_runs
 		WHERE status IN ('completed', 'approved') AND finished_at IS NOT NULL
 		  AND started_at >= datetime('now', '-7 days')
-		  AND (? = '' OR repo = ?)`, repo, repo).Scan(&avgMin); err != nil || !avgMin.Valid {
+		  AND (? = '' OR repo = ?)
+		  AND (? = '' OR branch LIKE ? || '%')
+		ORDER BY (julianday(finished_at) - julianday(started_at)) ASC`,
+		repo, repo, branchPrefix, branchPrefix)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var durations []float64
+	for rows.Next() {
+		var d sql.NullFloat64
+		if err := rows.Scan(&d); err == nil && d.Valid {
+			durations = append(durations, d.Float64)
+		}
+	}
+	if len(durations) == 0 {
 		return nil
 	}
 
-	var elapsedMin sql.NullFloat64
+	// Compute avg
+	var sum float64
+	for _, d := range durations {
+		sum += d
+	}
+	avg := sum / float64(len(durations))
+
+	// Compute percentiles (durations already sorted ASC from query)
+	p50 := percentile(durations, 0.50)
+	p90 := percentile(durations, 0.90)
+
+	// Find elapsed time for current running run
+	var elapsedMin float64
 	_ = db.QueryRowContext(ctx, `
 		SELECT ROUND((julianday('now') - julianday(started_at)) * 1440)
 		FROM review_runs
-		WHERE status = 'running' AND (? = '' OR repo = ?)
-		ORDER BY started_at DESC LIMIT 1`, repo, repo).Scan(&elapsedMin)
+		WHERE status = 'running'
+		  AND (? = '' OR repo = ?)
+		  AND (? = '' OR branch LIKE ? || '%')
+		ORDER BY started_at DESC LIMIT 1`, repo, repo, branchPrefix, branchPrefix).Scan(&elapsedMin)
 
-	eta := int(avgMin.Float64)
-	if elapsedMin.Valid {
-		eta -= int(elapsedMin.Float64)
-	}
+	eta := p50 - elapsedMin
 	if eta < 0 {
 		eta = 0
 	}
-	return &eta
+
+	return &ETADetail{
+		AvgMin:     int(avg),
+		P50Min:     int(p50),
+		P90Min:     int(p90),
+		ElapsedMin: int(elapsedMin),
+		ETAMin:     int(eta),
+	}
+}
+
+// percentile returns the value at the given percentile from a sorted slice.
+// Uses linear interpolation between adjacent values.
+func percentile(sorted []float64, p float64) float64 {
+	n := len(sorted)
+	if n == 0 {
+		return 0
+	}
+	if n == 1 {
+		return sorted[0]
+	}
+	// Index for percentile (0-indexed)
+	idx := p * float64(n-1)
+	lower := int(idx)
+	if lower >= n-1 {
+		return sorted[n-1]
+	}
+	upper := lower + 1
+	frac := idx - float64(lower)
+	return sorted[lower] + frac*(sorted[upper]-sorted[lower])
+}
+
+// queryETAMinutes is retained for backwards compatibility.
+// It delegates to queryETADetail and returns only the eta_min value.
+func queryETAMinutes(ctx context.Context, db *sql.DB, repo string) *int {
+	detail := queryETADetail(ctx, db, repo, "")
+	if detail == nil {
+		return nil
+	}
+	return &detail.ETAMin
 }
