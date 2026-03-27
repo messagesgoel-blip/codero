@@ -299,8 +299,10 @@ func (p GatePane) renderGateMiniPanel() string {
 		}
 
 		nameW := innerW - lipgloss.Width(dur) - 3 // 3 = space + icon + space
-		if nameW < 4 {
-			nameW = 4
+		if nameW < 1 {
+			// Not enough room for name + duration — drop duration.
+			dur = ""
+			nameW = maxInt(1, innerW-3)
 		}
 		name := truncStr(c.Name, nameW)
 		if name == "" {
@@ -324,6 +326,16 @@ func (p GatePane) renderGateMiniPanel() string {
 		totalStr = "—"
 	}
 	summary := fmt.Sprintf(" total: %-6s  %d/%d pass", totalStr, passCount, len(p.checksVM.Checks))
+	maxSummaryW := w - 3 // borders + 1 trailing space
+	if maxSummaryW < 1 {
+		maxSummaryW = 1
+	}
+	if lipgloss.Width(summary) > maxSummaryW {
+		summary = fmt.Sprintf(" %d/%d pass", passCount, len(p.checksVM.Checks))
+	}
+	if lipgloss.Width(summary) > maxSummaryW {
+		summary = summary[:maxSummaryW]
+	}
 	summaryPad := w - 2 - lipgloss.Width(summary) - 1
 	if summaryPad < 0 {
 		summaryPad = 0

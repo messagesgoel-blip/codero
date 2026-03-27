@@ -701,7 +701,8 @@ func (m Model) View() string {
 
 // fitToWidth joins alwaysShow segments unconditionally, then appends
 // optionalSegments from left to right, dropping trailing ones if the
-// total rendered width would exceed width.
+// total rendered width would exceed width. If even alwaysShow exceeds
+// width, the result is truncated to fit.
 func fitToWidth(alwaysShow, optionalSegments []string, width int) string {
 	all := append(append([]string{}, alwaysShow...), optionalSegments...)
 	for len(all) > len(alwaysShow) {
@@ -711,7 +712,11 @@ func fitToWidth(alwaysShow, optionalSegments []string, width int) string {
 		}
 		all = all[:len(all)-1]
 	}
-	return strings.Join(alwaysShow, "")
+	joined := strings.Join(alwaysShow, "")
+	if lipgloss.Width(joined) > width {
+		return lipgloss.NewStyle().MaxWidth(width).Render(joined)
+	}
+	return joined
 }
 
 // topBarPRNumber returns the first PR number associated with the configured
