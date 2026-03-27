@@ -469,6 +469,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.focused = PaneCenter
 		return m, nil
 
+	case key.Matches(msg, m.keys.Config):
+		m.prevTab = m.activeTab
+		m.activeTab = TabConfig
+		m.focused = PaneCenter
+		return m, nil
+
 	case key.Matches(msg, m.keys.NextPane):
 		m.focused = FocusedPane((int(m.focused) + 1) % paneCount)
 
@@ -496,6 +502,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.loadLiveShellCmds()
 
 	case key.Matches(msg, m.keys.Retry):
+		if m.activeTab == TabConfig {
+			m.configPane.Refresh()
+			return m, nil
+		}
 		if m.gateVM.IsFinal {
 			return m, retryGateCmd(m.cfg.RepoPath)
 		}
