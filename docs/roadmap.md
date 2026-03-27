@@ -365,7 +365,7 @@ Evidence: pilot rerun batch 2 evidence directory (local CI run artifacts, not tr
 ---
 
 ### v1.2.4 — UI Modernization + Feedback Loop Hardening
-**Status:** In progress (only INFRA-001, DOC-001, and COD-062 remain)
+**Status:** Completed
 **Scope:** TUI/dashboard visual refresh + infra/docs/log/session clarity; feedback-loop hardening shipped
 **Spec:** `docs/roadmaps/v1.2.4-backlog.md`
 
@@ -381,12 +381,11 @@ Key items:
 - ✅ UI-002: Dashboard UI component refresh (PR #78)
 - ✅ UI-003: Current activity session panel for the GUI (PR #79)
 - ✅ LOG-001: Structured heartbeat/log states for the full pre-commit step matrix (PR #65)
-- INFRA-001: Clarify `/gate` vs `/gate-check` endpoint naming in docs
-- DOC-001: Gate-check activation guide
-- COD-062: ETA calibration and per-repo history
+- ✅ INFRA-001: Clarify `/gate` vs `/gate-check` endpoint naming in docs
+- ✅ DOC-001: Gate-check activation guide
+- ✅ COD-062: ETA calibration and per-repo history
 
 **Current implementation direction:**
 - The original UI-001 gap audit is closed and kept above as historical context only.
-- The only remaining v1.2.4 work is INFRA-001, DOC-001, and COD-062.
-- Use the backlog file as the active source of truth for those three open items.
+- v1.2.4 is complete and retained here as a historical release record.
 - Preserve the completed UI/Dashboard/TUI slices as reference material for future work, but do not treat them as open backlog.
