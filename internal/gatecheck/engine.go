@@ -48,9 +48,8 @@ func (e *Engine) RunPipeline(ctx context.Context, worktree string, stagedFiles [
 	if stagedFiles != nil {
 		cfg.StagedFiles = stagedFiles
 	}
-	if strings.TrimSpace(cfg.Invocation) == "" || cfg.Invocation == "hook" {
-		cfg.Invocation = "codero"
-	}
+	// Pipeline invocations always use "codero" regardless of config default.
+	cfg.Invocation = "codero"
 
 	progressPath := filepath.Join(worktree, HeartbeatProgressPath)
 	engine := NewEngine(cfg)

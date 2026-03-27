@@ -2,8 +2,8 @@
 
 import store from '../store.js';
 import { apiFetch } from '../api.js';
-import { esc, $, setHtml, html, debounce } from '../utils.js';
-import { glassCard, skeleton, toast } from '../components.js';
+import { esc, $, setHtml } from '../utils.js';
+import { toast } from '../components.js';
 
 const QUICK_QUERIES = [
   { label: '/status',  prompt: '/status' },
@@ -163,6 +163,13 @@ async function sendMessage(inputEl) {
       }),
       raw: true,
     });
+
+    // Handle non-2xx responses before parsing body
+    if (!resp.ok) {
+      let errorText;
+      try { errorText = (await resp.json()).error || resp.statusText; } catch { errorText = resp.statusText || `HTTP ${resp.status}`; }
+      throw new Error(errorText);
+    }
 
     // Check if the response supports streaming
     if (resp.body && resp.headers.get('content-type')?.includes('text/event-stream')) {
