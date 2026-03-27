@@ -714,7 +714,15 @@ func fitToWidth(alwaysShow, optionalSegments []string, width int) string {
 	}
 	joined := strings.Join(alwaysShow, "")
 	if lipgloss.Width(joined) > width {
-		return lipgloss.NewStyle().MaxWidth(width).Render(joined)
+		if width <= 0 {
+			return ""
+		}
+		// Truncate by runes to fit within width columns.
+		runes := []rune(joined)
+		for len(runes) > 0 && lipgloss.Width(string(runes)) > width {
+			runes = runes[:len(runes)-1]
+		}
+		return string(runes)
 	}
 	return joined
 }

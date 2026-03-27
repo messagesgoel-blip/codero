@@ -192,7 +192,17 @@ func (m Model) renderChatComposer(width int) string {
 	chipLine := "  " + strings.Join(chips, " ")
 
 	// Line 2: prompt + input + busy indicator
-	input := t.Accent.Render("  \u276f") + " " + t.PaletteInput.Render(m.cliInput.View())
+	// Clamp input view to center-pane width to prevent overflow.
+	inputView := m.cliInput.View()
+	inputMaxW := maxInt(1, width-6) // account for "  ❯ " prefix + margin
+	if lipgloss.Width(inputView) > inputMaxW {
+		runes := []rune(inputView)
+		for len(runes) > 0 && lipgloss.Width(string(runes)) > inputMaxW {
+			runes = runes[:len(runes)-1]
+		}
+		inputView = string(runes)
+	}
+	input := t.Accent.Render("  \u276f") + " " + t.PaletteInput.Render(inputView)
 	if m.cliBusy {
 		input += " " + t.Warning.Render("\u25cf thinking\u2026")
 	}
