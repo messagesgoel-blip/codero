@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -100,7 +101,9 @@ func (e *Engine) RunPipeline(ctx context.Context, worktree string, stagedFiles [
 		if len(runners) > 0 {
 			pct = (i * 100) / len(runners)
 		}
-		_ = WriteProgress(progressPath, fmt.Sprintf("check_%d", i+1), pct, time.Since(pipelineStart).Milliseconds())
+		if err := WriteProgress(progressPath, fmt.Sprintf("check_%d", i+1), pct, time.Since(pipelineStart).Milliseconds()); err != nil {
+			log.Printf("gatecheck: write progress: %v", err)
+		}
 
 		result := r(ctx, cfg, staged)
 		if isInfraReason(result.ReasonCode) {
@@ -123,7 +126,9 @@ func (e *Engine) RunPipeline(ctx context.Context, worktree string, stagedFiles [
 		}
 		checks = append(checks, result)
 	}
-	_ = WriteProgress(progressPath, "complete", 100, time.Since(pipelineStart).Milliseconds())
+	if err := WriteProgress(progressPath, "complete", 100, time.Since(pipelineStart).Milliseconds()); err != nil {
+		log.Printf("gatecheck: write progress: %v", err)
+	}
 
 	EnforceFindingsCap(checks)
 	summary := ComputeSummary(checks, cfg.Profile, cfg.AllowRequiredSkip)

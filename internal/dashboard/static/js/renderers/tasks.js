@@ -13,6 +13,8 @@ import {
 // Lifecycle
 // ---------------------------------------------------------------------------
 
+let expandWired = false;
+
 export function initTasks() {
   store.subscribe('queue', () => renderTasks());
   store.subscribe('queueStats', () => renderTasks());
@@ -40,7 +42,10 @@ export function renderTasks() {
   ];
   setHtml(container, sections.join(''));
 
-  wireExpandRows(container);
+  if (!expandWired) {
+    wireExpandRows(container);
+    expandWired = true;
+  }
 }
 
 export async function refreshTasks() {

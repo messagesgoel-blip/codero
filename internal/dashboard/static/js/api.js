@@ -180,6 +180,7 @@ function normalizePipeline(raw) {
     state: p.state, substatus: p.substatus,
     checkpoint: p.checkpoint, version: p.version,
     stageSec: p.stage_sec, startedAt: p.started_at,
+    updatedAt: p.updated_at,
   }));
 }
 

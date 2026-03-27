@@ -21,7 +21,7 @@ export function initChat() {
   store.subscribe('chat', () => {
     if (store.state.ui.activeTab === 'chat') renderChat();
     if (store.state.ui.chatFloating) {
-      const floatEl = $('floating-chat');
+      const floatEl = $('chat-floating-panel');
       if (floatEl) renderFloatingChat(floatEl);
     }
   });
@@ -66,7 +66,7 @@ function buildChatUI(prefix) {
     </div>`;
   } else {
     for (const msg of messages) {
-      const cls = msg.role === 'user' ? 'chat-msg-user' : 'chat-msg-assistant';
+      const cls = msg.role === 'user' ? 'user' : 'assistant';
       const label = msg.role === 'user' ? 'You' : 'Codero';
       messagesHtml += `<div class="chat-msg ${cls}">
         <div class="chat-msg-label">${esc(label)}</div>
@@ -76,7 +76,7 @@ function buildChatUI(prefix) {
   }
 
   const quickBtns = QUICK_QUERIES.map(q =>
-    `<button class="btn btn-secondary btn-sm quick-query" data-prompt="${esc(q.prompt)}">${esc(q.label)}</button>`
+    `<button class="btn btn-secondary btn-sm chat-suggestion" data-prompt="${esc(q.prompt)}">${esc(q.label)}</button>`
   ).join('');
 
   const streaming = chat.streaming;
@@ -86,7 +86,7 @@ function buildChatUI(prefix) {
   return `
     <div class="chat-container">
       <div class="chat-messages">${messagesHtml}</div>
-      <div class="chat-quick-queries">${quickBtns}</div>
+      <div class="chat-suggestions">${quickBtns}</div>
       <div class="chat-input-row">
         <textarea id="${esc(prefix)}-input" class="chat-input" placeholder="Ask something..." rows="1" ${disabled}></textarea>
         <button id="${esc(prefix)}-send" class="btn btn-primary chat-send" ${disabled}>${btnLabel}</button>
@@ -109,7 +109,7 @@ function wireChat(container, prefix) {
   if (input) {
     input.addEventListener('keydown', e => {
       // Enter without shift sends
-      if (e.key === 'Enter' && !e.shiftKey) {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
         sendMessage(input);
       }
@@ -123,7 +123,7 @@ function wireChat(container, prefix) {
   }
 
   // Quick query buttons
-  const quickBtns = container.querySelectorAll('.quick-query');
+  const quickBtns = container.querySelectorAll('.chat-suggestion');
   for (const btn of quickBtns) {
     btn.addEventListener('click', () => {
       const prompt = btn.dataset.prompt;
@@ -139,6 +139,7 @@ function wireChat(container, prefix) {
 
 async function sendMessage(inputEl) {
   if (!inputEl) return;
+  if (store.state.chat.streaming) return;
   const prompt = inputEl.value.trim();
   if (!prompt) return;
 
@@ -200,6 +201,7 @@ async function sendMessage(inputEl) {
 async function handleStreamingResponse(resp) {
   const reader = resp.body.pipeThrough(new TextDecoderStream()).getReader();
   let accumulated = '';
+  let buffer = '';
 
   // Add a placeholder assistant message
   const current = store.state.chat;
@@ -214,18 +216,24 @@ async function handleStreamingResponse(resp) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      // Parse SSE-style chunks: "data: ...\n\n"
-      const lines = value.split('\n');
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const payload = line.slice(6);
-          if (payload === '[DONE]') continue;
-          try {
-            const parsed = JSON.parse(payload);
-            accumulated += parsed.delta || parsed.content || parsed.text || '';
-          } catch {
-            // Plain text chunk
-            accumulated += payload;
+      // Buffer chunks and process complete SSE frames (terminated by \n\n)
+      buffer += value;
+      const frames = buffer.split('\n\n');
+      // Last element is incomplete — keep it in the buffer
+      buffer = frames.pop() || '';
+
+      for (const frame of frames) {
+        for (const line of frame.split('\n')) {
+          if (line.startsWith('data: ')) {
+            const payload = line.slice(6);
+            if (payload === '[DONE]') continue;
+            try {
+              const parsed = JSON.parse(payload);
+              accumulated += parsed.delta || parsed.content || parsed.text || '';
+            } catch {
+              // Plain text chunk
+              accumulated += payload;
+            }
           }
         }
       }

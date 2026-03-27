@@ -13,15 +13,11 @@ type githubPipelineAdapter struct {
 }
 
 func (a *githubPipelineAdapter) CreatePRIfEnabled(ctx context.Context, repo, head, base, title, body string) (int, bool, error) {
-	pr, err := a.client.CreatePR(ctx, repo, head, base, title, body)
-	if err != nil {
-		return 0, false, err
-	}
-	return pr, true, nil
+	return a.client.CreatePRIfEnabled(ctx, repo, head, base, title, body)
 }
 
 func (a *githubPipelineAdapter) TriggerCodeRabbitReview(ctx context.Context, repo string, prNumber int) error {
-	return a.client.PostComment(ctx, repo, prNumber, "@coderabbitai review")
+	return a.client.TriggerCodeRabbitReview(ctx, repo, prNumber)
 }
 
 func (a *githubPipelineAdapter) FindOpenPR(ctx context.Context, repo, branch string) (*deliverypipeline.PRInfo, error) {

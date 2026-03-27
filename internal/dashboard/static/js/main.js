@@ -3,7 +3,7 @@
 import store from './store.js';
 import { registerRoute, startRouter, refreshCurrentPage } from './router.js';
 import { connectSSE, bus } from './sse.js';
-import { $, setText } from './utils.js';
+import { $, setText, esc } from './utils.js';
 
 import { initOverview, renderOverview, refreshOverview } from './renderers/overview.js';
 import { initSessions, renderSessions, refreshSessions } from './renderers/sessions.js';
@@ -149,7 +149,7 @@ function renderCmdResults(query) {
 
   // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method
   results.innerHTML = items.slice(0, 10).map((item, i) =>
-    `<div class="cmd-result" data-idx="${i}">${item.icon ? `<span class="cmd-result-icon">${item.icon}</span>` : ''}<span class="cmd-result-text">${item.text}</span><span class="cmd-result-hint">${item.hint}</span></div>`
+    `<div class="cmd-result" data-idx="${i}">${item.icon ? `<span class="cmd-result-icon">${item.icon}</span>` : ''}<span class="cmd-result-text">${esc(item.text)}</span><span class="cmd-result-hint">${esc(item.hint)}</span></div>`
   ).join('');
 
   results.querySelectorAll('.cmd-result').forEach((el, i) => {

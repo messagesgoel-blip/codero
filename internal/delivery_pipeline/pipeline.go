@@ -322,7 +322,7 @@ func (p *Pipeline) Submit(ctx context.Context, assignmentID, worktree string) er
 		if err == nil && branchStateID != "" {
 			result, err := state.EvaluateMergeReadiness(ctx, p.deps.StateDB, branchStateID)
 			if err == nil {
-				mergeReady = result.Ready
+				mergeReady = mergeReady && result.Ready
 			}
 		}
 	}
@@ -335,6 +335,7 @@ func (p *Pipeline) Submit(ctx context.Context, assignmentID, worktree string) er
 		return err
 	}
 
+	merged := false
 	if mergeReady && p.deps.GitHub != nil && monitorResult.prNumber > 0 {
 		mergeMethod := mergeMethodFromEnv()
 		if err := p.deps.GitHub.MergePR(ctx, assignment.Repo, monitorResult.prNumber, monitorResult.headSHA, mergeMethod); err != nil {
@@ -343,7 +344,8 @@ func (p *Pipeline) Submit(ctx context.Context, assignmentID, worktree string) er
 				"error", err.Error(),
 				"pr", monitorResult.prNumber,
 			)
-			mergeReady = false // Merge failed; don't archive as merged
+		} else {
+			merged = true
 		}
 	}
 
@@ -355,7 +357,7 @@ func (p *Pipeline) Submit(ctx context.Context, assignmentID, worktree string) er
 		return err
 	}
 
-	p.archiveSession(ctx, assignment, mergeReady)
+	p.archiveSession(ctx, assignment, merged)
 
 	// Reset to idle
 	if err := fsmState.Event(ctx, "reset"); err != nil {
@@ -379,7 +381,7 @@ type monitorOutcome struct {
 }
 
 func (m monitorOutcome) hasActionableFeedback() bool {
-	return m.changesRequested || len(m.reviewFindings) > 0
+	return m.changesRequested || len(m.reviewFindings) > 0 || (!m.ciPassed && !m.ciPending)
 }
 
 func (m monitorOutcome) feedbackSources() []FeedbackSource {
@@ -388,6 +390,12 @@ func (m monitorOutcome) feedbackSources() []FeedbackSource {
 		sources = append(sources, FeedbackSource{
 			Type:     FeedbackSourceCoderabbit,
 			Findings: m.reviewFindings,
+		})
+	}
+	if m.changesRequested && len(m.reviewFindings) == 0 {
+		sources = append(sources, FeedbackSource{
+			Type:     FeedbackSourceCoderabbit,
+			Findings: []FeedbackItem{{Message: "Changes requested by reviewer"}},
 		})
 	}
 	if !m.ciPassed && !m.ciPending {
@@ -415,11 +423,7 @@ func (p *Pipeline) monitor(ctx context.Context, assignment *state.AgentAssignmen
 
 		prInfo, err := p.deps.GitHub.FindOpenPR(ctx, assignment.Repo, assignment.Branch)
 		if err != nil {
-			loglib.Warn("delivery pipeline: find PR failed",
-				loglib.FieldComponent, "delivery_pipeline",
-				"error", err.Error(),
-			)
-			return monitorOutcome{}, nil // Graceful: no PR found, skip monitoring
+			return monitorOutcome{}, fmt.Errorf("find PR: %w", err)
 		}
 		if prInfo == nil || prInfo.Number == 0 {
 			return monitorOutcome{}, nil // No PR exists
@@ -427,10 +431,7 @@ func (p *Pipeline) monitor(ctx context.Context, assignment *state.AgentAssignmen
 
 		runs, err := p.deps.GitHub.ListCheckRuns(ctx, assignment.Repo, prInfo.HeadSHA)
 		if err != nil {
-			loglib.Warn("delivery pipeline: list check runs failed",
-				loglib.FieldComponent, "delivery_pipeline",
-				"error", err.Error(),
-			)
+			return monitorOutcome{}, fmt.Errorf("list check runs: %w", err)
 		}
 		ciPassed, ciPending := interpretCheckRuns(runs)
 
@@ -443,12 +444,24 @@ func (p *Pipeline) monitor(ctx context.Context, assignment *state.AgentAssignmen
 		}
 		approved, changesRequested := interpretReviews(reviews)
 
-		// If CI is done (pass or fail) and not pending, we can proceed
-		if !ciPending {
+		// Proceed once CI is resolved AND review state is decided (approved or changes_requested).
+		// If CI is still pending, always keep polling.
+		reviewResolved := approved || changesRequested
+		if !ciPending && reviewResolved {
 			return monitorOutcome{
 				prNumber:         prInfo.Number,
 				headSHA:          prInfo.HeadSHA,
 				ciPassed:         ciPassed,
+				approved:         approved,
+				changesRequested: changesRequested,
+			}, nil
+		}
+		// Also exit if CI failed — no point waiting for review.
+		if !ciPending && !ciPassed {
+			return monitorOutcome{
+				prNumber:         prInfo.Number,
+				headSHA:          prInfo.HeadSHA,
+				ciPassed:         false,
 				approved:         approved,
 				changesRequested: changesRequested,
 			}, nil
@@ -466,7 +479,7 @@ func (p *Pipeline) monitor(ctx context.Context, assignment *state.AgentAssignmen
 // interpretCheckRuns returns (allPassed, anyPending) from a list of check runs.
 func interpretCheckRuns(runs []CheckRunInfo) (bool, bool) {
 	if len(runs) == 0 {
-		return true, false // No checks = pass
+		return false, true // No checks yet = pending
 	}
 	allPassed := true
 	anyPending := false
@@ -482,14 +495,24 @@ func interpretCheckRuns(runs []CheckRunInfo) (bool, bool) {
 }
 
 // interpretReviews returns (approved, changesRequested) from a list of reviews.
+// Reviews are processed in order (oldest first, as returned by the GitHub API),
+// so later reviews from the same user override earlier ones.
 func interpretReviews(reviews []ReviewInfo) (bool, bool) {
-	approved := false
-	changesRequested := false
+	// Track each reviewer's latest actionable state.
+	latest := make(map[string]string) // user → "APPROVED" | "CHANGES_REQUESTED"
 	for _, r := range reviews {
 		if r.IsBot {
 			continue
 		}
-		switch strings.ToUpper(r.State) {
+		state := strings.ToUpper(r.State)
+		if state == "APPROVED" || state == "CHANGES_REQUESTED" {
+			latest[r.User] = state
+		}
+	}
+	approved := false
+	changesRequested := false
+	for _, state := range latest {
+		switch state {
 		case "APPROVED":
 			approved = true
 		case "CHANGES_REQUESTED":
