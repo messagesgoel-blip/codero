@@ -148,6 +148,7 @@ type Model struct {
 	focused   FocusedPane
 	activeTab Tab
 	prevTab   Tab
+	prevFocus FocusedPane
 	gateVM    adapters.GateViewModel
 	checksVM  adapters.CheckReportViewModel
 
@@ -442,6 +443,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.Chat):
 		m.prevTab = m.activeTab
+		m.prevFocus = m.focused
 		m.activeTab = TabChat
 		m.focused = PaneCenter
 		m.cliInput.Focus()
@@ -473,6 +475,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.Config):
 		m.prevTab = m.activeTab
+		m.prevFocus = m.focused
 		m.activeTab = TabConfig
 		m.focused = PaneCenter
 		return m, nil
@@ -516,7 +519,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, openLogsCmd(m.cfg.RepoPath)
 	}
 
-	return m.handleTerminalKey(msg)
+	if m.activeTab == TabChat {
+		return m.handleTerminalKey(msg)
+	}
+	return m, nil
 }
 
 func (m Model) handleTerminalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -662,7 +668,17 @@ func (m Model) chatContextTab() string {
 	case TabOverview:
 		return "overview"
 	case TabChat:
-		return "chat"
+		// Use the originating tab's scope so chat requests retain context.
+		switch m.prevTab {
+		case TabEvents:
+			return "events"
+		case TabQueue:
+			return "queue"
+		case TabOverview:
+			return "overview"
+		default:
+			return "all"
+		}
 	default:
 		return "review"
 	}

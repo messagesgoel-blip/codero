@@ -260,7 +260,7 @@ func (p GatePane) renderGateMiniPanel() string {
 
 	// Header
 	titleLine := "─ LAST GATE RUN "
-	rightPad := w - 2 - len(titleLine)
+	rightPad := w - 2 - lipgloss.Width(titleLine)
 	if rightPad < 0 {
 		rightPad = 0
 	}

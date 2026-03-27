@@ -238,6 +238,7 @@ func (m Model) handleChatTabKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.activeTab = m.prevTab
+		m.focused = m.prevFocus
 		return m, nil
 	case "/":
 		// Only open popup if the input is empty.
@@ -348,13 +349,23 @@ func simpleWordWrap(text string, width int) string {
 		for indent < len(line) && (line[indent] == ' ' || line[indent] == '\t') {
 			indent++
 		}
-		_ = indent // reserved for future indentation continuation
 		pos := 0
 		for pos < len(line) {
-			end := pos + width
+			segWidth := width
+			if pos > 0 && indent > 0 {
+				segWidth = width - indent
+				if segWidth < 10 {
+					segWidth = 10
+				}
+			}
+			end := pos + segWidth
 			if end >= len(line) {
 				if pos > 0 {
 					result.WriteByte('\n')
+					// Reapply leading indent on continuation lines.
+					if indent > 0 {
+						result.WriteString(line[:indent])
+					}
 				}
 				result.WriteString(line[pos:])
 				break
@@ -373,6 +384,10 @@ func simpleWordWrap(text string, width int) string {
 			}
 			if pos > 0 {
 				result.WriteByte('\n')
+				// Reapply leading indent on continuation lines.
+				if indent > 0 {
+					result.WriteString(line[:indent])
+				}
 			}
 			result.WriteString(line[pos:breakAt])
 			pos = breakAt
