@@ -133,6 +133,7 @@ type Model struct {
 	sessionDrillPane SessionDrillPane
 	archivesPane     ArchivesPane
 	compliancePane   CompliancePane
+	configPane       ConfigPane
 
 	outputVP    viewport.Model
 	outputLines []string
@@ -215,6 +216,7 @@ func New(cfg Config) Model {
 		sessionDrillPane: NewSessionDrillPane(theme),
 		archivesPane:     NewArchivesPane(theme),
 		compliancePane:   NewCompliancePane(theme),
+		configPane:       NewConfigPane(theme),
 		gateVM:           cfg.InitialVM,
 		paletteInput:     palette,
 		searchInput:      search,
@@ -413,6 +415,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.archivesPane, cmd = m.archivesPane.Update(msg)
 	cmds = append(cmds, cmd)
 	m.compliancePane, cmd = m.compliancePane.Update(msg)
+	cmds = append(cmds, cmd)
+	m.configPane, cmd = m.configPane.Update(msg)
 	cmds = append(cmds, cmd)
 
 	if m.outputReady {
@@ -720,6 +724,9 @@ func (m Model) renderCenter() string {
 	case TabCompliance:
 		m.compliancePane.SetSize(innerW, innerH)
 		content = m.compliancePane.View()
+	case TabConfig:
+		m.configPane.SetSize(innerW, innerH)
+		content = m.configPane.View()
 	default:
 		m.logsArchPane.SetSize(innerW, innerH)
 		content = m.logsArchPane.View()
@@ -769,6 +776,7 @@ func (m *Model) applyLayout() {
 	m.sessionDrillPane.SetSize(l.CenterW-2, l.ContentH-5)
 	m.archivesPane.SetSize(l.CenterW-2, l.ContentH-5)
 	m.compliancePane.SetSize(l.CenterW-2, l.ContentH-5)
+	m.configPane.SetSize(l.CenterW-2, l.ContentH-5)
 	if !m.outputReady {
 		m.outputVP = viewport.New(l.CenterW-2, l.ContentH-5)
 		m.outputReady = true
