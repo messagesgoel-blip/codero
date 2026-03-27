@@ -431,12 +431,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
+	// Quit is always available, even in chat/popup.
+	case key.Matches(msg, m.keys.Quit):
+		return m, tea.Quit
+
 	case m.chatState.SlashPopupActive:
 		return m.handleSlashPopupKey(msg)
 	case m.activeTab == TabChat:
 		return m.handleChatTabKey(msg)
-	case key.Matches(msg, m.keys.Quit):
-		return m, tea.Quit
 
 	case key.Matches(msg, m.keys.Chat):
 		m.prevTab = m.activeTab
@@ -935,7 +937,7 @@ func (m *Model) applyLayout() {
 	m.logsArchPane.SetSize(l.CenterW-2, l.ContentH-2)
 	m.pipelinePane.SetSize(l.PipelineW-2, l.ContentH-2)
 	m.paletteInput.Width = maxInt(24, l.TotalW-48)
-	m.cliInput.Width = maxInt(24, l.TotalW-48)
+	m.cliInput.Width = maxInt(24, l.CenterW-8)
 	m.queuePane.SetSize(l.CenterW-2, l.ContentH-5)
 	m.eventsPane.SetSize(l.CenterW-2, l.ContentH-5)
 	m.checksPane.SetSize(l.RightW-2, l.ContentH-2)

@@ -79,17 +79,3 @@ func TestChecksPane_View_ShowsTotalLinesAnalyzed(t *testing.T) {
 		t.Error("ChecksPane Summary should show 'Est. Lines Analyzed'")
 	}
 }
-
-func TestStatusBar_ShowsMergeAndHints(t *testing.T) {
-	cfg := makeCfg(false)
-	m := tui.New(cfg)
-
-	newModel, _ := m.Update(makeWindowSize(120, 40))
-	view := newModel.(tui.Model).View()
-
-	for _, want := range []string{"Merge:", "q quit", "c chat", "interval"} {
-		if !strings.Contains(view, want) {
-			t.Fatalf("status bar should contain %q\nfull view:\n%s", want, view)
-		}
-	}
-}

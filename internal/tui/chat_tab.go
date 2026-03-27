@@ -290,6 +290,12 @@ func (m Model) handleSlashPopupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.cliBusy = false
 				return m, nil
 			}
+			// Command not handled locally — route to backend.
+			m.cliBusy = true
+			m.cliSuggestions = nil
+			m.cliActions = nil
+			m.cliMessages = append(m.cliMessages, terminalMessage{Role: "assistant", Meta: "streaming", Content: "…"})
+			return m, dashboardChatStreamCmd(m.cfg.Context, selected.Name, m.chatContextTab(), m.chatConversationID)
 		}
 		return m, nil
 
@@ -323,36 +329,56 @@ func (m Model) handleSlashPopupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
-// simpleWordWrap wraps text to the given width at word boundaries.
+// simpleWordWrap wraps text to the given width preserving indentation.
 func simpleWordWrap(text string, width int) string {
 	if width <= 0 {
 		return text
 	}
 	var result strings.Builder
-	for _, paragraph := range strings.Split(text, "\n") {
-		if result.Len() > 0 {
+	for i, line := range strings.Split(text, "\n") {
+		if i > 0 {
 			result.WriteByte('\n')
 		}
-		words := strings.Fields(paragraph)
-		if len(words) == 0 {
+		if len(line) <= width {
+			result.WriteString(line)
 			continue
 		}
-		lineLen := 0
-		for i, w := range words {
-			wLen := len(w)
-			if i == 0 {
-				result.WriteString(w)
-				lineLen = wLen
-				continue
+		// Find leading whitespace to preserve indentation.
+		indent := 0
+		for indent < len(line) && (line[indent] == ' ' || line[indent] == '\t') {
+			indent++
+		}
+		_ = indent // reserved for future indentation continuation
+		pos := 0
+		for pos < len(line) {
+			end := pos + width
+			if end >= len(line) {
+				if pos > 0 {
+					result.WriteByte('\n')
+				}
+				result.WriteString(line[pos:])
+				break
 			}
-			if lineLen+1+wLen > width {
+			// Find last space within the segment for a soft break.
+			breakAt := -1
+			for j := end; j > pos; j-- {
+				if line[j] == ' ' {
+					breakAt = j
+					break
+				}
+			}
+			if breakAt <= pos {
+				// No space found — hard break.
+				breakAt = end
+			}
+			if pos > 0 {
 				result.WriteByte('\n')
-				result.WriteString(w)
-				lineLen = wLen
-			} else {
-				result.WriteByte(' ')
-				result.WriteString(w)
-				lineLen += 1 + wLen
+			}
+			result.WriteString(line[pos:breakAt])
+			pos = breakAt
+			// Skip the space at the break point (if it was a soft break).
+			if pos < len(line) && line[pos] == ' ' {
+				pos++
 			}
 		}
 	}

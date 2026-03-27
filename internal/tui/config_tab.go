@@ -89,7 +89,11 @@ func (p ConfigPane) renderContent() string {
 	var sb strings.Builder
 
 	sb.WriteString(t.PaneTitle.Render("CONFIG INSPECTOR") + "\n")
-	sb.WriteString(t.Muted.Render(strings.Repeat("─", p.width)) + "\n\n")
+	headerW := p.width
+	if headerW < 0 {
+		headerW = 0
+	}
+	sb.WriteString(t.Muted.Render(strings.Repeat("─", headerW)) + "\n\n")
 
 	for _, section := range p.snapshot.Sections {
 		if len(section.Vars) == 0 {
@@ -97,7 +101,11 @@ func (p ConfigPane) renderContent() string {
 		}
 		// Section header
 		sb.WriteString(t.PaneTitle.Render("  "+section.Title) + "\n")
-		sb.WriteString(t.Muted.Render("  "+strings.Repeat("─", minInt(p.width-4, 60))) + "\n")
+		divW := minInt(p.width-4, 60)
+		if divW < 0 {
+			divW = 0
+		}
+		sb.WriteString(t.Muted.Render("  "+strings.Repeat("─", divW)) + "\n")
 
 		// Variables
 		for _, v := range section.Vars {
@@ -140,16 +148,12 @@ var sensitiveVarExplicit = map[string]bool{
 	"CODERO_WEBHOOK_SECRET":       true,
 }
 
-var sensitiveVarSuffixRe = regexp.MustCompile(`_(KEY|SECRET|TOKEN|PASSWORD|PASS)$`)
-var numericKeySuffixRe = regexp.MustCompile(`_KEY_\d+$`)
+var sensitiveVarSuffixRe = regexp.MustCompile(`_(KEY|SECRET|TOKEN|PASSWORD|PASS)(_\d+)?$`)
 
 // isSensitiveVar returns true if the variable should be masked in the UI.
 func isSensitiveVar(name string) bool {
 	if sensitiveVarExplicit[name] {
 		return true
-	}
-	if numericKeySuffixRe.MatchString(name) {
-		return false
 	}
 	return sensitiveVarSuffixRe.MatchString(name)
 }
@@ -212,4 +216,3 @@ func groupConfigVars(vars map[string]string) []ConfigSection {
 	}
 	return sections
 }
-

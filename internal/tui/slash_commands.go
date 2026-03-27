@@ -20,9 +20,7 @@ func defaultSlashCommands() []SlashCommand {
 		{Name: "gate", Description: "gate-check details"},
 		{Name: "queue", Description: "pipeline queue"},
 		{Name: "clear", Description: "clear chat thread"},
-		{Name: "model", Description: "current model info"},
-		{Name: "context", Description: "loaded context scope"},
-		{Name: "export", Description: "save thread to .md"},
+		{Name: "agents", Description: "agent status"},
 		{Name: "help", Description: "list all commands"},
 	}
 }
@@ -70,10 +68,7 @@ func renderSlashPopupContent(theme Theme, cmds []SlashCommand, selectedIdx, widt
 
 	content := strings.Join(lines, "\n")
 
-	popupW := minInt(width-4, 36)
-	if popupW < 20 {
-		popupW = 20
-	}
+	popupW := maxInt(1, minInt(width-4, 36))
 
 	popup := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).

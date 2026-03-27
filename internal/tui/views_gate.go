@@ -169,6 +169,10 @@ func (p GatePane) View() string {
 		miniLines = strings.Count(miniPanel, "\n") + 1
 	}
 
+	if miniLines > p.height {
+		miniLines = p.height
+	}
+
 	// ── relay orchestration section (above mini-panel) ────────────────────────
 	// Only render if there's enough vertical space remaining after reserving
 	// space for the mini-panel.
@@ -193,12 +197,16 @@ func (p GatePane) View() string {
 
 	// Fill to leave exactly miniLines rows at the bottom for the mini-panel.
 	if miniPanel != "" {
-		for len(lines) < p.height-miniLines {
+		targetH := p.height - miniLines
+		if targetH < 0 {
+			targetH = 0
+		}
+		for len(lines) < targetH {
 			lines = append(lines, "")
 		}
 		// Trim if content overflowed before mini-panel space.
-		if len(lines) > p.height-miniLines {
-			lines = lines[:p.height-miniLines]
+		if len(lines) > targetH {
+			lines = lines[:targetH]
 		}
 		for _, ml := range strings.Split(miniPanel, "\n") {
 			lines = append(lines, ml)
@@ -212,7 +220,7 @@ func (p GatePane) View() string {
 	return lipgloss.NewStyle().Width(p.width).Render(content)
 }
 
-func (p *GatePane) SetSize(w, h int)                              { p.width = w; p.height = h }
+func (p *GatePane) SetSize(w, h int)                             { p.width = w; p.height = h }
 func (p *GatePane) SetVM(vm adapters.GateViewModel)              { p.vm = vm }
 func (p *GatePane) SetChecksVM(vm adapters.CheckReportViewModel) { p.checksVM = vm }
 
