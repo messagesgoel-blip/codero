@@ -715,8 +715,8 @@ func TestStaticEmbedHasIndexHTML(t *testing.T) {
 	if !bytes.Contains(data, []byte(`href="./styles.css"`)) {
 		t.Error("index.html does not reference ./styles.css")
 	}
-	if !bytes.Contains(data, []byte(`src="./app.js"`)) {
-		t.Error("index.html does not reference ./app.js")
+	if !bytes.Contains(data, []byte(`src="./js/main.js"`)) {
+		t.Error("index.html does not reference ./js/main.js")
 	}
 
 	// Verify styles.css is embedded.
@@ -730,15 +730,15 @@ func TestStaticEmbedHasIndexHTML(t *testing.T) {
 		t.Error("styles.css is empty")
 	}
 
-	// Verify app.js is embedded.
-	jf, err := subFS.Open("app.js")
+	// Verify js/main.js is embedded.
+	jf, err := subFS.Open("js/main.js")
 	if err != nil {
-		t.Fatalf("app.js not embedded: %v", err)
+		t.Fatalf("js/main.js not embedded: %v", err)
 	}
 	jData, _ := io.ReadAll(jf)
 	jf.Close()
 	if len(jData) == 0 {
-		t.Error("app.js is empty")
+		t.Error("js/main.js is empty")
 	}
 }
 
@@ -1554,28 +1554,27 @@ func TestDashboardHTML_HasExpectedContent(t *testing.T) {
 	}
 	html := string(htmlData)
 	for _, want := range []string{
-		"codero", "Overview", "Agents", "Events",
-		"Findings", "Architecture", "Settings",
-		"health-bar", "./styles.css", "./app.js",
+		"codero", "Overview", "Sessions", "Pipeline",
+		"Gate", "Chat", "Archives", "Settings",
+		"health-bar", "./styles.css", "./js/main.js",
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("index.html missing %q", want)
 		}
 	}
 
-	// Check JS content (now in app.js).
-	jsData, err := fs.ReadFile(subFS, "app.js")
+	// Check JS entry point (now split into modules under js/).
+	jsData, err := fs.ReadFile(subFS, "js/main.js")
 	if err != nil {
-		t.Fatalf("read app.js: %v", err)
+		t.Fatalf("read js/main.js: %v", err)
 	}
 	js := string(jsData)
 	for _, want := range []string{
-		"active-sessions", "apiFetch", "/health",
-		"/assignments", "/compliance", "/agent-events",
-		"renderAgentsTab", "renderOverviewTab",
+		"store.js", "router.js", "sse.js",
+		"startRouter", "connectSSE",
 	} {
 		if !strings.Contains(js, want) {
-			t.Errorf("app.js missing %q", want)
+			t.Errorf("js/main.js missing %q", want)
 		}
 	}
 
@@ -1586,8 +1585,9 @@ func TestDashboardHTML_HasExpectedContent(t *testing.T) {
 	}
 	css := string(cssData)
 	for _, want := range []string{
-		"--bg-base", "--surface-1", "--status-active",
+		"--bg-base", "--bg-surface-1", "--glass-bg",
 		".status-chip", ".metric-card", ".data-table",
+		".glass-card", ".kanban",
 	} {
 		if !strings.Contains(css, want) {
 			t.Errorf("styles.css missing %q", want)
@@ -1614,7 +1614,7 @@ func TestStaticFilesServedWithContentTypes(t *testing.T) {
 	}{
 		{"/dashboard/index.html", "text/html", "./styles.css"},
 		{"/dashboard/styles.css", "text/css", "--bg-base"},
-		{"/dashboard/app.js", "javascript", "apiFetch"},
+		{"/dashboard/js/main.js", "javascript", "startRouter"},
 	}
 	for _, tt := range tests {
 		resp, err := http.Get(srv.URL + tt.path)
@@ -1633,16 +1633,10 @@ func TestStaticFilesServedWithContentTypes(t *testing.T) {
 		if !bytes.Contains(body, []byte(tt.wantContain)) {
 			t.Errorf("GET %s: body missing %q", tt.path, tt.wantContain)
 		}
-		// For index.html, also verify the other relative asset link.
+		// For index.html, also verify the module script link.
 		if tt.path == "/dashboard/index.html" {
-			if !bytes.Contains(body, []byte("./app.js")) {
-				t.Errorf("GET %s: body missing %q", tt.path, "./app.js")
-			}
-		}
-		// For app.js, enforce JS Content-Type (Go uses text/javascript).
-		if tt.path == "/dashboard/app.js" {
-			if !strings.Contains(ct, "javascript") {
-				t.Errorf("GET %s: Content-Type %q, want javascript MIME", tt.path, ct)
+			if !bytes.Contains(body, []byte("./js/main.js")) {
+				t.Errorf("GET %s: body missing %q", tt.path, "./js/main.js")
 			}
 		}
 	}

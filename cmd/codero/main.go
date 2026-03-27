@@ -383,7 +383,7 @@ func daemonCmd(configPath *string) *cobra.Command {
 
 			pipeline := deliverypipeline.NewPipeline(deliverypipeline.PipelineDeps{
 				StateDB: db,
-				GitHub:  gh,
+				GitHub:  &githubPipelineAdapter{client: gh},
 			})
 			if err := pipeline.ClearStaleLocks(ctx); err != nil {
 				loglib.Warn("codero: delivery pipeline stale lock sweep failed",

@@ -70,6 +70,7 @@ type AgentAssignment struct {
 	BlockedReason string
 	Substatus     string
 	Version       int
+	DeliveryState string
 	StartedAt     time.Time
 	EndedAt       *time.Time
 	EndReason     string
@@ -580,7 +581,7 @@ func AttachAgentAssignment(ctx context.Context, db *DB, assignment *AgentAssignm
 func GetActiveAgentAssignment(ctx context.Context, db *DB, sessionID string) (*AgentAssignment, error) {
 	const q = `
 		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id, state, blocked_reason, assignment_substatus,
-		       assignment_version, started_at, ended_at, end_reason, superseded_by
+		       assignment_version, delivery_state, started_at, ended_at, end_reason, superseded_by
 		FROM agent_assignments
 		WHERE session_id = ? AND ended_at IS NULL
 		ORDER BY started_at DESC
@@ -594,7 +595,7 @@ func GetActiveAgentAssignment(ctx context.Context, db *DB, sessionID string) (*A
 func GetAgentAssignmentByID(ctx context.Context, db *DB, assignmentID string) (*AgentAssignment, error) {
 	const q = `
 		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id, state, blocked_reason, assignment_substatus,
-		       assignment_version, started_at, ended_at, end_reason, superseded_by
+		       assignment_version, delivery_state, started_at, ended_at, end_reason, superseded_by
 		FROM agent_assignments
 		WHERE assignment_id = ?`
 
@@ -606,7 +607,7 @@ func GetAgentAssignmentByID(ctx context.Context, db *DB, assignmentID string) (*
 func GetActiveAssignmentByTaskID(ctx context.Context, db *DB, taskID string) (*AgentAssignment, error) {
 	const q = `
 		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id, state, blocked_reason, assignment_substatus,
-		       assignment_version, started_at, ended_at, end_reason, superseded_by
+		       assignment_version, delivery_state, started_at, ended_at, end_reason, superseded_by
 		FROM agent_assignments
 		WHERE task_id = ? AND ended_at IS NULL
 		ORDER BY started_at DESC
@@ -620,7 +621,7 @@ func GetActiveAssignmentByTaskID(ctx context.Context, db *DB, taskID string) (*A
 func ListAgentAssignments(ctx context.Context, db *DB, sessionID string) ([]AgentAssignment, error) {
 	const q = `
 		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id, state, blocked_reason, assignment_substatus,
-		       assignment_version, started_at, ended_at, end_reason, superseded_by
+		       assignment_version, delivery_state, started_at, ended_at, end_reason, superseded_by
 		FROM agent_assignments
 		WHERE session_id = ?
 		ORDER BY started_at ASC`
@@ -709,7 +710,7 @@ func FinalizeAgentSession(ctx context.Context, db *DB, sessionID, agentID string
 	var active *AgentAssignment
 	row := tx.QueryRowContext(ctx, `
 		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id, state, blocked_reason, assignment_substatus,
-		       assignment_version, started_at, ended_at, end_reason, superseded_by
+		       assignment_version, delivery_state, started_at, ended_at, end_reason, superseded_by
 		FROM agent_assignments
 		WHERE session_id = ? AND ended_at IS NULL
 		ORDER BY started_at DESC
@@ -1067,7 +1068,7 @@ func ReconcileAgentAssignmentWaitingState(ctx context.Context, db *DB, repo, bra
 
 	row := tx.QueryRowContext(ctx, `
 		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id, state, blocked_reason, assignment_substatus,
-		       assignment_version, started_at, ended_at, end_reason, superseded_by
+		       assignment_version, delivery_state, started_at, ended_at, end_reason, superseded_by
 		FROM agent_assignments
 		WHERE repo = ? AND branch = ? AND ended_at IS NULL
 		ORDER BY started_at DESC
@@ -1284,7 +1285,7 @@ func AcceptTask(ctx context.Context, db *DB, sessionID, taskID string) (*AgentAs
 		row := tx.QueryRowContext(ctx,
 			`SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id,
 			        state, blocked_reason, assignment_substatus,
-			        assignment_version, started_at, ended_at, end_reason, superseded_by
+			        assignment_version, delivery_state, started_at, ended_at, end_reason, superseded_by
 			 FROM agent_assignments WHERE assignment_id = ?`,
 			existingID,
 		)
@@ -1372,7 +1373,7 @@ func AcceptTask(ctx context.Context, db *DB, sessionID, taskID string) (*AgentAs
 				row := tx.QueryRowContext(ctx, `
 					SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id,
 					       state, blocked_reason, assignment_substatus,
-					       assignment_version, started_at, ended_at, end_reason, superseded_by
+					       assignment_version, delivery_state, started_at, ended_at, end_reason, superseded_by
 					FROM agent_assignments
 					WHERE assignment_id = ?`,
 					conflictAssignment,
@@ -1495,7 +1496,7 @@ func EmitAssignmentUpdate(ctx context.Context, db *DB, assignmentID string, curr
 	currentRow := tx.QueryRowContext(ctx, `
 		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id,
 		       state, blocked_reason, assignment_substatus,
-		       assignment_version, started_at, ended_at, end_reason, superseded_by
+		       assignment_version, delivery_state, started_at, ended_at, end_reason, superseded_by
 		FROM agent_assignments
 		WHERE assignment_id = ?`,
 		assignmentID,
@@ -1686,10 +1687,11 @@ func scanAgentAssignment(row *sql.Row) (*AgentAssignment, error) {
 	var substatus sql.NullString
 	var state sql.NullString
 	var blockedReason sql.NullString
+	var deliveryState sql.NullString
 
 	err := row.Scan(
 		&a.ID, &a.SessionID, &a.AgentID, &a.Repo, &a.Branch, &a.Worktree, &a.TaskID, &state, &blockedReason, &substatus,
-		&a.Version, &a.StartedAt, &endedAt, &a.EndReason, &supersededBy,
+		&a.Version, &deliveryState, &a.StartedAt, &endedAt, &a.EndReason, &supersededBy,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1712,6 +1714,9 @@ func scanAgentAssignment(row *sql.Row) (*AgentAssignment, error) {
 	if blockedReason.Valid {
 		a.BlockedReason = blockedReason.String
 	}
+	if deliveryState.Valid {
+		a.DeliveryState = deliveryState.String
+	}
 	return &a, nil
 }
 
@@ -1722,10 +1727,11 @@ func scanAgentAssignmentRow(rows *sql.Rows) (*AgentAssignment, error) {
 	var substatus sql.NullString
 	var state sql.NullString
 	var blockedReason sql.NullString
+	var deliveryState sql.NullString
 
 	if err := rows.Scan(
 		&a.ID, &a.SessionID, &a.AgentID, &a.Repo, &a.Branch, &a.Worktree, &a.TaskID, &state, &blockedReason, &substatus,
-		&a.Version, &a.StartedAt, &endedAt, &a.EndReason, &supersededBy,
+		&a.Version, &deliveryState, &a.StartedAt, &endedAt, &a.EndReason, &supersededBy,
 	); err != nil {
 		return nil, fmt.Errorf("scan agent assignment row: %w", err)
 	}
@@ -1743,6 +1749,9 @@ func scanAgentAssignmentRow(rows *sql.Rows) (*AgentAssignment, error) {
 	}
 	if blockedReason.Valid {
 		a.BlockedReason = blockedReason.String
+	}
+	if deliveryState.Valid {
+		a.DeliveryState = deliveryState.String
 	}
 	return &a, nil
 }

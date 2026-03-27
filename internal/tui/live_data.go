@@ -300,6 +300,15 @@ func resolveSessionPipelineStage(ctx context.Context, db *state.DB, session dash
 	if err != nil {
 		return normalizeStageName(session.ActivityState), nil
 	}
+
+	// Prefer delivery_state from the delivery pipeline FSM when actively running.
+	if ds := assignment.DeliveryState; ds != "" && ds != "idle" {
+		stage := deliveryStateToKanban(ds)
+		if stage != "" {
+			return stage, assignment
+		}
+	}
+
 	branchState := state.StateSubmitted
 	if assignment.Repo != "" && assignment.Branch != "" {
 		if branch, branchErr := state.GetBranch(db, assignment.Repo, assignment.Branch); branchErr == nil {
@@ -311,6 +320,32 @@ func resolveSessionPipelineStage(ctx context.Context, db *state.DB, session dash
 		stage = normalizeStageName(session.ActivityState)
 	}
 	return stage, assignment
+}
+
+// deliveryStateToKanban maps the FSM delivery_state to a kanban column name.
+func deliveryStateToKanban(ds string) string {
+	switch strings.ToLower(strings.TrimSpace(ds)) {
+	case "staging":
+		return "SUBMITTED"
+	case "gating":
+		return "GATING"
+	case "committing":
+		return "COMMITTED"
+	case "pushing":
+		return "PUSHED"
+	case "pr_management":
+		return "PR_ACTIVE"
+	case "monitoring", "feedback_delivery", "merge_evaluation":
+		return "MONITORING"
+	case "merging":
+		return "MERGE_READY"
+	case "post_merge":
+		return "MERGED"
+	case "failed":
+		return "MONITORING"
+	default:
+		return ""
+	}
 }
 
 func normalizeStageName(s string) string {

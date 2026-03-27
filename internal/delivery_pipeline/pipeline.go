@@ -20,6 +20,11 @@ import (
 )
 
 const (
+	defaultMonitorPollInterval = 30 * time.Second
+	defaultMonitorTimeout      = 30 * time.Minute
+)
+
+const (
 	stateIdle             = "idle"
 	stateStaging          = "staging"
 	stateGating           = "gating"
@@ -50,10 +55,34 @@ type GateRunner interface {
 	RunPipeline(ctx context.Context, worktree string, stagedFiles []string) (*gatecheck.Report, error)
 }
 
+// PRInfo holds the essential fields from a GitHub PR lookup.
+type PRInfo struct {
+	Number  int
+	HeadSHA string
+}
+
+// CheckRunInfo holds one CI check run result.
+type CheckRunInfo struct {
+	Name       string
+	Status     string // "completed", "in_progress", "queued"
+	Conclusion string // "success", "failure", "neutral", etc.
+}
+
+// ReviewInfo holds one PR review result.
+type ReviewInfo struct {
+	State string // "APPROVED", "CHANGES_REQUESTED", "COMMENTED"
+	User  string
+	IsBot bool
+}
+
 // GitHubClient defines the PR operations needed by the pipeline.
 type GitHubClient interface {
 	CreatePRIfEnabled(ctx context.Context, repo, head, base, title, body string) (int, bool, error)
 	TriggerCodeRabbitReview(ctx context.Context, repo string, prNumber int) error
+	FindOpenPR(ctx context.Context, repo, branch string) (*PRInfo, error)
+	ListCheckRuns(ctx context.Context, repo, sha string) ([]CheckRunInfo, error)
+	ListPRReviews(ctx context.Context, repo string, prNumber int) ([]ReviewInfo, error)
+	MergePR(ctx context.Context, repo string, prNumber int, sha, mergeMethod string) error
 }
 
 // Writer writes TASK/FEEDBACK artifacts to the worktree.
@@ -240,36 +269,103 @@ func (p *Pipeline) Submit(ctx context.Context, assignmentID, worktree string) er
 		}
 	}
 
+	// --- Monitoring phase: poll CI and reviews until resolved ---
 	if err := fsmState.Event(ctx, "monitor"); err != nil {
 		return fmt.Errorf("pipeline: monitor transition: %w", err)
 	}
 	if err := p.setDeliveryState(ctx, assignmentID, stateMonitoring); err != nil {
 		return err
 	}
+
+	var monitorResult monitorOutcome
+	if p.deps.GitHub != nil {
+		var err error
+		monitorResult, err = p.monitor(ctx, assignment)
+		if err != nil {
+			return p.fail(ctx, assignmentID, worktree, fsmState, fmt.Errorf("monitor: %w", err), nil)
+		}
+	}
+
+	// --- Feedback delivery phase: write aggregated feedback to worktree ---
 	if err := fsmState.Event(ctx, "feedback"); err != nil {
 		return fmt.Errorf("pipeline: feedback transition: %w", err)
 	}
 	if err := p.setDeliveryState(ctx, assignmentID, stateFeedbackDelivery); err != nil {
 		return err
 	}
+
+	if monitorResult.hasActionableFeedback() {
+		fb, err := BuildFeedback(monitorResult.feedbackSources())
+		if err != nil {
+			loglib.Warn("delivery pipeline: build feedback failed",
+				loglib.FieldComponent, "delivery_pipeline",
+				"error", err.Error(),
+				"assignment", assignmentID,
+			)
+		} else if fb != nil {
+			if writeErr := p.deps.Writer.WriteFEEDBACK(worktree, *fb); writeErr != nil {
+				loglib.Warn("delivery pipeline: write feedback failed",
+					loglib.FieldComponent, "delivery_pipeline",
+					"error", writeErr.Error(),
+				)
+			} else {
+				p.deps.Notifier.Notify(worktree, "feedback", assignmentID)
+			}
+		}
+	}
+
+	// --- Merge evaluation phase: check all merge predicates ---
 	if err := fsmState.Event(ctx, "evaluate"); err != nil {
 		return fmt.Errorf("pipeline: evaluate transition: %w", err)
 	}
 	if err := p.setDeliveryState(ctx, assignmentID, stateMergeEvaluation); err != nil {
 		return err
 	}
+
+	mergeReady := monitorResult.ciPassed && monitorResult.approved && !monitorResult.changesRequested
+	if p.deps.StateDB != nil {
+		branchStateID, err := p.lookupBranchStateID(ctx, assignment.Repo, assignment.Branch)
+		if err == nil && branchStateID != "" {
+			result, err := state.EvaluateMergeReadiness(ctx, p.deps.StateDB, branchStateID)
+			if err == nil {
+				mergeReady = mergeReady && result.Ready
+			}
+		}
+	}
+
+	// --- Merging phase: execute merge if ready ---
 	if err := fsmState.Event(ctx, "merge"); err != nil {
 		return fmt.Errorf("pipeline: merge transition: %w", err)
 	}
 	if err := p.setDeliveryState(ctx, assignmentID, stateMerging); err != nil {
 		return err
 	}
+
+	merged := false
+	if mergeReady && p.deps.GitHub != nil && monitorResult.prNumber > 0 {
+		mergeMethod := mergeMethodFromEnv()
+		if err := p.deps.GitHub.MergePR(ctx, assignment.Repo, monitorResult.prNumber, monitorResult.headSHA, mergeMethod); err != nil {
+			loglib.Warn("delivery pipeline: merge failed",
+				loglib.FieldComponent, "delivery_pipeline",
+				"error", err.Error(),
+				"pr", monitorResult.prNumber,
+			)
+		} else {
+			merged = true
+		}
+	}
+
+	// --- Post-merge phase: archive session, dispatch next task ---
 	if err := fsmState.Event(ctx, "post"); err != nil {
 		return fmt.Errorf("pipeline: post transition: %w", err)
 	}
 	if err := p.setDeliveryState(ctx, assignmentID, statePostMerge); err != nil {
 		return err
 	}
+
+	p.archiveSession(ctx, assignment, merged)
+
+	// Reset to idle
 	if err := fsmState.Event(ctx, "reset"); err != nil {
 		return fmt.Errorf("pipeline: reset transition: %w", err)
 	}
@@ -277,6 +373,230 @@ func (p *Pipeline) Submit(ctx context.Context, assignmentID, worktree string) er
 		return err
 	}
 	return nil
+}
+
+// monitorOutcome captures the result of the monitoring phase.
+type monitorOutcome struct {
+	prNumber         int
+	headSHA          string
+	ciPassed         bool
+	ciPending        bool
+	approved         bool
+	changesRequested bool
+	reviewFindings   []FeedbackItem
+}
+
+func (m monitorOutcome) hasActionableFeedback() bool {
+	return m.changesRequested || len(m.reviewFindings) > 0 || (!m.ciPassed && !m.ciPending)
+}
+
+func (m monitorOutcome) feedbackSources() []FeedbackSource {
+	var sources []FeedbackSource
+	if len(m.reviewFindings) > 0 {
+		sources = append(sources, FeedbackSource{
+			Type:     FeedbackSourceCoderabbit,
+			Findings: m.reviewFindings,
+		})
+	}
+	if m.changesRequested && len(m.reviewFindings) == 0 {
+		sources = append(sources, FeedbackSource{
+			Type:     FeedbackSourceCoderabbit,
+			Findings: []FeedbackItem{{Message: "Changes requested by reviewer"}},
+		})
+	}
+	if !m.ciPassed && !m.ciPending {
+		sources = append(sources, FeedbackSource{
+			Type:     FeedbackSourceCI,
+			Findings: []FeedbackItem{{Message: "CI checks failed"}},
+		})
+	}
+	return sources
+}
+
+// monitor polls GitHub for CI status and review state until resolved or timeout.
+func (p *Pipeline) monitor(ctx context.Context, assignment *state.AgentAssignment) (monitorOutcome, error) {
+	pollInterval := monitorPollInterval()
+	timeout := monitorTimeout()
+	deadline := time.Now().Add(timeout)
+
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	for {
+		if time.Now().After(deadline) {
+			return monitorOutcome{}, fmt.Errorf("monitoring timed out after %s", timeout)
+		}
+
+		prInfo, err := p.deps.GitHub.FindOpenPR(ctx, assignment.Repo, assignment.Branch)
+		if err != nil {
+			return monitorOutcome{}, fmt.Errorf("find PR: %w", err)
+		}
+		if prInfo == nil || prInfo.Number == 0 {
+			return monitorOutcome{}, nil // No PR exists
+		}
+
+		runs, err := p.deps.GitHub.ListCheckRuns(ctx, assignment.Repo, prInfo.HeadSHA)
+		if err != nil {
+			return monitorOutcome{}, fmt.Errorf("list check runs: %w", err)
+		}
+		ciPassed, ciPending := interpretCheckRuns(runs)
+
+		reviews, err := p.deps.GitHub.ListPRReviews(ctx, assignment.Repo, prInfo.Number)
+		if err != nil {
+			loglib.Warn("delivery pipeline: list reviews failed",
+				loglib.FieldComponent, "delivery_pipeline",
+				"error", err.Error(),
+			)
+		}
+		approved, changesRequested := interpretReviews(reviews)
+
+		// Proceed once CI is resolved AND review state is decided (approved or changes_requested).
+		// If CI is still pending, always keep polling.
+		reviewResolved := approved || changesRequested
+		if !ciPending && reviewResolved {
+			return monitorOutcome{
+				prNumber:         prInfo.Number,
+				headSHA:          prInfo.HeadSHA,
+				ciPassed:         ciPassed,
+				approved:         approved,
+				changesRequested: changesRequested,
+			}, nil
+		}
+		// Also exit if CI failed — no point waiting for review.
+		if !ciPending && !ciPassed {
+			return monitorOutcome{
+				prNumber:         prInfo.Number,
+				headSHA:          prInfo.HeadSHA,
+				ciPassed:         false,
+				approved:         approved,
+				changesRequested: changesRequested,
+			}, nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return monitorOutcome{}, ctx.Err()
+		case <-ticker.C:
+			continue
+		}
+	}
+}
+
+// interpretCheckRuns returns (allPassed, anyPending) from a list of check runs.
+func interpretCheckRuns(runs []CheckRunInfo) (bool, bool) {
+	if len(runs) == 0 {
+		return false, true // No checks yet = pending
+	}
+	allPassed := true
+	anyPending := false
+	for _, run := range runs {
+		if run.Status != "completed" {
+			anyPending = true
+			allPassed = false
+		} else if run.Conclusion != "success" && run.Conclusion != "neutral" && run.Conclusion != "skipped" {
+			allPassed = false
+		}
+	}
+	return allPassed, anyPending
+}
+
+// interpretReviews returns (approved, changesRequested) from a list of reviews.
+// Reviews are processed in order (oldest first, as returned by the GitHub API),
+// so later reviews from the same user override earlier ones.
+func interpretReviews(reviews []ReviewInfo) (bool, bool) {
+	// Track each reviewer's latest actionable state.
+	latest := make(map[string]string) // user → "APPROVED" | "CHANGES_REQUESTED"
+	for _, r := range reviews {
+		if r.IsBot {
+			continue
+		}
+		state := strings.ToUpper(r.State)
+		if state == "APPROVED" || state == "CHANGES_REQUESTED" {
+			latest[r.User] = state
+		}
+	}
+	approved := false
+	changesRequested := false
+	for _, state := range latest {
+		switch state {
+		case "APPROVED":
+			approved = true
+		case "CHANGES_REQUESTED":
+			changesRequested = true
+		}
+	}
+	return approved, changesRequested
+}
+
+func (p *Pipeline) lookupBranchStateID(ctx context.Context, repo, branch string) (string, error) {
+	if p.deps.StateDB == nil {
+		return "", fmt.Errorf("no state DB")
+	}
+	var id string
+	err := p.deps.StateDB.Unwrap().QueryRowContext(ctx,
+		`SELECT id FROM branch_states WHERE repo = ? AND branch = ? LIMIT 1`,
+		repo, branch,
+	).Scan(&id)
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func (p *Pipeline) archiveSession(ctx context.Context, assignment *state.AgentAssignment, merged bool) {
+	if p.deps.StateDB == nil || assignment == nil {
+		return
+	}
+	result := "abandoned"
+	if merged {
+		result = "merged"
+	}
+	now := time.Now().UTC()
+	archiveID := fmt.Sprintf("%s-archive-%d", assignment.ID, now.UnixNano())
+	_, err := p.deps.StateDB.Unwrap().ExecContext(ctx,
+		`INSERT OR IGNORE INTO session_archives
+			(archive_id, session_id, agent_id, task_id, repo, branch, result, started_at, ended_at, archived_at)
+		VALUES
+			(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		archiveID, assignment.SessionID, assignment.AgentID,
+		assignment.TaskID, assignment.Repo, assignment.Branch,
+		result, assignment.StartedAt, now, now,
+	)
+	if err != nil {
+		loglib.Warn("delivery pipeline: archive session failed",
+			loglib.FieldComponent, "delivery_pipeline",
+			"error", err.Error(),
+		)
+	}
+}
+
+func monitorPollInterval() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("CODERO_MONITOR_POLL_INTERVAL"))
+	if raw == "" {
+		return defaultMonitorPollInterval
+	}
+	if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+		return d
+	}
+	return defaultMonitorPollInterval
+}
+
+func monitorTimeout() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("CODERO_MONITOR_TIMEOUT"))
+	if raw == "" {
+		return defaultMonitorTimeout
+	}
+	if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+		return d
+	}
+	return defaultMonitorTimeout
+}
+
+func mergeMethodFromEnv() string {
+	if m := strings.TrimSpace(os.Getenv("CODERO_MERGE_METHOD")); m != "" {
+		return m
+	}
+	return "squash"
 }
 
 // ClearStaleLocks removes delivery.lock files older than the configured timeout.

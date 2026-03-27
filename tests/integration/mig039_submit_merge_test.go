@@ -87,6 +87,8 @@ func TestMIG039_SubmitToMerge_HappyPath(t *testing.T) {
 	gh := &integrationGitHub{
 		prNumber: 42,
 		created:  true,
+		ciPassed: true,
+		approved: true,
 	}
 
 	writer := &integrationWriter{}
@@ -363,6 +365,8 @@ type integrationGitHub struct {
 	created        bool
 	createPRCalled bool
 	reviewCalled   bool
+	ciPassed       bool
+	approved       bool
 }
 
 func (g *integrationGitHub) CreatePRIfEnabled(ctx context.Context, repo, head, base, title, body string) (int, bool, error) {
@@ -372,6 +376,32 @@ func (g *integrationGitHub) CreatePRIfEnabled(ctx context.Context, repo, head, b
 
 func (g *integrationGitHub) TriggerCodeRabbitReview(ctx context.Context, repo string, prNumber int) error {
 	g.reviewCalled = true
+	return nil
+}
+
+func (g *integrationGitHub) FindOpenPR(ctx context.Context, repo, branch string) (*deliverypipeline.PRInfo, error) {
+	if g.prNumber == 0 {
+		return nil, nil
+	}
+	return &deliverypipeline.PRInfo{Number: g.prNumber, HeadSHA: "abc123"}, nil
+}
+
+func (g *integrationGitHub) ListCheckRuns(ctx context.Context, repo, sha string) ([]deliverypipeline.CheckRunInfo, error) {
+	conclusion := "success"
+	if !g.ciPassed {
+		conclusion = "failure"
+	}
+	return []deliverypipeline.CheckRunInfo{{Name: "ci", Status: "completed", Conclusion: conclusion}}, nil
+}
+
+func (g *integrationGitHub) ListPRReviews(ctx context.Context, repo string, prNumber int) ([]deliverypipeline.ReviewInfo, error) {
+	if g.approved {
+		return []deliverypipeline.ReviewInfo{{State: "APPROVED", User: "reviewer"}}, nil
+	}
+	return nil, nil
+}
+
+func (g *integrationGitHub) MergePR(ctx context.Context, repo string, prNumber int, sha, mergeMethod string) error {
 	return nil
 }
 
