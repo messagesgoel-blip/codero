@@ -64,7 +64,7 @@ func (m Model) renderSessionHeader(width int) string {
 	if model == "" {
 		model = "gpt-4o"
 	}
-	scope := os.Getenv("CODERO_CHAT_CONTEXT_SCOPE_DEFAULT")
+	scope := m.chatContextTab()
 	if scope == "" {
 		scope = "all"
 	}
@@ -331,6 +331,7 @@ func (m Model) handleSlashPopupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // simpleWordWrap wraps text to the given width preserving indentation.
+// Operates on runes to handle multi-byte UTF-8 characters correctly.
 func simpleWordWrap(text string, width int) string {
 	if width <= 0 {
 		return text
@@ -340,17 +341,18 @@ func simpleWordWrap(text string, width int) string {
 		if i > 0 {
 			result.WriteByte('\n')
 		}
-		if len(line) <= width {
+		runes := []rune(line)
+		if len(runes) <= width {
 			result.WriteString(line)
 			continue
 		}
 		// Find leading whitespace to preserve indentation.
 		indent := 0
-		for indent < len(line) && (line[indent] == ' ' || line[indent] == '\t') {
+		for indent < len(runes) && (runes[indent] == ' ' || runes[indent] == '\t') {
 			indent++
 		}
 		pos := 0
-		for pos < len(line) {
+		for pos < len(runes) {
 			segWidth := width
 			if pos > 0 && indent > 0 {
 				segWidth = width - indent
@@ -359,40 +361,36 @@ func simpleWordWrap(text string, width int) string {
 				}
 			}
 			end := pos + segWidth
-			if end >= len(line) {
+			if end >= len(runes) {
 				if pos > 0 {
 					result.WriteByte('\n')
-					// Reapply leading indent on continuation lines.
 					if indent > 0 {
-						result.WriteString(line[:indent])
+						result.WriteString(string(runes[:indent]))
 					}
 				}
-				result.WriteString(line[pos:])
+				result.WriteString(string(runes[pos:]))
 				break
 			}
 			// Find last space within the segment for a soft break.
 			breakAt := -1
 			for j := end; j > pos; j-- {
-				if line[j] == ' ' {
+				if runes[j] == ' ' {
 					breakAt = j
 					break
 				}
 			}
 			if breakAt <= pos {
-				// No space found — hard break.
 				breakAt = end
 			}
 			if pos > 0 {
 				result.WriteByte('\n')
-				// Reapply leading indent on continuation lines.
 				if indent > 0 {
-					result.WriteString(line[:indent])
+					result.WriteString(string(runes[:indent]))
 				}
 			}
-			result.WriteString(line[pos:breakAt])
+			result.WriteString(string(runes[pos:breakAt]))
 			pos = breakAt
-			// Skip the space at the break point (if it was a soft break).
-			if pos < len(line) && line[pos] == ' ' {
+			if pos < len(runes) && runes[pos] == ' ' {
 				pos++
 			}
 		}

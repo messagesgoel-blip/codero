@@ -90,6 +90,37 @@ func TestSimpleWordWrap(t *testing.T) {
 	}
 }
 
+func TestSimpleWordWrap_UTF8(t *testing.T) {
+	// CJK characters: each is 1 rune but 3 bytes.
+	input := "你好世界这是一段很长的中文文本需要换行处理"
+	wrapped := simpleWordWrap(input, 10)
+	for _, line := range strings.Split(wrapped, "\n") {
+		runes := []rune(line)
+		if len(runes) > 10 {
+			t.Errorf("line too long in runes (%d): %q", len(runes), line)
+		}
+	}
+	// Verify no rune corruption — roundtrip should produce valid UTF-8.
+	if !strings.ContainsRune(wrapped, '你') {
+		t.Error("wrapped output should contain original CJK runes")
+	}
+}
+
+func TestSimpleWordWrap_PreservesIndent(t *testing.T) {
+	input := "    indented line that is long enough to need wrapping at some point"
+	wrapped := simpleWordWrap(input, 30)
+	lines := strings.Split(wrapped, "\n")
+	if len(lines) < 2 {
+		t.Fatal("expected at least 2 lines")
+	}
+	// Continuation lines should start with the same indent.
+	for i := 1; i < len(lines); i++ {
+		if !strings.HasPrefix(lines[i], "    ") {
+			t.Errorf("continuation line %d should preserve indent: %q", i, lines[i])
+		}
+	}
+}
+
 func newTestModel() Model {
 	return New(Config{
 		Theme: DefaultTheme,

@@ -204,13 +204,19 @@ func (p GatePane) View() string {
 		for len(lines) < targetH {
 			lines = append(lines, "")
 		}
-		// Trim if content overflowed before mini-panel space.
 		if len(lines) > targetH {
 			lines = lines[:targetH]
 		}
-		for _, ml := range strings.Split(miniPanel, "\n") {
-			lines = append(lines, ml)
+		// Append mini-panel lines, truncating to available space.
+		mlSlice := strings.Split(miniPanel, "\n")
+		allowed := p.height - len(lines)
+		if allowed < 0 {
+			allowed = 0
 		}
+		if len(mlSlice) > allowed {
+			mlSlice = mlSlice[:allowed]
+		}
+		lines = append(lines, mlSlice...)
 	}
 
 	for len(lines) < p.height {
@@ -292,7 +298,7 @@ func (p GatePane) renderGateMiniPanel() string {
 			dur = adapters.FormatDurationMS(c.DurMS)
 		}
 
-		nameW := innerW - len(dur) - 3 // 3 = space + icon + space
+		nameW := innerW - lipgloss.Width(dur) - 3 // 3 = space + icon + space
 		if nameW < 4 {
 			nameW = 4
 		}
@@ -318,7 +324,7 @@ func (p GatePane) renderGateMiniPanel() string {
 		totalStr = "—"
 	}
 	summary := fmt.Sprintf(" total: %-6s  %d/%d pass", totalStr, passCount, len(p.checksVM.Checks))
-	summaryPad := w - 2 - len(summary) - 1
+	summaryPad := w - 2 - lipgloss.Width(summary) - 1
 	if summaryPad < 0 {
 		summaryPad = 0
 	}
