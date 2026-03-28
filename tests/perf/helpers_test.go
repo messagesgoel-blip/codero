@@ -45,6 +45,9 @@ func percentileDuration(values []time.Duration, percentile float64) time.Duratio
 	if len(values) == 0 {
 		return 0
 	}
+	if math.IsNaN(percentile) || math.IsInf(percentile, 0) || percentile <= 0 || percentile > 1 {
+		panic(fmt.Sprintf("percentileDuration: invalid percentile %v (must be in (0,1])", percentile))
+	}
 
 	sorted := append([]time.Duration(nil), values...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
@@ -106,7 +109,8 @@ func listBranchesByRepo(ctx context.Context, db *state.DB, repo string) ([]branc
 func seedAssignment(tb testing.TB, db *state.DB, sessionID, agentID, repo, branch, taskID string) *state.AgentAssignment {
 	tb.Helper()
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	if err := state.RegisterAgentSession(ctx, db, sessionID, agentID, "cli", ""); err != nil {
 		tb.Fatalf("register agent session: %v", err)
 	}

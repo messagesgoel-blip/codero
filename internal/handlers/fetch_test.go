@@ -55,15 +55,19 @@ func TestFetchURL_InvalidURL(t *testing.T) {
 	}
 }
 
+// TestFetchURL_AllowedHost mutates package-level allowedHosts and fetchClient;
+// do not use t.Parallel.
 func TestFetchURL_AllowedHost(t *testing.T) {
-	// Set up a test server and temporarily add its host to the allowlist.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.Write([]byte("hello from upstream"))
 	}))
 	defer ts.Close()
 
-	tsURL, _ := url.Parse(ts.URL)
+	tsURL, err := url.Parse(ts.URL)
+	if err != nil {
+		t.Fatalf("parse test server URL: %v", err)
+	}
 	allowedHosts[tsURL.Hostname()] = true
 	defer delete(allowedHosts, tsURL.Hostname())
 
@@ -87,13 +91,17 @@ func TestFetchURL_AllowedHost(t *testing.T) {
 	}
 }
 
+// TestFetchURL_UpstreamError mutates package-level state; do not use t.Parallel.
 func TestFetchURL_UpstreamError(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal failure", http.StatusInternalServerError)
 	}))
 	defer ts.Close()
 
-	tsURL, _ := url.Parse(ts.URL)
+	tsURL, err := url.Parse(ts.URL)
+	if err != nil {
+		t.Fatalf("parse test server URL: %v", err)
+	}
 	allowedHosts[tsURL.Hostname()] = true
 	defer delete(allowedHosts, tsURL.Hostname())
 

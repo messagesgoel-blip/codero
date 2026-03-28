@@ -70,8 +70,8 @@ func TestReadFile_FileNotFound(t *testing.T) {
 	w := httptest.NewRecorder()
 	ReadFile(w, req)
 
-	if w.Code != http.StatusInternalServerError {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
 	}
 }
 

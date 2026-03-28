@@ -97,6 +97,43 @@ func TestFinalize_HappyPath(t *testing.T) {
 	if err := store.Finalize(ctx, "sess-finalize", "agent-fin", comp); err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
+
+	// Verify session was ended
+	var endedAt *string
+	if err := db.Unwrap().QueryRow(
+		`SELECT ended_at FROM agent_sessions WHERE session_id = ?`, "sess-finalize",
+	).Scan(&endedAt); err != nil {
+		t.Fatalf("read ended_at: %v", err)
+	}
+	if endedAt == nil {
+		t.Fatal("session ended_at should be set after Finalize")
+	}
+}
+
+func TestFinalize_SessionNotFound(t *testing.T) {
+	db := openSessionTestDB(t)
+	store := NewStore(db)
+	comp := Completion{Status: "completed", Substatus: "terminal_finished"}
+	err := store.Finalize(context.Background(), "no-such-session", "agent-1", comp)
+	if err == nil {
+		t.Fatal("expected error for non-existent session")
+	}
+}
+
+func TestFinalize_AgentMismatch(t *testing.T) {
+	db := openSessionTestDB(t)
+	ctx := context.Background()
+	store := NewStore(db)
+
+	_, err := store.Register(ctx, "sess-fin-mismatch", "agent-X", "")
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	comp := Completion{Status: "completed", Substatus: "terminal_finished"}
+	err = store.Finalize(ctx, "sess-fin-mismatch", "agent-Y", comp)
+	if err == nil {
+		t.Fatal("expected error for agent mismatch")
+	}
 }
 
 func TestFinalize_MissingSessionID(t *testing.T) {

@@ -24,6 +24,10 @@ func ReadFile(w http.ResponseWriter, r *http.Request) {
 	}
 	data, err := os.ReadFile(abs) //nolint:gosec
 	if err != nil {
+		if os.IsNotExist(err) {
+			http.Error(w, "file not found", http.StatusNotFound)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
