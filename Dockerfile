@@ -1,5 +1,5 @@
 # Build stage: compile the Go binary with CGO enabled (required by go-sqlite3).
-FROM golang:1.24.2-bullseye AS builder
+FROM golang:1.25-bookworm AS builder
 
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -13,7 +13,7 @@ RUN CGO_ENABLED=1 GOOS=linux \
     -o /codero ./cmd/codero
 
 # ---- Runtime stage ----
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 
 ARG APP_USER=codero
 
