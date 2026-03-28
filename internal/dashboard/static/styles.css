@@ -116,7 +116,15 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.85em; }
   height: var(--header-h); display: flex; align-items: center;
   padding: 0 16px; gap: 10px; border-bottom: 1px solid var(--border-subtle);
 }
-.sidebar-logo { display: flex; flex-direction: column; line-height: 1; }
+.sidebar-logo { display: flex; align-items: center; gap: 10px; line-height: 1; }
+.sidebar-logo-icon { width: 32px; height: 32px; flex-shrink: 0; }
+.sidebar-logo-text { display: flex; flex-direction: column; }
+.sidebar-brand {
+  font-size: 1.125rem; font-weight: 800; letter-spacing: -0.5px;
+  background: linear-gradient(135deg, var(--primary), #00cc6a);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
 .sidebar-nav { flex: 1; padding: 8px; overflow-y: auto; }
 .nav-item {
   display: flex; align-items: center; gap: 10px;
@@ -418,7 +426,7 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.85em; }
 @media (max-width: 1024px) {
   .sidebar { width: var(--sidebar-w-collapsed); }
   .sidebar .nav-label { display: none; }
-  .sidebar-logo span { display: none; }
+  .sidebar-logo-text { display: none; }
   .section-grid { grid-template-columns: 1fr; }
   .kanban { grid-auto-columns: minmax(120px, 160px); }
 }

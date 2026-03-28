@@ -1,12 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40" fill="none">
-  <!-- Dark mode: #4ADE80, diagonal fade BL→TR -->
-  <rect x="1.5" y="1.5" width="9" height="9" rx="2.5" fill="#4ADE80" opacity="0.55"/>
-  <rect x="14" y="1.5" width="9" height="9" rx="2.5" fill="#4ADE80" opacity="0.35"/>
-  <rect x="26.5" y="1.5" width="9" height="9" rx="2.5" fill="#4ADE80" opacity="0.18"/>
-  <rect x="1.5" y="14" width="9" height="9" rx="2.5" fill="#4ADE80" opacity="0.70"/>
-  <rect x="14" y="14" width="9" height="9" rx="2.5" fill="#4ADE80" opacity="0.55"/>
-  <rect x="26.5" y="14" width="9" height="9" rx="2.5" fill="#4ADE80" opacity="0.30"/>
-  <rect x="1.5" y="26.5" width="9" height="9" rx="2.5" fill="#4ADE80" opacity="1.0"/>
-  <rect x="14" y="26.5" width="9" height="9" rx="2.5" fill="#4ADE80" opacity="0.75"/>
-  <rect x="26.5" y="26.5" width="9" height="9" rx="2.5" fill="#4ADE80" opacity="0.50"/>
+  <!-- Numera 3x3 grid icon — uses brand accent #00ff88 with diagonal fade BL→TR -->
+  <rect x="1.5" y="1.5" width="9" height="9" rx="2.5" fill="#00ff88" opacity="0.55"/>
+  <rect x="14" y="1.5" width="9" height="9" rx="2.5" fill="#00ff88" opacity="0.35"/>
+  <rect x="26.5" y="1.5" width="9" height="9" rx="2.5" fill="#00ff88" opacity="0.18"/>
+  <rect x="1.5" y="14" width="9" height="9" rx="2.5" fill="#00ff88" opacity="0.70"/>
+  <rect x="14" y="14" width="9" height="9" rx="2.5" fill="#00ff88" opacity="0.55"/>
+  <rect x="26.5" y="14" width="9" height="9" rx="2.5" fill="#00ff88" opacity="0.30"/>
+  <rect x="1.5" y="26.5" width="9" height="9" rx="2.5" fill="#00ff88" opacity="1.0"/>
+  <rect x="14" y="26.5" width="9" height="9" rx="2.5" fill="#00ff88" opacity="0.75"/>
+  <rect x="26.5" y="26.5" width="9" height="9" rx="2.5" fill="#00ff88" opacity="0.50"/>
 </svg>
