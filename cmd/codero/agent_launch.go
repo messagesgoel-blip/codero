@@ -196,7 +196,8 @@ touch "$WORKTREE/.codero/feedback/pending" 2>/dev/null || true
 		agentCmd = "bash" // default shell if no command given
 	}
 	// Combine export and command in one send to avoid tmux keystroke racing.
-	fullCmd := envExport + " && " + agentCmd
+	// Use exec to replace the outer shell so there's no nested shell left behind.
+	fullCmd := envExport + " && exec " + agentCmd
 	if err := exec.SendKeys(ctx, tmuxName, fullCmd); err != nil {
 		// Non-fatal; the session is alive, agent command just failed to send
 		fmt.Fprintf(os.Stderr, "warning: failed to send agent command: %v\n", err)

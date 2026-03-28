@@ -91,8 +91,8 @@ func TestRunAgentLaunch_WritesFilesAndCleansUp(t *testing.T) {
 	if !strings.Contains(sent, "CODERO_AGENT_ID='"+agentID+"'") {
 		t.Fatalf("send-keys should export CODERO_AGENT_ID, got: %s", sent)
 	}
-	if !strings.Contains(sent, "&& echo hello") {
-		t.Fatalf("send-keys should contain agent command after &&, got: %s", sent)
+	if !strings.Contains(sent, "&& exec echo hello") {
+		t.Fatalf("send-keys should contain agent command after && exec, got: %s", sent)
 	}
 
 	sessionMD, err := os.ReadFile(filepath.Join(worktree, ".codero", "SESSION.md"))
