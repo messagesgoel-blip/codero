@@ -152,12 +152,6 @@ type Model struct {
 	gateVM    adapters.GateViewModel
 	checksVM  adapters.CheckReportViewModel
 
-	paletteActive bool
-	paletteInput  textinput.Model
-
-	searchActive bool
-	searchInput  textinput.Model
-
 	cliMessages        []terminalMessage
 	cliInput           textinput.Model
 	cliBusy            bool
@@ -190,13 +184,6 @@ func New(cfg Config) Model {
 	theme := cfg.Theme
 	keys := DefaultKeyMap()
 
-	palette := textinput.New()
-	palette.Placeholder = "Type a command or message…"
-	palette.CharLimit = 64
-
-	search := textinput.New()
-	search.Placeholder = "search…"
-	search.CharLimit = 64
 	cli := textinput.New()
 	cli.Prompt = ""
 	cli.Placeholder = "type a command or message…"
@@ -219,9 +206,7 @@ func New(cfg Config) Model {
 		compliancePane:   NewCompliancePane(theme),
 		configPane:       NewConfigPane(theme),
 		gateVM:           cfg.InitialVM,
-		paletteInput:     palette,
-		searchInput:      search,
-		cliInput:         cli,
+		cliInput: cli,
 		cliHistoryIdx:    -1,
 		activeTab:        cfg.InitialTab,
 		cliMessages: []terminalMessage{
@@ -485,6 +470,36 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.PrevPane):
 		m.focused = FocusedPane((int(m.focused) - 1 + paneCount) % paneCount)
+
+	case key.Matches(msg, m.keys.NextTab):
+		m.activeTab = Tab((int(m.activeTab) + 1) % int(tabCount))
+		m.focused = PaneCenter
+		return m, nil
+
+	case key.Matches(msg, m.keys.PrevTab):
+		m.activeTab = Tab((int(m.activeTab) - 1 + int(tabCount)) % int(tabCount))
+		m.focused = PaneCenter
+		return m, nil
+
+	case key.Matches(msg, m.keys.Tab1):
+		m.activeTab = TabLogs
+		m.focused = PaneCenter
+		return m, nil
+
+	case key.Matches(msg, m.keys.Tab2):
+		m.activeTab = TabOverview
+		m.focused = PaneCenter
+		return m, nil
+
+	case key.Matches(msg, m.keys.Tab3):
+		m.activeTab = TabEvents
+		m.focused = PaneCenter
+		return m, nil
+
+	case key.Matches(msg, m.keys.Tab4):
+		m.activeTab = TabQueue
+		m.focused = PaneCenter
+		return m, nil
 
 	case msg.String() == "esc" && m.activeTab == TabSessionDrill:
 		m.activeTab = TabOverview
@@ -910,6 +925,12 @@ func (m Model) renderCenter() string {
 	case TabOverview:
 		m.refreshOverviewViewport()
 		content = m.outputVP.View()
+	case TabEvents:
+		m.eventsPane.SetSize(innerW, innerH)
+		content = m.eventsPane.View()
+	case TabQueue:
+		m.queuePane.SetSize(innerW, innerH)
+		content = m.queuePane.View()
 	case TabSessionDrill:
 		m.sessionDrillPane.SetSize(innerW, innerH)
 		content = m.sessionDrillPane.View()
@@ -965,7 +986,6 @@ func (m *Model) applyLayout() {
 	m.gatePane.SetSize(l.LeftW-2, l.ContentH-2)
 	m.logsArchPane.SetSize(l.CenterW-2, l.ContentH-2)
 	m.pipelinePane.SetSize(l.PipelineW-2, l.ContentH-2)
-	m.paletteInput.Width = maxInt(24, l.TotalW-48)
 	m.cliInput.Width = maxInt(24, l.CenterW-8)
 	m.queuePane.SetSize(l.CenterW-2, l.ContentH-5)
 	m.eventsPane.SetSize(l.CenterW-2, l.ContentH-5)

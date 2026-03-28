@@ -18,7 +18,6 @@ func TestDefaultKeyMap(t *testing.T) {
 		{"Quit", km.Quit.Keys()},
 		{"NextPane", km.NextPane.Keys()},
 		{"NextTab", km.NextTab.Keys()},
-		{"Palette", km.Palette.Keys()},
 		{"Retry", km.Retry.Keys()},
 		{"Logs", km.Logs.Keys()},
 		{"Refresh", km.Refresh.Keys()},
