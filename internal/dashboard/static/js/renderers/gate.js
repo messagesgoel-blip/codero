@@ -9,6 +9,13 @@ import { glassCard, dataTable, toggleSwitch, barChart } from '../components.js';
 
 let activeSeverityFilter = 'ALL';
 
+// LOG-001: maps raw GC-001 status → normalized display state.
+function toDisplayState(status) {
+  if (status === 'pass') return 'passing';
+  if (status === 'fail') return 'failing';
+  return 'disabled';
+}
+
 // ---- public API ---------------------------------------------------------
 
 export function initGate() {
@@ -61,7 +68,7 @@ function buildGatePipeline(gateChecks) {
     html +=
       `<div class="gate-check-row">` +
         `<span class="gate-check-name">${esc(check.name)}</span>` +
-        `<span class="gate-check-status">${statusChip(status)}</span>` +
+        `<span class="gate-check-status">${statusChip(toDisplayState(status))}</span>` +
         `<span class="gate-check-duration">${formatDuration(durationSec)}</span>` +
         `<span class="gate-check-findings">${findingsCount > 0
           ? `<span class="findings-badge">${findingsCount}</span>`
