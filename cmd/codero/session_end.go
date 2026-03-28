@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	daemongrpc "github.com/codero/codero/internal/daemon/grpc"
 	"github.com/codero/codero/internal/session"
 	"github.com/spf13/cobra"
 )
@@ -23,12 +24,6 @@ func sessionEndCmd(configPath *string) *cobra.Command {
 		Long: `Signals a clean session close. The agent or launcher runs this on normal exit.
 On unclean exit, heartbeat TTL handles cleanup automatically (SL-7).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			store, cleanup, err := openSessionStore(*configPathForCmd(cmd))
-			if err != nil {
-				return err
-			}
-			defer cleanup()
-
 			if sessionID == "" {
 				sessionID = resolveSessionIDFromEnv()
 			}
@@ -45,12 +40,33 @@ On unclean exit, heartbeat TTL handles cleanup automatically (SL-7).`,
 				result = "ended"
 			}
 
-			if err := store.Finalize(cmd.Context(), sessionID, agentID, session.Completion{
+			completion := session.Completion{
 				Status:     result,
 				Substatus:  "terminal_finished",
 				Summary:    "clean session close via codero session end",
 				FinishedAt: time.Now().UTC(),
-			}); err != nil {
+			}
+
+			if daemonAddr := resolveDaemonAddr(cmd); daemonAddr != "" {
+				client, err := daemongrpc.NewSessionClient(daemonAddr)
+				if err != nil {
+					return fmt.Errorf("session end: %w", err)
+				}
+				defer client.Close()
+				if err := client.Finalize(cmd.Context(), sessionID, agentID, completion); err != nil {
+					return fmt.Errorf("session end: %w", err)
+				}
+				fmt.Printf("session %s ended (result=%s)\n", sessionID, result)
+				return nil
+			}
+
+			store, cleanup, err := openSessionStore(*configPathForCmd(cmd))
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+
+			if err := store.Finalize(cmd.Context(), sessionID, agentID, completion); err != nil {
 				return fmt.Errorf("session end: %w", err)
 			}
 

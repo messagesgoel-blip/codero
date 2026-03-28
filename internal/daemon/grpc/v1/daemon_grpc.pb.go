@@ -19,9 +19,12 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	SessionService_RegisterSession_FullMethodName = "/codero.daemon.v1.SessionService/RegisterSession"
-	SessionService_Heartbeat_FullMethodName       = "/codero.daemon.v1.SessionService/Heartbeat"
-	SessionService_GetSession_FullMethodName      = "/codero.daemon.v1.SessionService/GetSession"
+	SessionService_RegisterSession_FullMethodName  = "/codero.daemon.v1.SessionService/RegisterSession"
+	SessionService_Heartbeat_FullMethodName        = "/codero.daemon.v1.SessionService/Heartbeat"
+	SessionService_GetSession_FullMethodName       = "/codero.daemon.v1.SessionService/GetSession"
+	SessionService_ConfirmSession_FullMethodName   = "/codero.daemon.v1.SessionService/ConfirmSession"
+	SessionService_AttachAssignment_FullMethodName = "/codero.daemon.v1.SessionService/AttachAssignment"
+	SessionService_FinalizeSession_FullMethodName  = "/codero.daemon.v1.SessionService/FinalizeSession"
 )
 
 // SessionServiceClient is the client API for SessionService service.
@@ -34,6 +37,12 @@ type SessionServiceClient interface {
 	Heartbeat(ctx context.Context, in *HeartbeatRequest, opts ...grpc.CallOption) (*HeartbeatResponse, error)
 	// Retrieve session details by session_id.
 	GetSession(ctx context.Context, in *GetSessionRequest, opts ...grpc.CallOption) (*GetSessionResponse, error)
+	// Confirm the agent identity matches the registered session.
+	ConfirmSession(ctx context.Context, in *ConfirmSessionRequest, opts ...grpc.CallOption) (*ConfirmSessionResponse, error)
+	// Attach a repo/branch assignment to an active session.
+	AttachAssignment(ctx context.Context, in *AttachAssignmentRequest, opts ...grpc.CallOption) (*AttachAssignmentResponse, error)
+	// Mark a session as complete with a terminal status.
+	FinalizeSession(ctx context.Context, in *FinalizeSessionRequest, opts ...grpc.CallOption) (*FinalizeSessionResponse, error)
 }
 
 type sessionServiceClient struct {
@@ -74,6 +83,36 @@ func (c *sessionServiceClient) GetSession(ctx context.Context, in *GetSessionReq
 	return out, nil
 }
 
+func (c *sessionServiceClient) ConfirmSession(ctx context.Context, in *ConfirmSessionRequest, opts ...grpc.CallOption) (*ConfirmSessionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ConfirmSessionResponse)
+	err := c.cc.Invoke(ctx, SessionService_ConfirmSession_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sessionServiceClient) AttachAssignment(ctx context.Context, in *AttachAssignmentRequest, opts ...grpc.CallOption) (*AttachAssignmentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AttachAssignmentResponse)
+	err := c.cc.Invoke(ctx, SessionService_AttachAssignment_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sessionServiceClient) FinalizeSession(ctx context.Context, in *FinalizeSessionRequest, opts ...grpc.CallOption) (*FinalizeSessionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FinalizeSessionResponse)
+	err := c.cc.Invoke(ctx, SessionService_FinalizeSession_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SessionServiceServer is the server API for SessionService service.
 // All implementations must embed UnimplementedSessionServiceServer
 // for forward compatibility.
@@ -84,6 +123,12 @@ type SessionServiceServer interface {
 	Heartbeat(context.Context, *HeartbeatRequest) (*HeartbeatResponse, error)
 	// Retrieve session details by session_id.
 	GetSession(context.Context, *GetSessionRequest) (*GetSessionResponse, error)
+	// Confirm the agent identity matches the registered session.
+	ConfirmSession(context.Context, *ConfirmSessionRequest) (*ConfirmSessionResponse, error)
+	// Attach a repo/branch assignment to an active session.
+	AttachAssignment(context.Context, *AttachAssignmentRequest) (*AttachAssignmentResponse, error)
+	// Mark a session as complete with a terminal status.
+	FinalizeSession(context.Context, *FinalizeSessionRequest) (*FinalizeSessionResponse, error)
 	mustEmbedUnimplementedSessionServiceServer()
 }
 
@@ -102,6 +147,15 @@ func (UnimplementedSessionServiceServer) Heartbeat(context.Context, *HeartbeatRe
 }
 func (UnimplementedSessionServiceServer) GetSession(context.Context, *GetSessionRequest) (*GetSessionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetSession not implemented")
+}
+func (UnimplementedSessionServiceServer) ConfirmSession(context.Context, *ConfirmSessionRequest) (*ConfirmSessionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ConfirmSession not implemented")
+}
+func (UnimplementedSessionServiceServer) AttachAssignment(context.Context, *AttachAssignmentRequest) (*AttachAssignmentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AttachAssignment not implemented")
+}
+func (UnimplementedSessionServiceServer) FinalizeSession(context.Context, *FinalizeSessionRequest) (*FinalizeSessionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method FinalizeSession not implemented")
 }
 func (UnimplementedSessionServiceServer) mustEmbedUnimplementedSessionServiceServer() {}
 func (UnimplementedSessionServiceServer) testEmbeddedByValue()                        {}
@@ -178,6 +232,60 @@ func _SessionService_GetSession_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SessionService_ConfirmSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConfirmSessionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SessionServiceServer).ConfirmSession(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SessionService_ConfirmSession_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SessionServiceServer).ConfirmSession(ctx, req.(*ConfirmSessionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SessionService_AttachAssignment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AttachAssignmentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SessionServiceServer).AttachAssignment(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SessionService_AttachAssignment_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SessionServiceServer).AttachAssignment(ctx, req.(*AttachAssignmentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SessionService_FinalizeSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FinalizeSessionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SessionServiceServer).FinalizeSession(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SessionService_FinalizeSession_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SessionServiceServer).FinalizeSession(ctx, req.(*FinalizeSessionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // SessionService_ServiceDesc is the grpc.ServiceDesc for SessionService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -196,6 +304,18 @@ var SessionService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetSession",
 			Handler:    _SessionService_GetSession_Handler,
+		},
+		{
+			MethodName: "ConfirmSession",
+			Handler:    _SessionService_ConfirmSession_Handler,
+		},
+		{
+			MethodName: "AttachAssignment",
+			Handler:    _SessionService_AttachAssignment_Handler,
+		},
+		{
+			MethodName: "FinalizeSession",
+			Handler:    _SessionService_FinalizeSession_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

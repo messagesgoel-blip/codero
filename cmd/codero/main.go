@@ -848,6 +848,9 @@ func sessionCmd(configPath *string) *cobra.Command {
 		Short: "Manage agent sessions",
 	}
 
+	cmd.PersistentFlags().String("daemon-addr", "",
+		"daemon gRPC address (e.g. 127.0.0.1:8110); routes commands via gRPC instead of direct DB (env: CODERO_DAEMON_ADDR)")
+
 	cmd.AddCommand(
 		sessionBootstrapCmd(configPath),
 		sessionRegisterCmd(configPath),
@@ -859,6 +862,15 @@ func sessionCmd(configPath *string) *cobra.Command {
 	)
 
 	return cmd
+}
+
+// resolveDaemonAddr returns the daemon address from --daemon-addr flag or
+// CODERO_DAEMON_ADDR env var. Empty string means use direct DB access.
+func resolveDaemonAddr(cmd *cobra.Command) string {
+	if addr, _ := cmd.Flags().GetString("daemon-addr"); addr != "" {
+		return addr
+	}
+	return os.Getenv("CODERO_DAEMON_ADDR")
 }
 
 func sessionRegisterCmd(configPath *string) *cobra.Command {
@@ -873,6 +885,29 @@ func sessionRegisterCmd(configPath *string) *cobra.Command {
 		Use:   "register",
 		Short: "Register a new agent session",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if agentID == "" {
+				agentID = resolveAgentIDFromEnv()
+			}
+			if mode == "" {
+				mode = resolveSessionModeFromEnv("agent")
+			}
+
+			if daemonAddr := resolveDaemonAddr(cmd); daemonAddr != "" {
+				client, err := daemongrpc.NewSessionClient(daemonAddr)
+				if err != nil {
+					return fmt.Errorf("session register: %w", err)
+				}
+				defer client.Close()
+
+				result, err := client.Register(cmd.Context(), agentID, mode)
+				if err != nil {
+					return fmt.Errorf("session register: %w", err)
+				}
+				fmt.Printf("session_id: %s\n", result.SessionID)
+				fmt.Printf("heartbeat_secret: %s\n", result.HeartbeatSecret)
+				return nil
+			}
+
 			store, cleanup, err := openSessionStore(*configPathForCmd(cmd))
 			if err != nil {
 				return err
@@ -884,12 +919,6 @@ func sessionRegisterCmd(configPath *string) *cobra.Command {
 			}
 			if sessionID == "" {
 				sessionID = uuid.New().String()
-			}
-			if agentID == "" {
-				agentID = resolveAgentIDFromEnv()
-			}
-			if mode == "" {
-				mode = resolveSessionModeFromEnv("agent")
 			}
 			if tmuxName == "" {
 				tmuxName = os.Getenv("CODERO_TMUX_NAME")
@@ -931,12 +960,6 @@ func sessionConfirmCmd(configPath *string) *cobra.Command {
 		Use:   "confirm",
 		Short: "Confirm that Codero has the injected live session",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			store, cleanup, err := openSessionStore(*configPathForCmd(cmd))
-			if err != nil {
-				return err
-			}
-			defer cleanup()
-
 			if sessionID == "" {
 				sessionID = resolveSessionIDFromEnv()
 			}
@@ -946,6 +969,26 @@ func sessionConfirmCmd(configPath *string) *cobra.Command {
 			if agentID == "" {
 				agentID = resolveAgentIDFromEnv()
 			}
+
+			if daemonAddr := resolveDaemonAddr(cmd); daemonAddr != "" {
+				client, err := daemongrpc.NewSessionClient(daemonAddr)
+				if err != nil {
+					return fmt.Errorf("session confirm: %w", err)
+				}
+				defer client.Close()
+				if err := client.Confirm(cmd.Context(), sessionID, agentID); err != nil {
+					return fmt.Errorf("session confirm: %w", err)
+				}
+				fmt.Printf("session_id: %s\n", sessionID)
+				return nil
+			}
+
+			store, cleanup, err := openSessionStore(*configPathForCmd(cmd))
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+
 			if err := store.Confirm(cmd.Context(), sessionID, agentID); err != nil {
 				return err
 			}
@@ -971,12 +1014,6 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 		Use:   "heartbeat",
 		Short: "Emit a session heartbeat",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			store, cleanup, err := openSessionStore(*configPathForCmd(cmd))
-			if err != nil {
-				return err
-			}
-			defer cleanup()
-
 			if sessionID == "" {
 				sessionID = resolveSessionIDFromEnv()
 			}
@@ -986,6 +1023,24 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 			if heartbeatSecret == "" {
 				heartbeatSecret = os.Getenv("CODERO_HEARTBEAT_SECRET")
 			}
+
+			if daemonAddr := resolveDaemonAddr(cmd); daemonAddr != "" {
+				client, err := daemongrpc.NewSessionClient(daemonAddr)
+				if err != nil {
+					return fmt.Errorf("session heartbeat: %w", err)
+				}
+				defer client.Close()
+				if err := client.Heartbeat(cmd.Context(), sessionID, heartbeatSecret, markProgress); err != nil {
+					return fmt.Errorf("session heartbeat: %w", err)
+				}
+				return nil
+			}
+
+			store, cleanup, err := openSessionStore(*configPathForCmd(cmd))
+			if err != nil {
+				return err
+			}
+			defer cleanup()
 
 			return store.Heartbeat(cmd.Context(), sessionID, heartbeatSecret, markProgress)
 		},
@@ -1014,17 +1069,6 @@ func sessionAttachCmd(configPath *string) *cobra.Command {
 		Use:   "attach",
 		Short: "Attach assignment context to a session",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := loadConfig(*configPathForCmd(cmd))
-			if err != nil {
-				return fmt.Errorf("codero: config: %w", err)
-			}
-
-			store, cleanup, err := openSessionStore(*configPathForCmd(cmd))
-			if err != nil {
-				return err
-			}
-			defer cleanup()
-
 			if sessionID == "" {
 				sessionID = resolveSessionIDFromEnv()
 			}
@@ -1045,12 +1089,6 @@ func sessionAttachCmd(configPath *string) *cobra.Command {
 					worktree = cwd
 				}
 			}
-			if repo == "" {
-				if len(cfg.Repos) == 0 {
-					return fmt.Errorf("no repositories configured")
-				}
-				repo = cfg.Repos[0]
-			}
 			if branch == "" {
 				var err error
 				branch, err = getCurrentBranch()
@@ -1058,6 +1096,39 @@ func sessionAttachCmd(configPath *string) *cobra.Command {
 					return fmt.Errorf("get current branch: %w", err)
 				}
 			}
+
+			if daemonAddr := resolveDaemonAddr(cmd); daemonAddr != "" {
+				if repo == "" {
+					return fmt.Errorf("--repo is required when using --daemon-addr")
+				}
+				client, err := daemongrpc.NewSessionClient(daemonAddr)
+				if err != nil {
+					return fmt.Errorf("session attach: %w", err)
+				}
+				defer client.Close()
+				if err := client.AttachAssignment(cmd.Context(), sessionID, agentID, repo, branch, worktree, mode, taskID, substatus); err != nil {
+					return fmt.Errorf("session attach: %w", err)
+				}
+				fmt.Printf("session %s attached to %s/%s\n", sessionID, repo, branch)
+				return nil
+			}
+
+			cfg, err := loadConfig(*configPathForCmd(cmd))
+			if err != nil {
+				return fmt.Errorf("codero: config: %w", err)
+			}
+			if repo == "" {
+				if len(cfg.Repos) == 0 {
+					return fmt.Errorf("no repositories configured")
+				}
+				repo = cfg.Repos[0]
+			}
+
+			store, cleanup, err := openSessionStore(*configPathForCmd(cmd))
+			if err != nil {
+				return err
+			}
+			defer cleanup()
 
 			if err := store.AttachAssignment(cmd.Context(), sessionID, agentID, repo, branch, worktree, mode, taskID, substatus); err != nil {
 				return err

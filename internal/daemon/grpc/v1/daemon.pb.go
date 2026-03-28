@@ -662,6 +662,7 @@ type HeartbeatRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	Timestamp     *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	MarkProgress  bool                   `protobuf:"varint,3,opt,name=mark_progress,json=markProgress,proto3" json:"mark_progress,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -708,6 +709,13 @@ func (x *HeartbeatRequest) GetTimestamp() *timestamppb.Timestamp {
 		return x.Timestamp
 	}
 	return nil
+}
+
+func (x *HeartbeatRequest) GetMarkProgress() bool {
+	if x != nil {
+		return x.MarkProgress
+	}
+	return false
 }
 
 type HeartbeatResponse struct {
@@ -982,6 +990,374 @@ func (x *GetSessionResponse) GetActiveAssignment() *ActiveAssignmentSummary {
 	return nil
 }
 
+type ConfirmSessionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	AgentId       string                 `protobuf:"bytes,2,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConfirmSessionRequest) Reset() {
+	*x = ConfirmSessionRequest{}
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConfirmSessionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConfirmSessionRequest) ProtoMessage() {}
+
+func (x *ConfirmSessionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConfirmSessionRequest.ProtoReflect.Descriptor instead.
+func (*ConfirmSessionRequest) Descriptor() ([]byte, []int) {
+	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *ConfirmSessionRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *ConfirmSessionRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+type ConfirmSessionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConfirmSessionResponse) Reset() {
+	*x = ConfirmSessionResponse{}
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConfirmSessionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConfirmSessionResponse) ProtoMessage() {}
+
+func (x *ConfirmSessionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConfirmSessionResponse.ProtoReflect.Descriptor instead.
+func (*ConfirmSessionResponse) Descriptor() ([]byte, []int) {
+	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{8}
+}
+
+type AttachAssignmentRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	AgentId       string                 `protobuf:"bytes,2,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	Repo          string                 `protobuf:"bytes,3,opt,name=repo,proto3" json:"repo,omitempty"`
+	Branch        string                 `protobuf:"bytes,4,opt,name=branch,proto3" json:"branch,omitempty"`
+	Worktree      string                 `protobuf:"bytes,5,opt,name=worktree,proto3" json:"worktree,omitempty"`
+	Mode          string                 `protobuf:"bytes,6,opt,name=mode,proto3" json:"mode,omitempty"`
+	TaskId        string                 `protobuf:"bytes,7,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	Substatus     string                 `protobuf:"bytes,8,opt,name=substatus,proto3" json:"substatus,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AttachAssignmentRequest) Reset() {
+	*x = AttachAssignmentRequest{}
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AttachAssignmentRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AttachAssignmentRequest) ProtoMessage() {}
+
+func (x *AttachAssignmentRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AttachAssignmentRequest.ProtoReflect.Descriptor instead.
+func (*AttachAssignmentRequest) Descriptor() ([]byte, []int) {
+	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *AttachAssignmentRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *AttachAssignmentRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *AttachAssignmentRequest) GetRepo() string {
+	if x != nil {
+		return x.Repo
+	}
+	return ""
+}
+
+func (x *AttachAssignmentRequest) GetBranch() string {
+	if x != nil {
+		return x.Branch
+	}
+	return ""
+}
+
+func (x *AttachAssignmentRequest) GetWorktree() string {
+	if x != nil {
+		return x.Worktree
+	}
+	return ""
+}
+
+func (x *AttachAssignmentRequest) GetMode() string {
+	if x != nil {
+		return x.Mode
+	}
+	return ""
+}
+
+func (x *AttachAssignmentRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *AttachAssignmentRequest) GetSubstatus() string {
+	if x != nil {
+		return x.Substatus
+	}
+	return ""
+}
+
+type AttachAssignmentResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AssignmentId  string                 `protobuf:"bytes,1,opt,name=assignment_id,json=assignmentId,proto3" json:"assignment_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AttachAssignmentResponse) Reset() {
+	*x = AttachAssignmentResponse{}
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AttachAssignmentResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AttachAssignmentResponse) ProtoMessage() {}
+
+func (x *AttachAssignmentResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AttachAssignmentResponse.ProtoReflect.Descriptor instead.
+func (*AttachAssignmentResponse) Descriptor() ([]byte, []int) {
+	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *AttachAssignmentResponse) GetAssignmentId() string {
+	if x != nil {
+		return x.AssignmentId
+	}
+	return ""
+}
+
+type FinalizeSessionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	AgentId       string                 `protobuf:"bytes,2,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	Status        string                 `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"`
+	Substatus     string                 `protobuf:"bytes,4,opt,name=substatus,proto3" json:"substatus,omitempty"`
+	Summary       string                 `protobuf:"bytes,5,opt,name=summary,proto3" json:"summary,omitempty"`
+	TaskId        string                 `protobuf:"bytes,6,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	Tests         []string               `protobuf:"bytes,7,rep,name=tests,proto3" json:"tests,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FinalizeSessionRequest) Reset() {
+	*x = FinalizeSessionRequest{}
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FinalizeSessionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FinalizeSessionRequest) ProtoMessage() {}
+
+func (x *FinalizeSessionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FinalizeSessionRequest.ProtoReflect.Descriptor instead.
+func (*FinalizeSessionRequest) Descriptor() ([]byte, []int) {
+	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *FinalizeSessionRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *FinalizeSessionRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *FinalizeSessionRequest) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *FinalizeSessionRequest) GetSubstatus() string {
+	if x != nil {
+		return x.Substatus
+	}
+	return ""
+}
+
+func (x *FinalizeSessionRequest) GetSummary() string {
+	if x != nil {
+		return x.Summary
+	}
+	return ""
+}
+
+func (x *FinalizeSessionRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *FinalizeSessionRequest) GetTests() []string {
+	if x != nil {
+		return x.Tests
+	}
+	return nil
+}
+
+type FinalizeSessionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	FinalizedAt   *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=finalized_at,json=finalizedAt,proto3" json:"finalized_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FinalizeSessionResponse) Reset() {
+	*x = FinalizeSessionResponse{}
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FinalizeSessionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FinalizeSessionResponse) ProtoMessage() {}
+
+func (x *FinalizeSessionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FinalizeSessionResponse.ProtoReflect.Descriptor instead.
+func (*FinalizeSessionResponse) Descriptor() ([]byte, []int) {
+	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *FinalizeSessionResponse) GetFinalizedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.FinalizedAt
+	}
+	return nil
+}
+
 type IngestTaskRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
@@ -999,7 +1375,7 @@ type IngestTaskRequest struct {
 
 func (x *IngestTaskRequest) Reset() {
 	*x = IngestTaskRequest{}
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[7]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1011,7 +1387,7 @@ func (x *IngestTaskRequest) String() string {
 func (*IngestTaskRequest) ProtoMessage() {}
 
 func (x *IngestTaskRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[7]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1024,7 +1400,7 @@ func (x *IngestTaskRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IngestTaskRequest.ProtoReflect.Descriptor instead.
 func (*IngestTaskRequest) Descriptor() ([]byte, []int) {
-	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{7}
+	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *IngestTaskRequest) GetTaskId() string {
@@ -1102,7 +1478,7 @@ type IngestTaskResponse struct {
 
 func (x *IngestTaskResponse) Reset() {
 	*x = IngestTaskResponse{}
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[8]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1114,7 +1490,7 @@ func (x *IngestTaskResponse) String() string {
 func (*IngestTaskResponse) ProtoMessage() {}
 
 func (x *IngestTaskResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[8]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1127,7 +1503,7 @@ func (x *IngestTaskResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IngestTaskResponse.ProtoReflect.Descriptor instead.
 func (*IngestTaskResponse) Descriptor() ([]byte, []int) {
-	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{8}
+	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *IngestTaskResponse) GetTaskId() string {
@@ -1167,7 +1543,7 @@ type GetAssignmentRequest struct {
 
 func (x *GetAssignmentRequest) Reset() {
 	*x = GetAssignmentRequest{}
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[9]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1179,7 +1555,7 @@ func (x *GetAssignmentRequest) String() string {
 func (*GetAssignmentRequest) ProtoMessage() {}
 
 func (x *GetAssignmentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[9]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1192,7 +1568,7 @@ func (x *GetAssignmentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAssignmentRequest.ProtoReflect.Descriptor instead.
 func (*GetAssignmentRequest) Descriptor() ([]byte, []int) {
-	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{9}
+	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *GetAssignmentRequest) GetAssignmentId() string {
@@ -1215,7 +1591,7 @@ type RuleCheck struct {
 
 func (x *RuleCheck) Reset() {
 	*x = RuleCheck{}
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[10]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1227,7 +1603,7 @@ func (x *RuleCheck) String() string {
 func (*RuleCheck) ProtoMessage() {}
 
 func (x *RuleCheck) ProtoReflect() protoreflect.Message {
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[10]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1240,7 +1616,7 @@ func (x *RuleCheck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RuleCheck.ProtoReflect.Descriptor instead.
 func (*RuleCheck) Descriptor() ([]byte, []int) {
-	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{10}
+	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *RuleCheck) GetRuleId() string {
@@ -1288,7 +1664,7 @@ type MergeReadiness struct {
 
 func (x *MergeReadiness) Reset() {
 	*x = MergeReadiness{}
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[11]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1300,7 +1676,7 @@ func (x *MergeReadiness) String() string {
 func (*MergeReadiness) ProtoMessage() {}
 
 func (x *MergeReadiness) ProtoReflect() protoreflect.Message {
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[11]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1313,7 +1689,7 @@ func (x *MergeReadiness) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeReadiness.ProtoReflect.Descriptor instead.
 func (*MergeReadiness) Descriptor() ([]byte, []int) {
-	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{11}
+	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *MergeReadiness) GetReady() bool {
@@ -1352,7 +1728,7 @@ type GetAssignmentResponse struct {
 
 func (x *GetAssignmentResponse) Reset() {
 	*x = GetAssignmentResponse{}
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[12]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1364,7 +1740,7 @@ func (x *GetAssignmentResponse) String() string {
 func (*GetAssignmentResponse) ProtoMessage() {}
 
 func (x *GetAssignmentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[12]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1377,7 +1753,7 @@ func (x *GetAssignmentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAssignmentResponse.ProtoReflect.Descriptor instead.
 func (*GetAssignmentResponse) Descriptor() ([]byte, []int) {
-	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{12}
+	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *GetAssignmentResponse) GetAssignmentId() string {
@@ -1490,7 +1866,7 @@ type SubmitRequest struct {
 
 func (x *SubmitRequest) Reset() {
 	*x = SubmitRequest{}
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[13]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1502,7 +1878,7 @@ func (x *SubmitRequest) String() string {
 func (*SubmitRequest) ProtoMessage() {}
 
 func (x *SubmitRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[13]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1515,7 +1891,7 @@ func (x *SubmitRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitRequest.ProtoReflect.Descriptor instead.
 func (*SubmitRequest) Descriptor() ([]byte, []int) {
-	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{13}
+	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *SubmitRequest) GetAssignmentId() string {
@@ -1556,7 +1932,7 @@ type SubmitResponse struct {
 
 func (x *SubmitResponse) Reset() {
 	*x = SubmitResponse{}
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[14]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1568,7 +1944,7 @@ func (x *SubmitResponse) String() string {
 func (*SubmitResponse) ProtoMessage() {}
 
 func (x *SubmitResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[14]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1581,7 +1957,7 @@ func (x *SubmitResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitResponse.ProtoReflect.Descriptor instead.
 func (*SubmitResponse) Descriptor() ([]byte, []int) {
-	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{14}
+	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *SubmitResponse) GetPipelineId() string {
@@ -1608,7 +1984,7 @@ type GetFeedbackRequest struct {
 
 func (x *GetFeedbackRequest) Reset() {
 	*x = GetFeedbackRequest{}
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[15]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1620,7 +1996,7 @@ func (x *GetFeedbackRequest) String() string {
 func (*GetFeedbackRequest) ProtoMessage() {}
 
 func (x *GetFeedbackRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[15]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1633,7 +2009,7 @@ func (x *GetFeedbackRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetFeedbackRequest.ProtoReflect.Descriptor instead.
 func (*GetFeedbackRequest) Descriptor() ([]byte, []int) {
-	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{15}
+	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *GetFeedbackRequest) GetTaskId() string {
@@ -1665,7 +2041,7 @@ type Finding struct {
 
 func (x *Finding) Reset() {
 	*x = Finding{}
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[16]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1677,7 +2053,7 @@ func (x *Finding) String() string {
 func (*Finding) ProtoMessage() {}
 
 func (x *Finding) ProtoReflect() protoreflect.Message {
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[16]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1690,7 +2066,7 @@ func (x *Finding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Finding.ProtoReflect.Descriptor instead.
 func (*Finding) Descriptor() ([]byte, []int) {
-	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{16}
+	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *Finding) GetFindingId() string {
@@ -1756,7 +2132,7 @@ type FeedbackSource struct {
 
 func (x *FeedbackSource) Reset() {
 	*x = FeedbackSource{}
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[17]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1768,7 +2144,7 @@ func (x *FeedbackSource) String() string {
 func (*FeedbackSource) ProtoMessage() {}
 
 func (x *FeedbackSource) ProtoReflect() protoreflect.Message {
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[17]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1781,7 +2157,7 @@ func (x *FeedbackSource) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedbackSource.ProtoReflect.Descriptor instead.
 func (*FeedbackSource) Descriptor() ([]byte, []int) {
-	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{17}
+	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *FeedbackSource) GetSource() FeedbackSourceType {
@@ -1838,7 +2214,7 @@ type GetFeedbackResponse struct {
 
 func (x *GetFeedbackResponse) Reset() {
 	*x = GetFeedbackResponse{}
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[18]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1850,7 +2226,7 @@ func (x *GetFeedbackResponse) String() string {
 func (*GetFeedbackResponse) ProtoMessage() {}
 
 func (x *GetFeedbackResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[18]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1863,7 +2239,7 @@ func (x *GetFeedbackResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetFeedbackResponse.ProtoReflect.Descriptor instead.
 func (*GetFeedbackResponse) Descriptor() ([]byte, []int) {
-	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{18}
+	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *GetFeedbackResponse) GetTaskId() string {
@@ -1909,7 +2285,7 @@ type GateFinding struct {
 
 func (x *GateFinding) Reset() {
 	*x = GateFinding{}
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[19]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1921,7 +2297,7 @@ func (x *GateFinding) String() string {
 func (*GateFinding) ProtoMessage() {}
 
 func (x *GateFinding) ProtoReflect() protoreflect.Message {
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[19]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1934,7 +2310,7 @@ func (x *GateFinding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GateFinding.ProtoReflect.Descriptor instead.
 func (*GateFinding) Descriptor() ([]byte, []int) {
-	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{19}
+	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *GateFinding) GetFindingId() string {
@@ -1998,7 +2374,7 @@ type GateCheck struct {
 
 func (x *GateCheck) Reset() {
 	*x = GateCheck{}
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[20]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2010,7 +2386,7 @@ func (x *GateCheck) String() string {
 func (*GateCheck) ProtoMessage() {}
 
 func (x *GateCheck) ProtoReflect() protoreflect.Message {
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[20]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2023,7 +2399,7 @@ func (x *GateCheck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GateCheck.ProtoReflect.Descriptor instead.
 func (*GateCheck) Descriptor() ([]byte, []int) {
-	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{20}
+	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *GateCheck) GetName() string {
@@ -2068,7 +2444,7 @@ type PostFindingsRequest struct {
 
 func (x *PostFindingsRequest) Reset() {
 	*x = PostFindingsRequest{}
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[21]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2080,7 +2456,7 @@ func (x *PostFindingsRequest) String() string {
 func (*PostFindingsRequest) ProtoMessage() {}
 
 func (x *PostFindingsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[21]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2093,7 +2469,7 @@ func (x *PostFindingsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PostFindingsRequest.ProtoReflect.Descriptor instead.
 func (*PostFindingsRequest) Descriptor() ([]byte, []int) {
-	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{21}
+	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *PostFindingsRequest) GetSessionId() string {
@@ -2147,7 +2523,7 @@ type PostFindingsResponse struct {
 
 func (x *PostFindingsResponse) Reset() {
 	*x = PostFindingsResponse{}
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[22]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2159,7 +2535,7 @@ func (x *PostFindingsResponse) String() string {
 func (*PostFindingsResponse) ProtoMessage() {}
 
 func (x *PostFindingsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[22]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2172,7 +2548,7 @@ func (x *PostFindingsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PostFindingsResponse.ProtoReflect.Descriptor instead.
 func (*PostFindingsResponse) Descriptor() ([]byte, []int) {
-	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{22}
+	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *PostFindingsResponse) GetRecordedAt() *timestamppb.Timestamp {
@@ -2190,7 +2566,7 @@ type GetHealthRequest struct {
 
 func (x *GetHealthRequest) Reset() {
 	*x = GetHealthRequest{}
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[23]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2202,7 +2578,7 @@ func (x *GetHealthRequest) String() string {
 func (*GetHealthRequest) ProtoMessage() {}
 
 func (x *GetHealthRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[23]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2215,7 +2591,7 @@ func (x *GetHealthRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetHealthRequest.ProtoReflect.Descriptor instead.
 func (*GetHealthRequest) Descriptor() ([]byte, []int) {
-	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{23}
+	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{29}
 }
 
 type GetHealthResponse struct {
@@ -2232,7 +2608,7 @@ type GetHealthResponse struct {
 
 func (x *GetHealthResponse) Reset() {
 	*x = GetHealthResponse{}
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[24]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2244,7 +2620,7 @@ func (x *GetHealthResponse) String() string {
 func (*GetHealthResponse) ProtoMessage() {}
 
 func (x *GetHealthResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[24]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2257,7 +2633,7 @@ func (x *GetHealthResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetHealthResponse.ProtoReflect.Descriptor instead.
 func (*GetHealthResponse) Descriptor() ([]byte, []int) {
-	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{24}
+	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *GetHealthResponse) GetStatus() string {
@@ -2310,7 +2686,7 @@ type GetGitHubStatusRequest struct {
 
 func (x *GetGitHubStatusRequest) Reset() {
 	*x = GetGitHubStatusRequest{}
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[25]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2322,7 +2698,7 @@ func (x *GetGitHubStatusRequest) String() string {
 func (*GetGitHubStatusRequest) ProtoMessage() {}
 
 func (x *GetGitHubStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[25]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2335,7 +2711,7 @@ func (x *GetGitHubStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetGitHubStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetGitHubStatusRequest) Descriptor() ([]byte, []int) {
-	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{25}
+	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{31}
 }
 
 type GetGitHubStatusResponse struct {
@@ -2349,7 +2725,7 @@ type GetGitHubStatusResponse struct {
 
 func (x *GetGitHubStatusResponse) Reset() {
 	*x = GetGitHubStatusResponse{}
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[26]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2361,7 +2737,7 @@ func (x *GetGitHubStatusResponse) String() string {
 func (*GetGitHubStatusResponse) ProtoMessage() {}
 
 func (x *GetGitHubStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[26]
+	mi := &file_codero_daemon_v1_daemon_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2374,7 +2750,7 @@ func (x *GetGitHubStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetGitHubStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetGitHubStatusResponse) Descriptor() ([]byte, []int) {
-	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{26}
+	return file_codero_daemon_v1_daemon_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *GetGitHubStatusResponse) GetStatus() GitHubAvailability {
@@ -2418,11 +2794,12 @@ const file_codero_daemon_v1_daemon_proto_rawDesc = "" +
 	"\tapi_token\x18\x03 \x01(\tR\bapiToken\x12<\n" +
 	"\x1aheartbeat_interval_seconds\x18\x04 \x01(\x05R\x18heartbeatIntervalSeconds\x122\n" +
 	"\x15heartbeat_ttl_seconds\x18\x05 \x01(\x05R\x13heartbeatTtlSeconds\x12.\n" +
-	"\x13ready_sentinel_path\x18\x06 \x01(\tR\x11readySentinelPath\"k\n" +
+	"\x13ready_sentinel_path\x18\x06 \x01(\tR\x11readySentinelPath\"\x90\x01\n" +
 	"\x10HeartbeatRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x128\n" +
-	"\ttimestamp\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\"t\n" +
+	"\ttimestamp\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12#\n" +
+	"\rmark_progress\x18\x03 \x01(\bR\fmarkProgress\"t\n" +
 	"\x11HeartbeatResponse\x12\"\n" +
 	"\facknowledged\x18\x01 \x01(\bR\facknowledged\x12;\n" +
 	"\vserver_time\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
@@ -2448,7 +2825,35 @@ const file_codero_daemon_v1_daemon_proto_rawDesc = "" +
 	"\vclient_kind\x18\x06 \x01(\tR\n" +
 	"clientKind\x12'\n" +
 	"\x0fdeviation_count\x18\a \x01(\x05R\x0edeviationCount\x12V\n" +
-	"\x11active_assignment\x18\b \x01(\v2).codero.daemon.v1.ActiveAssignmentSummaryR\x10activeAssignment\"\xbf\x03\n" +
+	"\x11active_assignment\x18\b \x01(\v2).codero.daemon.v1.ActiveAssignmentSummaryR\x10activeAssignment\"Q\n" +
+	"\x15ConfirmSessionRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x19\n" +
+	"\bagent_id\x18\x02 \x01(\tR\aagentId\"\x18\n" +
+	"\x16ConfirmSessionResponse\"\xe6\x01\n" +
+	"\x17AttachAssignmentRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x19\n" +
+	"\bagent_id\x18\x02 \x01(\tR\aagentId\x12\x12\n" +
+	"\x04repo\x18\x03 \x01(\tR\x04repo\x12\x16\n" +
+	"\x06branch\x18\x04 \x01(\tR\x06branch\x12\x1a\n" +
+	"\bworktree\x18\x05 \x01(\tR\bworktree\x12\x12\n" +
+	"\x04mode\x18\x06 \x01(\tR\x04mode\x12\x17\n" +
+	"\atask_id\x18\a \x01(\tR\x06taskId\x12\x1c\n" +
+	"\tsubstatus\x18\b \x01(\tR\tsubstatus\"?\n" +
+	"\x18AttachAssignmentResponse\x12#\n" +
+	"\rassignment_id\x18\x01 \x01(\tR\fassignmentId\"\xd1\x01\n" +
+	"\x16FinalizeSessionRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x19\n" +
+	"\bagent_id\x18\x02 \x01(\tR\aagentId\x12\x16\n" +
+	"\x06status\x18\x03 \x01(\tR\x06status\x12\x1c\n" +
+	"\tsubstatus\x18\x04 \x01(\tR\tsubstatus\x12\x18\n" +
+	"\asummary\x18\x05 \x01(\tR\asummary\x12\x17\n" +
+	"\atask_id\x18\x06 \x01(\tR\x06taskId\x12\x14\n" +
+	"\x05tests\x18\a \x03(\tR\x05tests\"X\n" +
+	"\x17FinalizeSessionResponse\x12=\n" +
+	"\ffinalized_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\vfinalizedAt\"\xbf\x03\n" +
 	"\x11IngestTaskRequest\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12 \n" +
@@ -2630,12 +3035,15 @@ const file_codero_daemon_v1_daemon_proto_rawDesc = "" +
 	"\x1fGITHUB_AVAILABILITY_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x1bGITHUB_AVAILABILITY_HEALTHY\x10\x01\x12 \n" +
 	"\x1cGITHUB_AVAILABILITY_DEGRADED\x10\x02\x12#\n" +
-	"\x1fGITHUB_AVAILABILITY_UNAVAILABLE\x10\x032\xa7\x02\n" +
+	"\x1fGITHUB_AVAILABILITY_UNAVAILABLE\x10\x032\xdf\x04\n" +
 	"\x0eSessionService\x12f\n" +
 	"\x0fRegisterSession\x12(.codero.daemon.v1.RegisterSessionRequest\x1a).codero.daemon.v1.RegisterSessionResponse\x12T\n" +
 	"\tHeartbeat\x12\".codero.daemon.v1.HeartbeatRequest\x1a#.codero.daemon.v1.HeartbeatResponse\x12W\n" +
 	"\n" +
-	"GetSession\x12#.codero.daemon.v1.GetSessionRequest\x1a$.codero.daemon.v1.GetSessionResponse2f\n" +
+	"GetSession\x12#.codero.daemon.v1.GetSessionRequest\x1a$.codero.daemon.v1.GetSessionResponse\x12c\n" +
+	"\x0eConfirmSession\x12'.codero.daemon.v1.ConfirmSessionRequest\x1a(.codero.daemon.v1.ConfirmSessionResponse\x12i\n" +
+	"\x10AttachAssignment\x12).codero.daemon.v1.AttachAssignmentRequest\x1a*.codero.daemon.v1.AttachAssignmentResponse\x12f\n" +
+	"\x0fFinalizeSession\x12(.codero.daemon.v1.FinalizeSessionRequest\x1a).codero.daemon.v1.FinalizeSessionResponse2f\n" +
 	"\vTaskService\x12W\n" +
 	"\n" +
 	"IngestTask\x12#.codero.daemon.v1.IngestTaskRequest\x1a$.codero.daemon.v1.IngestTaskResponse2\xc2\x01\n" +
@@ -2663,104 +3071,117 @@ func file_codero_daemon_v1_daemon_proto_rawDescGZIP() []byte {
 }
 
 var file_codero_daemon_v1_daemon_proto_enumTypes = make([]protoimpl.EnumInfo, 9)
-var file_codero_daemon_v1_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
+var file_codero_daemon_v1_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
 var file_codero_daemon_v1_daemon_proto_goTypes = []any{
-	(SessionStatus)(0),              // 0: codero.daemon.v1.SessionStatus
-	(PriorityClass)(0),              // 1: codero.daemon.v1.PriorityClass
-	(TaskSource)(0),                 // 2: codero.daemon.v1.TaskSource
-	(AssignmentState)(0),            // 3: codero.daemon.v1.AssignmentState
-	(FeedbackSourceType)(0),         // 4: codero.daemon.v1.FeedbackSourceType
-	(FeedbackStatus)(0),             // 5: codero.daemon.v1.FeedbackStatus
-	(GateCheckStatus)(0),            // 6: codero.daemon.v1.GateCheckStatus
-	(GateOverallStatus)(0),          // 7: codero.daemon.v1.GateOverallStatus
-	(GitHubAvailability)(0),         // 8: codero.daemon.v1.GitHubAvailability
-	(*RegisterSessionRequest)(nil),  // 9: codero.daemon.v1.RegisterSessionRequest
-	(*RegisterSessionResponse)(nil), // 10: codero.daemon.v1.RegisterSessionResponse
-	(*HeartbeatRequest)(nil),        // 11: codero.daemon.v1.HeartbeatRequest
-	(*HeartbeatResponse)(nil),       // 12: codero.daemon.v1.HeartbeatResponse
-	(*GetSessionRequest)(nil),       // 13: codero.daemon.v1.GetSessionRequest
-	(*ActiveAssignmentSummary)(nil), // 14: codero.daemon.v1.ActiveAssignmentSummary
-	(*GetSessionResponse)(nil),      // 15: codero.daemon.v1.GetSessionResponse
-	(*IngestTaskRequest)(nil),       // 16: codero.daemon.v1.IngestTaskRequest
-	(*IngestTaskResponse)(nil),      // 17: codero.daemon.v1.IngestTaskResponse
-	(*GetAssignmentRequest)(nil),    // 18: codero.daemon.v1.GetAssignmentRequest
-	(*RuleCheck)(nil),               // 19: codero.daemon.v1.RuleCheck
-	(*MergeReadiness)(nil),          // 20: codero.daemon.v1.MergeReadiness
-	(*GetAssignmentResponse)(nil),   // 21: codero.daemon.v1.GetAssignmentResponse
-	(*SubmitRequest)(nil),           // 22: codero.daemon.v1.SubmitRequest
-	(*SubmitResponse)(nil),          // 23: codero.daemon.v1.SubmitResponse
-	(*GetFeedbackRequest)(nil),      // 24: codero.daemon.v1.GetFeedbackRequest
-	(*Finding)(nil),                 // 25: codero.daemon.v1.Finding
-	(*FeedbackSource)(nil),          // 26: codero.daemon.v1.FeedbackSource
-	(*GetFeedbackResponse)(nil),     // 27: codero.daemon.v1.GetFeedbackResponse
-	(*GateFinding)(nil),             // 28: codero.daemon.v1.GateFinding
-	(*GateCheck)(nil),               // 29: codero.daemon.v1.GateCheck
-	(*PostFindingsRequest)(nil),     // 30: codero.daemon.v1.PostFindingsRequest
-	(*PostFindingsResponse)(nil),    // 31: codero.daemon.v1.PostFindingsResponse
-	(*GetHealthRequest)(nil),        // 32: codero.daemon.v1.GetHealthRequest
-	(*GetHealthResponse)(nil),       // 33: codero.daemon.v1.GetHealthResponse
-	(*GetGitHubStatusRequest)(nil),  // 34: codero.daemon.v1.GetGitHubStatusRequest
-	(*GetGitHubStatusResponse)(nil), // 35: codero.daemon.v1.GetGitHubStatusResponse
-	nil,                             // 36: codero.daemon.v1.RegisterSessionRequest.InitialContextEntry
-	nil,                             // 37: codero.daemon.v1.IngestTaskRequest.MetadataEntry
-	(*timestamppb.Timestamp)(nil),   // 38: google.protobuf.Timestamp
+	(SessionStatus)(0),               // 0: codero.daemon.v1.SessionStatus
+	(PriorityClass)(0),               // 1: codero.daemon.v1.PriorityClass
+	(TaskSource)(0),                  // 2: codero.daemon.v1.TaskSource
+	(AssignmentState)(0),             // 3: codero.daemon.v1.AssignmentState
+	(FeedbackSourceType)(0),          // 4: codero.daemon.v1.FeedbackSourceType
+	(FeedbackStatus)(0),              // 5: codero.daemon.v1.FeedbackStatus
+	(GateCheckStatus)(0),             // 6: codero.daemon.v1.GateCheckStatus
+	(GateOverallStatus)(0),           // 7: codero.daemon.v1.GateOverallStatus
+	(GitHubAvailability)(0),          // 8: codero.daemon.v1.GitHubAvailability
+	(*RegisterSessionRequest)(nil),   // 9: codero.daemon.v1.RegisterSessionRequest
+	(*RegisterSessionResponse)(nil),  // 10: codero.daemon.v1.RegisterSessionResponse
+	(*HeartbeatRequest)(nil),         // 11: codero.daemon.v1.HeartbeatRequest
+	(*HeartbeatResponse)(nil),        // 12: codero.daemon.v1.HeartbeatResponse
+	(*GetSessionRequest)(nil),        // 13: codero.daemon.v1.GetSessionRequest
+	(*ActiveAssignmentSummary)(nil),  // 14: codero.daemon.v1.ActiveAssignmentSummary
+	(*GetSessionResponse)(nil),       // 15: codero.daemon.v1.GetSessionResponse
+	(*ConfirmSessionRequest)(nil),    // 16: codero.daemon.v1.ConfirmSessionRequest
+	(*ConfirmSessionResponse)(nil),   // 17: codero.daemon.v1.ConfirmSessionResponse
+	(*AttachAssignmentRequest)(nil),  // 18: codero.daemon.v1.AttachAssignmentRequest
+	(*AttachAssignmentResponse)(nil), // 19: codero.daemon.v1.AttachAssignmentResponse
+	(*FinalizeSessionRequest)(nil),   // 20: codero.daemon.v1.FinalizeSessionRequest
+	(*FinalizeSessionResponse)(nil),  // 21: codero.daemon.v1.FinalizeSessionResponse
+	(*IngestTaskRequest)(nil),        // 22: codero.daemon.v1.IngestTaskRequest
+	(*IngestTaskResponse)(nil),       // 23: codero.daemon.v1.IngestTaskResponse
+	(*GetAssignmentRequest)(nil),     // 24: codero.daemon.v1.GetAssignmentRequest
+	(*RuleCheck)(nil),                // 25: codero.daemon.v1.RuleCheck
+	(*MergeReadiness)(nil),           // 26: codero.daemon.v1.MergeReadiness
+	(*GetAssignmentResponse)(nil),    // 27: codero.daemon.v1.GetAssignmentResponse
+	(*SubmitRequest)(nil),            // 28: codero.daemon.v1.SubmitRequest
+	(*SubmitResponse)(nil),           // 29: codero.daemon.v1.SubmitResponse
+	(*GetFeedbackRequest)(nil),       // 30: codero.daemon.v1.GetFeedbackRequest
+	(*Finding)(nil),                  // 31: codero.daemon.v1.Finding
+	(*FeedbackSource)(nil),           // 32: codero.daemon.v1.FeedbackSource
+	(*GetFeedbackResponse)(nil),      // 33: codero.daemon.v1.GetFeedbackResponse
+	(*GateFinding)(nil),              // 34: codero.daemon.v1.GateFinding
+	(*GateCheck)(nil),                // 35: codero.daemon.v1.GateCheck
+	(*PostFindingsRequest)(nil),      // 36: codero.daemon.v1.PostFindingsRequest
+	(*PostFindingsResponse)(nil),     // 37: codero.daemon.v1.PostFindingsResponse
+	(*GetHealthRequest)(nil),         // 38: codero.daemon.v1.GetHealthRequest
+	(*GetHealthResponse)(nil),        // 39: codero.daemon.v1.GetHealthResponse
+	(*GetGitHubStatusRequest)(nil),   // 40: codero.daemon.v1.GetGitHubStatusRequest
+	(*GetGitHubStatusResponse)(nil),  // 41: codero.daemon.v1.GetGitHubStatusResponse
+	nil,                              // 42: codero.daemon.v1.RegisterSessionRequest.InitialContextEntry
+	nil,                              // 43: codero.daemon.v1.IngestTaskRequest.MetadataEntry
+	(*timestamppb.Timestamp)(nil),    // 44: google.protobuf.Timestamp
 }
 var file_codero_daemon_v1_daemon_proto_depIdxs = []int32{
-	36, // 0: codero.daemon.v1.RegisterSessionRequest.initial_context:type_name -> codero.daemon.v1.RegisterSessionRequest.InitialContextEntry
-	38, // 1: codero.daemon.v1.HeartbeatRequest.timestamp:type_name -> google.protobuf.Timestamp
-	38, // 2: codero.daemon.v1.HeartbeatResponse.server_time:type_name -> google.protobuf.Timestamp
+	42, // 0: codero.daemon.v1.RegisterSessionRequest.initial_context:type_name -> codero.daemon.v1.RegisterSessionRequest.InitialContextEntry
+	44, // 1: codero.daemon.v1.HeartbeatRequest.timestamp:type_name -> google.protobuf.Timestamp
+	44, // 2: codero.daemon.v1.HeartbeatResponse.server_time:type_name -> google.protobuf.Timestamp
 	0,  // 3: codero.daemon.v1.GetSessionResponse.status:type_name -> codero.daemon.v1.SessionStatus
-	38, // 4: codero.daemon.v1.GetSessionResponse.started_at:type_name -> google.protobuf.Timestamp
-	38, // 5: codero.daemon.v1.GetSessionResponse.last_seen_at:type_name -> google.protobuf.Timestamp
+	44, // 4: codero.daemon.v1.GetSessionResponse.started_at:type_name -> google.protobuf.Timestamp
+	44, // 5: codero.daemon.v1.GetSessionResponse.last_seen_at:type_name -> google.protobuf.Timestamp
 	14, // 6: codero.daemon.v1.GetSessionResponse.active_assignment:type_name -> codero.daemon.v1.ActiveAssignmentSummary
-	1,  // 7: codero.daemon.v1.IngestTaskRequest.priority_class:type_name -> codero.daemon.v1.PriorityClass
-	2,  // 8: codero.daemon.v1.IngestTaskRequest.source:type_name -> codero.daemon.v1.TaskSource
-	37, // 9: codero.daemon.v1.IngestTaskRequest.metadata:type_name -> codero.daemon.v1.IngestTaskRequest.MetadataEntry
-	38, // 10: codero.daemon.v1.IngestTaskResponse.enqueued_at:type_name -> google.protobuf.Timestamp
-	38, // 11: codero.daemon.v1.RuleCheck.checked_at:type_name -> google.protobuf.Timestamp
-	38, // 12: codero.daemon.v1.RuleCheck.resolved_at:type_name -> google.protobuf.Timestamp
-	3,  // 13: codero.daemon.v1.GetAssignmentResponse.state:type_name -> codero.daemon.v1.AssignmentState
-	38, // 14: codero.daemon.v1.GetAssignmentResponse.created_at:type_name -> google.protobuf.Timestamp
-	38, // 15: codero.daemon.v1.GetAssignmentResponse.completed_at:type_name -> google.protobuf.Timestamp
-	19, // 16: codero.daemon.v1.GetAssignmentResponse.rule_checks:type_name -> codero.daemon.v1.RuleCheck
-	20, // 17: codero.daemon.v1.GetAssignmentResponse.merge_readiness:type_name -> codero.daemon.v1.MergeReadiness
-	4,  // 18: codero.daemon.v1.FeedbackSource.source:type_name -> codero.daemon.v1.FeedbackSourceType
-	38, // 19: codero.daemon.v1.FeedbackSource.last_updated:type_name -> google.protobuf.Timestamp
-	5,  // 20: codero.daemon.v1.FeedbackSource.status:type_name -> codero.daemon.v1.FeedbackStatus
-	25, // 21: codero.daemon.v1.FeedbackSource.findings:type_name -> codero.daemon.v1.Finding
-	26, // 22: codero.daemon.v1.GetFeedbackResponse.sources:type_name -> codero.daemon.v1.FeedbackSource
-	6,  // 23: codero.daemon.v1.GateCheck.status:type_name -> codero.daemon.v1.GateCheckStatus
-	28, // 24: codero.daemon.v1.GateCheck.findings:type_name -> codero.daemon.v1.GateFinding
-	29, // 25: codero.daemon.v1.PostFindingsRequest.checks:type_name -> codero.daemon.v1.GateCheck
-	7,  // 26: codero.daemon.v1.PostFindingsRequest.overall_status:type_name -> codero.daemon.v1.GateOverallStatus
-	38, // 27: codero.daemon.v1.PostFindingsResponse.recorded_at:type_name -> google.protobuf.Timestamp
-	8,  // 28: codero.daemon.v1.GetGitHubStatusResponse.status:type_name -> codero.daemon.v1.GitHubAvailability
-	38, // 29: codero.daemon.v1.GetGitHubStatusResponse.last_check:type_name -> google.protobuf.Timestamp
-	9,  // 30: codero.daemon.v1.SessionService.RegisterSession:input_type -> codero.daemon.v1.RegisterSessionRequest
-	11, // 31: codero.daemon.v1.SessionService.Heartbeat:input_type -> codero.daemon.v1.HeartbeatRequest
-	13, // 32: codero.daemon.v1.SessionService.GetSession:input_type -> codero.daemon.v1.GetSessionRequest
-	16, // 33: codero.daemon.v1.TaskService.IngestTask:input_type -> codero.daemon.v1.IngestTaskRequest
-	18, // 34: codero.daemon.v1.AssignmentService.GetAssignment:input_type -> codero.daemon.v1.GetAssignmentRequest
-	22, // 35: codero.daemon.v1.AssignmentService.Submit:input_type -> codero.daemon.v1.SubmitRequest
-	24, // 36: codero.daemon.v1.FeedbackService.GetFeedback:input_type -> codero.daemon.v1.GetFeedbackRequest
-	30, // 37: codero.daemon.v1.GateService.PostFindings:input_type -> codero.daemon.v1.PostFindingsRequest
-	32, // 38: codero.daemon.v1.HealthService.GetHealth:input_type -> codero.daemon.v1.GetHealthRequest
-	34, // 39: codero.daemon.v1.HealthService.GetGitHubStatus:input_type -> codero.daemon.v1.GetGitHubStatusRequest
-	10, // 40: codero.daemon.v1.SessionService.RegisterSession:output_type -> codero.daemon.v1.RegisterSessionResponse
-	12, // 41: codero.daemon.v1.SessionService.Heartbeat:output_type -> codero.daemon.v1.HeartbeatResponse
-	15, // 42: codero.daemon.v1.SessionService.GetSession:output_type -> codero.daemon.v1.GetSessionResponse
-	17, // 43: codero.daemon.v1.TaskService.IngestTask:output_type -> codero.daemon.v1.IngestTaskResponse
-	21, // 44: codero.daemon.v1.AssignmentService.GetAssignment:output_type -> codero.daemon.v1.GetAssignmentResponse
-	23, // 45: codero.daemon.v1.AssignmentService.Submit:output_type -> codero.daemon.v1.SubmitResponse
-	27, // 46: codero.daemon.v1.FeedbackService.GetFeedback:output_type -> codero.daemon.v1.GetFeedbackResponse
-	31, // 47: codero.daemon.v1.GateService.PostFindings:output_type -> codero.daemon.v1.PostFindingsResponse
-	33, // 48: codero.daemon.v1.HealthService.GetHealth:output_type -> codero.daemon.v1.GetHealthResponse
-	35, // 49: codero.daemon.v1.HealthService.GetGitHubStatus:output_type -> codero.daemon.v1.GetGitHubStatusResponse
-	40, // [40:50] is the sub-list for method output_type
-	30, // [30:40] is the sub-list for method input_type
-	30, // [30:30] is the sub-list for extension type_name
-	30, // [30:30] is the sub-list for extension extendee
-	0,  // [0:30] is the sub-list for field type_name
+	44, // 7: codero.daemon.v1.FinalizeSessionResponse.finalized_at:type_name -> google.protobuf.Timestamp
+	1,  // 8: codero.daemon.v1.IngestTaskRequest.priority_class:type_name -> codero.daemon.v1.PriorityClass
+	2,  // 9: codero.daemon.v1.IngestTaskRequest.source:type_name -> codero.daemon.v1.TaskSource
+	43, // 10: codero.daemon.v1.IngestTaskRequest.metadata:type_name -> codero.daemon.v1.IngestTaskRequest.MetadataEntry
+	44, // 11: codero.daemon.v1.IngestTaskResponse.enqueued_at:type_name -> google.protobuf.Timestamp
+	44, // 12: codero.daemon.v1.RuleCheck.checked_at:type_name -> google.protobuf.Timestamp
+	44, // 13: codero.daemon.v1.RuleCheck.resolved_at:type_name -> google.protobuf.Timestamp
+	3,  // 14: codero.daemon.v1.GetAssignmentResponse.state:type_name -> codero.daemon.v1.AssignmentState
+	44, // 15: codero.daemon.v1.GetAssignmentResponse.created_at:type_name -> google.protobuf.Timestamp
+	44, // 16: codero.daemon.v1.GetAssignmentResponse.completed_at:type_name -> google.protobuf.Timestamp
+	25, // 17: codero.daemon.v1.GetAssignmentResponse.rule_checks:type_name -> codero.daemon.v1.RuleCheck
+	26, // 18: codero.daemon.v1.GetAssignmentResponse.merge_readiness:type_name -> codero.daemon.v1.MergeReadiness
+	4,  // 19: codero.daemon.v1.FeedbackSource.source:type_name -> codero.daemon.v1.FeedbackSourceType
+	44, // 20: codero.daemon.v1.FeedbackSource.last_updated:type_name -> google.protobuf.Timestamp
+	5,  // 21: codero.daemon.v1.FeedbackSource.status:type_name -> codero.daemon.v1.FeedbackStatus
+	31, // 22: codero.daemon.v1.FeedbackSource.findings:type_name -> codero.daemon.v1.Finding
+	32, // 23: codero.daemon.v1.GetFeedbackResponse.sources:type_name -> codero.daemon.v1.FeedbackSource
+	6,  // 24: codero.daemon.v1.GateCheck.status:type_name -> codero.daemon.v1.GateCheckStatus
+	34, // 25: codero.daemon.v1.GateCheck.findings:type_name -> codero.daemon.v1.GateFinding
+	35, // 26: codero.daemon.v1.PostFindingsRequest.checks:type_name -> codero.daemon.v1.GateCheck
+	7,  // 27: codero.daemon.v1.PostFindingsRequest.overall_status:type_name -> codero.daemon.v1.GateOverallStatus
+	44, // 28: codero.daemon.v1.PostFindingsResponse.recorded_at:type_name -> google.protobuf.Timestamp
+	8,  // 29: codero.daemon.v1.GetGitHubStatusResponse.status:type_name -> codero.daemon.v1.GitHubAvailability
+	44, // 30: codero.daemon.v1.GetGitHubStatusResponse.last_check:type_name -> google.protobuf.Timestamp
+	9,  // 31: codero.daemon.v1.SessionService.RegisterSession:input_type -> codero.daemon.v1.RegisterSessionRequest
+	11, // 32: codero.daemon.v1.SessionService.Heartbeat:input_type -> codero.daemon.v1.HeartbeatRequest
+	13, // 33: codero.daemon.v1.SessionService.GetSession:input_type -> codero.daemon.v1.GetSessionRequest
+	16, // 34: codero.daemon.v1.SessionService.ConfirmSession:input_type -> codero.daemon.v1.ConfirmSessionRequest
+	18, // 35: codero.daemon.v1.SessionService.AttachAssignment:input_type -> codero.daemon.v1.AttachAssignmentRequest
+	20, // 36: codero.daemon.v1.SessionService.FinalizeSession:input_type -> codero.daemon.v1.FinalizeSessionRequest
+	22, // 37: codero.daemon.v1.TaskService.IngestTask:input_type -> codero.daemon.v1.IngestTaskRequest
+	24, // 38: codero.daemon.v1.AssignmentService.GetAssignment:input_type -> codero.daemon.v1.GetAssignmentRequest
+	28, // 39: codero.daemon.v1.AssignmentService.Submit:input_type -> codero.daemon.v1.SubmitRequest
+	30, // 40: codero.daemon.v1.FeedbackService.GetFeedback:input_type -> codero.daemon.v1.GetFeedbackRequest
+	36, // 41: codero.daemon.v1.GateService.PostFindings:input_type -> codero.daemon.v1.PostFindingsRequest
+	38, // 42: codero.daemon.v1.HealthService.GetHealth:input_type -> codero.daemon.v1.GetHealthRequest
+	40, // 43: codero.daemon.v1.HealthService.GetGitHubStatus:input_type -> codero.daemon.v1.GetGitHubStatusRequest
+	10, // 44: codero.daemon.v1.SessionService.RegisterSession:output_type -> codero.daemon.v1.RegisterSessionResponse
+	12, // 45: codero.daemon.v1.SessionService.Heartbeat:output_type -> codero.daemon.v1.HeartbeatResponse
+	15, // 46: codero.daemon.v1.SessionService.GetSession:output_type -> codero.daemon.v1.GetSessionResponse
+	17, // 47: codero.daemon.v1.SessionService.ConfirmSession:output_type -> codero.daemon.v1.ConfirmSessionResponse
+	19, // 48: codero.daemon.v1.SessionService.AttachAssignment:output_type -> codero.daemon.v1.AttachAssignmentResponse
+	21, // 49: codero.daemon.v1.SessionService.FinalizeSession:output_type -> codero.daemon.v1.FinalizeSessionResponse
+	23, // 50: codero.daemon.v1.TaskService.IngestTask:output_type -> codero.daemon.v1.IngestTaskResponse
+	27, // 51: codero.daemon.v1.AssignmentService.GetAssignment:output_type -> codero.daemon.v1.GetAssignmentResponse
+	29, // 52: codero.daemon.v1.AssignmentService.Submit:output_type -> codero.daemon.v1.SubmitResponse
+	33, // 53: codero.daemon.v1.FeedbackService.GetFeedback:output_type -> codero.daemon.v1.GetFeedbackResponse
+	37, // 54: codero.daemon.v1.GateService.PostFindings:output_type -> codero.daemon.v1.PostFindingsResponse
+	39, // 55: codero.daemon.v1.HealthService.GetHealth:output_type -> codero.daemon.v1.GetHealthResponse
+	41, // 56: codero.daemon.v1.HealthService.GetGitHubStatus:output_type -> codero.daemon.v1.GetGitHubStatusResponse
+	44, // [44:57] is the sub-list for method output_type
+	31, // [31:44] is the sub-list for method input_type
+	31, // [31:31] is the sub-list for extension type_name
+	31, // [31:31] is the sub-list for extension extendee
+	0,  // [0:31] is the sub-list for field type_name
 }
 
 func init() { file_codero_daemon_v1_daemon_proto_init() }
@@ -2774,7 +3195,7 @@ func file_codero_daemon_v1_daemon_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_codero_daemon_v1_daemon_proto_rawDesc), len(file_codero_daemon_v1_daemon_proto_rawDesc)),
 			NumEnums:      9,
-			NumMessages:   29,
+			NumMessages:   35,
 			NumExtensions: 0,
 			NumServices:   6,
 		},
