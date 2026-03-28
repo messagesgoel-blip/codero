@@ -246,32 +246,35 @@ func (m Model) estimateTokenUsageApprox() (used, total int) {
 
 // handleChatTabKey handles key input when TabChat is active.
 func (m Model) handleChatTabKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Tab-switching keys work even from inside the chat tab.
-	switch {
-	case key.Matches(msg, m.keys.NextTab):
-		m.activeTab = Tab((int(m.activeTab) + 1) % int(tabCount))
-		m.focused = PaneCenter
-		return m, nil
-	case key.Matches(msg, m.keys.PrevTab):
-		m.activeTab = Tab((int(m.activeTab) - 1 + int(tabCount)) % int(tabCount))
-		m.focused = PaneCenter
-		return m, nil
-	case key.Matches(msg, m.keys.Tab1):
-		m.activeTab = TabLogs
-		m.focused = PaneCenter
-		return m, nil
-	case key.Matches(msg, m.keys.Tab2):
-		m.activeTab = TabOverview
-		m.focused = PaneCenter
-		return m, nil
-	case key.Matches(msg, m.keys.Tab3):
-		m.activeTab = TabEvents
-		m.focused = PaneCenter
-		return m, nil
-	case key.Matches(msg, m.keys.Tab4):
-		m.activeTab = TabQueue
-		m.focused = PaneCenter
-		return m, nil
+	// Tab-switching keys work from the chat tab only when the input is empty,
+	// so printable characters (], [, 1-4) reach the composer when typing.
+	if strings.TrimSpace(m.cliInput.Value()) == "" {
+		switch {
+		case key.Matches(msg, m.keys.NextTab):
+			m.activeTab = Tab((int(m.activeTab) + 1) % int(tabCount))
+			m.focused = PaneCenter
+			return m, nil
+		case key.Matches(msg, m.keys.PrevTab):
+			m.activeTab = Tab((int(m.activeTab) - 1 + int(tabCount)) % int(tabCount))
+			m.focused = PaneCenter
+			return m, nil
+		case key.Matches(msg, m.keys.Tab1):
+			m.activeTab = TabLogs
+			m.focused = PaneCenter
+			return m, nil
+		case key.Matches(msg, m.keys.Tab2):
+			m.activeTab = TabOverview
+			m.focused = PaneCenter
+			return m, nil
+		case key.Matches(msg, m.keys.Tab3):
+			m.activeTab = TabEvents
+			m.focused = PaneCenter
+			return m, nil
+		case key.Matches(msg, m.keys.Tab4):
+			m.activeTab = TabQueue
+			m.focused = PaneCenter
+			return m, nil
+		}
 	}
 
 	switch msg.String() {
