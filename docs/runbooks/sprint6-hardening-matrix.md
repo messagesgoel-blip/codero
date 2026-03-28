@@ -612,7 +612,7 @@ WHERE branch = 'test-branch';"
 | `codero gate-status --logs` | Show gate log path and last entries |
 | `codero commit-gate` | Run gate and auto-record outcomes to scorecard |
 
-For detailed layout and keymap, see `docs/tui-v2-architecture.md`.
+For TUI architecture, see `docs/adr/0006-tui-shell-architecture.md`. For layout and keymap quickstart, see `docs/tui-v2-architecture.md`.
 
 ---
 
