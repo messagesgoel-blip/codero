@@ -13,11 +13,8 @@ type KeyMap struct {
 	Home     key.Binding
 	End      key.Binding
 
-	FocusLeft   key.Binding
-	FocusCenter key.Binding
-	FocusRight  key.Binding
-	NextPane    key.Binding
-	PrevPane    key.Binding
+	NextPane key.Binding
+	PrevPane key.Binding
 
 	NextTab key.Binding
 	PrevTab key.Binding
@@ -28,7 +25,6 @@ type KeyMap struct {
 
 	Retry    key.Binding
 	Logs     key.Binding
-	Branch   key.Binding
 	Chat     key.Binding
 	Overview key.Binding
 	Session  key.Binding
@@ -36,10 +32,7 @@ type KeyMap struct {
 	Archives key.Binding
 	Config   key.Binding
 
-	Search  key.Binding
-	Palette key.Binding
 	Refresh key.Binding
-	Help    key.Binding
 	Quit    key.Binding
 }
 
@@ -55,21 +48,18 @@ func DefaultKeyMap() KeyMap {
 		Home:     key.NewBinding(key.WithKeys("home", "g"), key.WithHelp("home/g", "top")),
 		End:      key.NewBinding(key.WithKeys("end", "G"), key.WithHelp("end/G", "bottom")),
 
-		FocusLeft:   key.NewBinding(key.WithKeys("ctrl+left", "ctrl+h"), key.WithHelp("C-←", "focus left")),
-		FocusCenter: key.NewBinding(key.WithKeys("ctrl+right", "ctrl+l"), key.WithHelp("C-→", "focus center")),
-		NextPane:    key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next pane")),
-		PrevPane:    key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev pane")),
+		NextPane: key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next pane")),
+		PrevPane: key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("S-tab", "prev pane")),
 
 		NextTab: key.NewBinding(key.WithKeys("shift+right", "]"), key.WithHelp("]/S-→", "next tab")),
 		PrevTab: key.NewBinding(key.WithKeys("shift+left", "["), key.WithHelp("[/S-←", "prev tab")),
-		Tab1:    key.NewBinding(key.WithKeys("1"), key.WithHelp("1", "output")),
-		Tab2:    key.NewBinding(key.WithKeys("2"), key.WithHelp("2", "events")),
-		Tab3:    key.NewBinding(key.WithKeys("3"), key.WithHelp("3", "queue")),
-		Tab4:    key.NewBinding(key.WithKeys("4"), key.WithHelp("4", "findings")),
+		Tab1:    key.NewBinding(key.WithKeys("1"), key.WithHelp("1", "logs")),
+		Tab2:    key.NewBinding(key.WithKeys("2"), key.WithHelp("2", "overview")),
+		Tab3:    key.NewBinding(key.WithKeys("3"), key.WithHelp("3", "events")),
+		Tab4:    key.NewBinding(key.WithKeys("4"), key.WithHelp("4", "queue")),
 
 		Retry:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "retry gate")),
 		Logs:     key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "logs")),
-		Branch:   key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "branch view")),
 		Chat:     key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "chat")),
 		Overview: key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "overview")),
 		Session:  key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "session drill")),
@@ -77,15 +67,12 @@ func DefaultKeyMap() KeyMap {
 		Archives: key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "archives")),
 		Config:   key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "config")),
 
-		Search:  key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
-		Palette: key.NewBinding(key.WithKeys("ctrl+p", ":"), key.WithHelp("C-p/:", "command palette")),
 		Refresh: key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("C-r", "refresh")),
-		Help:    key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 		Quit:    key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 	}
 }
 
 // ShortHelp returns the minimal key hints for the bottom bar.
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Overview, k.Session, k.Pipeline, k.Archives, k.Config, k.NextPane, k.Retry, k.Logs, k.Chat, k.Palette, k.Quit}
+	return []key.Binding{k.Overview, k.Session, k.Pipeline, k.Archives, k.Config, k.NextPane, k.NextTab, k.Retry, k.Chat, k.Refresh, k.Quit}
 }

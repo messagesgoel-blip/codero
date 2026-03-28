@@ -39,23 +39,33 @@ func tuiCmd(configPath *string) *cobra.Command {
 		Long: `Launch the Bubble Tea operator shell with agents, logs, pipeline, findings, and review prompt panes.
 
 The TUI provides a full-screen interactive overview of the codero control plane:
-  - Left pane:   agents and relay orchestration
-  - Middle panes: live logs, pipeline progress, and findings
-  - Bottom pane: review prompt and local review commands
+  - Left pane:     agents and relay orchestration
+  - Center pane:   logs, overview, events, queue, chat, session drill, archives, config
+  - Pipeline pane: pipeline progress cards
+  - Right pane:    findings and routing dashboard
 
-Refreshes automatically at --interval seconds. Press q or Ctrl+C to quit.
+Refreshes automatically at --interval seconds.
 
 Keyboard shortcuts:
-  h / ?          toggle help
-  H/J/K/L        move focus between panes
-  r              force refresh
-  q / Ctrl+C     quit
+  tab / S-tab    cycle pane focus
+  ] / [          next / prev center tab
+  1-4            jump to logs / overview / events / queue
+  o              overview (mission control)
+  s              session drill-down
+  a              archives
+  i              config
+  c              chat / review assistant
+  p              focus pipeline pane
+  r              retry gate
+  L              open gate logs
+  C-r            force refresh
+  q / C-c        quit
 
 Examples:
   codero tui
   codero tui --view queue --interval 3
   codero tui --theme dracula
-  codero tui --no-alt-screen          # useful in tmux or terminals that don't support alt screen`,
+  codero tui --no-alt-screen`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !tui.IsInteractiveTTY() {
 				return fmt.Errorf("codero tui requires an interactive terminal (stdin and stdout must be a TTY)")
@@ -127,7 +137,7 @@ Examples:
 	cmd.Flags().StringVar(&themeName, "theme", "dark",
 		"UI theme: dark (default), light, system, dracula, vscode")
 	cmd.Flags().StringVar(&viewName, "view", "gate",
-		"review context for the assistant prompt: gate, logs, queue, events, overview, output")
+		"initial center tab: gate, logs, events, queue, overview, chat, archives, config")
 	cmd.Flags().BoolVar(&noAltScreen, "no-alt-screen", false,
 		"disable alt-screen mode (useful in tmux or CI-adjacent terminals)")
 
@@ -237,8 +247,14 @@ func resolveInitialTab(view string) tui.Tab {
 		return tui.TabQueue
 	case "output", "overview", "mission", "control":
 		return tui.TabOverview
+	case "chat":
+		return tui.TabChat
+	case "archives":
+		return tui.TabArchives
+	case "config":
+		return tui.TabConfig
 	default:
-		// "logs", "gate", "findings", and unknown values default to the primary
+		// "logs", "gate", and unknown values default to the primary
 		// logs & architecture view.
 		return tui.TabLogs
 	}
