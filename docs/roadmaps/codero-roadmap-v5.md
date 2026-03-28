@@ -2,9 +2,14 @@
 
 ## Implementation Roadmap v5 — Repo-First, Contract-Bound, Module-Intake Driven
 
-Status: proposed  
-Owner: you  
-Horizon: 6-12 months  
+> **STATUS: HISTORICAL REFERENCE ONLY (2026-03-28)**
+> This document is preserved for its binding contract appendices (A-K).
+> The active roadmap is `docs/roadmap.md`. TUI references in this document
+> reflect the state before the TUI was removed in favor of the web dashboard.
+
+Status: superseded — see `docs/roadmap.md`
+Owner: sanjay
+Horizon: 6-12 months
 Revision intent: preserve the cleaner program structure of v5 while restoring the implementation contracts, failure semantics, and operator model that v4 captured well.
 
 ---

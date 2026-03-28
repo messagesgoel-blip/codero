@@ -9,8 +9,8 @@ state transitions, durable persistence, and observable operations.
 
 - Durable state: canonical source of truth (initially local DB)
 - Coordination layer: ephemeral queue/lease/heartbeat primitives
-- Interface layer: CLI + API contracts
-- Operator layer: status surfaces, alerts, runbooks
+- Interface layer: CLI + API contracts + web dashboard
+- Operator layer: dashboard, CLI status commands, alerts, runbooks
 
 ## Initial Runtime Model
 
@@ -37,7 +37,6 @@ internal/
   session/          — session lifecycle management (MIG-038)
   webhook/          — GitHub webhook receiver and dedup (P1-S5)
   precommit/        — two-loop local review gate (P1-S5.5)
-  tui/              — Bubble Tea three-pane terminal UI (P1-S6)
   version/          — build-time version constant
 scripts/
   service/          — systemd unit and launchd plist

@@ -22,7 +22,6 @@ import (
 	loglib "github.com/codero/codero/internal/log"
 	"github.com/codero/codero/internal/redis"
 	"github.com/codero/codero/internal/scheduler"
-	"github.com/codero/codero/internal/tui/adapters"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	ggrpc "google.golang.org/grpc"
@@ -492,7 +491,7 @@ func (o *ObservabilityServer) handleGate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	result := adapters.ParseProgressEnv(string(data))
+	result := gate.ParseProgressEnv(string(data))
 	fields := parseProgressEnv(string(data))
 	bar := result.ProgressBar
 	if bar == "" {
