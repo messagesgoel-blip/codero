@@ -43,10 +43,18 @@ func TestReadFile_DirectoryTraversal(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HANDLERS_STATIC_ROOT", dir)
 
+	// Create a file outside static root to verify traversal is blocked, not just 404.
+	parentFile := filepath.Join(filepath.Dir(dir), "secret.txt")
+	if err := os.WriteFile(parentFile, []byte("secret-data"), 0o644); err != nil {
+		t.Fatalf("create parent file: %v", err)
+	}
+	t.Cleanup(func() { os.Remove(parentFile) })
+
 	paths := []string{
 		"../../breakout",
 		"../../../breakout",
 		"..%2f..%2fbreakout",
+		"../secret.txt",
 	}
 	for _, p := range paths {
 		t.Run(p, func(t *testing.T) {
@@ -54,9 +62,11 @@ func TestReadFile_DirectoryTraversal(t *testing.T) {
 			w := httptest.NewRecorder()
 			ReadFile(w, req)
 
-			// Should be 400 (traversal blocked) or 500 (file not found after sanitisation)
-			if w.Code == http.StatusOK {
-				t.Errorf("traversal path %q returned 200; expected rejection", p)
+			if w.Code != http.StatusBadRequest && w.Code != http.StatusNotFound {
+				t.Errorf("traversal path %q returned %d; expected 400 or 404", p, w.Code)
+			}
+			if w.Body.String() == "secret-data" {
+				t.Errorf("traversal path %q leaked file contents outside static root", p)
 			}
 		})
 	}

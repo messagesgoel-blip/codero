@@ -53,12 +53,6 @@ func percentileDuration(values []time.Duration, percentile float64) time.Duratio
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
 
 	index := int(math.Ceil(float64(len(sorted))*percentile)) - 1
-	if index < 0 {
-		index = 0
-	}
-	if index >= len(sorted) {
-		index = len(sorted) - 1
-	}
 	return sorted[index]
 }
 
