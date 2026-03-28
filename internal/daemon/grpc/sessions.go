@@ -3,6 +3,7 @@ package grpc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,25 +26,42 @@ type sessionService struct {
 }
 
 // RegisterSession registers a new agent session with the daemon.
+//
+// Security model: Registration is unauthenticated by design — the daemon runs on
+// loopback (127.0.0.1) and only trusted launchers can reach it. The ON CONFLICT
+// upsert allows idempotent re-registration for launcher retries, but the
+// heartbeat_secret is preserved from the original registration (not overwritten),
+// so a subsequent caller cannot hijack heartbeats for an existing session (EL-23).
 func (s *sessionService) RegisterSession(ctx context.Context, req *daemonv1.RegisterSessionRequest) (*daemonv1.RegisterSessionResponse, error) {
 	if req.AgentId == "" {
 		return nil, status.Error(codes.InvalidArgument, "agent_id is required")
 	}
 
-	sessionID := uuid.New().String()
+	sessionID := req.SessionId
+	if sessionID == "" {
+		sessionID = uuid.New().String()
+	}
 	clientKind := req.ClientKind
 	if clientKind == "" {
 		clientKind = "unknown"
 	}
 
-	secret, err := s.server.sessionStore.Register(ctx, sessionID, req.AgentId, clientKind)
+	var (
+		secret string
+		err    error
+	)
+	if req.TmuxSessionName != "" {
+		secret, err = s.server.sessionStore.RegisterWithTmux(ctx, sessionID, req.AgentId, clientKind, req.TmuxSessionName)
+	} else {
+		secret, err = s.server.sessionStore.Register(ctx, sessionID, req.AgentId, clientKind)
+	}
 	if err != nil {
 		loglib.Error("grpc: RegisterSession failed",
 			loglib.FieldComponent, "grpc",
 			"agent_id", req.AgentId,
 			"error", err,
 		)
-		return nil, status.Errorf(codes.Internal, "register session: %v", err)
+		return nil, status.Error(codes.Internal, fmt.Errorf("register session: %w", err).Error())
 	}
 
 	// EL-23: return heartbeat_secret via response trailer so only the launcher has it.

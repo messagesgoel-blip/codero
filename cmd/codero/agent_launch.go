@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	daemongrpc "github.com/codero/codero/internal/daemon/grpc"
 	"github.com/codero/codero/internal/session"
 	"github.com/codero/codero/internal/tmux"
 	"github.com/google/uuid"
@@ -37,6 +38,7 @@ type AgentLaunchConfig struct {
 	RepoPath     string
 	Branch       string
 	Mode         string
+	DaemonAddr   string
 	AgentCommand []string
 	WriteLog     bool
 	TmuxExecutor tmux.Executor
@@ -88,6 +90,16 @@ The wrapper handles all Codero integration — the agent never calls session API
 				}
 			}
 
+			if daemonAddr := resolveDaemonAddr(cmd); daemonAddr != "" {
+				cfg.DaemonAddr = daemonAddr
+				client, err := daemongrpc.NewSessionClient(daemonAddr)
+				if err != nil {
+					return fmt.Errorf("agent launch: connect to daemon: %w", err)
+				}
+				defer client.Close()
+				return runAgentLaunch(cmd.Context(), cfg, client)
+			}
+
 			store, cleanup, err := openSessionStore(*configPathForCmd(cmd))
 			if err != nil {
 				return err
@@ -109,7 +121,7 @@ The wrapper handles all Codero integration — the agent never calls session API
 
 // runAgentLaunch executes the 14-step wrapper sequence.
 // Each step maps directly to Session Lifecycle v1 §8.1/§8.2.
-func runAgentLaunch(ctx context.Context, cfg *AgentLaunchConfig, store *session.Store) error {
+func runAgentLaunch(ctx context.Context, cfg *AgentLaunchConfig, backend session.SessionBackend) error {
 	exec := cfg.TmuxExecutor
 	if exec == nil {
 		exec = tmux.RealExecutor{}
@@ -134,7 +146,7 @@ func runAgentLaunch(ctx context.Context, cfg *AgentLaunchConfig, store *session.
 	}
 
 	// Step 6: Register session with daemon (SL-12)
-	if _, err := store.RegisterWithTmux(ctx, sessionID, cfg.AgentID, cfg.Mode, tmuxName); err != nil {
+	if _, err := backend.RegisterWithTmux(ctx, sessionID, cfg.AgentID, cfg.Mode, tmuxName); err != nil {
 		// Cleanup tmux on registration failure
 		_ = exec.KillSession(ctx, tmuxName)
 		return fmt.Errorf("step 6: register session: %w", err)
@@ -172,12 +184,20 @@ touch "$WORKTREE/.codero/feedback/pending" 2>/dev/null || true
 `, tmuxName)
 	_ = os.WriteFile(filepath.Join(hooksDir, "on-feedback"), []byte(hookScript), 0o755)
 
-	// Step 10: Launch agent inside tmux
+	// Step 10: Launch agent inside tmux with session env vars
+	envExport := fmt.Sprintf("export CODERO_SESSION_ID='%s' CODERO_AGENT_ID='%s'",
+		shellEscape(sessionID), shellEscape(cfg.AgentID))
+	if cfg.DaemonAddr != "" {
+		envExport += fmt.Sprintf(" CODERO_DAEMON_ADDR='%s'", shellEscape(cfg.DaemonAddr))
+	}
+
 	agentCmd := strings.Join(cfg.AgentCommand, " ")
 	if agentCmd == "" {
 		agentCmd = "bash" // default shell if no command given
 	}
-	if err := exec.SendKeys(ctx, tmuxName, agentCmd); err != nil {
+	// Combine export and command in one send to avoid tmux keystroke racing.
+	fullCmd := envExport + " && " + agentCmd
+	if err := exec.SendKeys(ctx, tmuxName, fullCmd); err != nil {
 		// Non-fatal; the session is alive, agent command just failed to send
 		fmt.Fprintf(os.Stderr, "warning: failed to send agent command: %v\n", err)
 	}
@@ -190,7 +210,7 @@ touch "$WORKTREE/.codero/feedback/pending" 2>/dev/null || true
 	if exitCode != 0 {
 		result = "lost"
 	}
-	endErr := store.Finalize(ctx, sessionID, cfg.AgentID, session.Completion{
+	endErr := backend.Finalize(ctx, sessionID, cfg.AgentID, session.Completion{
 		Status:     result,
 		Substatus:  "terminal_finished",
 		Summary:    fmt.Sprintf("wrapper exit (code=%d)", exitCode),
@@ -250,4 +270,9 @@ func resolveWorktree(repoPath, branch string) string {
 		}
 	}
 	return repoPath
+}
+
+// shellEscape escapes a string for safe use inside single-quoted shell values.
+func shellEscape(s string) string {
+	return strings.ReplaceAll(s, "'", `'\''`)
 }

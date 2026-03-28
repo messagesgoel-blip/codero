@@ -16,6 +16,9 @@ import (
 	"github.com/codero/codero/internal/session"
 )
 
+// Compile-time assertion: SessionClient implements session.SessionBackend.
+var _ session.SessionBackend = (*SessionClient)(nil)
+
 // SessionClient wraps the gRPC SessionService stub for use by CLI commands.
 type SessionClient struct {
 	conn   *grpc.ClientConn
@@ -69,6 +72,30 @@ func (c *SessionClient) Register(ctx context.Context, agentID, clientKind string
 		SessionID:       resp.SessionId,
 		HeartbeatSecret: secret,
 	}, nil
+}
+
+// RegisterWithTmux creates a session with a client-provided session ID and tmux name,
+// returning the heartbeat secret. Satisfies session.SessionBackend.
+func (c *SessionClient) RegisterWithTmux(ctx context.Context, sessionID, agentID, mode, tmuxName string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	var header metadata.MD
+	_, err := c.client.RegisterSession(ctx, &daemonv1.RegisterSessionRequest{
+		AgentId:         agentID,
+		ClientKind:      mode,
+		SessionId:       sessionID,
+		TmuxSessionName: tmuxName,
+	}, grpc.Header(&header))
+	if err != nil {
+		return "", fmt.Errorf("register session: %w", err)
+	}
+
+	secret := ""
+	if vals := header.Get("x-heartbeat-secret"); len(vals) > 0 {
+		secret = vals[0]
+	}
+	return secret, nil
 }
 
 // Heartbeat proves a session is still alive. Requires the heartbeat secret from Register.
