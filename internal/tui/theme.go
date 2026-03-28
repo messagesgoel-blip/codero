@@ -56,19 +56,19 @@ var AltTheme = newAltTheme()
 
 func newDefaultTheme() Theme {
 	fg := lipgloss.Color("#E6EDF3")
-	muted := lipgloss.Color("#7D8590")
+	muted := lipgloss.Color("#8B949E")
 	accent := lipgloss.Color("#58A6FF")
 	pass := lipgloss.Color("#3FB950")
 	fail := lipgloss.Color("#F85149")
 	running := lipgloss.Color("#E3B341")
 	warn := lipgloss.Color("#D29922")
-	border := lipgloss.Color("#21262D")
+	border := lipgloss.Color("#3D444D")
 	activeBorder := lipgloss.Color("#58A6FF")
-	selected := lipgloss.Color("#1C2128")
-	paneTitle := lipgloss.Color("#58A6FF")
-	bgPane := lipgloss.Color("#161B22")
-	bgPalette := lipgloss.Color("#0D1117")
-	headerBg := lipgloss.Color("#161B22")
+	selected := lipgloss.Color("#262C36")
+	paneTitle := lipgloss.Color("#79C0FF")
+	bgPane := lipgloss.Color("#1C2128")
+	bgPalette := lipgloss.Color("#161B22")
+	headerBg := lipgloss.Color("#272D37")
 
 	return Theme{
 		Base:              lipgloss.NewStyle().Foreground(fg),

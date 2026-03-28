@@ -897,7 +897,7 @@ func (m Model) renderTopBar() string {
 
 	return lipgloss.NewStyle().
 		Width(l.TotalW).
-		Background(lipgloss.Color("#1E1F2E")).
+		Background(lipgloss.Color("#2D333B")).
 		Render(bar)
 }
 
