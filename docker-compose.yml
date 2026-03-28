@@ -23,6 +23,10 @@ services:
       - codero-pids:/data/pids
       - codero-tmp:/data/tmp
       - codero-snapshots:/data/snapshots
+    networks:
+      default:
+      proxy:
+        ipv4_address: 172.25.0.31
     depends_on:
       redis:
         condition: service_healthy
@@ -49,6 +53,11 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+
+# Shared reverse-proxy network (pre-created: docker network create --subnet=172.25.0.0/16 proxy)
+networks:
+  proxy:
+    external: true
 
 volumes:
   codero-db:
