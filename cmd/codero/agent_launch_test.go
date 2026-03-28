@@ -81,8 +81,18 @@ func TestRunAgentLaunch_WritesFilesAndCleansUp(t *testing.T) {
 	if len(exec.KilledNames) != 1 || exec.KilledNames[0] != tmuxName {
 		t.Fatalf("tmux kill: got %v, want %s", exec.KilledNames, tmuxName)
 	}
-	if len(exec.SentKeys) != 1 || exec.SentKeys[0].Command != "echo hello" {
-		t.Fatalf("send keys: got %v", exec.SentKeys)
+	if len(exec.SentKeys) != 1 {
+		t.Fatalf("send keys: expected 1 (combined env+command), got %d: %v", len(exec.SentKeys), exec.SentKeys)
+	}
+	sent := exec.SentKeys[0].Command
+	if !strings.Contains(sent, "CODERO_SESSION_ID='"+sessionID+"'") {
+		t.Fatalf("send-keys should export CODERO_SESSION_ID, got: %s", sent)
+	}
+	if !strings.Contains(sent, "CODERO_AGENT_ID='"+agentID+"'") {
+		t.Fatalf("send-keys should export CODERO_AGENT_ID, got: %s", sent)
+	}
+	if !strings.Contains(sent, "&& echo hello") {
+		t.Fatalf("send-keys should contain agent command after &&, got: %s", sent)
 	}
 
 	sessionMD, err := os.ReadFile(filepath.Join(worktree, ".codero", "SESSION.md"))

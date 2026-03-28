@@ -30,13 +30,24 @@ func (s *sessionService) RegisterSession(ctx context.Context, req *daemonv1.Regi
 		return nil, status.Error(codes.InvalidArgument, "agent_id is required")
 	}
 
-	sessionID := uuid.New().String()
+	sessionID := req.SessionId
+	if sessionID == "" {
+		sessionID = uuid.New().String()
+	}
 	clientKind := req.ClientKind
 	if clientKind == "" {
 		clientKind = "unknown"
 	}
 
-	secret, err := s.server.sessionStore.Register(ctx, sessionID, req.AgentId, clientKind)
+	var (
+		secret string
+		err    error
+	)
+	if req.TmuxSessionName != "" {
+		secret, err = s.server.sessionStore.RegisterWithTmux(ctx, sessionID, req.AgentId, clientKind, req.TmuxSessionName)
+	} else {
+		secret, err = s.server.sessionStore.Register(ctx, sessionID, req.AgentId, clientKind)
+	}
 	if err != nil {
 		loglib.Error("grpc: RegisterSession failed",
 			loglib.FieldComponent, "grpc",

@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v3.21.12
-// source: codero/daemon/v1/daemon.proto
+// source: proto/codero/daemon/v1/daemon.proto
 
 package daemonv1
 
@@ -319,7 +319,7 @@ var SessionService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "codero/daemon/v1/daemon.proto",
+	Metadata: "proto/codero/daemon/v1/daemon.proto",
 }
 
 const (
@@ -423,7 +423,7 @@ var TaskService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "codero/daemon/v1/daemon.proto",
+	Metadata: "proto/codero/daemon/v1/daemon.proto",
 }
 
 const (
@@ -567,7 +567,7 @@ var AssignmentService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "codero/daemon/v1/daemon.proto",
+	Metadata: "proto/codero/daemon/v1/daemon.proto",
 }
 
 const (
@@ -671,7 +671,7 @@ var FeedbackService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "codero/daemon/v1/daemon.proto",
+	Metadata: "proto/codero/daemon/v1/daemon.proto",
 }
 
 const (
@@ -775,7 +775,7 @@ var GateService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "codero/daemon/v1/daemon.proto",
+	Metadata: "proto/codero/daemon/v1/daemon.proto",
 }
 
 const (
@@ -919,5 +919,5 @@ var HealthService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "codero/daemon/v1/daemon.proto",
+	Metadata: "proto/codero/daemon/v1/daemon.proto",
 }
