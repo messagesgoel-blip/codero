@@ -136,6 +136,20 @@ func (s *Store) AttachAssignment(
 	if repo == "" || branch == "" {
 		return ErrMissingAssignment
 	}
+
+	// Check branch exists before creating session/assignment rows to avoid
+	// orphan writes when the branch is not in the state store.
+	var branchExists int
+	if err := s.db.Unwrap().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM branch_states WHERE repo = ? AND branch = ?`,
+		repo, branch,
+	).Scan(&branchExists); err != nil {
+		return fmt.Errorf("attach assignment: check branch: %w", err)
+	}
+	if branchExists == 0 {
+		return state.ErrBranchNotFound
+	}
+
 	if err := state.RegisterAgentSession(ctx, s.db, sessionID, agentID, mode, ""); err != nil {
 		return err
 	}
@@ -153,18 +167,14 @@ func (s *Store) AttachAssignment(
 	if err := state.AttachAgentAssignment(ctx, s.db, assignment); err != nil {
 		return err
 	}
-	res, err := s.db.Unwrap().ExecContext(ctx, `
+	if _, err := s.db.Unwrap().ExecContext(ctx, `
 		UPDATE branch_states
 		SET owner_session_id = ?, owner_session_last_seen = datetime('now'),
 		    owner_agent = ?, updated_at = datetime('now')
 		WHERE repo = ? AND branch = ?`,
-		sessionID, agentID, repo, branch)
-	if err != nil {
+		sessionID, agentID, repo, branch,
+	); err != nil {
 		return fmt.Errorf("attach assignment: sync branch state: %w", err)
-	}
-	affected, _ := res.RowsAffected()
-	if affected == 0 {
-		return state.ErrBranchNotFound
 	}
 	return nil
 }
@@ -180,7 +190,7 @@ func (s *Store) Finalize(ctx context.Context, sessionID, agentID string, complet
 	if completion.Status == "" {
 		return ErrMissingStatus
 	}
-	return state.FinalizeAgentSession(ctx, s.db, sessionID, agentID, state.AgentSessionCompletion{
+	err := state.FinalizeAgentSession(ctx, s.db, sessionID, agentID, state.AgentSessionCompletion{
 		TaskID:     completion.TaskID,
 		Status:     completion.Status,
 		Substatus:  completion.Substatus,
@@ -188,4 +198,14 @@ func (s *Store) Finalize(ctx context.Context, sessionID, agentID string, complet
 		Tests:      completion.Tests,
 		FinishedAt: completion.FinishedAt,
 	})
+	if err != nil {
+		if errors.Is(err, state.ErrAgentSessionNotFound) || errors.Is(err, state.ErrAgentSessionAlreadyEnded) {
+			return ErrSessionNotFound
+		}
+		if errors.Is(err, state.ErrAgentSessionAgentMismatch) {
+			return ErrSessionMismatch
+		}
+		return fmt.Errorf("Store.Finalize: %w", err)
+	}
+	return nil
 }

@@ -183,6 +183,12 @@ func (s *sessionService) FinalizeSession(ctx context.Context, req *daemonv1.Fina
 	}
 
 	if err := s.server.sessionStore.Finalize(ctx, req.SessionId, req.AgentId, completion); err != nil {
+		if errors.Is(err, session.ErrSessionNotFound) {
+			return nil, status.Error(codes.NotFound, "session not found or already ended")
+		}
+		if errors.Is(err, session.ErrSessionMismatch) {
+			return nil, status.Error(codes.PermissionDenied, "agent mismatch")
+		}
 		loglib.Error("grpc: FinalizeSession failed",
 			loglib.FieldComponent, "grpc",
 			"session_id", req.SessionId,
