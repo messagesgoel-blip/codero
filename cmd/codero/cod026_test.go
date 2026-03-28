@@ -147,7 +147,7 @@ func TestGateStatusJSON_ParityWithGateEndpoint(t *testing.T) {
 	orig := os.Stdout
 	rd, wr, _ := os.Pipe()
 	os.Stdout = wr
-	if err := printGateStatusJSON(parseEnvToResult(envContent)); err != nil {
+	if err := printGateStatusJSON(gate.ParseProgressEnv(envContent)); err != nil {
 		t.Fatalf("printGateStatusJSON returned error: %v", err)
 	}
 	wr.Close()

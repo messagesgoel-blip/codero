@@ -21,6 +21,14 @@ func ParseProgressEnv(content string) Result {
 		}
 		fields[strings.TrimSpace(k)] = strings.TrimSpace(v)
 	}
+	if err := scanner.Err(); err != nil {
+		return Result{
+			Status:        StatusFail,
+			CopilotStatus: "error",
+			LiteLLMStatus: "error",
+			Comments:      []string{fmt.Sprintf("progress.env scan error: %v", err)},
+		}
+	}
 
 	r := Result{
 		RunID:         fields["RUN_ID"],

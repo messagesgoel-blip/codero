@@ -53,7 +53,7 @@ func TestGateStateToPrecommitStatus_Unknown(t *testing.T) {
 	}
 }
 
-// --- parseEnvToResult tests ---
+// --- gate.ParseProgressEnv tests ---
 
 func TestParseEnvToResult_Pass(t *testing.T) {
 	env := `STATUS=PASS
@@ -66,7 +66,7 @@ ELAPSED_SEC=12
 POLL_AFTER_SEC=180
 COMMENTS=none
 `
-	r := parseEnvToResult(env)
+	r := gate.ParseProgressEnv(env)
 
 	if r.Status != gate.StatusPass {
 		t.Errorf("Status: got %q, want PASS", r.Status)
@@ -101,7 +101,7 @@ COPILOT_STATUS=blocked
 LITELLM_STATUS=pass
 COMMENTS=BLOCK: missing auth check|BLOCK: untested error path
 `
-	r := parseEnvToResult(env)
+	r := gate.ParseProgressEnv(env)
 
 	if r.Status != gate.StatusFail {
 		t.Errorf("Status: got %q, want FAIL", r.Status)
@@ -121,7 +121,7 @@ COPILOT_STATUS=running
 LITELLM_STATUS=pending
 CURRENT_GATE=copilot
 `
-	r := parseEnvToResult(env)
+	r := gate.ParseProgressEnv(env)
 
 	if r.Status != gate.StatusPending {
 		t.Errorf("Status: got %q, want PENDING", r.Status)
@@ -136,7 +136,7 @@ CURRENT_GATE=copilot
 
 func TestParseEnvToResult_NoFile(t *testing.T) {
 	// Empty content should default to PENDING with pending statuses.
-	r := parseEnvToResult("")
+	r := gate.ParseProgressEnv("")
 	if r.Status != gate.StatusPending {
 		t.Errorf("empty content: Status got %q, want PENDING", r.Status)
 	}
@@ -149,7 +149,7 @@ func TestParseEnvToResult_NoFile(t *testing.T) {
 }
 
 func TestParseEnvToResult_UnknownStatus(t *testing.T) {
-	r := parseEnvToResult("STATUS=RUNNING\nCOPILOT_STATUS=running\n")
+	r := gate.ParseProgressEnv("STATUS=RUNNING\nCOPILOT_STATUS=running\n")
 	// Unknown status should be treated as PENDING.
 	if r.Status != gate.StatusPending {
 		t.Errorf("unknown STATUS: got %q, want PENDING", r.Status)
@@ -158,7 +158,7 @@ func TestParseEnvToResult_UnknownStatus(t *testing.T) {
 
 func TestParseEnvToResult_InvalidElapsedAndPollFallbackToZero(t *testing.T) {
 	env := "STATUS=PENDING\nELAPSED_SEC=abc\nPOLL_AFTER_SEC=xyz\n"
-	r := parseEnvToResult(env)
+	r := gate.ParseProgressEnv(env)
 	if r.ElapsedSec != 0 {
 		t.Errorf("ElapsedSec: got %d, want 0 on parse error", r.ElapsedSec)
 	}

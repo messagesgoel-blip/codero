@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"bufio"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -491,14 +490,23 @@ func (o *ObservabilityServer) handleGate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	result := gate.ParseProgressEnv(string(data))
-	fields := parseProgressEnv(string(data))
+	raw := string(data)
+	result := gate.ParseProgressEnv(raw)
 	bar := result.ProgressBar
 	if bar == "" {
 		bar = gate.RenderBar(result.CopilotStatus, result.LiteLLMStatus, result.CurrentGate)
 	}
 	if result.Comments == nil {
 		result.Comments = []string{}
+	}
+
+	// Extract UPDATED_AT directly instead of parsing all fields a second time.
+	var updatedAt string
+	for _, line := range strings.Split(raw, "\n") {
+		if k, v, ok := strings.Cut(line, "="); ok && strings.TrimSpace(k) == "UPDATED_AT" {
+			updatedAt = strings.TrimSpace(v)
+			break
+		}
 	}
 
 	resp := map[string]interface{}{
@@ -510,7 +518,7 @@ func (o *ObservabilityServer) handleGate(w http.ResponseWriter, r *http.Request)
 		"litellm_status": result.LiteLLMStatus,
 		"comments":       result.Comments,
 		"elapsed_sec":    result.ElapsedSec,
-		"updated_at":     fields["UPDATED_AT"],
+		"updated_at":     updatedAt,
 		"generated_at":   time.Now().Format(time.RFC3339),
 	}
 
@@ -518,20 +526,3 @@ func (o *ObservabilityServer) handleGate(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(resp)
 }
 
-// parseProgressEnv parses KEY=VALUE pairs from progress.env content.
-func parseProgressEnv(content string) map[string]string {
-	fields := make(map[string]string)
-	scanner := bufio.NewScanner(strings.NewReader(content))
-	for scanner.Scan() {
-		line := scanner.Text()
-		key, val, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		fields[strings.TrimSpace(key)] = strings.TrimSpace(val)
-	}
-	if err := scanner.Err(); err != nil {
-		return map[string]string{}
-	}
-	return fields
-}

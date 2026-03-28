@@ -731,13 +731,7 @@ func readProgressEnvAsResult(repoPath string) gate.Result {
 			LiteLLMStatus: "pending",
 		}
 	}
-	return parseEnvToResult(string(data))
-}
-
-// parseEnvToResult converts KEY=VALUE pairs from progress.env into a gate.Result.
-// This mirrors the field mapping used by the /gate observability endpoint.
-func parseEnvToResult(envContent string) gate.Result {
-	return gate.ParseProgressEnv(envContent)
+	return gate.ParseProgressEnv(string(data))
 }
 
 // RenderGateStatusBox renders a full-height terminal box displaying gate state.
