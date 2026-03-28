@@ -15,12 +15,10 @@ import (
 	"text/tabwriter"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/codero/codero/internal/gate"
 	"github.com/codero/codero/internal/state"
-	"github.com/codero/codero/internal/tui"
-	"github.com/codero/codero/internal/tui/adapters"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 // queueCmd displays the current queue state for a repository.
@@ -650,7 +648,7 @@ Examples:
 				fmt.Print(RenderGateStatusBox(result, repoPath))
 			}
 
-			ttyInteractive := tui.IsInteractiveTTY()
+			ttyInteractive := isInteractiveTTY()
 			promptInteractive := ttyInteractive && !noPrompt && !jsonOutput
 			if promptInteractive {
 				printGateActions(result, repoPath)
@@ -702,38 +700,14 @@ func printGateStatusJSON(r gate.Result) error {
 	return enc.Encode(out)
 }
 
-// runGateStatusWatch runs the Bubble Tea TUI to display gate status.
-// When stdin or stdout is not a TTY (CI, pipe, Docker non-interactive), the TUI
-// cannot be initialised safely.  In that case the function falls back to
-// emitting a single JSON object using the same schema as gate-status --json
-// and returns immediately.
-func runGateStatusWatch(ctx context.Context, repoPath string, intervalSec int) error {
-	if !tui.IsInteractiveTTY() {
-		// Non-TTY fallback: emit one JSON snapshot and exit cleanly.
-		result := readProgressEnvAsResult(repoPath)
-		return printGateStatusJSON(result)
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	if intervalSec < 1 {
-		intervalSec = 5
-	}
-	interval := time.Duration(intervalSec) * time.Second
-
-	initialVM := tui.AdapterFromPath(repoPath)
-	cfg := tui.Config{
-		RepoPath:  repoPath,
-		Context:   ctx,
-		Interval:  interval,
-		Theme:     tui.DefaultTheme,
-		WatchMode: true,
-		InitialVM: initialVM,
-	}
-	p := tea.NewProgram(tui.New(cfg), tea.WithContext(ctx), tea.WithAltScreen())
-	_, err := p.Run()
-	return err
+// runGateStatusWatch emits a single JSON snapshot.
+// The interactive Bubble Tea watch mode was removed; use the web dashboard for
+// live monitoring.
+func runGateStatusWatch(_ context.Context, repoPath string, _ int) error {
+	fmt.Fprintln(os.Stderr, "gate-status: --watch interactive TUI removed; use the web dashboard for live monitoring")
+	fmt.Fprintln(os.Stderr, "gate-status: emitting one-shot JSON snapshot instead")
+	result := readProgressEnvAsResult(repoPath)
+	return printGateStatusJSON(result)
 }
 
 // readProgressEnvAsResult reads .codero/gate-heartbeat/progress.env and converts
@@ -757,13 +731,7 @@ func readProgressEnvAsResult(repoPath string) gate.Result {
 			LiteLLMStatus: "pending",
 		}
 	}
-	return parseEnvToResult(string(data))
-}
-
-// parseEnvToResult converts KEY=VALUE pairs from progress.env into a gate.Result.
-// This mirrors the field mapping used by the /gate observability endpoint.
-func parseEnvToResult(envContent string) gate.Result {
-	return adapters.ParseProgressEnv(envContent)
+	return gate.ParseProgressEnv(string(data))
 }
 
 // RenderGateStatusBox renders a full-height terminal box displaying gate state.
@@ -841,7 +809,7 @@ func printGateActions(r gate.Result, repoPath string) {
 	}
 
 	// Guard interactive prompt behind IsInteractiveTTY (centralised check).
-	if !tui.IsInteractiveTTY() {
+	if !isInteractiveTTY() {
 		return
 	}
 
@@ -1017,4 +985,10 @@ func truncate(s string, max int) string {
 		return string(runes[:max])
 	}
 	return string(runes[:max-1]) + "…"
+}
+
+// isInteractiveTTY returns true when both stdin and stdout are connected to a
+// real terminal. Replaces tui.IsInteractiveTTY() after TUI removal.
+func isInteractiveTTY() bool {
+	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
 }

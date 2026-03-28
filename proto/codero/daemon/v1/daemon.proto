@@ -15,6 +15,12 @@ service SessionService {
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
   // Retrieve session details by session_id.
   rpc GetSession(GetSessionRequest) returns (GetSessionResponse);
+  // Confirm the agent identity matches the registered session.
+  rpc ConfirmSession(ConfirmSessionRequest) returns (ConfirmSessionResponse);
+  // Attach a repo/branch assignment to an active session.
+  rpc AttachAssignment(AttachAssignmentRequest) returns (AttachAssignmentResponse);
+  // Mark a session as complete with a terminal status.
+  rpc FinalizeSession(FinalizeSessionRequest) returns (FinalizeSessionResponse);
 }
 
 message RegisterSessionRequest {
@@ -35,6 +41,7 @@ message RegisterSessionResponse {
 message HeartbeatRequest {
   string session_id = 1;
   google.protobuf.Timestamp timestamp = 2;
+  bool mark_progress = 3;
 }
 
 message HeartbeatResponse {
@@ -71,6 +78,43 @@ message GetSessionResponse {
   string client_kind = 6;
   int32 deviation_count = 7;
   ActiveAssignmentSummary active_assignment = 8;
+}
+
+message ConfirmSessionRequest {
+  string session_id = 1;
+  string agent_id = 2;
+}
+
+message ConfirmSessionResponse {}
+
+message AttachAssignmentRequest {
+  string session_id = 1;
+  string agent_id = 2;
+  string repo = 3;
+  string branch = 4;
+  string worktree = 5;
+  string mode = 6;
+  string task_id = 7;
+  string substatus = 8;
+}
+
+message AttachAssignmentResponse {
+  string assignment_id = 1;
+}
+
+message FinalizeSessionRequest {
+  string session_id = 1;
+  string agent_id = 2;
+  string status = 3;
+  string substatus = 4;
+  string summary = 5;
+  string task_id = 6;
+  repeated string tests = 7;
+  google.protobuf.Timestamp finished_at = 8;
+}
+
+message FinalizeSessionResponse {
+  google.protobuf.Timestamp finalized_at = 1;
 }
 
 // ─── Task Service (Daemon Spec v2 §7.2) ─────────────────────────────

@@ -2,7 +2,6 @@ package main
 
 // cod026_test.go — Tests for COD-026 features:
 //   - printGateStatusJSON (gate-status --json)
-//   - resolveTheme / resolveInitialTab (codero tui flag parsing)
 //   - portsCmd output correctness
 //   - dashboardCmd --check endpoint validation (with a mock HTTP server)
 
@@ -23,7 +22,6 @@ import (
 	"github.com/codero/codero/internal/gate"
 	"github.com/codero/codero/internal/redis"
 	"github.com/codero/codero/internal/scheduler"
-	"github.com/codero/codero/internal/tui"
 )
 
 // --- printGateStatusJSON ---
@@ -149,7 +147,7 @@ func TestGateStatusJSON_ParityWithGateEndpoint(t *testing.T) {
 	orig := os.Stdout
 	rd, wr, _ := os.Pipe()
 	os.Stdout = wr
-	if err := printGateStatusJSON(parseEnvToResult(envContent)); err != nil {
+	if err := printGateStatusJSON(gate.ParseProgressEnv(envContent)); err != nil {
 		t.Fatalf("printGateStatusJSON returned error: %v", err)
 	}
 	wr.Close()
@@ -182,66 +180,6 @@ func TestGateStatusJSON_ParityWithGateEndpoint(t *testing.T) {
 	}
 	if !reflect.DeepEqual(cliCore, gateCore) {
 		t.Fatalf("CLI /gate parity mismatch\ncli=%v\ngate=%v", cliCore, gateCore)
-	}
-}
-
-// --- resolveTheme ---
-
-func TestResolveTheme_Dark(t *testing.T) {
-	theme := resolveTheme("dark")
-	if theme.Name != "securecode" {
-		t.Errorf("dark theme should have Name=securecode, got %q", theme.Name)
-	}
-}
-
-func TestResolveTheme_Dracula(t *testing.T) {
-	theme := resolveTheme("dracula")
-	if theme.Name != "securecode" {
-		t.Errorf("dracula should use DefaultTheme (Name=securecode), got %q", theme.Name)
-	}
-}
-
-func TestResolveTheme_System(t *testing.T) {
-	theme := resolveTheme("system")
-	if theme.Name != "securecode" {
-		t.Errorf("system should use DefaultTheme (Name=securecode), got %q", theme.Name)
-	}
-}
-
-func TestResolveTheme_Light(t *testing.T) {
-	theme := resolveTheme("light")
-	if theme.Name != "light" {
-		t.Errorf("light should use AltTheme (Name=light), got %q", theme.Name)
-	}
-}
-
-func TestResolveTheme_VSCode(t *testing.T) {
-	theme := resolveTheme("vscode")
-	if theme.Name != "light" {
-		t.Errorf("vscode should use AltTheme (Name=light), got %q", theme.Name)
-	}
-}
-
-// --- resolveInitialTab ---
-
-func TestResolveInitialTab(t *testing.T) {
-	tests := []struct {
-		input string
-		want  tui.Tab
-	}{
-		{"gate", tui.TabLogs},
-		{"output", tui.TabOverview},
-		{"events", tui.TabEvents},
-		{"queue", tui.TabQueue},
-		{"findings", tui.TabLogs}, // findings now routes to primary logs & arch view
-		{"EVENTS", tui.TabEvents},
-		{"", tui.TabLogs},
-		{"unknown", tui.TabLogs},
-	}
-	for _, tt := range tests {
-		if got := resolveInitialTab(tt.input); got != tt.want {
-			t.Errorf("resolveInitialTab(%q) = %v, want %v", tt.input, got, tt.want)
-		}
 	}
 }
 

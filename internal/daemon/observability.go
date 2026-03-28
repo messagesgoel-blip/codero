@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"bufio"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -22,7 +21,6 @@ import (
 	loglib "github.com/codero/codero/internal/log"
 	"github.com/codero/codero/internal/redis"
 	"github.com/codero/codero/internal/scheduler"
-	"github.com/codero/codero/internal/tui/adapters"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	ggrpc "google.golang.org/grpc"
@@ -161,14 +159,28 @@ func NewObservabilityServerWithGRPC(redisClient *redis.Client, queue *scheduler.
 			loglib.FieldComponent, "daemon", "error", err)
 	} else {
 		fileServer := http.FileServer(http.FS(staticFS))
+		// Wrap with short cache headers so Cloudflare doesn't serve stale assets.
+		cachedFileServer := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "public, max-age=60")
+			fileServer.ServeHTTP(w, r)
+		})
 		// Strip the base path before serving static files so that the embedded
 		// index.html is served for any path under dashboardBasePath/.
-		mux.Handle(dashboardBasePath+"/", http.StripPrefix(dashboardBasePath, fileServer))
+		mux.Handle(dashboardBasePath+"/", http.StripPrefix(dashboardBasePath, cachedFileServer))
 		// Redirect bare dashboardBasePath to dashboardBasePath/ so the SPA loads.
 		mux.HandleFunc(dashboardBasePath, func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, dashboardBasePath+"/", http.StatusMovedPermanently)
 		})
 	}
+
+	// Redirect root to dashboard so the public URL works without /dashboard/ suffix.
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			http.Redirect(w, r, dashboardBasePath+"/", http.StatusFound)
+			return
+		}
+		http.NotFound(w, r)
+	})
 
 	return obs
 }
@@ -492,14 +504,23 @@ func (o *ObservabilityServer) handleGate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	result := adapters.ParseProgressEnv(string(data))
-	fields := parseProgressEnv(string(data))
+	raw := string(data)
+	result := gate.ParseProgressEnv(raw)
 	bar := result.ProgressBar
 	if bar == "" {
 		bar = gate.RenderBar(result.CopilotStatus, result.LiteLLMStatus, result.CurrentGate)
 	}
 	if result.Comments == nil {
 		result.Comments = []string{}
+	}
+
+	// Extract UPDATED_AT directly instead of parsing all fields a second time.
+	var updatedAt string
+	for _, line := range strings.Split(raw, "\n") {
+		if k, v, ok := strings.Cut(line, "="); ok && strings.TrimSpace(k) == "UPDATED_AT" {
+			updatedAt = strings.TrimSpace(v)
+			break
+		}
 	}
 
 	resp := map[string]interface{}{
@@ -511,7 +532,7 @@ func (o *ObservabilityServer) handleGate(w http.ResponseWriter, r *http.Request)
 		"litellm_status": result.LiteLLMStatus,
 		"comments":       result.Comments,
 		"elapsed_sec":    result.ElapsedSec,
-		"updated_at":     fields["UPDATED_AT"],
+		"updated_at":     updatedAt,
 		"generated_at":   time.Now().Format(time.RFC3339),
 	}
 
@@ -519,20 +540,3 @@ func (o *ObservabilityServer) handleGate(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(resp)
 }
 
-// parseProgressEnv parses KEY=VALUE pairs from progress.env content.
-func parseProgressEnv(content string) map[string]string {
-	fields := make(map[string]string)
-	scanner := bufio.NewScanner(strings.NewReader(content))
-	for scanner.Scan() {
-		line := scanner.Text()
-		key, val, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		fields[strings.TrimSpace(key)] = strings.TrimSpace(val)
-	}
-	if err := scanner.Err(); err != nil {
-		return map[string]string{}
-	}
-	return fields
-}

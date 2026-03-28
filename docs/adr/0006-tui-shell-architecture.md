@@ -1,6 +1,6 @@
 # ADR-0006: TUI Shell Architecture
 
-**Status:** Accepted
+**Status:** Superseded — TUI removed in favor of web dashboard (2026-03-28)
 **Date:** 2026-03-20
 **Context:** UI-001 TUI Visual Design Refresh
 

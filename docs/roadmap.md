@@ -1,391 +1,188 @@
-# codero
+# Codero Roadmap
 
-## Implementation Roadmap v5 — Repo-First, Module-Intake Driven
-
-Status: proposed
-Owner: you
-Horizon: 6-12 months
+Status: active
+Owner: sanjay
+Updated: 2026-03-28
 
 ---
 
-## 1) Why v5
+## Current State
 
-v4 has strong engineering detail, but it mixes implementation tasks, product scope, and long-term commercialization in one stream.
-For disciplined execution, we need:
+Codero is a single-operator code review orchestration control plane.
+All 11 normative specs are certified and signed off (2026-03-25).
+The system runs daily across two active repositories (codero, whimsy).
 
-- a clean repo bootstrap phase first
-- hard entry/exit gates per phase
-- a formal process for importing modules from ghwatcher one-by-one
-- explicit structure decision checkpoints
+**Operator surfaces:** CLI commands + web dashboard (served at `/dashboard`).
+The Bubble Tea terminal TUI was removed in v1.2.5 — the web dashboard is the
+sole interactive operator interface. CLI commands (`gate-status`, `queue`,
+`branch`, `events`, `scorecard`, `why`) remain for scripting and quick checks.
 
-v5 keeps the core architecture direction from v4 (durable store + Redis coordination + explicit state machine), but changes execution order.
-
----
-
-## 2) Non-Negotiable Principles
-
-- New repo starts clean (no bulk copy from ghwatcher).
-- Every imported capability must have a contract, parity tests, and rollback path.
-- Durable state is source of truth; Redis is coordination only.
-- Multi-repo support is a required Phase 2 outcome, not a future wish.
-- No phase is complete without operations readiness: tests, observability, runbooks.
+**Release:** v1.2.4 is the latest tagged release. v1.2.5 is in progress (TUI
+removal + roadmap consolidation).
 
 ---
 
-## 3) Phase Plan
+## Phase 1 — Core Runtime (In Progress)
 
-## Phase 0 — Program Setup and Clean Repo Bootstrap (Week 1)
+**Goal:** Production-quality single-operator control plane running daily across 2+ repos.
 
-Goal: establish execution discipline before building features.
+### What's done
 
-Deliverables:
+- Daemon lifecycle, crash recovery, structured logging
+- 10-state / 20-transition branch state machine
+- SQLite WAL durable store with migrations
+- Redis coordination (leases, WFQ queue, heartbeats, dedup)
+- Pre-commit gate pipeline (Copilot → LiteLLM, Semgrep deterministic blockers)
+- PR review runner with CodeRabbit provider
+- Webhook receiver, dedup, and reconciliation loop
+- Session registration, heartbeat, assignment attachment
+- Delivery pipeline (submit-to-merge FSM)
+- Web dashboard (overview, settings, live activity, chat, session drill-down, archives)
+- CLI: submit, heartbeat, poll, why, commit-gate, gate-status, gate-check, queue, branch, events, scorecard
+- Auto-merge (opt-in squash merge on `merge_ready`)
+- Proving period metrics and scorecard
+- All 11 specs certified
 
-- New empty `codero` repo with baseline structure, CI, and governance docs.
-- Architecture baseline doc (`docs/architecture.md`) with system boundaries.
-- ADR process (`docs/adr/`), roadmap ownership, and release policy.
-- Module intake registry (`docs/module-intake-registry.md`).
+### What remains for Phase 1 exit
 
-Required controls:
+The exit gate is evidence-based, not time-based:
 
-- PR template with "scope / tests / risk / rollback".
-- Branch strategy and protected main.
-- Required CI checks (lint, unit, contract tests).
-
-Exit gate (must all pass):
-
-- CI green on empty scaffold commit.
-- Contribution workflow documented and usable by another engineer.
-- At least 3 ADRs merged:
-  - language/runtime choice
-  - durable store choice
-  - Redis role boundaries
-
----
-
-## Phase 1 — Core Runtime (Single-Operator, Single-Repo) (Weeks 2-6)
-
-Goal: build a minimal reliable control plane that works daily.
-
-Scope:
-
-- Daemon lifecycle (start/stop/status, graceful shutdown, crash recovery).
-- Canonical branch lifecycle state machine.
-- State machine specification is carried forward unchanged from v4 Canonical State Machine table (10 states, 20 transitions).
-- Durable storage schema + migrations.
-- Queue, lease, and heartbeat coordination.
-- CLI submit/heartbeat/poll/why (minimum viable contract).
-- Structured logging + health + metrics.
-- MI-001 (lease semantics) contract + parity-test preparation is completed in Phase 1 (Sprint 3 tail), before Phase 2 integration.
-
-Out of scope:
-
-- SaaS, billing, tenant isolation, enterprise RBAC.
-
-Exit gate:
-
-- 14 consecutive days of personal daily use without manual DB repair.
-- Zero data-loss incidents across restart/kill tests.
-- Contract tests for all public CLI/API commands.
-- Failure-mode tests for Redis outage, daemon restart, and lease expiry.
+- [ ] 14 consecutive days of daily use without manual DB repair
+- [ ] Zero missed feedback deliveries
+- [ ] Zero silent queue stalls
+- [ ] Minimum: 3 branches reviewed/week, 10 pre-commit reviews/project/week
+- [ ] Recovery drills: Redis restart, daemon restart, SIGKILL, duplicate webhook
+- [ ] Pre-commit enforcement by hook, not policy alone
 
 ---
 
-## Phase 2 — Multi-Repo and Module Intake from ghwatcher (Weeks 6-12)
+## Phase 2 — Platformization
 
-Goal: achieve true multi-repo orchestration while reusing proven parts of ghwatcher deliberately.
+**Goal:** Tenant-ready infrastructure without changing proven runtime semantics.
 
-Sequencing note: MI-001 lease semantics contract/parity artifacts are produced in Phase 1 and consumed at Phase 2 start.
+**Entry:** Phase 1 exit gate evidence complete.
 
-### 2.1 Module Intake Workflow (for every module)
+### Scope
 
-1. Define target contract in codero (input/output/errors).
-2. Identify source module in ghwatcher.
-3. Write parity tests in codero before integration.
-4. Integrate as adapter or direct port (smallest change first).
-5. Validate parity + load behavior + failure behavior.
-6. Record decision in ADR and registry.
+- PostgreSQL migration with `tenant_id` on all durable tables
+- Managed Redis (non-cluster baseline)
+- Asynq as job primitive
+- GitHub App + OAuth + tenant provisioning
+- Per-tenant queue isolation, slot isolation, rate limiting
+- Object-store-backed delivery streams
 
-Guardrail: no bulk copy from ghwatcher. Intake is module-by-module only.
+### Exit gate
 
-No module is "adopted" without all 6 steps complete.
-
-### 2.2 Priority Intake Queue
-
-Priority A (required for core value):
-
-- Event lease semantics and transition safety
-- Webhook ingestion + dedup path
-- Relay/claim/ack/resolve event delivery model
-- Session heartbeat and stale session handling
-
-Priority B (operator leverage):
-
-- Review routing policy engine
-- Active agent relay worker model
-- Overview/docs generation surfaces
-
-Priority C (advanced):
-
-- LLM-assisted routing
-- Advanced watchdog heuristics
-
-### 2.3 Multi-Repo Required Outcomes
-
-- Repo registry and per-repo state isolation.
-- Repo-qualified API routes and queries (`owner/repo + branch`, never `branch` alone).
-- Delivery model that does not assume a single local inbox file.
-- Cross-repo fairness + starvation protection validated by simulation.
-
-Exit gate:
-
-- At least 3 real repositories running concurrently with validated end-to-end review cycles.
-- No cross-repo state collision incidents.
-- p95 event delivery latency and queue wait SLOs defined and met.
+- New org installs and receives first review without manual intervention
+- Two tenants cannot affect each other's queue/slots/rates
+- Managed Redis: keyspace notifications, lease expiry, recovery all verified
+- Migration from Phase 1 personal env to tenant-ready deployment tested
 
 ---
 
-## Phase 3 — Product Hardening and Operator Experience (Months 4-6)
+## Phase 3 — Enterprise Controls
 
-Goal: make codero operationally boring and supportable.
+**Goal:** Inspectable, supportable, safe to run for others.
 
-Scope:
+### Scope
 
-- Hardening and scale-readiness for existing TUI + dashboard operator surfaces.
-- Runbooks for incident classes (stuck lease, webhook delay, Redis outage, queue stall).
-- Backfill/reconcile jobs and consistency audits.
-- Security hardening and secret handling.
-- Performance profiling and capacity limits.
+- RBAC and immutable operator audit log
+- Live queue views via Redis pub/sub
+- Status checks, inline annotations, GitHub re-run triggers
+- Secrets management, restore drills, backup validation
+- Data residency and deletion policies
+- SOC 2 readiness gap analysis
 
-Exit gate:
+### Exit gate
 
-- On-call style drills completed for top 5 failure modes.
-- SLO dashboard live with alert thresholds.
-- Restore/recovery runbooks tested from backup snapshots.
-- Carry-forward SLO targets from v4 are met: zero missed deliveries, zero silent queue stalls, zero undetected stale branches.
-
----
-
-## Phase 4 — Commercialization (Only after proven Phase 3)
-
-Goal: convert proven core into SaaS capability safely.
-
-Scope:
-
-- Tenant model + isolation model
-- Auth/RBAC + auditability
-- Billing/metering
-- Deployment model and upgrade/migration policy
-
-Entry criteria:
-
-- At least 3 months stable Phase 3 operation.
-- Clear demand signal and pricing hypothesis.
+- Viewer role cannot execute state-changing actions
+- Audit log covers every operator action
+- Restore and deletion workflows tested
+- CLI and web dashboard remain semantically consistent under Phase 3 controls
 
 ---
 
-## 4) Repo Structure Decision Framework
+## Phase 4 — Commercialization
 
-We decide structure after Phase 0 by scoring options against maintainability, testability, and migration speed.
+**Entry:** Phase 3 complete + clear demand signal + pricing hypothesis.
 
-Option A — Single service repo (recommended start):
-
-- `cmd/` (entrypoints)
-- `internal/` (domain modules)
-- `pkg/` (shared contracts)
-- `docs/` (ADRs, roadmap, runbooks)
-- `tests/` (unit, integration, contract, simulation)
-
-Why A first:
-
-- fastest to enforce clean boundaries
-- simplest CI and release path
-- easiest module-intake control
-
-Option B — Multi-repo split now (not recommended at start):
-
-- daemon repo, cli repo, dashboard repo, shared contracts repo
-
-Risk:
-
-- slows Phase 1 and Phase 2 with coordination overhead before core behavior is stable.
-
-Decision checkpoint:
-
-- Choose A at Phase 0 exit.
-- Re-evaluate split only after Phase 2 multi-repo success metrics are met.
+- Billing, metering, plan enforcement
+- Packaging, support model, onboarding workflow
 
 ---
 
-## 5) Quality Gates by Layer
+## Deferred Items
 
-Code:
-
-- lint + unit tests mandatory
-- mutation or property tests on state transitions and lease logic
-- Tooling alignment: for the current Go codebase, v4 Stage 1.5 ESLint/Prettier is superseded by Go-native gates (`gofmt`, `go vet`, `go test`) in CI.
-- JS/TS linting and typecheck are mandatory for dashboard/frontend surfaces now that Phase 1E includes web UI delivery.
-
-Contracts:
-
-- API/CLI contract snapshots versioned
-- backward compatibility checks in CI
-
-Operations:
-
-- health/metrics endpoints required
-- chaos tests for Redis and webhook disruptions
-
-Product:
-
-- user-visible latency/error metrics
-- documented manual override procedures
+| Item | Deferred to | Reason |
+|---|---|---|
+| PostgreSQL + managed infra | Phase 2 | SQLite sufficient for personal proof |
+| GitHub App onboarding | Phase 2 | Not needed for personal proof |
+| RBAC + audit log | Phase 3 | Single operator doesn't need role separation |
+| Billing | Phase 4 | Commercial work after product proves out |
+| Temporal workflow engine | Conditional | Only if Asynq can't model required workflows |
+| Managed Redis cluster mode | Scale-triggered | Only after materially higher tenant scale |
 
 ---
 
-## 6) First 4 Execution Sprints
+## Binding Contracts (Appendices)
 
-Sprint 1 (Phase 0):
+The following contracts are normative. Changes require an ADR, migration note,
+compatibility impact note, regression tests, and a rollback path.
 
-- bootstrap repo
-- ADRs + contribution + CI
-- module-intake registry template
-- adopt cross-repo two-pass pre-commit review gate (Mathkit-v2 pattern)
+### A. Canonical State Machine
 
-Sprint 2 (Phase 1):
+10 states, 20 transitions. See `docs/roadmaps/codero-roadmap-v5.md` Appendix A
+for the full table. Key rules:
 
-- core state machine + durable schema + migrations
-- daemon lifecycle and status surfaces
+- Branch identity is `repo + branch + HEAD`, never branch alone
+- `merge_ready` requires: approved AND ci_green AND pending_events=0 AND no unresolved threads
+- Invalid transitions are rejected and logged
+- No model output may directly cause a state transition
 
-Sprint 3 (Phase 1):
+### B. Redis Coordination
 
-- queue/lease/heartbeat
-- CLI submit/poll/why
-- crash and outage tests
-- define MI-001 lease semantics contract (state transition + Redis lease-key behavior)
-- build MI-001 parity-test harness before module integration
+Redis is ephemeral coordination only — never source of truth.
+Every Redis value is either reconstructable from durable state or safe to lose.
+All Redis commands centralized in `internal/redis`.
+See Appendix B of the v5 roadmap for the full key/primitive table.
 
-Sprint 4 (Phase 2 start):
+### C. Delivery and Reconciliation
 
-- integrate MI-001 lease semantics using the prepared Phase 1 contract + parity harness
-- execute parity tests and rollout checklist
+- Delivery is append-only with monotonic seq numbers
+- Polling-only mode is default and fully functional
+- Reconciliation runs every 60s (polling) or 5m (webhook mode)
+- Merge readiness is deterministic (4 conditions, no model bypass)
 
-### Current Implementation Snapshot (2026-03-16)
+### D. Pre-Commit Gate
 
-- `local_review` state transitions are implemented in `internal/state` (T02/T03/T04).
-- `codero commit-gate` is implemented and wired to the shared heartbeat gate contract.
-- `codero commit-gate` renders a `Copilot -> LiteLLM` heartbeat pipeline, while `scripts/review/two-pass-review.sh` still enforces Semgrep as a mandatory blocker pass.
-- `/gate` observability endpoint is live for dashboard parity with CLI gate progress.
-- Phase 1E web dashboard is implemented for operator parity (overview/settings/live activity/manual upload) and served at `/dashboard`.
-- Proving-period metrics commands (`scorecard`, `record-event`, `record-precommit`) are implemented and `commit-gate` now auto-records provider outcomes.
-- TUI v2-alpha is shipped for `codero gate-status --watch` with Bubble Tea 3-pane layout, keyboard-first controls, and authoritative/non-authoritative gate separation.
-- TUI architecture is documented in `docs/adr/0006-tui-shell-architecture.md`; operator quickstart in `docs/tui-v2-architecture.md`.
+- Fixed order: Copilot → LiteLLM (Semgrep as deterministic blocker in pipeline)
+- Independent per-gate timeouts
+- Hook-based enforcement (`commit-gate` via pre-commit hook)
+- Findings returned synchronously to agent
 
----
+### E. Operator Actions
 
-## 6.1) Deferred Post-v3 Hardening Backlog
+Consistent semantics across CLI and web dashboard:
+reprioritize, pause, resume, drain, release, reactivate, abandon, close,
+replay, why, release-slot.
 
-These items are explicitly deferred for later implementation. They are not blockers for v3 session/compliance acceptance or the current PR `#86` closeout path.
+### F. Observability
 
-- High availability / failover: revisit standby-region or multi-region failover only after the current single-region durable-store model reaches measured operational limits. This likely requires a durable-store redesign, not a small patch.
-- Scalability under sustained load: plan backend horizontalization and possible sharding/priority separation for high-volume feedback aggregation and compliance workloads once single-writer SQLite throughput becomes a measured constraint.
-- Feedback precedence / conflict resolution: publish an explicit source-priority contract for conflicting signals (hard compliance, merge readiness / CI, human review, operator annotations) and define whether any audited override path should exist for non-hard signals.
-- Real-time feedback transport: evaluate SSE or WebSocket push delivery if polling and webhook catch-up become a measured latency bottleneck for operators or agents.
-- Extended timeout escalation: build on the existing lost/stuck/TTL detection with abnormal-duration alerts, reassignment, and escalation policies for assignments that remain stalled too long without progress.
-- Observability expansion: add queue saturation, reconciliation lag, rule-check latency, and operator troubleshooting views before attempting major scale-out or failover work.
+Required endpoints: `/health`, `/queue`, `/metrics`, `/gate`, `/api/v1/agent-metrics`.
+SLOs: zero missed deliveries, zero silent queue stalls, zero undetected stale branches.
 
----
+### G. Failure Recovery
 
-## 7) Risks and Mitigations
-
-Risk: hidden coupling when importing ghwatcher modules.
-Mitigation: contract-first adapters + parity tests before integration.
-
-Risk: Redis assumptions leak into durability model.
-Mitigation: reconstructability tests from durable store after Redis wipe.
-
-Risk: roadmap bloat slows delivery.
-Mitigation: phase exit gates and strict out-of-scope list per phase.
-
-Risk: premature SaaS work.
-Mitigation: hard entry criteria before Phase 4.
+Named failure cases with required behavior documented in v5 Appendix G.
+Phase 1 sign-off requires drills for all cases.
 
 ---
 
-## 8) Definition of Done for "Proper Roadmap"
+## Historical Reference
 
-A roadmap is accepted only if:
+Previous roadmap versions and completed backlog are preserved as read-only
+historical documents:
 
-- each phase has measurable entry and exit gates
-- each imported module has an intake contract and test gate
-- repo structure decision point is explicit
-- next 2-4 sprints are immediately executable
-
-This v5 satisfies those conditions.
-
----
-
-## 9) Release Tracking (v1.2.x)
-
-### v1.2.2 — Surface Parity Harness (COD-050, PR #54)
-**Status:** ✅ Merged + promoted  
-**Commit:** `6f6be45734f07438d1bd2d7bb9fc23a8573df379`
-
-- `gate-check --tui-snapshot`: deterministic headless TUI surface
-- `dashboard --serve-fixture`: local dashboard fixture server
-- Surface parity contract tests: CLI / JSON / TUI / dashboard all verified identical
-
-**Pilot rerun batch 2 results (2026-03-18):**
-
-| Pilot | Verdict |
-|---|---|
-| P1 Contract Rerun | ✅ PASS |
-| P2 Hardblock Rerun | ✅ PASS |
-| P3 Surface Parity Rerun | ✅ PASS |
-| P4 Strict Policy Rerun | ✅ PASS |
-| P5 Surface Parity (dashboard+TUI) | ✅ PASS |
-
-Evidence: pilot rerun batch 2 evidence directory (local CI run artifacts, not tracked in repo)
-
----
-
-### v1.2.3 — Functional Hardening / Non-UI Release (COD-052)
-**Status:** Released (tag: v1.2.3)  
-**Scope:** Non-UI functional release only
-
-**Included:**
-- BUG-001 fix: forbidden-paths disabled reason message distinguishes missing enforce flag vs missing regex
-- Pilot rerun batch 2 validation (all 5 pilots pass)
-- Release notes: `docs/runbooks/v1.2.3-release-notes.md`
-- Env contract doc update: two-var requirement for forbidden-paths
-
-**Not included (deferred to v1.2.4):**
-- TUI visual design refresh
-- Dashboard UI component refresh
-
----
-
-### v1.2.4 — UI Modernization + Feedback Loop Hardening
-**Status:** Completed
-**Scope:** TUI/dashboard visual refresh + infra/docs/log/session clarity; feedback-loop hardening shipped
-**Spec:** `docs/roadmaps/v1.2.4-backlog.md`
-
-Key items:
-- ✅ COD-NEW-A: Post-push CI watcher (`ci-watch.sh`) — completed (PR #60)
-- ✅ COD-NEW-B: Pre-push test gate (`pre-push` hook) — completed (PR #60)
-- ✅ COD-NEW-C: Autonomous finish-loop (`codero-finish.sh`) — completed (PR #62)
-- ✅ COD-055: Finish-loop stabilization follow-up (`codero-finish.sh`) — completed (PR #63)
-- ✅ COD-059: Dashboard live fields — security score, coverage, ETA, PR number, owner agent (PR #67)
-- ✅ COD-060: OwnerAgent population at session start (PR #71; closeout follow-up PR #109)
-- ✅ COD-061: Coverage upload integration (PR #72)
-- ✅ UI-001: TUI layout and visual design modernization + live shell follow-up (PR #66, PR #108)
-- ✅ UI-002: Dashboard UI component refresh (PR #78)
-- ✅ UI-003: Current activity session panel for the GUI (PR #79)
-- ✅ LOG-001: Structured heartbeat/log states for the full pre-commit step matrix (PR #65)
-- ✅ INFRA-001: Clarify `/gate` vs `/gate-check` endpoint naming in docs
-- ✅ DOC-001: Gate-check activation guide
-- ✅ COD-062: ETA calibration and per-repo history
-
-**Current implementation direction:**
-- The original UI-001 gap audit is closed and kept above as historical context only.
-- v1.2.4 is complete and retained here as a historical release record.
-- Preserve the completed UI/Dashboard/TUI slices as reference material for future work, but do not treat them as open backlog.
+- `docs/roadmaps/codero-roadmap-v5.md` — full binding contracts and appendices (reference only)
+- `docs/roadmaps/v1.2.4-backlog.md` — completed UI modernization and hardening release
+- `docs/adr/0006-tui-shell-architecture.md` — superseded TUI architecture decision

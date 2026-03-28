@@ -13,7 +13,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/codero/codero/internal/gatecheck"
-	"github.com/codero/codero/internal/tui"
 )
 
 // UsageError signals a command-line misconfiguration (invalid flag combination,
@@ -141,7 +140,7 @@ Additional output modes:
 					return err
 				}
 			} else if tuiSnapshot {
-				fmt.Print(tui.RenderCheckReportSnapshot(report))
+				fmt.Print(gatecheck.RenderCheckReportSnapshot(report))
 			} else {
 				printGateCheckTable(report)
 			}
