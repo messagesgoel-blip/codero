@@ -168,6 +168,15 @@ func NewObservabilityServerWithGRPC(redisClient *redis.Client, queue *scheduler.
 		})
 	}
 
+	// Redirect root to dashboard so the public URL works without /dashboard/ suffix.
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			http.Redirect(w, r, dashboardBasePath+"/", http.StatusFound)
+			return
+		}
+		http.NotFound(w, r)
+	})
+
 	return obs
 }
 
