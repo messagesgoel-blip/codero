@@ -110,6 +110,7 @@ message FinalizeSessionRequest {
   string summary = 5;
   string task_id = 6;
   repeated string tests = 7;
+  google.protobuf.Timestamp finished_at = 8;
 }
 
 message FinalizeSessionResponse {

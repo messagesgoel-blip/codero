@@ -1231,6 +1231,7 @@ type FinalizeSessionRequest struct {
 	Summary       string                 `protobuf:"bytes,5,opt,name=summary,proto3" json:"summary,omitempty"`
 	TaskId        string                 `protobuf:"bytes,6,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
 	Tests         []string               `protobuf:"bytes,7,rep,name=tests,proto3" json:"tests,omitempty"`
+	FinishedAt    *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=finished_at,json=finishedAt,proto3" json:"finished_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1310,6 +1311,13 @@ func (x *FinalizeSessionRequest) GetTaskId() string {
 func (x *FinalizeSessionRequest) GetTests() []string {
 	if x != nil {
 		return x.Tests
+	}
+	return nil
+}
+
+func (x *FinalizeSessionRequest) GetFinishedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.FinishedAt
 	}
 	return nil
 }
@@ -2842,7 +2850,7 @@ const file_codero_daemon_v1_daemon_proto_rawDesc = "" +
 	"\atask_id\x18\a \x01(\tR\x06taskId\x12\x1c\n" +
 	"\tsubstatus\x18\b \x01(\tR\tsubstatus\"?\n" +
 	"\x18AttachAssignmentResponse\x12#\n" +
-	"\rassignment_id\x18\x01 \x01(\tR\fassignmentId\"\xd1\x01\n" +
+	"\rassignment_id\x18\x01 \x01(\tR\fassignmentId\"\x8e\x02\n" +
 	"\x16FinalizeSessionRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x19\n" +
@@ -2851,7 +2859,9 @@ const file_codero_daemon_v1_daemon_proto_rawDesc = "" +
 	"\tsubstatus\x18\x04 \x01(\tR\tsubstatus\x12\x18\n" +
 	"\asummary\x18\x05 \x01(\tR\asummary\x12\x17\n" +
 	"\atask_id\x18\x06 \x01(\tR\x06taskId\x12\x14\n" +
-	"\x05tests\x18\a \x03(\tR\x05tests\"X\n" +
+	"\x05tests\x18\a \x03(\tR\x05tests\x12;\n" +
+	"\vfinished_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"finishedAt\"X\n" +
 	"\x17FinalizeSessionResponse\x12=\n" +
 	"\ffinalized_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\vfinalizedAt\"\xbf\x03\n" +
 	"\x11IngestTaskRequest\x12\x17\n" +
@@ -3127,61 +3137,62 @@ var file_codero_daemon_v1_daemon_proto_depIdxs = []int32{
 	44, // 4: codero.daemon.v1.GetSessionResponse.started_at:type_name -> google.protobuf.Timestamp
 	44, // 5: codero.daemon.v1.GetSessionResponse.last_seen_at:type_name -> google.protobuf.Timestamp
 	14, // 6: codero.daemon.v1.GetSessionResponse.active_assignment:type_name -> codero.daemon.v1.ActiveAssignmentSummary
-	44, // 7: codero.daemon.v1.FinalizeSessionResponse.finalized_at:type_name -> google.protobuf.Timestamp
-	1,  // 8: codero.daemon.v1.IngestTaskRequest.priority_class:type_name -> codero.daemon.v1.PriorityClass
-	2,  // 9: codero.daemon.v1.IngestTaskRequest.source:type_name -> codero.daemon.v1.TaskSource
-	43, // 10: codero.daemon.v1.IngestTaskRequest.metadata:type_name -> codero.daemon.v1.IngestTaskRequest.MetadataEntry
-	44, // 11: codero.daemon.v1.IngestTaskResponse.enqueued_at:type_name -> google.protobuf.Timestamp
-	44, // 12: codero.daemon.v1.RuleCheck.checked_at:type_name -> google.protobuf.Timestamp
-	44, // 13: codero.daemon.v1.RuleCheck.resolved_at:type_name -> google.protobuf.Timestamp
-	3,  // 14: codero.daemon.v1.GetAssignmentResponse.state:type_name -> codero.daemon.v1.AssignmentState
-	44, // 15: codero.daemon.v1.GetAssignmentResponse.created_at:type_name -> google.protobuf.Timestamp
-	44, // 16: codero.daemon.v1.GetAssignmentResponse.completed_at:type_name -> google.protobuf.Timestamp
-	25, // 17: codero.daemon.v1.GetAssignmentResponse.rule_checks:type_name -> codero.daemon.v1.RuleCheck
-	26, // 18: codero.daemon.v1.GetAssignmentResponse.merge_readiness:type_name -> codero.daemon.v1.MergeReadiness
-	4,  // 19: codero.daemon.v1.FeedbackSource.source:type_name -> codero.daemon.v1.FeedbackSourceType
-	44, // 20: codero.daemon.v1.FeedbackSource.last_updated:type_name -> google.protobuf.Timestamp
-	5,  // 21: codero.daemon.v1.FeedbackSource.status:type_name -> codero.daemon.v1.FeedbackStatus
-	31, // 22: codero.daemon.v1.FeedbackSource.findings:type_name -> codero.daemon.v1.Finding
-	32, // 23: codero.daemon.v1.GetFeedbackResponse.sources:type_name -> codero.daemon.v1.FeedbackSource
-	6,  // 24: codero.daemon.v1.GateCheck.status:type_name -> codero.daemon.v1.GateCheckStatus
-	34, // 25: codero.daemon.v1.GateCheck.findings:type_name -> codero.daemon.v1.GateFinding
-	35, // 26: codero.daemon.v1.PostFindingsRequest.checks:type_name -> codero.daemon.v1.GateCheck
-	7,  // 27: codero.daemon.v1.PostFindingsRequest.overall_status:type_name -> codero.daemon.v1.GateOverallStatus
-	44, // 28: codero.daemon.v1.PostFindingsResponse.recorded_at:type_name -> google.protobuf.Timestamp
-	8,  // 29: codero.daemon.v1.GetGitHubStatusResponse.status:type_name -> codero.daemon.v1.GitHubAvailability
-	44, // 30: codero.daemon.v1.GetGitHubStatusResponse.last_check:type_name -> google.protobuf.Timestamp
-	9,  // 31: codero.daemon.v1.SessionService.RegisterSession:input_type -> codero.daemon.v1.RegisterSessionRequest
-	11, // 32: codero.daemon.v1.SessionService.Heartbeat:input_type -> codero.daemon.v1.HeartbeatRequest
-	13, // 33: codero.daemon.v1.SessionService.GetSession:input_type -> codero.daemon.v1.GetSessionRequest
-	16, // 34: codero.daemon.v1.SessionService.ConfirmSession:input_type -> codero.daemon.v1.ConfirmSessionRequest
-	18, // 35: codero.daemon.v1.SessionService.AttachAssignment:input_type -> codero.daemon.v1.AttachAssignmentRequest
-	20, // 36: codero.daemon.v1.SessionService.FinalizeSession:input_type -> codero.daemon.v1.FinalizeSessionRequest
-	22, // 37: codero.daemon.v1.TaskService.IngestTask:input_type -> codero.daemon.v1.IngestTaskRequest
-	24, // 38: codero.daemon.v1.AssignmentService.GetAssignment:input_type -> codero.daemon.v1.GetAssignmentRequest
-	28, // 39: codero.daemon.v1.AssignmentService.Submit:input_type -> codero.daemon.v1.SubmitRequest
-	30, // 40: codero.daemon.v1.FeedbackService.GetFeedback:input_type -> codero.daemon.v1.GetFeedbackRequest
-	36, // 41: codero.daemon.v1.GateService.PostFindings:input_type -> codero.daemon.v1.PostFindingsRequest
-	38, // 42: codero.daemon.v1.HealthService.GetHealth:input_type -> codero.daemon.v1.GetHealthRequest
-	40, // 43: codero.daemon.v1.HealthService.GetGitHubStatus:input_type -> codero.daemon.v1.GetGitHubStatusRequest
-	10, // 44: codero.daemon.v1.SessionService.RegisterSession:output_type -> codero.daemon.v1.RegisterSessionResponse
-	12, // 45: codero.daemon.v1.SessionService.Heartbeat:output_type -> codero.daemon.v1.HeartbeatResponse
-	15, // 46: codero.daemon.v1.SessionService.GetSession:output_type -> codero.daemon.v1.GetSessionResponse
-	17, // 47: codero.daemon.v1.SessionService.ConfirmSession:output_type -> codero.daemon.v1.ConfirmSessionResponse
-	19, // 48: codero.daemon.v1.SessionService.AttachAssignment:output_type -> codero.daemon.v1.AttachAssignmentResponse
-	21, // 49: codero.daemon.v1.SessionService.FinalizeSession:output_type -> codero.daemon.v1.FinalizeSessionResponse
-	23, // 50: codero.daemon.v1.TaskService.IngestTask:output_type -> codero.daemon.v1.IngestTaskResponse
-	27, // 51: codero.daemon.v1.AssignmentService.GetAssignment:output_type -> codero.daemon.v1.GetAssignmentResponse
-	29, // 52: codero.daemon.v1.AssignmentService.Submit:output_type -> codero.daemon.v1.SubmitResponse
-	33, // 53: codero.daemon.v1.FeedbackService.GetFeedback:output_type -> codero.daemon.v1.GetFeedbackResponse
-	37, // 54: codero.daemon.v1.GateService.PostFindings:output_type -> codero.daemon.v1.PostFindingsResponse
-	39, // 55: codero.daemon.v1.HealthService.GetHealth:output_type -> codero.daemon.v1.GetHealthResponse
-	41, // 56: codero.daemon.v1.HealthService.GetGitHubStatus:output_type -> codero.daemon.v1.GetGitHubStatusResponse
-	44, // [44:57] is the sub-list for method output_type
-	31, // [31:44] is the sub-list for method input_type
-	31, // [31:31] is the sub-list for extension type_name
-	31, // [31:31] is the sub-list for extension extendee
-	0,  // [0:31] is the sub-list for field type_name
+	44, // 7: codero.daemon.v1.FinalizeSessionRequest.finished_at:type_name -> google.protobuf.Timestamp
+	44, // 8: codero.daemon.v1.FinalizeSessionResponse.finalized_at:type_name -> google.protobuf.Timestamp
+	1,  // 9: codero.daemon.v1.IngestTaskRequest.priority_class:type_name -> codero.daemon.v1.PriorityClass
+	2,  // 10: codero.daemon.v1.IngestTaskRequest.source:type_name -> codero.daemon.v1.TaskSource
+	43, // 11: codero.daemon.v1.IngestTaskRequest.metadata:type_name -> codero.daemon.v1.IngestTaskRequest.MetadataEntry
+	44, // 12: codero.daemon.v1.IngestTaskResponse.enqueued_at:type_name -> google.protobuf.Timestamp
+	44, // 13: codero.daemon.v1.RuleCheck.checked_at:type_name -> google.protobuf.Timestamp
+	44, // 14: codero.daemon.v1.RuleCheck.resolved_at:type_name -> google.protobuf.Timestamp
+	3,  // 15: codero.daemon.v1.GetAssignmentResponse.state:type_name -> codero.daemon.v1.AssignmentState
+	44, // 16: codero.daemon.v1.GetAssignmentResponse.created_at:type_name -> google.protobuf.Timestamp
+	44, // 17: codero.daemon.v1.GetAssignmentResponse.completed_at:type_name -> google.protobuf.Timestamp
+	25, // 18: codero.daemon.v1.GetAssignmentResponse.rule_checks:type_name -> codero.daemon.v1.RuleCheck
+	26, // 19: codero.daemon.v1.GetAssignmentResponse.merge_readiness:type_name -> codero.daemon.v1.MergeReadiness
+	4,  // 20: codero.daemon.v1.FeedbackSource.source:type_name -> codero.daemon.v1.FeedbackSourceType
+	44, // 21: codero.daemon.v1.FeedbackSource.last_updated:type_name -> google.protobuf.Timestamp
+	5,  // 22: codero.daemon.v1.FeedbackSource.status:type_name -> codero.daemon.v1.FeedbackStatus
+	31, // 23: codero.daemon.v1.FeedbackSource.findings:type_name -> codero.daemon.v1.Finding
+	32, // 24: codero.daemon.v1.GetFeedbackResponse.sources:type_name -> codero.daemon.v1.FeedbackSource
+	6,  // 25: codero.daemon.v1.GateCheck.status:type_name -> codero.daemon.v1.GateCheckStatus
+	34, // 26: codero.daemon.v1.GateCheck.findings:type_name -> codero.daemon.v1.GateFinding
+	35, // 27: codero.daemon.v1.PostFindingsRequest.checks:type_name -> codero.daemon.v1.GateCheck
+	7,  // 28: codero.daemon.v1.PostFindingsRequest.overall_status:type_name -> codero.daemon.v1.GateOverallStatus
+	44, // 29: codero.daemon.v1.PostFindingsResponse.recorded_at:type_name -> google.protobuf.Timestamp
+	8,  // 30: codero.daemon.v1.GetGitHubStatusResponse.status:type_name -> codero.daemon.v1.GitHubAvailability
+	44, // 31: codero.daemon.v1.GetGitHubStatusResponse.last_check:type_name -> google.protobuf.Timestamp
+	9,  // 32: codero.daemon.v1.SessionService.RegisterSession:input_type -> codero.daemon.v1.RegisterSessionRequest
+	11, // 33: codero.daemon.v1.SessionService.Heartbeat:input_type -> codero.daemon.v1.HeartbeatRequest
+	13, // 34: codero.daemon.v1.SessionService.GetSession:input_type -> codero.daemon.v1.GetSessionRequest
+	16, // 35: codero.daemon.v1.SessionService.ConfirmSession:input_type -> codero.daemon.v1.ConfirmSessionRequest
+	18, // 36: codero.daemon.v1.SessionService.AttachAssignment:input_type -> codero.daemon.v1.AttachAssignmentRequest
+	20, // 37: codero.daemon.v1.SessionService.FinalizeSession:input_type -> codero.daemon.v1.FinalizeSessionRequest
+	22, // 38: codero.daemon.v1.TaskService.IngestTask:input_type -> codero.daemon.v1.IngestTaskRequest
+	24, // 39: codero.daemon.v1.AssignmentService.GetAssignment:input_type -> codero.daemon.v1.GetAssignmentRequest
+	28, // 40: codero.daemon.v1.AssignmentService.Submit:input_type -> codero.daemon.v1.SubmitRequest
+	30, // 41: codero.daemon.v1.FeedbackService.GetFeedback:input_type -> codero.daemon.v1.GetFeedbackRequest
+	36, // 42: codero.daemon.v1.GateService.PostFindings:input_type -> codero.daemon.v1.PostFindingsRequest
+	38, // 43: codero.daemon.v1.HealthService.GetHealth:input_type -> codero.daemon.v1.GetHealthRequest
+	40, // 44: codero.daemon.v1.HealthService.GetGitHubStatus:input_type -> codero.daemon.v1.GetGitHubStatusRequest
+	10, // 45: codero.daemon.v1.SessionService.RegisterSession:output_type -> codero.daemon.v1.RegisterSessionResponse
+	12, // 46: codero.daemon.v1.SessionService.Heartbeat:output_type -> codero.daemon.v1.HeartbeatResponse
+	15, // 47: codero.daemon.v1.SessionService.GetSession:output_type -> codero.daemon.v1.GetSessionResponse
+	17, // 48: codero.daemon.v1.SessionService.ConfirmSession:output_type -> codero.daemon.v1.ConfirmSessionResponse
+	19, // 49: codero.daemon.v1.SessionService.AttachAssignment:output_type -> codero.daemon.v1.AttachAssignmentResponse
+	21, // 50: codero.daemon.v1.SessionService.FinalizeSession:output_type -> codero.daemon.v1.FinalizeSessionResponse
+	23, // 51: codero.daemon.v1.TaskService.IngestTask:output_type -> codero.daemon.v1.IngestTaskResponse
+	27, // 52: codero.daemon.v1.AssignmentService.GetAssignment:output_type -> codero.daemon.v1.GetAssignmentResponse
+	29, // 53: codero.daemon.v1.AssignmentService.Submit:output_type -> codero.daemon.v1.SubmitResponse
+	33, // 54: codero.daemon.v1.FeedbackService.GetFeedback:output_type -> codero.daemon.v1.GetFeedbackResponse
+	37, // 55: codero.daemon.v1.GateService.PostFindings:output_type -> codero.daemon.v1.PostFindingsResponse
+	39, // 56: codero.daemon.v1.HealthService.GetHealth:output_type -> codero.daemon.v1.GetHealthResponse
+	41, // 57: codero.daemon.v1.HealthService.GetGitHubStatus:output_type -> codero.daemon.v1.GetGitHubStatusResponse
+	45, // [45:58] is the sub-list for method output_type
+	32, // [32:45] is the sub-list for method input_type
+	32, // [32:32] is the sub-list for extension type_name
+	32, // [32:32] is the sub-list for extension extendee
+	0,  // [0:32] is the sub-list for field type_name
 }
 
 func init() { file_codero_daemon_v1_daemon_proto_init() }

@@ -113,10 +113,10 @@ func (s *sessionService) ConfirmSession(ctx context.Context, req *daemonv1.Confi
 	}
 
 	if err := s.server.sessionStore.Confirm(ctx, req.SessionId, req.AgentId); err != nil {
-		if errors.Is(err, state.ErrAgentSessionNotFound) || errors.Is(err, state.ErrAgentSessionAlreadyEnded) {
+		if errors.Is(err, session.ErrSessionNotFound) {
 			return nil, status.Error(codes.NotFound, "session not found")
 		}
-		if errors.Is(err, state.ErrAgentSessionAgentMismatch) {
+		if errors.Is(err, session.ErrSessionMismatch) {
 			return nil, status.Error(codes.PermissionDenied, "agent mismatch")
 		}
 		return nil, status.Errorf(codes.Internal, "confirm session: %v", err)
@@ -177,6 +177,9 @@ func (s *sessionService) FinalizeSession(ctx context.Context, req *daemonv1.Fina
 		Substatus: req.Substatus,
 		Summary:   req.Summary,
 		Tests:     req.Tests,
+	}
+	if req.FinishedAt != nil {
+		completion.FinishedAt = req.FinishedAt.AsTime()
 	}
 
 	if err := s.server.sessionStore.Finalize(ctx, req.SessionId, req.AgentId, completion); err != nil {

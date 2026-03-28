@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	daemonv1 "github.com/codero/codero/internal/daemon/grpc/v1"
 	"github.com/codero/codero/internal/session"
@@ -131,7 +132,7 @@ func (c *SessionClient) Finalize(ctx context.Context, sessionID, agentID string,
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	_, err := c.client.FinalizeSession(ctx, &daemonv1.FinalizeSessionRequest{
+	req := &daemonv1.FinalizeSessionRequest{
 		SessionId: sessionID,
 		AgentId:   agentID,
 		Status:    completion.Status,
@@ -139,7 +140,11 @@ func (c *SessionClient) Finalize(ctx context.Context, sessionID, agentID string,
 		Summary:   completion.Summary,
 		TaskId:    completion.TaskID,
 		Tests:     completion.Tests,
-	})
+	}
+	if !completion.FinishedAt.IsZero() {
+		req.FinishedAt = timestamppb.New(completion.FinishedAt)
+	}
+	_, err := c.client.FinalizeSession(ctx, req)
 	if err != nil {
 		return fmt.Errorf("finalize session: %w", err)
 	}
