@@ -16,6 +16,9 @@ import (
 	"github.com/codero/codero/internal/session"
 )
 
+// Compile-time assertion: SessionClient implements session.SessionBackend.
+var _ session.SessionBackend = (*SessionClient)(nil)
+
 // SessionClient wraps the gRPC SessionService stub for use by CLI commands.
 type SessionClient struct {
 	conn   *grpc.ClientConn
