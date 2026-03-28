@@ -278,7 +278,7 @@ Sprint 4 (Phase 2 start):
 - Phase 1E web dashboard is implemented for operator parity (overview/settings/live activity/manual upload) and served at `/dashboard`.
 - Proving-period metrics commands (`scorecard`, `record-event`, `record-precommit`) are implemented and `commit-gate` now auto-records provider outcomes.
 - TUI v2-alpha is shipped for `codero gate-status --watch` with Bubble Tea 3-pane layout, keyboard-first controls, and authoritative/non-authoritative gate separation.
-- TUI architecture and operator quickstart are documented in `docs/tui-v2-architecture.md`.
+- TUI architecture is documented in `docs/adr/0006-tui-shell-architecture.md`; operator quickstart in `docs/tui-v2-architecture.md`.
 
 ---
 

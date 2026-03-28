@@ -637,7 +637,7 @@ Program-level criteria (reviewed at phase gates):
   - `--logs` flag to inspect gate log directory
   - interactive prompt for retry/logs/branch-view actions
   - `/gate` endpoint and TUI share the same `progress.env` source and `gate.RenderBar()` call — verified by unit tests
-  - TUI v2 architecture and operator quickstart documented in `docs/tui-v2-architecture.md`
+  - TUI architecture in `docs/adr/0006-tui-shell-architecture.md`; operator quickstart in `docs/tui-v2-architecture.md`
 - effectiveness metrics baseline (`scorecard`, `record-event`, `record-precommit`) - implemented; automatic gate-to-metric writes - **implemented**
   - `commit-gate` auto-records per-provider (`copilot`, `litellm`) outcomes on every terminal result
   - idempotent writes (`INSERT OR IGNORE`) using `run_id + provider` as deterministic ID
