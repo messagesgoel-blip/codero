@@ -159,9 +159,14 @@ func NewObservabilityServerWithGRPC(redisClient *redis.Client, queue *scheduler.
 			loglib.FieldComponent, "daemon", "error", err)
 	} else {
 		fileServer := http.FileServer(http.FS(staticFS))
+		// Wrap with short cache headers so Cloudflare doesn't serve stale assets.
+		cachedFileServer := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "public, max-age=60")
+			fileServer.ServeHTTP(w, r)
+		})
 		// Strip the base path before serving static files so that the embedded
 		// index.html is served for any path under dashboardBasePath/.
-		mux.Handle(dashboardBasePath+"/", http.StripPrefix(dashboardBasePath, fileServer))
+		mux.Handle(dashboardBasePath+"/", http.StripPrefix(dashboardBasePath, cachedFileServer))
 		// Redirect bare dashboardBasePath to dashboardBasePath/ so the SPA loads.
 		mux.HandleFunc(dashboardBasePath, func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, dashboardBasePath+"/", http.StatusMovedPermanently)
