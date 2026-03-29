@@ -169,6 +169,7 @@ function normalizeSessions(raw) {
     state: s.activity_state, task: s.task,
     startedAt: s.started_at, lastHeartbeat: s.last_heartbeat_at,
     elapsedSec: s.elapsed_sec, ownerAgent: s.owner_agent,
+    lastIOAt: s.last_io_at,
   }));
 }
 

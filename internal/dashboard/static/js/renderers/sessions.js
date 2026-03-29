@@ -154,6 +154,16 @@ function _renderSessionsTable(sessions, assignments) {
       render: (r) => statusChip(r.state || 'unknown'),
     },
     {
+      key: 'lastIOAt',
+      label: 'Last Output',
+      render: (r) => {
+        if (!r.lastIOAt) return '<span style="color:var(--fg-muted)">—</span>';
+        const age = (Date.now() - new Date(r.lastIOAt).getTime()) / 1000;
+        const style = age > 90 ? 'color:var(--warning)' : 'color:var(--success)';
+        return `<span style="${style}">${esc(relativeTime(r.lastIOAt))}</span>`;
+      },
+    },
+    {
       key: 'lastHeartbeat',
       label: 'Heartbeat',
       render: (r) => esc(relativeTime(r.lastHeartbeat)),
@@ -190,6 +200,7 @@ function _buildExpandContent(session, assigns) {
       { label: 'Worktree', value: esc(session.worktree || '—') },
       { label: 'PR', value: session.prNumber ? esc('#' + session.prNumber) : '—' },
       { label: 'Started', value: esc(relativeTime(session.startedAt)) },
+      { label: 'Last Output', value: session.lastIOAt ? esc(relativeTime(session.lastIOAt)) : '—' },
     ];
     return detailGrid(items);
   }

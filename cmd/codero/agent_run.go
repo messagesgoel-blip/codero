@@ -25,6 +25,20 @@ import (
 	"golang.org/x/term"
 )
 
+// tailDir returns the directory used for per-session output tail files.
+// Override via CODERO_TAIL_DIR env var; defaults to codero-tails under os.TempDir().
+func tailDir() string {
+	if d := os.Getenv("CODERO_TAIL_DIR"); d != "" {
+		return d
+	}
+	return filepath.Join(os.TempDir(), "codero-tails")
+}
+
+// tailPath returns the tail file path for a session.
+func tailPath(sessionID string) string {
+	return filepath.Join(tailDir(), sessionID+".log")
+}
+
 // activityTracker records the last time the child process wrote to stdout/stderr.
 // The heartbeat goroutine reads this to decide whether to mark progress.
 type activityTracker struct {
@@ -47,13 +61,27 @@ func (t *activityTracker) hasRecentActivity(window time.Duration) bool {
 }
 
 // activityWriter wraps an io.Writer and touches the tracker on every write.
+// If tail is non-nil, output is also tee'd to the tail file (capped at tailMaxBytes).
 type activityWriter struct {
 	inner   io.Writer
 	tracker *activityTracker
+	tail    *os.File
+	written int64
 }
+
+const tailMaxBytes = 4 * 1024 * 1024 // 4 MB cap per session tail file
 
 func (w *activityWriter) Write(p []byte) (int, error) {
 	w.tracker.touch()
+	if w.tail != nil && w.written < tailMaxBytes {
+		remaining := tailMaxBytes - w.written
+		chunk := p
+		if int64(len(chunk)) > remaining {
+			chunk = p[:remaining]
+		}
+		n, _ := w.tail.Write(chunk)
+		w.written += int64(n)
+	}
 	return w.inner.Write(p)
 }
 
@@ -67,10 +95,12 @@ func agentRunCmd(configPath *string) *cobra.Command {
 	var (
 		agentID string
 		mode    string
+		taskID  string
+		repo    string
 	)
 
 	cmd := &cobra.Command{
-		Use:   "run [--agent-id name] [--mode mode] -- /path/to/binary [args...]",
+		Use:   "run [--agent-id name] [--mode mode] [--task-id id] [--repo owner/repo] -- /path/to/binary [args...]",
 		Short: "Run an agent binary with automatic session tracking",
 		Long: `Wraps any agent binary with codero session lifecycle management.
 Registers a session, heartbeats in the background, and finalizes on exit.
@@ -108,7 +138,7 @@ If the daemon is unreachable, runs the binary directly with no tracking.`,
 				return execBinary(binaryPath, binaryArgs)
 			}
 
-			err := runAgentWithTracking(cmd.Context(), agentID, mode, daemonAddr, binaryPath, binaryArgs)
+			err := runAgentWithTracking(cmd.Context(), agentID, mode, taskID, repo, daemonAddr, binaryPath, binaryArgs)
 			var exitErr exitCodeError
 			if errors.As(err, &exitErr) {
 				os.Exit(exitErr.code)
@@ -119,12 +149,14 @@ If the daemon is unreachable, runs the binary directly with no tracking.`,
 
 	cmd.Flags().StringVar(&agentID, "agent-id", "", "agent identifier (defaults to binary name)")
 	cmd.Flags().StringVar(&mode, "mode", "coding", "session mode label")
+	cmd.Flags().StringVar(&taskID, "task-id", "", "task identifier to associate with this session (e.g. COD-123)")
+	cmd.Flags().StringVar(&repo, "repo", "", "repository override in owner/repo format (defaults to git remote detection)")
 
 	return cmd
 }
 
 // runAgentWithTracking registers, heartbeats, runs the child, and finalizes.
-func runAgentWithTracking(ctx context.Context, agentID, mode, daemonAddr, binaryPath string, binaryArgs []string) error {
+func runAgentWithTracking(ctx context.Context, agentID, mode, taskID, repoOverride, daemonAddr, binaryPath string, binaryArgs []string) error {
 	// Connect to daemon
 	client, err := daemongrpc.NewSessionClient(daemonAddr)
 	if err != nil {
@@ -136,6 +168,16 @@ func runAgentWithTracking(ctx context.Context, agentID, mode, daemonAddr, binary
 
 	// Build rich metadata
 	initialContext := buildSessionContext(binaryPath)
+	if taskID != "" {
+		initialContext["task_id"] = taskID
+	}
+	if repoOverride != "" {
+		parts := strings.SplitN(repoOverride, "/", 2)
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			return fmt.Errorf("--repo must be in owner/repo format, got %q", repoOverride)
+		}
+		initialContext["repo"] = repoOverride
+	}
 
 	result, err := client.RegisterWithContext(ctx, agentID, mode, initialContext)
 	if err != nil {
@@ -146,6 +188,18 @@ func runAgentWithTracking(ctx context.Context, agentID, mode, daemonAddr, binary
 	sessionID := result.SessionID
 	secret := result.HeartbeatSecret
 
+	// Open per-session tail file for output capture.
+	// 0o700/0o600: agent output may contain secrets; restrict to owner only.
+	var tailFile *os.File
+	if err := os.MkdirAll(tailDir(), 0o700); err == nil {
+		if f, err := os.OpenFile(tailPath(sessionID), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600); err == nil {
+			tailFile = f
+		}
+	}
+	if tailFile != nil {
+		defer tailFile.Close()
+	}
+
 	// Activity tracker — heartbeat marks progress only when the child produces output.
 	tracker := newActivityTracker()
 
@@ -155,7 +209,7 @@ func runAgentWithTracking(ctx context.Context, agentID, mode, daemonAddr, binary
 	go heartbeatLoop(hbCtx, client, sessionID, secret, tracker)
 
 	// Run child process
-	exitCode := runChild(binaryPath, binaryArgs, sessionID, agentID, daemonAddr, tracker)
+	exitCode := runChild(binaryPath, binaryArgs, sessionID, agentID, daemonAddr, tracker, tailFile)
 
 	hbCancel()
 	status := "completed"
@@ -209,7 +263,7 @@ func heartbeatLoop(ctx context.Context, client *daemongrpc.SessionClient, sessio
 // When stdout is a real TTY (e.g. inside tmux), the child is started inside a PTY so that
 // isatty() checks in the child return true and TUI agents render correctly.
 // Activity is tracked by reading the PTY master output stream.
-func runChild(binaryPath string, args []string, sessionID, agentID, daemonAddr string, tracker *activityTracker) int {
+func runChild(binaryPath string, args []string, sessionID, agentID, daemonAddr string, tracker *activityTracker, tailFile *os.File) int {
 	child := exec.Command(binaryPath, args...) // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	child.Env = append(os.Environ(),
 		"CODERO_SESSION_ID="+sessionID,
@@ -220,14 +274,14 @@ func runChild(binaryPath string, args []string, sessionID, agentID, daemonAddr s
 	stdoutIsTTY := term.IsTerminal(int(os.Stdout.Fd()))
 
 	if stdoutIsTTY {
-		return runChildPTY(child, tracker)
+		return runChildPTY(child, tracker, tailFile)
 	}
-	return runChildPiped(child, tracker)
+	return runChildPiped(child, tracker, tailFile)
 }
 
 // runChildPTY starts the child inside a pseudo-terminal so TUI agents see a real TTY.
 // It copies PTY master → os.Stdout while tracking write activity.
-func runChildPTY(child *exec.Cmd, tracker *activityTracker) int {
+func runChildPTY(child *exec.Cmd, tracker *activityTracker, tailFile *os.File) int {
 	ptmx, err := pty.Start(child)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "codero: pty start failed: %v\n", err)
@@ -271,8 +325,8 @@ func runChildPTY(child *exec.Cmd, tracker *activityTracker) int {
 	// stdin → PTY master (user keystrokes reach the child).
 	go func() { _, _ = io.Copy(ptmx, os.Stdin) }()
 
-	// PTY master → stdout with activity tracking.
-	_, _ = io.Copy(&activityWriter{inner: os.Stdout, tracker: tracker}, ptmx)
+	// PTY master → stdout with activity tracking (also tee'd to tail file).
+	_, _ = io.Copy(&activityWriter{inner: os.Stdout, tracker: tracker, tail: tailFile}, ptmx)
 
 	signal.Stop(sigCh)
 	close(sigCh)
@@ -289,9 +343,9 @@ func runChildPTY(child *exec.Cmd, tracker *activityTracker) int {
 }
 
 // runChildPiped starts the child with plain pipes (non-TTY fallback).
-func runChildPiped(child *exec.Cmd, tracker *activityTracker) int {
+func runChildPiped(child *exec.Cmd, tracker *activityTracker, tailFile *os.File) int {
 	child.Stdin = os.Stdin
-	child.Stdout = &activityWriter{inner: os.Stdout, tracker: tracker}
+	child.Stdout = &activityWriter{inner: os.Stdout, tracker: tracker, tail: tailFile}
 	child.Stderr = &activityWriter{inner: os.Stderr, tracker: tracker}
 
 	sigCh := make(chan os.Signal, 1)

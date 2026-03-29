@@ -67,6 +67,20 @@ if (chatFloatingBtn && chatFloatingPanel) {
   });
 }
 
+// --- Sidebar collapse ---
+const sidebar = $('sidebar');
+const btnSidebarCollapse = $('btn-sidebar-collapse');
+if (sidebar && btnSidebarCollapse) {
+  const STORAGE_KEY = 'codero-sidebar-collapsed';
+  if (localStorage.getItem(STORAGE_KEY) === '1') {
+    sidebar.classList.add('collapsed');
+  }
+  btnSidebarCollapse.addEventListener('click', () => {
+    sidebar.classList.toggle('collapsed');
+    localStorage.setItem(STORAGE_KEY, sidebar.classList.contains('collapsed') ? '1' : '0');
+  });
+}
+
 // --- Command palette (Cmd+K) ---
 document.addEventListener('keydown', e => {
   if ((e.metaKey || e.ctrlKey) && e.key === 'k') {

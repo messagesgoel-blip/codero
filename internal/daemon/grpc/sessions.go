@@ -81,33 +81,43 @@ func (s *sessionService) RegisterSession(ctx context.Context, req *daemonv1.Regi
 		"client_kind", clientKind,
 	)
 
-	// Auto-attach assignment from initial_context so that repo/branch
+	// Auto-attach an assignment from initial_context so that task/repo/worktree
 	// appear in the dashboard immediately for agent_run sessions.
-	// NOTE: branch_states is intentionally not updated here — it is
-	// populated by the gate-check pipeline. The dashboard's primary path
-	// (queryActiveSessionsFromAgentSessions) reads agent_sessions +
-	// agent_assignments which this code writes to.
-	if repo := req.InitialContext["repo"]; repo != "" {
-		if branch := req.InitialContext["branch"]; branch != "" {
-			assignment := &state.AgentAssignment{
-				ID:        uuid.New().String(),
-				SessionID: sessionID,
-				AgentID:   req.AgentId,
-				Repo:      repo,
-				Branch:    branch,
-				Worktree:  req.InitialContext["cwd"],
-				TaskID:    req.InitialContext["task_id"],
-				Substatus: state.AssignmentSubstatusInProgress,
-			}
-			if err := state.AttachAgentAssignment(ctx, s.server.db, assignment); err != nil {
-				loglib.Warn("grpc: auto-attach assignment from initial_context failed",
-					loglib.FieldComponent, "grpc",
-					"session_id", sessionID,
-					"repo", repo,
-					"branch", branch,
-					"error", err,
-				)
-			}
+	//
+	// We attach whenever cwd is provided (which agent_run always sets), even if
+	// repo is absent. Branch is intentionally omitted so compliance Rule-001
+	// (gate-must-pass-before-merge) is not-applicable for wrapper sessions.
+	// This covers:
+	//   - git repos: repo+worktree tracking (no branch, so no gate check)
+	//   - non-git directories: worktree-only tracking (infra, scratch, etc.)
+	//
+	// NOTE: branch_states is intentionally not updated here — it is populated by
+	// the gate-check pipeline. The dashboard reads agent_sessions + agent_assignments.
+	cwd := req.InitialContext["cwd"]
+	repo := req.InitialContext["repo"]
+	taskID := req.InitialContext["task_id"]
+	// Branch is intentionally excluded: wrapper sessions track agent invocations,
+	// not branch-level work. Omitting branch makes compliance Rule-001
+	// (gate-must-pass-before-merge) not applicable, so the session can
+	// finalize as completed without a PR gate check.
+	if cwd != "" || repo != "" {
+		assignment := &state.AgentAssignment{
+			ID:        uuid.New().String(),
+			SessionID: sessionID,
+			AgentID:   req.AgentId,
+			Repo:      repo,
+			Worktree:  cwd,
+			TaskID:    taskID,
+			Substatus: state.AssignmentSubstatusInProgress,
+		}
+		if err := state.AttachAgentAssignment(ctx, s.server.db, assignment); err != nil {
+			loglib.Warn("grpc: auto-attach assignment from initial_context failed",
+				loglib.FieldComponent, "grpc",
+				"session_id", sessionID,
+				"repo", repo,
+				"has_cwd", cwd != "",
+				"error", err,
+			)
 		}
 	}
 

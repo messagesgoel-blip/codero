@@ -451,6 +451,7 @@ func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]Ac
 			StartedAt:       startedAt,
 			LastHeartbeatAt: s.LastSeenAt,
 			ProgressAt:      nullTimePtr(s.LastProgressAt),
+			LastIOAt:        nullTimePtr(s.LastIOAt),
 			ElapsedSec:      int64(elapsed.Seconds()),
 		})
 	}
