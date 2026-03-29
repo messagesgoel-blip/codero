@@ -859,6 +859,7 @@ func sessionCmd(configPath *string) *cobra.Command {
 		sessionConfirmCmd(configPath),
 		sessionHeartbeatCmd(configPath),
 		sessionAttachCmd(configPath),
+		sessionTagCmd(configPath),
 		sessionFinalizeCmd(configPath),
 		sessionEndCmd(configPath),
 	)
@@ -1166,6 +1167,63 @@ func sessionAttachCmd(configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&taskID, "task-id", "", "optional task identifier")
 	cmd.Flags().StringVar(&substatus, "substatus", "in_progress", "assignment substatus")
 
+	return cmd
+}
+
+// sessionTagCmd implements `codero session tag` — attach a task-id (and
+// optionally repo) to an already-running session without needing branch context.
+// Useful for sessions started via `oc` without --task-id, or to retroactively
+// label an ongoing wrapper session from another terminal.
+func sessionTagCmd(configPath *string) *cobra.Command {
+	var (
+		sessionID string
+		taskID    string
+		repo      string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "tag",
+		Short: "Tag a running session with a task ID (and optional repo)",
+		Example: `  codero session tag --session <id> --task-id COD-123
+  codero session tag --session <id> --task-id COD-123 --repo owner/repo`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if sessionID == "" {
+				sessionID = resolveSessionIDFromEnv()
+			}
+			if sessionID == "" {
+				return fmt.Errorf("--session is required")
+			}
+			if taskID == "" {
+				return fmt.Errorf("--task-id is required")
+			}
+			if repo != "" {
+				parts := strings.SplitN(repo, "/", 2)
+				if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+					return fmt.Errorf("--repo must be in owner/repo format, got %q", repo)
+				}
+			}
+
+			cfg, err := loadConfig(*configPathForCmd(cmd))
+			if err != nil {
+				return fmt.Errorf("codero: config: %w", err)
+			}
+			db, err := state.Open(cfg.DBPath)
+			if err != nil {
+				return fmt.Errorf("open db: %w", err)
+			}
+			defer db.Close()
+			if err := state.SetSessionTaskID(cmd.Context(), db, sessionID, taskID, repo); err != nil {
+				return fmt.Errorf("session tag: %w", err)
+			}
+			fmt.Printf("session %s tagged with task %s\n", sessionID, taskID)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&sessionID, "session", "", "session ID to tag (defaults to $CODERO_SESSION_ID)")
+	cmd.Flags().StringVar(&taskID, "task-id", "", "task ID to attach (required)")
+	cmd.Flags().StringVar(&repo, "repo", "", "repo in owner/repo format (optional)")
+	_ = cmd.MarkFlagRequired("task-id")
 	return cmd
 }
 
