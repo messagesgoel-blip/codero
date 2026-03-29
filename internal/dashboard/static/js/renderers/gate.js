@@ -8,6 +8,7 @@ import {
 import { glassCard, dataTable, toggleSwitch, barChart, toast } from '../components.js';
 
 let activeSeverityFilter = 'ALL';
+let _initialized = false;
 
 // LOG-001: maps raw GC-001 status → normalized display state.
 function toDisplayState(status) {
@@ -19,6 +20,8 @@ function toDisplayState(status) {
 // ---- public API ---------------------------------------------------------
 
 export function initGate() {
+  if (_initialized) return;
+  _initialized = true;
   store.subscribe('gateChecks', () => renderGate());
   store.subscribe('blockReasons', () => renderGate());
   store.subscribe('gateConfig', () => renderGate());
