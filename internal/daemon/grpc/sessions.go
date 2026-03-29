@@ -85,9 +85,10 @@ func (s *sessionService) RegisterSession(ctx context.Context, req *daemonv1.Regi
 	// appear in the dashboard immediately for agent_run sessions.
 	//
 	// We attach whenever cwd is provided (which agent_run always sets), even if
-	// repo or branch are absent. This covers:
-	//   - git repos with branch: full repo+branch tracking
-	//   - git repos on detached HEAD / infra repos with no branch: repo-only tracking
+	// repo is absent. Branch is intentionally omitted so compliance Rule-001
+	// (gate-must-pass-before-merge) is not-applicable for wrapper sessions.
+	// This covers:
+	//   - git repos: repo+worktree tracking (no branch, so no gate check)
 	//   - non-git directories: worktree-only tracking (infra, scratch, etc.)
 	//
 	// NOTE: branch_states is intentionally not updated here — it is populated by
