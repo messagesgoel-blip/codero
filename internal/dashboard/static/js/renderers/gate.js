@@ -1,7 +1,7 @@
 // gate.js — Gate page renderer: pre-commit checks, findings, toggle controls.
 
 import store from '../store.js';
-import { loadGateChecks, loadFindings, loadGateConfig, apiPut } from '../api.js';
+import { loadGateChecks, loadFindings, loadGateConfig, loadCompliance, apiPut } from '../api.js';
 import {
   $, setHtml, esc, statusChip, severityChip, formatDuration,
 } from '../utils.js';
@@ -22,10 +22,11 @@ export function initGate() {
   store.subscribe('gateChecks', () => renderGate());
   store.subscribe('blockReasons', () => renderGate());
   store.subscribe('gateConfig', () => renderGate());
+  store.subscribe('compliance', () => renderGate());
 }
 
 export async function refreshGate() {
-  await Promise.all([loadGateChecks(), loadFindings(), loadGateConfig()]);
+  await Promise.all([loadGateChecks(), loadFindings(), loadGateConfig(), loadCompliance()]);
 }
 
 export function renderGate() {
@@ -35,17 +36,20 @@ export function renderGate() {
   const gateChecks = store.select('gateChecks');
   const blockReasons = store.select('blockReasons') || [];
   const gateConfig = store.select('gateConfig');
+  const compliance = store.select('compliance');
 
   const pipelineHtml = buildGatePipeline(gateChecks);
   const togglesHtml = buildToggleControls(gateChecks, gateConfig);
   const chartHtml = buildBlockReasonsChart(blockReasons);
   const findingsHtml = buildFindingsBrowser(gateChecks);
+  const complianceHtml = buildComplianceTable(compliance);
 
   setHtml(container,
     glassCard('Gate Pipeline', pipelineHtml, { class: 'gate-pipeline-card' }) +
     glassCard('Gate Controls', togglesHtml, { class: 'gate-toggles-card' }) +
     glassCard('Block Reasons', chartHtml, { class: 'gate-chart-card' }) +
-    glassCard('Findings', findingsHtml, { padding: 'none', class: 'gate-findings-card' })
+    glassCard('Findings', findingsHtml, { padding: 'none', class: 'gate-findings-card' }) +
+    complianceHtml
   );
 
   attachToggleListeners(gateConfig);
@@ -218,6 +222,60 @@ function extractFindings(gateChecks) {
     }
   }
   return all;
+}
+
+// ---- compliance rules -------------------------------------------------------
+
+function buildComplianceTable(compliance) {
+  if (!compliance || !compliance.rules || compliance.rules.length === 0) {
+    return glassCard('Compliance Rules', '<div class="empty-state">No compliance data</div>', {
+      class: 'gate-compliance-card',
+    });
+  }
+
+  const columns = [
+    { key: 'name', label: 'Rule' },
+    {
+      key: 'enforcement',
+      label: 'Enforcement',
+      render: r => enforcementBadge(r.enforcement),
+    },
+    {
+      key: 'passed',
+      label: 'Passed',
+      class: 'col-num',
+      render: r => esc(String(r.passed ?? 0)),
+    },
+    {
+      key: 'failed',
+      label: 'Failed',
+      class: 'col-num',
+      render: r => {
+        const f = r.failed ?? 0;
+        const cls = f > 0 ? 'text-destructive' : '';
+        return `<span class="${cls}">${esc(String(f))}</span>`;
+      },
+    },
+  ];
+
+  const rows = compliance.rules.map(r => ({
+    name: r.name || r.rule || '—',
+    enforcement: r.enforcement || 'advisory',
+    passed: r.passed ?? 0,
+    failed: r.failed ?? 0,
+  }));
+
+  const tableHtml = dataTable('compliance-table', columns, rows, { empty: 'No compliance rules' });
+  return glassCard('Compliance Rules', tableHtml, { padding: 'none', class: 'gate-compliance-card' });
+}
+
+function enforcementBadge(level) {
+  const l = String(level).toLowerCase();
+  let cls = 'badge-muted';
+  if (l === 'blocking' || l === 'required') cls = 'badge-destructive';
+  else if (l === 'warning' || l === 'advisory') cls = 'badge-warning';
+  else if (l === 'info') cls = 'badge-info';
+  return `<span class="enforcement-badge ${cls}">${esc(level)}</span>`;
 }
 
 function attachFilterListeners() {

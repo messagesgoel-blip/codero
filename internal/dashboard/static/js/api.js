@@ -143,6 +143,11 @@ export async function loadTrackingConfig() {
   store.set({ trackingConfig: data });
 }
 
+export async function loadAgents() {
+  const data = await apiFetch('/api/v1/dashboard/agents');
+  store.set({ agents: normalizeAgents(data) });
+}
+
 export async function toggleAgentTracking(agentId, disabled) {
   const data = await apiPut('tracking-config', { agent_id: agentId, disabled });
   store.set({ trackingConfig: data });
@@ -170,6 +175,8 @@ function normalizeSessions(raw) {
     startedAt: s.started_at, lastHeartbeat: s.last_heartbeat_at,
     elapsedSec: s.elapsed_sec, ownerAgent: s.owner_agent,
     lastIOAt: s.last_io_at,
+    contextPressure: s.context_pressure || 'normal',
+    compactCount: s.compact_count || 0,
   }));
 }
 
@@ -223,6 +230,20 @@ function normalizeEvents(raw) {
 
 function normalizeBlockReasons(raw) {
   return (raw.reasons || []).map(r => ({ source: r.source, count: r.count }));
+}
+
+function normalizeAgents(raw) {
+  return (raw.agents || []).map(a => ({
+    agentId: a.agent_id,
+    activeSessions: a.active_sessions ?? 0,
+    totalSessions: a.total_sessions ?? 0,
+    lastSeen: a.last_seen || null,
+    avgElapsedSec: a.avg_elapsed_sec ?? 0,
+    totalTokens: a.total_tokens ?? 0,
+    tokensPerSec: a.tokens_per_sec ?? 0,
+    activePressure: a.active_pressure || '',
+    status: a.status || 'idle',
+  }));
 }
 
 function normalizeArchives(raw) {

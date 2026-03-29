@@ -1,12 +1,17 @@
-// sessions.js — Sessions & Assignments page renderer.
-// Reads from the global store and renders session table, assignments, and compliance.
+// sessions.js — Sessions page renderer.
+// Active tab: live session table with expandable context-pressure sparkline.
+// History tab: archived runs with timing analytics strip.
 
 import store from '../store.js';
-import { loadSessions, loadAssignments, loadCompliance, loadTrackingConfig, toggleAgentTracking } from '../api.js';
+import { loadSessions, loadAssignments, loadArchives, apiFetch } from '../api.js';
 import {
   esc, html, statusChip, relativeTime, formatDuration, truncId, setHtml, $,
 } from '../utils.js';
-import { metricCard, dataTable, detailGrid, glassCard, skeleton } from '../components.js';
+import { metricCard, dataTable, detailGrid, glassCard, skeleton, sparklineChart } from '../components.js';
+
+// --- Tab + filter state ---
+let _tab = 'active';   // 'active' | 'history'
+let _filter = { repo: '', branch: '' };
 
 // --- Internal state ---
 let _initialized = false;
@@ -20,106 +25,82 @@ export function initSessions() {
 
   _unsubs.push(store.subscribe('sessions', () => renderSessions()));
   _unsubs.push(store.subscribe('assignments', () => renderSessions()));
-  _unsubs.push(store.subscribe('compliance', () => renderSessions()));
-  _unsubs.push(store.subscribe('trackingConfig', () => renderSessions()));
+  _unsubs.push(store.subscribe('archives', () => { if (_tab === 'history') renderSessions(); }));
 }
 
 export async function refreshSessions() {
-  await Promise.allSettled([
-    loadSessions(),
-    loadAssignments(),
-    loadCompliance(),
-    loadTrackingConfig(),
-  ]);
+  await Promise.allSettled([loadSessions(), loadAssignments(), loadArchives()]);
 }
 
 export function renderSessions() {
   const container = $('page-sessions');
   if (!container) return;
 
-  const sessions = store.select('sessions') || [];
-  const assignments = store.select('assignments') || [];
-  const compliance = store.select('compliance');
-
-  // Show skeleton while initial data loads
-  if (!store.select('sessions')) {
+  if (_tab === 'active' && !store.select('sessions')) {
     setHtml(container, skeleton(6));
     return;
   }
 
-  const trackingConfig = store.select('trackingConfig');
-  const parts = [];
+  const sessions = store.select('sessions') || [];
+  const assignments = store.select('assignments') || [];
+  const archives = store.select('archives') || [];
 
-  // ---- Metric strip (4 glass cards) ----
-  parts.push(_renderMetricStrip(sessions, assignments, compliance));
-
-  // ---- Sessions table (expandable) ----
-  parts.push(_renderSessionsTable(sessions, assignments));
-
-  // ---- Agent tracking toggles ----
-  parts.push(_renderTrackingPanel(sessions, trackingConfig));
-
-  // ---- Compliance rules summary ----
-  parts.push(_renderComplianceTable(compliance));
-
+  const parts = [
+    _renderTabBar(),
+    _tab === 'active'
+      ? _renderActiveTab(sessions, assignments)
+      : _renderHistoryTab(archives),
+  ];
   setHtml(container, parts.join(''));
 
-  // Bind expand-row click handlers after DOM insertion
+  _bindTabBar();
   _bindExpandToggles();
-  _bindTrackingToggles();
 }
 
-// --- Private renderers ---
+// --- Tab bar ---
 
-function _renderMetricStrip(sessions, assignments, compliance) {
-  const activeSessions = sessions.filter(
-    (s) => s.state === 'active' || s.state === 'in_progress'
-  ).length;
-  const totalAssignments = assignments.length;
-  const complianceScore = _computeComplianceScore(compliance);
-  const eventCount = _countComplianceEvents(compliance);
+function _renderTabBar() {
+  const activeBtn = `<button class="tab-btn${_tab === 'active' ? ' active' : ''}" data-tab="active">Active</button>`;
+  const historyBtn = `<button class="tab-btn${_tab === 'history' ? ' active' : ''}" data-tab="history">History</button>`;
+  const filterInput = `<input class="filter-input" id="sessions-filter" placeholder="filter repo / branch…" value="${esc(_filter.repo || _filter.branch || '')}">`;
+  return `<div class="tab-bar">${activeBtn}${historyBtn}${filterInput}</div>`;
+}
 
-  const cards = [
-    metricCard(String(activeSessions), 'Active Sessions', 'var(--accent)'),
-    metricCard(String(totalAssignments), 'Assignments', 'var(--info)'),
-    metricCard(complianceScore, 'Compliance', _complianceColor(complianceScore)),
-    metricCard(String(eventCount), 'Events', 'var(--fg-muted)'),
+function _bindTabBar() {
+  const container = $('page-sessions');
+  if (!container) return;
+  container.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      const t = e.target.dataset.tab;
+      if (t && t !== _tab) { _tab = t; renderSessions(); }
+    });
+  });
+  const filterEl = document.getElementById('sessions-filter');
+  if (filterEl) {
+    filterEl.addEventListener('input', e => {
+      const v = e.target.value.trim();
+      _filter = { repo: v, branch: v };
+      renderSessions();
+    });
+  }
+}
+
+// --- Active tab ---
+
+function _renderActiveTab(sessions, assignments) {
+  const activeSessions = sessions.filter(s => s.state === 'active').length;
+  const stalledSessions = sessions.filter(s => s.state === 'stalled').length;
+  const strip = [
+    metricCard(String(sessions.length), 'Sessions', 'var(--accent)'),
+    metricCard(String(activeSessions), 'Active', 'var(--success)'),
+    metricCard(String(stalledSessions), 'Stalled', stalledSessions > 0 ? 'var(--warning)' : 'var(--fg-muted)'),
+    metricCard(String(assignments.length), 'Assignments', 'var(--info)'),
   ];
-  return `<div class="metric-strip">${cards.join('')}</div>`;
-}
-
-function _computeComplianceScore(compliance) {
-  if (!compliance || !compliance.rules || compliance.rules.length === 0) return '—';
-  const rules = compliance.rules;
-  let totalPass = 0;
-  let totalChecks = 0;
-  for (const r of rules) {
-    totalPass += r.passed ?? 0;
-    totalChecks += (r.passed ?? 0) + (r.failed ?? 0);
-  }
-  if (totalChecks === 0) return '—';
-  return Math.round((totalPass / totalChecks) * 100) + '%';
-}
-
-function _complianceColor(score) {
-  if (score === '—') return 'var(--fg-muted)';
-  const v = parseInt(score, 10);
-  if (v >= 90) return 'var(--success)';
-  if (v >= 70) return 'var(--warning)';
-  return 'var(--destructive)';
-}
-
-function _countComplianceEvents(compliance) {
-  if (!compliance || !compliance.rules) return 0;
-  let total = 0;
-  for (const r of compliance.rules) {
-    total += (r.passed ?? 0) + (r.failed ?? 0);
-  }
-  return total;
+  const metricsHtml = `<div class="metric-strip">${strip.join('')}</div>`;
+  return metricsHtml + _renderSessionsTable(sessions, assignments);
 }
 
 function _renderSessionsTable(sessions, assignments) {
-  // Build assignment lookup by session ID for expand rows
   const assignmentsBySession = new Map();
   for (const a of assignments) {
     if (!assignmentsBySession.has(a.sessionId)) {
@@ -128,16 +109,25 @@ function _renderSessionsTable(sessions, assignments) {
     assignmentsBySession.get(a.sessionId).push(a);
   }
 
+  // Client-side filter
+  const filterVal = (_filter.repo || '').toLowerCase();
+  const filtered = filterVal
+    ? sessions.filter(s =>
+        (s.repo || '').toLowerCase().includes(filterVal) ||
+        (s.branch || '').toLowerCase().includes(filterVal) ||
+        (s.agent || s.ownerAgent || '').toLowerCase().includes(filterVal))
+    : sessions;
+
   const columns = [
     {
       key: 'agent',
       label: 'Agent',
-      render: (r) => html`${r.agent || r.ownerAgent || '—'}`,
+      render: r => html`${r.agent || r.ownerAgent || '—'}`,
     },
     {
       key: 'repo',
       label: 'Repo / Branch',
-      render: (r) => {
+      render: r => {
         const repo = esc(r.repo || '—');
         const branch = esc(r.branch || '');
         return branch ? `${repo} / <code>${branch}</code>` : repo;
@@ -146,17 +136,17 @@ function _renderSessionsTable(sessions, assignments) {
     {
       key: 'task',
       label: 'Task',
-      render: (r) => esc(r.task || '—'),
+      render: r => esc(r.task || '—'),
     },
     {
       key: 'state',
       label: 'State',
-      render: (r) => statusChip(r.state || 'unknown'),
+      render: r => statusChip(r.state || 'unknown'),
     },
     {
       key: 'lastIOAt',
       label: 'Last Output',
-      render: (r) => {
+      render: r => {
         if (!r.lastIOAt) return '<span style="color:var(--fg-muted)">—</span>';
         const age = (Date.now() - new Date(r.lastIOAt).getTime()) / 1000;
         const style = age > 90 ? 'color:var(--warning)' : 'color:var(--success)';
@@ -164,21 +154,33 @@ function _renderSessionsTable(sessions, assignments) {
       },
     },
     {
+      key: 'contextPressure',
+      label: 'Context',
+      render: r => {
+        const p = r.contextPressure || 'normal';
+        if (p === 'normal') return '<span style="color:var(--fg-muted)">—</span>';
+        const col = p === 'critical' ? 'var(--error)' : 'var(--warning)';
+        const icon = p === 'critical' ? '🔴' : '🟡';
+        const compact = r.compactCount > 0 ? ` ×${r.compactCount}` : '';
+        return `<span style="color:${col}" title="${p} context pressure${compact ? '; compacted ' + r.compactCount + ' time(s)' : ''}">${icon} ${p}${compact}</span>`;
+      },
+    },
+    {
       key: 'lastHeartbeat',
       label: 'Heartbeat',
-      render: (r) => esc(relativeTime(r.lastHeartbeat)),
+      render: r => esc(relativeTime(r.lastHeartbeat)),
     },
     {
       key: 'elapsedSec',
       label: 'Elapsed',
-      render: (r) => esc(formatDuration(r.elapsedSec)),
+      render: r => esc(formatDuration(r.elapsedSec)),
     },
   ];
 
-  // Prepare rows with expand content
-  const rows = sessions.map((s) => {
+  const rows = filtered.map(s => {
     const row = { ...s, _id: s.id };
     const sessionAssigns = assignmentsBySession.get(s.id) || [];
+    // Inject sparkline placeholder — filled in lazily on expand
     row._expandHtml = _buildExpandContent(s, sessionAssigns);
     return row;
   });
@@ -192,8 +194,12 @@ function _renderSessionsTable(sessions, assignments) {
 }
 
 function _buildExpandContent(session, assigns) {
+  const _mkPlaceholder = (uid) => `<div id="sparkline-${esc(uid)}" data-sparkline-for="${esc(session.id)}" class="sparkline-placeholder">
+    <div class="skeleton sparkline-skeleton" style="width:120px;height:30px;display:inline-block;border-radius:4px"></div>
+    <a href="/api/v1/dashboard/sessions/metrics/${esc(session.id)}" target="_blank" class="drilldown-link" style="margin-left:8px;font-size:11px;color:var(--accent)">metrics →</a>
+  </div>`;
+
   if (assigns.length === 0) {
-    // Show session-level detail only
     const items = [
       { label: 'Session ID', value: esc(truncId(session.id, 12)) },
       { label: 'Mode', value: esc(session.mode || '—') },
@@ -201,11 +207,11 @@ function _buildExpandContent(session, assigns) {
       { label: 'PR', value: session.prNumber ? esc('#' + session.prNumber) : '—' },
       { label: 'Started', value: esc(relativeTime(session.startedAt)) },
       { label: 'Last Output', value: session.lastIOAt ? esc(relativeTime(session.lastIOAt)) : '—' },
+      { label: 'Context Trend', value: _mkPlaceholder(session.id) },
     ];
     return detailGrid(items);
   }
 
-  // Render each assignment as a detail grid
   let out = '';
   for (const a of assigns) {
     const items = [
@@ -218,157 +224,195 @@ function _buildExpandContent(session, assigns) {
       { label: 'PR', value: a.prNumber ? esc('#' + a.prNumber) : '—' },
       { label: 'Started', value: esc(relativeTime(a.startedAt)) },
       { label: 'Ended', value: a.endedAt ? esc(relativeTime(a.endedAt)) : '—' },
+      { label: 'Context Trend', value: _mkPlaceholder(session.id + '-' + a.id) },
     ];
     out += detailGrid(items);
   }
   return out;
 }
 
-function _renderComplianceTable(compliance) {
-  if (!compliance || !compliance.rules || compliance.rules.length === 0) {
-    return glassCard('Compliance Rules', '<div class="empty-state">No compliance data</div>', {
-      class: 'card-compliance',
+// Lazy-load sparkline on row expand.
+// Targets all placeholders for the session via [data-sparkline-for] so
+// sessions with multiple assignment grids all get updated.
+function _loadSparkline(sessionId) {
+  const placeholders = document.querySelectorAll(`[data-sparkline-for="${sessionId}"]`);
+  if (!placeholders.length) return;
+  const unloaded = [...placeholders].filter(el => !el.dataset.loaded);
+  if (!unloaded.length) return;
+
+  const safeId = encodeURIComponent(sessionId);
+  const fallbackLink = `<a href="/api/v1/dashboard/sessions/metrics/${safeId}" target="_blank" class="drilldown-link" style="font-size:11px;color:var(--accent)">metrics \u2192</a>`;
+  apiFetch(`/api/v1/dashboard/sessions/metrics/${safeId}`).then(data => {
+    if (!Array.isArray(data?.requests)) {
+      // Malformed/empty response — leave unloaded so a future expand can retry
+      const noData = '<span style="color:var(--fg-muted);font-size:11px">no metrics yet</span> ' + fallbackLink;
+      // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method
+      for (const p of unloaded) p.innerHTML = noData;
+      return;
+    }
+    const values = data.requests.map(r => {
+      const n = Number(r.cumulative_prompt_tokens);
+      return Number.isFinite(n) ? n : 0;
     });
-  }
-
-  const columns = [
-    { key: 'name', label: 'Rule' },
-    {
-      key: 'enforcement',
-      label: 'Enforcement',
-      render: (r) => _enforcementBadge(r.enforcement),
-    },
-    {
-      key: 'passed',
-      label: 'Passed',
-      class: 'col-num',
-      render: (r) => esc(String(r.passed ?? 0)),
-    },
-    {
-      key: 'failed',
-      label: 'Failed',
-      class: 'col-num',
-      render: (r) => {
-        const f = r.failed ?? 0;
-        const cls = f > 0 ? 'text-destructive' : '';
-        return `<span class="${cls}">${esc(String(f))}</span>`;
-      },
-    },
-  ];
-
-  const rows = compliance.rules.map((r) => ({
-    name: r.name || r.rule || '—',
-    enforcement: r.enforcement || 'advisory',
-    passed: r.passed ?? 0,
-    failed: r.failed ?? 0,
-  }));
-
-  const tableHtml = dataTable('compliance-table', columns, rows, {
-    empty: 'No compliance rules',
+    const compact = (data?.compact_count ?? 0) > 0
+      ? `<span style="margin-left:6px;font-size:11px;color:var(--fg-muted)">compacted \xd7${Number(data.compact_count)}</span>`
+      : '';
+    const link = `<a href="/api/v1/dashboard/sessions/metrics/${safeId}" target="_blank" class="drilldown-link" style="margin-left:8px;font-size:11px;color:var(--accent)">metrics \u2192</a>`;
+    const chart = sparklineChart(values, { color: 'var(--accent)' });
+    const inner = chart + compact + link;
+    for (const p of unloaded) {
+      p.dataset.loaded = '1';
+      // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method
+      p.innerHTML = inner;
+    }
+  }).catch(() => {
+    // Network/parse error — leave unloaded so a future expand can retry
+    const noData = '<span style="color:var(--fg-muted);font-size:11px">no metrics yet</span> ' + fallbackLink;
+    // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method
+    for (const p of unloaded) p.innerHTML = noData;
   });
-
-  return glassCard('Compliance Rules', tableHtml, { padding: 'none', class: 'card-compliance' });
-}
-
-function _enforcementBadge(level) {
-  const l = String(level).toLowerCase();
-  let cls = 'badge-muted';
-  if (l === 'blocking' || l === 'required') cls = 'badge-destructive';
-  else if (l === 'warning' || l === 'advisory') cls = 'badge-warning';
-  else if (l === 'info') cls = 'badge-info';
-  return `<span class="enforcement-badge ${cls}">${esc(level)}</span>`;
 }
 
 // --- Expand-row toggle binding ---
 
 function _bindExpandToggles() {
-  const table = $('sessions-table');
-  if (!table) return;
+  for (const tableId of ['sessions-table', 'history-table']) {
+    const table = $(tableId);
+    if (!table) continue;
 
-  // Remove any prior listener by re-cloning the tbody
-  // (not needed on fresh renders since we replace innerHTML, but safe)
-  table.addEventListener('click', (e) => {
-    const tr = e.target.closest('tr.expandable');
-    if (!tr) return;
-    const rowId = tr.dataset.rowId;
-    if (!rowId) return;
+    table.addEventListener('click', (e) => {
+      const tr = e.target.closest('tr.expandable');
+      if (!tr) return;
+      const rowId = tr.dataset.rowId;
+      if (!rowId) return;
 
-    const expandRow = table.querySelector(`tr.expand-row[data-expand-for="${rowId}"]`);
-    if (!expandRow) return;
+      const expandRow = table.querySelector(`tr.expand-row[data-expand-for="${rowId}"]`);
+      if (!expandRow) return;
 
-    const isHidden = expandRow.classList.contains('hidden');
-    expandRow.classList.toggle('hidden', !isHidden);
+      const isHidden = expandRow.classList.contains('hidden');
+      expandRow.classList.toggle('hidden', !isHidden);
 
-    // Rotate chevron
-    const chevron = tr.querySelector('.chevron');
-    if (chevron) {
-      chevron.classList.toggle('chevron-open', isHidden);
-    }
+      const chevron = tr.querySelector('.chevron');
+      if (chevron) chevron.classList.toggle('chevron-open', isHidden);
 
-    // Track in store UI state
-    const expanded = store.select('ui').expandedRows;
-    if (isHidden) {
-      expanded.add(rowId);
-    } else {
-      expanded.delete(rowId);
-    }
-  });
-}
-
-function _renderTrackingPanel(sessions, trackingConfig) {
-  const configAgents = (trackingConfig && trackingConfig.agents) || [];
-  const activeAgents = new Set(sessions.map(s => s.agent).filter(Boolean));
-
-  if (configAgents.length === 0 && activeAgents.size === 0) {
-    return '';
-  }
-
-  // Supplement config list with active agents not yet discovered as shims.
-  const configIds = new Set(configAgents.map(a => a.agent_id));
-  const extraAgents = [...activeAgents]
-    .filter(id => !configIds.has(id))
-    .map(id => ({ agent_id: id, shim_name: id, real_binary: '', installed: true, disabled: false }));
-  const agentList = [...configAgents, ...extraAgents];
-
-  const rows = agentList.map(a => {
-    const isActive = activeAgents.has(a.agent_id);
-    const activeDot = isActive
-      ? '<span style="color:var(--success);margin-right:4px" title="Currently active">&#9679;</span>'
-      : '';
-    const installedBadge = a.installed
-      ? ''
-      : '<span style="color:var(--destructive);font-size:10px;margin-left:4px" title="Binary not found">&#x2717; missing</span>';
-    const alias = a.shim_name !== a.agent_id
-      ? `<span style="color:var(--fg-muted);font-size:11px;margin-left:4px">(${esc(a.shim_name)})</span>`
-      : '';
-    return `<label class="tracking-toggle" style="display:flex;align-items:center;gap:6px;padding:5px 10px;margin:2px 0;border-radius:6px;background:var(--glass-bg);cursor:pointer;min-width:280px">
-      <input type="checkbox" data-agent="${esc(a.agent_id)}" ${a.disabled ? '' : 'checked'} style="cursor:pointer;flex-shrink:0">
-      ${activeDot}<span style="font-weight:500;min-width:70px">${esc(a.agent_id)}</span>${alias}${installedBadge}
-    </label>`;
-  }).join('');
-
-  return `<div class="glass-card" style="margin-top:16px;padding:16px">
-    <h3 style="margin:0 0 8px;font-size:14px;color:var(--fg-muted)">Agent Tracking</h3>
-    <div style="display:flex;flex-wrap:wrap;gap:2px">${rows}</div>
-    <p style="margin:8px 0 0;font-size:11px;color:var(--fg-muted)">Uncheck to disable tracking on next launch. &#9679; = active now. New shims in ~/.codero/bin/ auto-appear.</p>
-  </div>`;
-}
-
-function _bindTrackingToggles() {
-  const toggles = document.querySelectorAll('.tracking-toggle input[type="checkbox"]');
-  for (const el of toggles) {
-    el.addEventListener('change', async (e) => {
-      const agent = e.target.dataset.agent;
-      const disabled = !e.target.checked;
-      const prevChecked = !e.target.checked; // previous state before user clicked
-      e.target.disabled = true;
-      try {
-        await toggleAgentTracking(agent, disabled);
-      } catch (err) {
-        e.target.checked = prevChecked;
-      } finally {
-        e.target.disabled = false;
+      const expanded = store.select('ui').expandedRows;
+      if (isHidden) {
+        expanded.add(rowId);
+        // Lazy-load sparkline when row is opened (no-op for history rows)
+        _loadSparkline(rowId);
+      } else {
+        expanded.delete(rowId);
       }
     });
   }
+}
+
+// --- History tab ---
+
+function _renderHistoryTab(archives) {
+  const filterVal = (_filter.repo || '').toLowerCase();
+  const filtered = filterVal
+    ? archives.filter(a =>
+        (a.repo || '').toLowerCase().includes(filterVal) ||
+        (a.branch || '').toLowerCase().includes(filterVal) ||
+        (a.agent || '').toLowerCase().includes(filterVal))
+    : archives;
+
+  return _renderTimingAnalytics(filtered) + _renderHistoryTable(filtered);
+}
+
+function _renderTimingAnalytics(archives) {
+  const completed = archives.filter(a => a.durationSec != null && a.durationSec >= 0);
+  const totalRuns = archives.length;
+  const avgDuration = completed.length > 0
+    ? completed.reduce((sum, a) => sum + a.durationSec, 0) / completed.length
+    : -1;
+  const successCount = archives.filter(a => ['success', 'merged', 'completed'].includes((a.result || '').toLowerCase())).length;
+  const passRate = totalRuns > 0 ? Math.round((successCount / totalRuns) * 100) : -1;
+  // Throughput: sessions per day over the window spanned by the archives
+  let throughput = 0;
+  if (archives.length > 1) {
+    const times = archives.map(a => a.startedAt ? new Date(a.startedAt).getTime() : 0).filter(Boolean);
+    if (times.length > 1) {
+      let minTime = times[0], maxTime = times[0];
+      for (const t of times) { if (t < minTime) minTime = t; if (t > maxTime) maxTime = t; }
+      const spanDays = (maxTime - minTime) / (1000 * 60 * 60 * 24);
+      if (spanDays > 0) throughput = +(archives.length / spanDays).toFixed(1);
+    }
+  }
+
+  const strip = [
+    metricCard(totalRuns, 'Total Runs', 'var(--fg-muted)'),
+    metricCard(formatDuration(avgDuration), 'Avg Duration', 'var(--stage-gating)'),
+    metricCard(passRate >= 0 ? passRate + '%' : '—', 'Pass Rate', passRate >= 80 ? 'var(--success)' : passRate >= 50 ? 'var(--warning)' : 'var(--destructive)'),
+    metricCard(throughput > 0 ? throughput + '/day' : '—', 'Throughput', 'var(--info)'),
+  ].join('');
+
+  return `<div class="metric-strip">${strip}</div>`;
+}
+
+function _renderHistoryTable(archives) {
+  const columns = [
+    { key: 'agent', label: 'Agent' },
+    {
+      key: 'repo',
+      label: 'Repo / Branch',
+      render: r => `${esc(r.repo || '—')} / <code>${esc(r.branch || '—')}</code>`,
+    },
+    {
+      key: 'result',
+      label: 'Result',
+      render: r => _resultChip(r.result),
+    },
+    {
+      key: 'durationSec',
+      label: 'Duration',
+      render: r => formatDuration(r.durationSec),
+    },
+    {
+      key: 'endedAt',
+      label: 'Ended',
+      render: r => r.endedAt ? esc(relativeTime(r.endedAt)) : '<span style="color:var(--fg-muted)">—</span>',
+    },
+    {
+      key: 'commitCount',
+      label: 'Commits',
+      class: 'col-num',
+      render: r => esc(String(r.commitCount ?? 0)),
+    },
+  ];
+
+  const rows = archives.map(a => ({
+    ...a,
+    _id: a.id || a.sessionId,
+    _expandHtml: _buildHistoryExpandContent(a),
+  }));
+
+  const tableHtml = dataTable('history-table', columns, rows, {
+    expandable: true,
+    empty: 'No archived runs',
+  });
+
+  return glassCard('Run History', tableHtml, { padding: 'none', class: 'card-history' });
+}
+
+function _buildHistoryExpandContent(archive) {
+  const items = [
+    { label: 'Session ID', value: archive.sessionId ? `<code>${esc(truncId(archive.sessionId, 16))}</code>` : '—' },
+    { label: 'Task', value: esc(archive.taskId || '—') },
+    { label: 'Task Source', value: esc(archive.taskSource || '—') },
+    { label: 'Started', value: archive.startedAt ? esc(new Date(archive.startedAt).toLocaleString()) : '—' },
+    { label: 'Ended', value: archive.endedAt ? esc(new Date(archive.endedAt).toLocaleString()) : '—' },
+    { label: 'Merge SHA', value: archive.mergeSha ? `<code>${esc(truncId(archive.mergeSha, 10))}</code>` : '—' },
+  ];
+  return detailGrid(items);
+}
+
+function _resultChip(result) {
+  if (!result) return statusChip('unknown');
+  const r = String(result).toLowerCase();
+  if (['success', 'merged', 'completed'].includes(r)) return statusChip('success');
+  if (['failure', 'failed', 'error'].includes(r)) return statusChip('fail');
+  if (['cancelled', 'abandoned', 'timeout'].includes(r)) return statusChip('cancelled');
+  return statusChip(result);
 }

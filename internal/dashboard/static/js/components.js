@@ -178,6 +178,36 @@ export function fileDropZone(id) {
   </div>`;
 }
 
+// --- Sparkline (SVG polyline, no axes) ---
+export function sparklineChart(values, opts = {}) {
+  const w = opts.width || 120;
+  const h = opts.height || 30;
+  const color = opts.color || 'var(--accent)';
+  if (!values || values.length < 2) {
+    // Flat line when no data
+    return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" class="sparkline"><line x1="0" y1="${h / 2}" x2="${w}" y2="${h / 2}" stroke="${color}" stroke-width="1.5" opacity="0.4"/></svg>`;
+  }
+  let min = Infinity;
+  let max = -Infinity;
+  for (const n of values) {
+    const v = Number(n);
+    if (!Number.isFinite(v)) continue;
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
+  if (min === Infinity) {
+    return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" class="sparkline"><line x1="0" y1="${h / 2}" x2="${w}" y2="${h / 2}" stroke="${color}" stroke-width="1.5" opacity="0.4"/></svg>`;
+  }
+  const range = max - min || 1;
+  const pad = 2;
+  const points = values.map((v, i) => {
+    const x = pad + (i / (values.length - 1)) * (w - pad * 2);
+    const y = (h - pad) - ((v - min) / range) * (h - pad * 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" class="sparkline"><polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+}
+
 // --- Horizontal Bar ---
 export function barChart(items, maxVal) {
   if (!items || items.length === 0) return '<div class="empty-state">No data</div>';

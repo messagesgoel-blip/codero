@@ -1895,3 +1895,211 @@ func scanAgentAssignmentContextRows(rows *sql.Rows) (*agentAssignmentContext, er
 	}
 	return &contextRow, nil
 }
+
+// ─── Session token metrics ────────────────────────────────────────────────────
+
+// ContextPressureLevel is the severity of context window saturation.
+type ContextPressureLevel string
+
+const (
+	ContextPressureNormal   ContextPressureLevel = "normal"
+	ContextPressureWarning  ContextPressureLevel = "warning"
+	ContextPressureCritical ContextPressureLevel = "critical"
+)
+
+// TokenMetricRow is one row from session_token_metrics.
+type TokenMetricRow struct {
+	ID                         int64
+	SessionID                  string
+	LiteLLMRequestID           *string
+	Model                      string
+	PromptTokens               int64
+	CompletionTokens           int64
+	CumulativePromptTokens     int64
+	CumulativeCompletionTokens int64
+	RequestTime                time.Time
+	SyncedAt                   time.Time
+}
+
+// UpsertTokenMetric inserts a new token metric row. If litellm_request_id
+// conflicts (already synced) the row is silently ignored.
+func UpsertTokenMetric(ctx context.Context, db *DB, row TokenMetricRow) error {
+	var litellmID interface{}
+	if row.LiteLLMRequestID != nil {
+		litellmID = *row.LiteLLMRequestID
+	}
+	_, err := db.sql.ExecContext(ctx, `
+		INSERT OR IGNORE INTO session_token_metrics
+			(session_id, litellm_request_id, model, prompt_tokens, completion_tokens,
+			 cumulative_prompt_tokens, cumulative_completion_tokens, request_time, synced_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		row.SessionID, litellmID, row.Model,
+		row.PromptTokens, row.CompletionTokens,
+		row.CumulativePromptTokens, row.CumulativeCompletionTokens,
+		row.RequestTime.UTC().Format(time.RFC3339),
+		time.Now().UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		return fmt.Errorf("upsert token metric: %w", err)
+	}
+	return nil
+}
+
+// GetTokenMetrics returns all token metric rows for a session ordered by
+// request_time ascending.
+func GetTokenMetrics(ctx context.Context, db *DB, sessionID string) ([]TokenMetricRow, error) {
+	rows, err := db.sql.QueryContext(ctx, `
+		SELECT id, session_id, litellm_request_id, model, prompt_tokens, completion_tokens,
+		       cumulative_prompt_tokens, cumulative_completion_tokens, request_time, synced_at
+		FROM session_token_metrics
+		WHERE session_id = ?
+		ORDER BY request_time ASC`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("get token metrics: %w", err)
+	}
+	defer rows.Close()
+	var out []TokenMetricRow
+	for rows.Next() {
+		var r TokenMetricRow
+		var requestTimeStr, syncedAtStr string
+		var litellmID sql.NullString
+		if err2 := rows.Scan(
+			&r.ID, &r.SessionID, &litellmID, &r.Model,
+			&r.PromptTokens, &r.CompletionTokens,
+			&r.CumulativePromptTokens, &r.CumulativeCompletionTokens,
+			&requestTimeStr, &syncedAtStr,
+		); err2 != nil {
+			return nil, fmt.Errorf("get token metrics: scan: %w", err2)
+		}
+		if litellmID.Valid {
+			r.LiteLLMRequestID = &litellmID.String
+		}
+		if t, err2 := time.Parse(time.RFC3339, requestTimeStr); err2 == nil {
+			r.RequestTime = t
+		}
+		if t, err2 := time.Parse(time.RFC3339, syncedAtStr); err2 == nil {
+			r.SyncedAt = t
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("get token metrics: rows iteration: %w", err)
+	}
+	return out, nil
+}
+
+// GetLatestSyncedRequestTime returns the most recent request_time in
+// session_token_metrics, used by the LiteLLM syncer as an import cursor.
+func GetLatestSyncedRequestTime(ctx context.Context, db *DB) (time.Time, error) {
+	var s sql.NullString
+	if err := db.sql.QueryRowContext(ctx,
+		`SELECT MAX(request_time) FROM session_token_metrics`).Scan(&s); err != nil || !s.Valid {
+		return time.Time{}, err
+	}
+	t, err := time.Parse(time.RFC3339, s.String)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse latest request time: %w", err)
+	}
+	return t, nil
+}
+
+// SetContextPressure updates context_pressure on a session.
+func SetContextPressure(ctx context.Context, db *DB, sessionID string, level ContextPressureLevel) error {
+	_, err := db.sql.ExecContext(ctx,
+		`UPDATE agent_sessions SET context_pressure = ? WHERE session_id = ?`,
+		string(level), sessionID)
+	if err != nil {
+		return fmt.Errorf("set context pressure: %w", err)
+	}
+	return nil
+}
+
+// RecordCompact increments compact_count and sets last_compact_at for a session.
+func RecordCompact(ctx context.Context, db *DB, sessionID string) error {
+	_, err := db.sql.ExecContext(ctx,
+		`UPDATE agent_sessions
+		 SET compact_count = compact_count + 1,
+		     last_compact_at = ?
+		 WHERE session_id = ?`,
+		time.Now().UTC().Format(time.RFC3339), sessionID)
+	if err != nil {
+		return fmt.Errorf("record compact: %w", err)
+	}
+	return nil
+}
+
+// TokenMetricSummary is an aggregate view of token usage for a session.
+type TokenMetricSummary struct {
+	SessionID                  string
+	TotalRequests              int
+	TotalPromptTokens          int64
+	TotalCompletionTokens      int64
+	PeakCumulativePromptTokens int64
+	AvgPromptPerRequest        float64
+	Models                     []string // distinct, ordered by first use
+	ContextPressure            string
+	LastCompactAt              *time.Time
+	CompactCount               int
+}
+
+// GetTokenMetricSummary returns aggregate token stats for a session.
+func GetTokenMetricSummary(ctx context.Context, db *DB, sessionID string) (*TokenMetricSummary, error) {
+	rows, err := db.sql.QueryContext(ctx, `
+		SELECT model, prompt_tokens, completion_tokens, cumulative_prompt_tokens
+		FROM session_token_metrics
+		WHERE session_id = ?
+		ORDER BY request_time ASC`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("get token metric summary: %w", err)
+	}
+	defer rows.Close()
+
+	s := &TokenMetricSummary{SessionID: sessionID}
+	seenModels := map[string]bool{}
+	for rows.Next() {
+		var model string
+		var prompt, completion, cumPrompt int64
+		if err2 := rows.Scan(&model, &prompt, &completion, &cumPrompt); err2 != nil {
+			return nil, fmt.Errorf("get token metric summary: scan: %w", err2)
+		}
+		s.TotalRequests++
+		s.TotalPromptTokens += prompt
+		s.TotalCompletionTokens += completion
+		if cumPrompt > s.PeakCumulativePromptTokens {
+			s.PeakCumulativePromptTokens = cumPrompt
+		}
+		if !seenModels[model] {
+			seenModels[model] = true
+			s.Models = append(s.Models, model)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("get token metric summary: rows iteration: %w", err)
+	}
+	if s.TotalRequests > 0 {
+		s.AvgPromptPerRequest = float64(s.TotalPromptTokens) / float64(s.TotalRequests)
+	}
+
+	// Join session row for pressure/compact fields.
+	var pressure sql.NullString
+	var lastCompact sql.NullString
+	var compactCount int
+	err = db.sql.QueryRowContext(ctx,
+		`SELECT context_pressure, last_compact_at, compact_count FROM agent_sessions WHERE session_id = ?`,
+		sessionID).Scan(&pressure, &lastCompact, &compactCount)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("get token metric summary: session row: %w", err)
+	}
+	if pressure.Valid {
+		s.ContextPressure = pressure.String
+	} else {
+		s.ContextPressure = string(ContextPressureNormal)
+	}
+	s.CompactCount = compactCount
+	if lastCompact.Valid {
+		if t, err2 := time.Parse(time.RFC3339, lastCompact.String); err2 == nil {
+			s.LastCompactAt = &t
+		}
+	}
+	return s, nil
+}

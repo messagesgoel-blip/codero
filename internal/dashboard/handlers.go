@@ -104,6 +104,12 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 	// §2.8 / RV-1: session archives endpoint for TUI/dashboard parity
 	mux.HandleFunc("/api/v1/dashboard/archives", h.handleArchives)
+
+	// Session token metrics (context pressure / observability)
+	mux.HandleFunc("/api/v1/dashboard/sessions/metrics/", h.handleSessionMetrics)
+
+	// Agent fleet roster
+	mux.HandleFunc("/api/v1/dashboard/agents", h.handleAgents)
 }
 
 // handleOverview serves GET /api/v1/dashboard/overview.

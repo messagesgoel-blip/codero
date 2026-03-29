@@ -92,6 +92,8 @@ type ActiveSession struct {
 	ProgressAt      *time.Time  `json:"progress_at,omitempty"`
 	LastIOAt        *time.Time  `json:"last_io_at,omitempty"`
 	ElapsedSec      int64       `json:"elapsed_sec"`
+	ContextPressure string      `json:"context_pressure,omitempty"` // normal|warning|critical
+	CompactCount    int         `json:"compact_count,omitempty"`
 }
 
 // ActiveSessionsResponse is the response for GET /api/v1/dashboard/active-sessions.
