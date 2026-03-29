@@ -271,3 +271,8 @@ function normalizeArchives(raw) {
 export function sessionAction(assignmentId, action) {
   return apiPost(`assignments/${encodeURIComponent(assignmentId)}/${encodeURIComponent(action)}`, {});
 }
+
+export async function loadScorecard() {
+  const data = await apiFetch('scorecard');
+  store.set({ scorecard: data });
+}

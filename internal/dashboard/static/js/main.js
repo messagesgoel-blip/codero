@@ -14,6 +14,7 @@ import { initChat, renderChat, refreshChat, renderFloatingChat } from './rendere
 import { initAgents, renderAgents, refreshAgents } from './renderers/agents.js';
 import { initSettings, renderSettings, refreshSettings } from './renderers/settings.js';
 import { initRepos, renderRepos, refreshRepos } from './renderers/repos.js';
+import { initScorecard, renderScorecard, refreshScorecard } from './renderers/scorecard.js';
 
 // --- Register all routes ---
 registerRoute('overview', { init: initOverview, render: renderOverview, refresh: refreshOverview });
@@ -25,6 +26,7 @@ registerRoute('gate', { init: initGate, render: renderGate, refresh: refreshGate
 registerRoute('chat', { init: initChat, render: renderChat, refresh: refreshChat });
 registerRoute('agents', { init: initAgents, render: renderAgents, refresh: refreshAgents });
 registerRoute('settings', { init: initSettings, render: renderSettings, refresh: refreshSettings });
+registerRoute('scorecard', { init: initScorecard, render: renderScorecard, refresh: refreshScorecard });
 
 // --- Theme ---
 function applyTheme(theme) {
@@ -52,7 +54,7 @@ applyTheme(store.state.ui.theme);
 const titleMap = {
   overview: 'Overview', sessions: 'Sessions', agents: 'Agents', pipeline: 'Delivery Pipeline',
   tasks: 'Tasks', repos: 'Node Repositories', gate: 'Gate Checks', chat: 'Chat Assistant',
-  archives: 'Archives & Timing', settings: 'Settings',
+  archives: 'Archives & Timing', settings: 'Settings', scorecard: 'Scorecard',
 };
 store.subscribe('ui', (ui) => {
   setText('header-title', titleMap[ui.activeTab] || 'Codero');

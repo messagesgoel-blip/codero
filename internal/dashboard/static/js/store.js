@@ -20,6 +20,7 @@ const store = {
     agents: null,
     nodeRepos: null,
     trackingConfig: null,
+    scorecard: null,
     blockReasons: [],
     gateHealth: [],
     chat: { messages: [], conversationId: null, streaming: false },
