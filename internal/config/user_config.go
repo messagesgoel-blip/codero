@@ -28,7 +28,7 @@ var shimRe = regexp.MustCompile(`--agent-id\s+(\S+)\s+--\s+"?([^"$]+)"?`)
 func DiscoverAgents(uc *UserConfig) ([]AgentInfo, error) {
 	dir, err := UserConfigDir()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("discover agents: %w", err)
 	}
 	binDir := filepath.Join(dir, "bin")
 	entries, err := os.ReadDir(binDir)
@@ -50,12 +50,16 @@ func DiscoverAgents(uc *UserConfig) ([]AgentInfo, error) {
 			continue
 		}
 		_, statErr := os.Stat(realBin)
+		var disabled bool
+		if uc != nil {
+			disabled = uc.IsTrackingDisabled(agentID)
+		}
 		agents = append(agents, AgentInfo{
 			AgentID:    agentID,
 			ShimName:   e.Name(),
 			RealBinary: realBin,
 			Installed:  statErr == nil,
-			Disabled:   uc.IsTrackingDisabled(agentID),
+			Disabled:   disabled,
 		})
 	}
 	return agents, nil

@@ -798,6 +798,7 @@ func (h *Handler) handleTrackingConfig(w http.ResponseWriter, r *http.Request) {
 			"generated_at":    time.Now().UTC(),
 		})
 	case http.MethodPut:
+		defer r.Body.Close()
 		body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "read body: "+err.Error(), "bad_request")

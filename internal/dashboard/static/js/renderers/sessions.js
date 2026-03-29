@@ -305,12 +305,19 @@ function _bindExpandToggles() {
 }
 
 function _renderTrackingPanel(sessions, trackingConfig) {
-  const agentList = (trackingConfig && trackingConfig.agents) || [];
-  const activeAgents = new Set(sessions.map(s => s.agent));
+  const configAgents = (trackingConfig && trackingConfig.agents) || [];
+  const activeAgents = new Set(sessions.map(s => s.agent).filter(Boolean));
 
-  if (agentList.length === 0 && activeAgents.size === 0) {
+  if (configAgents.length === 0 && activeAgents.size === 0) {
     return '';
   }
+
+  // Supplement config list with active agents not yet discovered as shims.
+  const configIds = new Set(configAgents.map(a => a.agent_id));
+  const extraAgents = [...activeAgents]
+    .filter(id => !configIds.has(id))
+    .map(id => ({ agent_id: id, shim_name: id, real_binary: '', installed: true, disabled: false }));
+  const agentList = [...configAgents, ...extraAgents];
 
   const rows = agentList.map(a => {
     const isActive = activeAgents.has(a.agent_id);
@@ -342,9 +349,12 @@ function _bindTrackingToggles() {
     el.addEventListener('change', async (e) => {
       const agent = e.target.dataset.agent;
       const disabled = !e.target.checked;
+      const prevChecked = !disabled;
       e.target.disabled = true;
       try {
         await toggleAgentTracking(agent, disabled);
+      } catch (err) {
+        e.target.checked = prevChecked;
       } finally {
         e.target.disabled = false;
       }
