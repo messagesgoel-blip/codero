@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -66,10 +67,11 @@ func (t *activityTracker) hasRecentActivity(window time.Duration) bool {
 // ANSI escape sequences are stripped before writing to the tail file so that
 // `codero tail` produces readable plain text.
 type activityWriter struct {
-	inner   io.Writer
-	tracker *activityTracker
-	tail    *os.File
-	written int64
+	inner     io.Writer
+	tracker   *activityTracker
+	tail      *os.File
+	written   int64
+	ansiCarry []byte // partial escape fragment carried over from previous Write
 }
 
 const tailMaxBytes = 4 * 1024 * 1024 // 4 MB cap per session tail file
@@ -90,10 +92,31 @@ func stripANSI(b []byte) []byte {
 	return ansiStripper.ReplaceAll(b, nil)
 }
 
+// splitTrailingANSIFragment splits b into a stable prefix safe to strip and a
+// carry suffix that may be an incomplete ANSI escape started near the end. The
+// carry is prepended to the next Write call so split sequences are stripped
+// correctly instead of leaking raw bytes into the tail file.
+func splitTrailingANSIFragment(b []byte) (stable, carry []byte) {
+	i := bytes.LastIndexByte(b, 0x1b)
+	if i < 0 {
+		return b, nil
+	}
+	tail := b[i:]
+	// If the trailing ESC and whatever follows is already a complete token,
+	// there is nothing to defer.
+	if ansiStripper.Match(tail) {
+		return b, nil
+	}
+	return b[:i], append([]byte(nil), tail...)
+}
+
 func (w *activityWriter) Write(p []byte) (int, error) {
 	w.tracker.touch()
 	if w.tail != nil && w.written < tailMaxBytes {
-		plain := stripANSI(p)
+		joined := append(append([]byte(nil), w.ansiCarry...), p...)
+		stable, carry := splitTrailingANSIFragment(joined)
+		w.ansiCarry = carry
+		plain := stripANSI(stable)
 		remaining := tailMaxBytes - w.written
 		chunk := plain
 		if int64(len(chunk)) > remaining {
