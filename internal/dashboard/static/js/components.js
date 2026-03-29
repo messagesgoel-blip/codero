@@ -140,9 +140,10 @@ export function toast(message, type = 'info') {
 
 // --- Skeleton ---
 export function skeleton(lines = 3) {
+  const widths = [85, 65, 45, 75, 55, 90, 50, 70, 60, 80];
   let out = '<div class="skeleton-container">';
   for (let i = 0; i < lines; i++) {
-    const w = 40 + Math.random() * 50;
+    const w = widths[i % widths.length];
     out += `<div class="skeleton-line" style="width:${w}%"></div>`;
   }
   return out + '</div>';

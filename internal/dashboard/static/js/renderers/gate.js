@@ -26,6 +26,23 @@ export function initGate() {
   store.subscribe('blockReasons', () => renderGate());
   store.subscribe('gateConfig', () => renderGate());
   store.subscribe('compliance', () => renderGate());
+
+  // Event delegation for gate config toggles — survives re-renders
+  const container = $('page-gate');
+  if (container) {
+    container.addEventListener('change', async (e) => {
+      if (!e.target.matches('.gate-toggles-card .toggle-input')) return;
+      const varName = e.target.id.replace('gate-toggle-', '');
+      const newValue = e.target.checked;
+      try {
+        await apiPut('settings/gate-config/' + encodeURIComponent(varName), { value: newValue });
+        await loadGateConfig();
+      } catch (err) {
+        e.target.checked = !newValue;
+        toast('Failed to update gate config: ' + err.message, 'error');
+      }
+    });
+  }
 }
 
 export async function refreshGate() {
@@ -69,7 +86,6 @@ export function renderGate() {
     complianceHtml
   );
 
-  attachToggleListeners(gateConfig);
   attachFilterListeners();
 }
 
@@ -143,29 +159,6 @@ function buildToggleControls(gateChecks, gateConfig) {
   }
   html += '</div>';
   return html;
-}
-
-function attachToggleListeners(gateConfig) {
-  const toggles = document.querySelectorAll('.gate-toggles-card .toggle-input');
-  for (const toggle of toggles) {
-    // Remove any previous listener by cloning
-    const fresh = toggle.cloneNode(true);
-    toggle.parentNode.replaceChild(fresh, toggle);
-
-    fresh.addEventListener('change', async (e) => {
-      const id = e.target.id; // gate-toggle-{varName}
-      const varName = id.replace('gate-toggle-', '');
-      const newValue = e.target.checked;
-      try {
-        await apiPut('settings/gate-config/' + encodeURIComponent(varName), { value: newValue });
-        await loadGateConfig();
-      } catch (err) {
-        // Revert on failure
-        e.target.checked = !newValue;
-        toast('Failed to update gate config: ' + err.message, 'error');
-      }
-    });
-  }
 }
 
 // ---- block reasons chart ------------------------------------------------

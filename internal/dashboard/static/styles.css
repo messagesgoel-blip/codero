@@ -513,3 +513,8 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.85em; }
   text-align: center;
 }
 .sse-disconnected { color: var(--warning) !important; font-weight: 600; }
+
+/* ========== PRESSURE DOTS ========== */
+.pressure-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+.pressure-dot.critical { background: var(--destructive); }
+.pressure-dot.warning { background: var(--warning); }
