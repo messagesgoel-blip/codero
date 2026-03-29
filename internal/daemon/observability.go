@@ -47,25 +47,26 @@ type ObservabilityServer struct {
 	version     string                 // Binary version string set via ldflags
 	ready       atomic.Bool            // Set true after full daemon bootstrap completes
 	grpcServer  *ggrpc.Server          // Optional gRPC server for daemon contract surface
+	cfg         *configpkg.Config      // Full daemon configuration
 }
 
 // NewObservabilityServer creates a new observability server.
 // host is the bind address (empty string → all interfaces); port is the TCP port string.
 // dashboardBasePath is the URL prefix for the dashboard SPA (default "/dashboard").
-func NewObservabilityServer(redisClient *redis.Client, queue *scheduler.Queue, slotCounter *scheduler.SlotCounter, db *sql.DB, host, port, dashboardBasePath, version string) *ObservabilityServer {
-	return NewObservabilityServerWithAddr(redisClient, queue, slotCounter, db, net.JoinHostPort(host, port), 0, 0, dashboardBasePath, version)
+func NewObservabilityServer(redisClient *redis.Client, queue *scheduler.Queue, slotCounter *scheduler.SlotCounter, db *sql.DB, host, port, dashboardBasePath, version string, cfg *configpkg.Config) *ObservabilityServer {
+	return NewObservabilityServerWithAddr(redisClient, queue, slotCounter, db, net.JoinHostPort(host, port), 0, 0, dashboardBasePath, version, cfg)
 }
 
 // NewObservabilityServerWithAddr creates a new observability server using a full
 // bind address plus server-level read/write timeouts.
-func NewObservabilityServerWithAddr(redisClient *redis.Client, queue *scheduler.Queue, slotCounter *scheduler.SlotCounter, db *sql.DB, addr string, readTimeout, writeTimeout time.Duration, dashboardBasePath, version string) *ObservabilityServer {
-	return NewObservabilityServerWithGRPC(redisClient, queue, slotCounter, db, addr, readTimeout, writeTimeout, dashboardBasePath, version, nil)
+func NewObservabilityServerWithAddr(redisClient *redis.Client, queue *scheduler.Queue, slotCounter *scheduler.SlotCounter, db *sql.DB, addr string, readTimeout, writeTimeout time.Duration, dashboardBasePath, version string, cfg *configpkg.Config) *ObservabilityServer {
+	return NewObservabilityServerWithGRPC(redisClient, queue, slotCounter, db, addr, readTimeout, writeTimeout, dashboardBasePath, version, nil, cfg)
 }
 
 // NewObservabilityServerWithGRPC creates a new observability server with optional
 // gRPC multiplexing. When grpcServer is non-nil, gRPC and HTTP share the same port
 // via h2c (HTTP/2 cleartext) per Daemon Spec v2 §7: "gRPC + REST on CODERO_API_ADDR".
-func NewObservabilityServerWithGRPC(redisClient *redis.Client, queue *scheduler.Queue, slotCounter *scheduler.SlotCounter, db *sql.DB, addr string, readTimeout, writeTimeout time.Duration, dashboardBasePath, version string, grpcServer *ggrpc.Server) *ObservabilityServer {
+func NewObservabilityServerWithGRPC(redisClient *redis.Client, queue *scheduler.Queue, slotCounter *scheduler.SlotCounter, db *sql.DB, addr string, readTimeout, writeTimeout time.Duration, dashboardBasePath, version string, grpcServer *ggrpc.Server, cfg *configpkg.Config) *ObservabilityServer {
 	if dashboardBasePath == "" {
 		dashboardBasePath = "/dashboard"
 	}
@@ -132,6 +133,7 @@ func NewObservabilityServerWithGRPC(redisClient *redis.Client, queue *scheduler.
 		repoPath:    repoPath,
 		version:     version,
 		grpcServer:  grpcServer,
+		cfg:         cfg,
 	}
 
 	// Register observability routes
@@ -148,7 +150,7 @@ func NewObservabilityServerWithGRPC(redisClient *redis.Client, queue *scheduler.
 	if settingsDir == "." || settingsDir == "" {
 		settingsDir = os.TempDir()
 	}
-	dashHandler := dashboard.NewHandler(db, dashboard.NewSettingsStore(settingsDir))
+	dashHandler := dashboard.NewHandler(db, dashboard.NewSettingsStore(settingsDir), cfg)
 	dashHandler.RegisterRoutes(mux)
 
 	// Serve dashboard static files under dashboardBasePath + "/".

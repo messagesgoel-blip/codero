@@ -14,12 +14,14 @@ import { initChat, renderChat, refreshChat, renderFloatingChat } from './rendere
 import { initArchives, renderArchives, refreshArchives } from './renderers/archives.js';
 import { initAgents, renderAgents, refreshAgents } from './renderers/agents.js';
 import { initSettings, renderSettings, refreshSettings } from './renderers/settings.js';
+import renderRepos from './renderers/repos.js';
 
 // --- Register all routes ---
 registerRoute('overview', { init: initOverview, render: renderOverview, refresh: refreshOverview });
 registerRoute('sessions', { init: initSessions, render: renderSessions, refresh: refreshSessions });
 registerRoute('pipeline', { init: initPipeline, render: renderPipeline, refresh: refreshPipeline });
 registerRoute('tasks', { init: initTasks, render: renderTasks, refresh: refreshTasks });
+registerRoute('repos', { init: () => {}, render: renderRepos, refresh: renderRepos });
 registerRoute('gate', { init: initGate, render: renderGate, refresh: refreshGate });
 registerRoute('chat', { init: initChat, render: renderChat, refresh: refreshChat });
 registerRoute('archives', { init: initArchives, render: renderArchives, refresh: refreshArchives });
@@ -46,7 +48,7 @@ applyTheme(store.state.ui.theme);
 // --- Header title ---
 const titleMap = {
   overview: 'Overview', sessions: 'Sessions', agents: 'Agents', pipeline: 'Delivery Pipeline',
-  tasks: 'Tasks & Repos', gate: 'Gate Checks', chat: 'Chat Assistant',
+  tasks: 'Tasks', repos: 'Node Repositories', gate: 'Gate Checks', chat: 'Chat Assistant',
   archives: 'Archives & Timing', settings: 'Settings',
 };
 store.subscribe('ui', (ui) => {
@@ -55,6 +57,35 @@ store.subscribe('ui', (ui) => {
   const chatBtn = $('chat-floating-btn');
   if (chatBtn) chatBtn.style.display = ui.activeTab === 'chat' ? 'none' : '';
 });
+
+// --- Health bar (DB / Redis / GitHub status dots) ---
+function updateHealthBar() {
+  const h = store.select('health');
+  if (!h) return;
+
+  const dotMap = {
+    'hb-db-dot': h.db_status || h.db,
+    'hb-redis-dot': h.redis_status || h.redis,
+    'hb-gh-dot': h.github_status || h.github,
+  };
+
+  for (const [id, status] of Object.entries(dotMap)) {
+    const el = $(id);
+    if (!el) continue;
+    el.classList.remove('dot-ok', 'dot-warn', 'dot-fail', 'dot-unknown');
+    if (status === 'ok' || status === 'connected') {
+      el.classList.add('dot-ok');
+    } else if (status === 'fail' || status === 'error' || status === 'disconnected') {
+      el.classList.add('dot-fail');
+    } else if (status === 'degraded' || status === 'slow' || status === 'warn') {
+      el.classList.add('dot-warn');
+    } else {
+      el.classList.add('dot-unknown');
+    }
+  }
+}
+
+store.subscribe('health', updateHealthBar);
 
 // --- Floating chat ---
 const chatFloatingBtn = $('chat-floating-btn');

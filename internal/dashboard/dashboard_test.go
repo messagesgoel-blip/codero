@@ -18,6 +18,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/codero/codero/internal/config"
 	"github.com/codero/codero/internal/dashboard"
 	"github.com/codero/codero/internal/gatecheck"
 	"github.com/codero/codero/internal/state"
@@ -40,7 +41,8 @@ func newTestHandler(t *testing.T) (*dashboard.Handler, *sql.DB) {
 	t.Helper()
 	db := openTestDB(t)
 	store := dashboard.NewSettingsStore(t.TempDir())
-	return dashboard.NewHandler(db, store), db
+	cfg := config.LoadEnv()
+	return dashboard.NewHandler(db, store, cfg), db
 }
 
 // seedBranch inserts one branch_states row.

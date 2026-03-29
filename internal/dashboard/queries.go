@@ -1583,6 +1583,53 @@ func queryAgentRoster(ctx context.Context, db *sql.DB) ([]AgentRosterRow, error)
 	return out, rows.Err()
 }
 
+// AgentRecentSessionRow holds summary data for one of an agent's recent sessions.
+type AgentRecentSessionRow struct {
+	SessionID string     `json:"session_id"`
+	StartedAt time.Time  `json:"started_at"`
+	EndedAt   *time.Time `json:"ended_at"`
+	EndReason string     `json:"end_reason"`
+	Repo      string     `json:"repo"`
+	Branch    string     `json:"branch"`
+}
+
+// queryAgentRecentSessions returns the last 5 sessions for a given agent, with
+// the most recent assignment's repo/branch for context.
+func queryAgentRecentSessions(ctx context.Context, db *sql.DB, agentID string) ([]AgentRecentSessionRow, error) {
+	const query = `
+	SELECT
+	  s.session_id,
+	  s.started_at,
+	  s.ended_at,
+	  s.end_reason,
+	  COALESCE((SELECT repo   FROM agent_assignments WHERE session_id = s.session_id ORDER BY started_at DESC LIMIT 1), '') AS repo,
+	  COALESCE((SELECT branch FROM agent_assignments WHERE session_id = s.session_id ORDER BY started_at DESC LIMIT 1), '') AS branch
+	FROM agent_sessions s
+	WHERE s.agent_id = ?
+	ORDER BY s.started_at DESC
+	LIMIT 5`
+
+	rows, err := db.QueryContext(ctx, query, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("queryAgentRecentSessions: %w", err)
+	}
+	defer rows.Close()
+
+	var out []AgentRecentSessionRow
+	for rows.Next() {
+		var r AgentRecentSessionRow
+		var endedAt sql.NullTime
+		if err := rows.Scan(&r.SessionID, &r.StartedAt, &endedAt, &r.EndReason, &r.Repo, &r.Branch); err != nil {
+			return nil, fmt.Errorf("queryAgentRecentSessions: scan: %w", err)
+		}
+		if endedAt.Valid {
+			r.EndedAt = &endedAt.Time
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // queryETAMinutes is retained for backwards compatibility.
 // It delegates to queryETADetail and returns only the eta_min value.
 func queryETAMinutes(ctx context.Context, db *sql.DB, repo string) *int {
@@ -1591,4 +1638,50 @@ func queryETAMinutes(ctx context.Context, db *sql.DB, repo string) *int {
 		return nil
 	}
 	return &detail.ETAMin
+}
+
+// ScanNodeRepos scans a directory for git repositories and identifies
+// which are connected (in connectedRepos) and which are orphans.
+func ScanNodeRepos(ctx context.Context, scanPath string, connectedRepos []string) ([]NodeRepoSummary, error) {
+	entries, err := os.ReadDir(scanPath)
+	if err != nil {
+		return nil, fmt.Errorf("ScanNodeRepos: read dir %s: %w", scanPath, err)
+	}
+
+	connectedSet := make(map[string]bool)
+	for _, r := range connectedRepos {
+		// connectedRepos might be full paths or just names
+		connectedSet[filepath.Base(r)] = true
+	}
+
+	var out []NodeRepoSummary
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		path := filepath.Join(scanPath, entry.Name())
+		if isGitRepo(path) {
+			connected := connectedSet[entry.Name()]
+			out = append(out, NodeRepoSummary{
+				Name:      entry.Name(),
+				Path:      path,
+				Connected: connected,
+				IsOrphan:  !connected,
+				LastScan:  time.Now().UTC(),
+			})
+		}
+	}
+
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Name < out[j].Name
+	})
+
+	return out, nil
+}
+
+func isGitRepo(path string) bool {
+	// Check for .git directory or file (for worktrees)
+	gitPath := filepath.Join(path, ".git")
+	_, err := os.Stat(gitPath)
+	return err == nil
 }

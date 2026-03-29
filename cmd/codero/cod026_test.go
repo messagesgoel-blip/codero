@@ -18,6 +18,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/codero/codero/internal/config"
 	"github.com/codero/codero/internal/daemon"
 	"github.com/codero/codero/internal/gate"
 	"github.com/codero/codero/internal/redis"
@@ -131,7 +132,8 @@ func TestGateStatusJSON_ParityWithGateEndpoint(t *testing.T) {
 	client := redis.New("127.0.0.1:0", "")
 	queue := scheduler.NewQueue(client)
 	slotCounter := scheduler.NewSlotCounter(client)
-	obs := daemon.NewObservabilityServer(client, queue, slotCounter, nil, "127.0.0.1", "0", "/dashboard", "test")
+	cfg := config.LoadEnv()
+	obs := daemon.NewObservabilityServer(client, queue, slotCounter, nil, "127.0.0.1", "0", "/dashboard", "test", cfg)
 
 	req := httptest.NewRequest(http.MethodGet, "/gate", nil)
 	rec := httptest.NewRecorder()
@@ -295,7 +297,8 @@ func TestRunDashboardFixture_CheckMode(t *testing.T) {
 		t.Fatalf("write report: %v", err)
 	}
 
-	if err := runDashboardFixture("127.0.0.1", 0, "/dashboard", dir, reportPath, "", true, true); err != nil {
+	cfg := config.LoadEnv()
+	if err := runDashboardFixture("127.0.0.1", 0, "/dashboard", dir, reportPath, "", true, true, cfg); err != nil {
 		t.Fatalf("runDashboardFixture(check): %v", err)
 	}
 }

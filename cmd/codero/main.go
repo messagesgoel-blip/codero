@@ -423,7 +423,7 @@ func daemonCmd(configPath *string) *cobra.Command {
 			// Serve gRPC + HTTP on the same port via h2c multiplexing.
 			obs := daemon.NewObservabilityServerWithGRPC(client, queue, slotCounter, db.Unwrap(),
 				cfg.APIServer.Addr, cfg.APIServer.ReadTimeout, cfg.APIServer.WriteTimeout,
-				cfg.DashboardBasePath, version, grpcSrv.GRPCServer())
+				cfg.DashboardBasePath, version, grpcSrv.GRPCServer(), cfg)
 			obs.SetPipeline(pipeline)
 			obs.Start()
 			wg.Add(1)

@@ -1,7 +1,7 @@
 // agents.js — Agents page renderer: fleet roster, load distribution, tracking toggles.
 
 import store from '../store.js';
-import { loadAgents, loadTrackingConfig, toggleAgentTracking } from '../api.js';
+import { loadAgents, loadAgentSessions, loadTrackingConfig, toggleAgentTracking } from '../api.js';
 import {
   esc, html, statusChip, relativeTime, formatDuration, setHtml, $,
 } from '../utils.js';
@@ -44,6 +44,7 @@ export function renderAgents() {
   setHtml(container, parts.join(''));
 
   _bindTrackingToggles();
+  _bindExpandToggles();
 }
 
 // --- Private renderers ---
@@ -146,7 +147,80 @@ function _buildAgentExpandContent(agent) {
     { label: 'Avg Elapsed', value: agent.avgElapsedSec > 0 ? esc(formatDuration(agent.avgElapsedSec)) : '—' },
     { label: 'Active Pressure', value: pressureLabel },
   ];
-  return detailGrid(items);
+  const sessionsPlaceholder = `<div id="agent-sessions-${esc(agent.agentId)}" style="margin-top:12px">` +
+    `<div class="skeleton" style="height:72px;border-radius:6px"></div></div>`;
+  return detailGrid(items) + sessionsPlaceholder;
+}
+
+// --- Expand toggle + lazy session history ---
+
+function _bindExpandToggles() {
+  const table = $('agents-table');
+  if (!table) return;
+  table.addEventListener('click', (e) => {
+    const tr = e.target.closest('tr.expandable');
+    if (!tr) return;
+    const rowId = tr.dataset.rowId;
+    if (!rowId) return;
+    const expandRow = table.querySelector(`tr.expand-row[data-expand-for="${rowId}"]`);
+    if (!expandRow) return;
+    const isHidden = expandRow.classList.contains('hidden');
+    expandRow.classList.toggle('hidden', !isHidden);
+    const chevron = tr.querySelector('.chevron');
+    if (chevron) chevron.classList.toggle('chevron-open', isHidden);
+    if (isHidden) _loadAgentSessions(rowId);
+  });
+}
+
+async function _loadAgentSessions(agentId) {
+  const container = document.getElementById(`agent-sessions-${agentId}`);
+  if (!container || container.dataset.loaded) return;
+
+  let data;
+  try {
+    data = await loadAgentSessions(agentId);
+  } catch (_) {
+    setHtml(container, '<span style=\"color:var(--fg-muted);font-size:12px\">Could not load session history</span>');
+    return;
+  }
+
+  const sessions = data?.sessions || [];
+  if (sessions.length === 0) {
+    container.dataset.loaded = '1';
+    setHtml(container, '<span style=\"color:var(--fg-muted);font-size:12px\">No recent sessions</span>');
+    return;
+  }
+
+  const rows = sessions.map(s => {
+    const elapsedSec = s.ended_at
+      ? (new Date(s.ended_at) - new Date(s.started_at)) / 1000
+      : null;
+    const elapsed = elapsedSec != null ? esc(formatDuration(elapsedSec)) : '—';
+    const state = s.ended_at
+      ? `<span style=\"color:var(--fg-muted)\">${esc(s.end_reason || 'done')}</span>`
+      : statusChip('active');
+    return `<tr>
+      <td style=\"padding:2px 8px 2px 0\">${esc(relativeTime(s.started_at))}</td>
+      <td style=\"padding:2px 8px 2px 0\">${esc(s.repo || '—')}</td>
+      <td style=\"padding:2px 8px 2px 0\"><code>${esc(s.branch || '—')}</code></td>
+      <td style=\"padding:2px 8px 2px 0\">${elapsed}</td>
+      <td style=\"padding:2px 0\">${state}</td>
+    </tr>`;
+  }).join('');
+
+  container.dataset.loaded = '1';
+  setHtml(container, `
+    <h4 style=\"margin:0 0 6px;font-size:12px;color:var(--fg-muted)\">Recent Sessions</h4>
+    <table style=\"width:100%;font-size:12px;border-collapse:collapse\">
+      <thead><tr style=\"color:var(--fg-muted)\">
+        <th style=\"text-align:left;padding:2px 8px 2px 0;font-weight:500\">Started</th>
+        <th style=\"text-align:left;padding:2px 8px 2px 0;font-weight:500\">Repo</th>
+        <th style=\"text-align:left;padding:2px 8px 2px 0;font-weight:500\">Branch</th>
+        <th style=\"text-align:left;padding:2px 8px 2px 0;font-weight:500\">Elapsed</th>
+        <th style=\"text-align:left;padding:2px 0;font-weight:500\">State</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`);
 }
 
 function _renderLoadDistribution(agents) {

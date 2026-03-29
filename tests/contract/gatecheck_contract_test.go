@@ -145,7 +145,7 @@ func TestGateCheckSurfaceParity(t *testing.T) {
 	defer db.Close()
 
 	t.Setenv("CODERO_GATE_CHECK_REPORT_PATH", reportPath)
-	handler := dashboard.NewHandler(db.Unwrap(), dashboard.NewSettingsStore(fixtureDir))
+	handler := dashboard.NewHandler(db.Unwrap(), dashboard.NewSettingsStore(fixtureDir), nil)
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 
@@ -235,7 +235,7 @@ func TestContract_CheckFailedReasonCode(t *testing.T) {
 	defer fixtureDB.Close()
 
 	t.Setenv("CODERO_GATE_CHECK_REPORT_PATH", reportPath)
-	handler := dashboard.NewHandler(fixtureDB.Unwrap(), dashboard.NewSettingsStore(fixtureDir))
+	handler := dashboard.NewHandler(fixtureDB.Unwrap(), dashboard.NewSettingsStore(fixtureDir), nil)
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 

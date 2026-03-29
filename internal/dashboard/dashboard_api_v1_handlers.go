@@ -915,6 +915,41 @@ func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleAgentSessions serves GET /api/v1/dashboard/agents/{agentId}/sessions.
+// Returns the last 5 sessions for the named agent with repo/branch context.
+func (h *Handler) handleAgentSessions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "")
+		return
+	}
+	setCORSHeaders(w)
+
+	const prefix = "/api/v1/dashboard/agents/"
+	const suffix = "/sessions"
+	path := r.URL.Path
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		writeError(w, http.StatusNotFound, "not found", "")
+		return
+	}
+	agentID := strings.TrimSuffix(strings.TrimPrefix(path, prefix), suffix)
+	if agentID == "" || strings.Contains(agentID, "/") {
+		writeError(w, http.StatusBadRequest, "invalid agent ID", "")
+		return
+	}
+
+	sessions, err := queryAgentRecentSessions(r.Context(), h.db, agentID)
+	if err != nil {
+		loglib.Error("dashboard: agent sessions query failed",
+			loglib.FieldComponent, "dashboard", "agent_id", agentID, "error", err)
+		writeError(w, http.StatusInternalServerError, "query failed", "db_error")
+		return
+	}
+	if sessions == nil {
+		sessions = []AgentRecentSessionRow{}
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"sessions": sessions})
+}
+
 // agentStatus derives the display status for an agent roster row.
 // disabled overrides everything; otherwise: active > offline > idle.
 func agentStatus(r AgentRosterRow, disabled bool) string {
