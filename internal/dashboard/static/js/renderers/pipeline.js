@@ -5,7 +5,7 @@ import { loadPipeline, loadAssignments } from '../api.js';
 import {
   $, setHtml, esc, statusChip, formatDuration, stageColor, relativeTime,
 } from '../utils.js';
-import { pipelineCard, glassCard, dataTable, barChart } from '../components.js';
+import { pipelineCard, glassCard, dataTable, barChart, toast } from '../components.js';
 
 const STAGES = [
   'SUBMITTED', 'GATING', 'COMMITTED', 'PUSHED',
@@ -20,7 +20,11 @@ export function initPipeline() {
 }
 
 export async function refreshPipeline() {
-  await Promise.all([loadPipeline(), loadAssignments()]);
+  try {
+    await Promise.all([loadPipeline(), loadAssignments()]);
+  } catch (err) {
+    toast('Failed to refresh pipeline: ' + err.message, 'error');
+  }
 }
 
 export function renderPipeline() {

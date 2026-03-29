@@ -4,7 +4,7 @@
 import store from '../store.js';
 import { loadOverview, loadRepos, loadHealth, loadGateHealth, loadEvents } from '../api.js';
 import { formatPct, formatDuration, relativeTime, esc, html, setHtml, $, statusChip, truncId } from '../utils.js';
-import { metricCard, dataTable, glassCard, skeleton } from '../components.js';
+import { metricCard, dataTable, glassCard, skeleton, toast } from '../components.js';
 
 // --- Internal state ---
 let _initialized = false;
@@ -23,13 +23,16 @@ export function initOverview() {
 }
 
 export async function refreshOverview() {
-  await Promise.allSettled([
+  const results = await Promise.allSettled([
     loadOverview(),
     loadRepos(),
     loadHealth(),
     loadGateHealth(),
     loadEvents(),
   ]);
+  if (results.some(r => r.status === 'rejected')) {
+    toast('Some overview data failed to load', 'error');
+  }
 }
 
 export function renderOverview() {

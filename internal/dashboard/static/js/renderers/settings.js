@@ -21,6 +21,7 @@ export function initSettings() {
 export function renderSettings() {
   const container = $('page-settings');
   if (!container) return;
+  if (store.state.ui.activeTab !== 'settings') return;
 
   const settings = store.state.settings;
   const gateConfig = store.state.gateConfig;
@@ -58,7 +59,11 @@ function renderIntegrationsGrid(settings) {
   const integrations = settings?.integrations || settings?.providers || [];
 
   if (integrations.length === 0) {
-    // Provide sensible defaults if API returns no explicit list
+    if (settings != null) {
+      // Settings loaded but returned no integrations — show empty state
+      return glassCard('Integrations', '<div class="empty-state">No integrations configured</div>');
+    }
+    // Settings not loaded yet — show known defaults so the card isn't blank
     const defaults = [
       { name: 'GitHub', connected: true,  description: 'Pull requests, checks, and webhooks' },
       { name: 'CodeRabbit', connected: false, description: 'AI code review on PRs' },
@@ -67,7 +72,7 @@ function renderIntegrationsGrid(settings) {
       { name: 'LiteLLM', connected: false, description: 'LLM proxy for chat' },
       { name: 'SonarCloud', connected: false, description: 'Code quality metrics' },
     ];
-    return renderIntegrationCards(settings ? integrations : defaults);
+    return renderIntegrationCards(defaults);
   }
 
   return renderIntegrationCards(integrations);

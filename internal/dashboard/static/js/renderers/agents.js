@@ -5,7 +5,7 @@ import { loadAgents, loadAgentSessions, loadTrackingConfig, toggleAgentTracking 
 import {
   esc, html, statusChip, relativeTime, formatDuration, setHtml, $,
 } from '../utils.js';
-import { metricCard, dataTable, detailGrid, glassCard, skeleton, barChart } from '../components.js';
+import { metricCard, dataTable, detailGrid, glassCard, skeleton, barChart, toast } from '../components.js';
 
 // --- Internal state ---
 let _initialized = false;
@@ -20,7 +20,10 @@ export function initAgents() {
 }
 
 export async function refreshAgents() {
-  await Promise.allSettled([loadAgents(), loadTrackingConfig()]);
+  const results = await Promise.allSettled([loadAgents(), loadTrackingConfig()]);
+  if (results.some(r => r.status === 'rejected')) {
+    toast('Some agent data failed to load', 'error');
+  }
 }
 
 export function renderAgents() {

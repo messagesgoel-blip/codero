@@ -5,7 +5,7 @@ import { loadGateChecks, loadFindings, loadGateConfig, loadCompliance, apiPut } 
 import {
   $, setHtml, esc, statusChip, severityChip, formatDuration,
 } from '../utils.js';
-import { glassCard, dataTable, toggleSwitch, barChart } from '../components.js';
+import { glassCard, dataTable, toggleSwitch, barChart, toast } from '../components.js';
 
 let activeSeverityFilter = 'ALL';
 
@@ -26,7 +26,11 @@ export function initGate() {
 }
 
 export async function refreshGate() {
-  await Promise.all([loadGateChecks(), loadFindings(), loadGateConfig(), loadCompliance()]);
+  try {
+    await Promise.all([loadGateChecks(), loadFindings(), loadGateConfig(), loadCompliance()]);
+  } catch (err) {
+    toast('Failed to refresh gate data: ' + err.message, 'error');
+  }
 }
 
 export function renderGate() {
@@ -155,7 +159,7 @@ function attachToggleListeners(gateConfig) {
       } catch (err) {
         // Revert on failure
         e.target.checked = !newValue;
-        console.error('Failed to update gate config:', err);
+        toast('Failed to update gate config: ' + err.message, 'error');
       }
     });
   }
