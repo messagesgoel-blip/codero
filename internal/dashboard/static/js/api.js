@@ -170,6 +170,8 @@ function normalizeSessions(raw) {
     startedAt: s.started_at, lastHeartbeat: s.last_heartbeat_at,
     elapsedSec: s.elapsed_sec, ownerAgent: s.owner_agent,
     lastIOAt: s.last_io_at,
+    contextPressure: s.context_pressure || 'normal',
+    compactCount: s.compact_count || 0,
   }));
 }
 

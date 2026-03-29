@@ -170,6 +170,19 @@ type Config struct {
 	// Example: "https://ops.example.com/codero"
 	DashboardPublicBaseURL string          `yaml:"dashboard_public_base_url"`
 	AutoMerge              AutoMergeConfig `yaml:"auto_merge"`
+	// LiteLLMMetrics configures the session token metrics syncer.
+	// When DSN is set the daemon polls LiteLLM's Postgres on each interval.
+	LiteLLMMetrics LiteLLMMetricsConfig `yaml:"litellm_metrics"`
+}
+
+// LiteLLMMetricsConfig holds settings for the session observability sync.
+type LiteLLMMetricsConfig struct {
+	// DSN is the Postgres connection string for LiteLLM's database.
+	// Example: "postgres://litellm:password@localhost:5432/litellm?sslmode=disable"
+	// Leave empty to disable LiteLLM sync (pressure detection still runs on manually inserted rows).
+	DSN string `yaml:"dsn"`
+	// Interval controls how often the syncer runs. Default: 30s.
+	Interval time.Duration `yaml:"interval"`
 }
 
 // Load reads config from a YAML file at path and applies env overrides.

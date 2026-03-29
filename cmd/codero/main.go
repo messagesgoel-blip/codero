@@ -23,6 +23,7 @@ import (
 	"github.com/codero/codero/internal/runner"
 	"github.com/codero/codero/internal/scheduler"
 	"github.com/codero/codero/internal/session"
+	"github.com/codero/codero/internal/sessmetrics"
 	"github.com/codero/codero/internal/state"
 	"github.com/codero/codero/internal/tmux"
 	"github.com/codero/codero/internal/webhook"
@@ -358,6 +359,18 @@ func daemonCmd(configPath *string) *cobra.Command {
 			expiryWorker := scheduler.NewExpiryWorker(db, queue, stream)
 			expiryWorker.TmuxChecker = tmux.RealExecutor{}
 			reconciler := webhook.NewReconciler(db, gh, cfg.Repos, cfg.Webhook.Enabled)
+
+			// ─── Session observability monitor ──────────────────────────
+			interval := cfg.LiteLLMMetrics.Interval
+			if interval <= 0 {
+				interval = 30 * time.Second
+			}
+			metricsMonitor := sessmetrics.NewMonitor(cfg.LiteLLMMetrics.DSN, db, interval)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				metricsMonitor.Run(ctx)
+			}()
 			if cfg.AutoMerge.Enabled {
 				reconciler.WithAutoMerge(gh, cfg.AutoMerge.Method)
 				loglib.Info("codero: auto-merge enabled",
@@ -861,6 +874,7 @@ func sessionCmd(configPath *string) *cobra.Command {
 		sessionAttachCmd(configPath),
 		sessionFinalizeCmd(configPath),
 		sessionEndCmd(configPath),
+		sessionMetricsCmd(configPath),
 	)
 
 	return cmd

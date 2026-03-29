@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/codero/codero/internal/config"
+	loglib "github.com/codero/codero/internal/log"
 )
 
 // trackingConfigMu serializes read-modify-write on ~/.codero/config.yaml
@@ -844,4 +845,98 @@ func (h *Handler) handleTrackingConfig(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "")
 	}
+}
+
+// handleSessionMetrics serves GET /api/v1/dashboard/sessions/metrics/{session_id}.
+// Returns token usage and context pressure summary for a session.
+func (h *Handler) handleSessionMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "")
+		return
+	}
+	setCORSHeaders(w)
+
+	// URL: /api/v1/dashboard/sessions/metrics/{session_id}
+	prefix := "/api/v1/dashboard/sessions/metrics/"
+	sessionID := strings.TrimPrefix(r.URL.Path, prefix)
+	sessionID = strings.TrimSuffix(sessionID, "/")
+	if sessionID == "" {
+		writeError(w, http.StatusBadRequest, "session_id required", "missing_id")
+		return
+	}
+
+	rows, err := h.db.QueryContext(r.Context(), `
+		SELECT model, prompt_tokens, completion_tokens,
+		       cumulative_prompt_tokens, cumulative_completion_tokens, request_time
+		FROM session_token_metrics
+		WHERE session_id = ?
+		ORDER BY request_time ASC`, sessionID)
+	if err != nil {
+		loglib.Error("dashboard: session metrics query failed",
+			loglib.FieldComponent, "dashboard",
+			"session_id", sessionID,
+			"error", err,
+		)
+		writeError(w, http.StatusInternalServerError, "metrics query failed", "db_error")
+		return
+	}
+	defer rows.Close()
+
+	type requestEntry struct {
+		Model                      string    `json:"model"`
+		PromptTokens               int64     `json:"prompt_tokens"`
+		CompletionTokens           int64     `json:"completion_tokens"`
+		CumulativePromptTokens     int64     `json:"cumulative_prompt_tokens"`
+		CumulativeCompletionTokens int64     `json:"cumulative_completion_tokens"`
+		RequestTime                time.Time `json:"request_time"`
+	}
+
+	var requests []requestEntry
+	var totalPrompt, totalCompletion int64
+	seenModels := map[string]bool{}
+	var models []string
+
+	for rows.Next() {
+		var e requestEntry
+		var reqTimeStr string
+		if err := rows.Scan(&e.Model, &e.PromptTokens, &e.CompletionTokens,
+			&e.CumulativePromptTokens, &e.CumulativeCompletionTokens, &reqTimeStr); err != nil {
+			writeError(w, http.StatusInternalServerError, "metrics scan failed", "db_error")
+			return
+		}
+		if t, err2 := time.Parse(time.RFC3339, reqTimeStr); err2 == nil {
+			e.RequestTime = t
+		}
+		requests = append(requests, e)
+		totalPrompt += e.PromptTokens
+		totalCompletion += e.CompletionTokens
+		if !seenModels[e.Model] {
+			seenModels[e.Model] = true
+			models = append(models, e.Model)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "metrics rows error", "db_error")
+		return
+	}
+
+	// Fetch pressure/compact fields from the session row.
+	var pressure string
+	var compactCount int
+	_ = h.db.QueryRowContext(r.Context(),
+		`SELECT COALESCE(context_pressure, 'normal'), COALESCE(compact_count, 0)
+		 FROM agent_sessions WHERE session_id = ?`, sessionID).
+		Scan(&pressure, &compactCount)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"session_id":       sessionID,
+		"total_requests":   len(requests),
+		"total_prompt":     totalPrompt,
+		"total_completion": totalCompletion,
+		"models":           models,
+		"context_pressure": pressure,
+		"compact_count":    compactCount,
+		"requests":         requests,
+		"generated_at":     time.Now().UTC(),
+	})
 }
