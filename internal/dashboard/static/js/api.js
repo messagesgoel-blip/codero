@@ -265,3 +265,9 @@ function normalizeArchives(raw) {
     mergeSha: a.merge_sha, taskSource: a.task_source, archivedAt: a.archived_at,
   }));
 }
+
+// ---- Operator Actions ----
+
+export function sessionAction(assignmentId, action) {
+  return apiPost(`assignments/${encodeURIComponent(assignmentId)}/${encodeURIComponent(action)}`, {});
+}

@@ -518,3 +518,10 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.85em; }
 .pressure-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
 .pressure-dot.critical { background: var(--destructive); }
 .pressure-dot.warning { background: var(--warning); }
+
+/* ========== OPERATOR ACTIONS ========== */
+.session-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle); }
+.btn-sm { padding: 3px 10px; font-size: 0.72rem; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-surface-2); color: var(--fg-secondary); cursor: pointer; transition: background var(--duration-fast); }
+.btn-sm:hover { background: var(--bg-surface-3); color: var(--fg-primary); }
+.btn-sm.destructive { color: var(--destructive); border-color: var(--destructive); }
+.btn-sm.destructive:hover { background: var(--destructive-bg); }

@@ -3,7 +3,7 @@
 // History tab: archived runs with timing analytics strip.
 
 import store from '../store.js';
-import { loadSessions, loadAssignments, loadArchives, apiFetch } from '../api.js';
+import { loadSessions, loadAssignments, loadArchives, apiFetch, sessionAction } from '../api.js';
 import {
   esc, html, statusChip, relativeTime, formatDuration, truncId, setHtml, $,
 } from '../utils.js';
@@ -254,6 +254,16 @@ function _buildExpandContent(session, assigns) {
       { label: 'Context Trend', value: _mkPlaceholder(session.id + '-' + a.id) },
     ];
     out += detailGrid(items);
+    
+    // Operator action buttons
+    const actions = ['pause', 'resume', 'abandon', 'close', 'replay', 'release', 'release-slot'];
+    const destructiveActions = new Set(['abandon', 'close']);
+    out += '<div class="session-actions">';
+    for (const act of actions) {
+      const cls = destructiveActions.has(act) ? 'btn-sm destructive' : 'btn-sm';
+      out += `<button class="${cls}" data-action="${esc(act)}" data-assignment-id="${esc(a.id)}">${esc(act)}</button>`;
+    }
+    out += '</div>';
   }
   return out;
 }
@@ -308,6 +318,31 @@ function _bindExpandToggles() {
     if (!table) continue;
 
     table.addEventListener('click', (e) => {
+      // Handle operator action button clicks
+      const actionBtn = e.target.closest('.btn-sm[data-action]');
+      if (actionBtn) {
+        e.stopPropagation();
+        const action = actionBtn.dataset.action;
+        const assignmentId = actionBtn.dataset.assignmentId;
+        if (action && assignmentId) {
+          actionBtn.disabled = true;
+          actionBtn.textContent = action + '…';
+          sessionAction(assignmentId, action)
+            .then(res => {
+              toast(`${action}: ${res.message || 'done'}`, 'success');
+              refreshSessions();
+            })
+            .catch(err => {
+              toast(`${action} failed: ${err.message}`, 'error');
+            })
+            .finally(() => {
+              actionBtn.disabled = false;
+              actionBtn.textContent = action;
+            });
+        }
+        return;
+      }
+
       const tr = e.target.closest('tr.expandable');
       if (!tr) return;
       const rowId = tr.dataset.rowId;
