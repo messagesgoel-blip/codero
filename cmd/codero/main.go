@@ -73,6 +73,7 @@ func main() {
 		taskCmd(&configPath),
 		contextCmd(),
 		submitCmd(&configPath),
+		setupCmd(),
 	)
 
 	if err := root.Execute(); err != nil {
@@ -864,13 +865,30 @@ func sessionCmd(configPath *string) *cobra.Command {
 	return cmd
 }
 
-// resolveDaemonAddr returns the daemon address from --daemon-addr flag or
-// CODERO_DAEMON_ADDR env var. Empty string means use direct DB access.
+// resolveDaemonAddr resolves the daemon gRPC address. Priority:
+// 1. --daemon-addr flag  2. CODERO_DAEMON_ADDR env  3. ~/.codero/config.yaml
+// 4. Auto-detect localhost:8110. Empty string means use direct DB access.
 func resolveDaemonAddr(cmd *cobra.Command) string {
 	if addr, _ := cmd.Flags().GetString("daemon-addr"); addr != "" {
 		return addr
 	}
-	return os.Getenv("CODERO_DAEMON_ADDR")
+	if addr := os.Getenv("CODERO_DAEMON_ADDR"); addr != "" {
+		return addr
+	}
+	if uc, err := config.LoadUserConfig(); err == nil {
+		if uc.DaemonAddr != "" {
+			return uc.DaemonAddr
+		}
+	} else {
+		loglib.Warn("failed to load user config",
+			loglib.FieldComponent, "cli",
+			"error", err,
+		)
+	}
+	if daemonReachable(defaultDaemonAddr) {
+		return defaultDaemonAddr
+	}
+	return ""
 }
 
 func sessionRegisterCmd(configPath *string) *cobra.Command {

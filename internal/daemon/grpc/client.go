@@ -74,6 +74,32 @@ func (c *SessionClient) Register(ctx context.Context, agentID, clientKind string
 	}, nil
 }
 
+// RegisterWithContext creates a session with rich metadata in the initial_context map.
+func (c *SessionClient) RegisterWithContext(ctx context.Context, agentID, mode string, initialContext map[string]string) (*RegisterResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	var header metadata.MD
+	resp, err := c.client.RegisterSession(ctx, &daemonv1.RegisterSessionRequest{
+		AgentId:        agentID,
+		ClientKind:     mode,
+		InitialContext: initialContext,
+	}, grpc.Header(&header))
+	if err != nil {
+		return nil, fmt.Errorf("register session: %w", err)
+	}
+
+	secret := ""
+	if vals := header.Get("x-heartbeat-secret"); len(vals) > 0 {
+		secret = vals[0]
+	}
+
+	return &RegisterResult{
+		SessionID:       resp.SessionId,
+		HeartbeatSecret: secret,
+	}, nil
+}
+
 // RegisterWithTmux creates a session with a client-provided session ID and tmux name,
 // returning the heartbeat secret. Satisfies session.SessionBackend.
 func (c *SessionClient) RegisterWithTmux(ctx context.Context, sessionID, agentID, mode, tmuxName string) (string, error) {
