@@ -28,6 +28,7 @@ func agentCmd(configPath *string) *cobra.Command {
 		Short: "Manage agent lifecycle",
 	}
 	cmd.AddCommand(agentLaunchCmd(configPath))
+	cmd.AddCommand(agentRunCmd(configPath))
 	return cmd
 }
 
