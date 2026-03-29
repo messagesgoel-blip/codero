@@ -349,7 +349,7 @@ function _bindTrackingToggles() {
     el.addEventListener('change', async (e) => {
       const agent = e.target.dataset.agent;
       const disabled = !e.target.checked;
-      const prevChecked = !disabled;
+      const prevChecked = !e.target.checked; // previous state before user clicked
       e.target.disabled = true;
       try {
         await toggleAgentTracking(agent, disabled);
