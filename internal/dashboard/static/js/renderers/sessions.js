@@ -7,7 +7,7 @@ import { loadSessions, loadAssignments, loadArchives, apiFetch } from '../api.js
 import {
   esc, html, statusChip, relativeTime, formatDuration, truncId, setHtml, $,
 } from '../utils.js';
-import { metricCard, dataTable, detailGrid, glassCard, skeleton, sparklineChart } from '../components.js';
+import { metricCard, dataTable, detailGrid, glassCard, skeleton, sparklineChart, toast } from '../components.js';
 
 // --- Tab + filter state ---
 let _tab = 'active';   // 'active' | 'history'
@@ -29,7 +29,10 @@ export function initSessions() {
 }
 
 export async function refreshSessions() {
-  await Promise.allSettled([loadSessions(), loadAssignments(), loadArchives()]);
+  const results = await Promise.allSettled([loadSessions(), loadAssignments(), loadArchives()]);
+  if (results.some(r => r.status === 'rejected')) {
+    toast('Some session data failed to load', 'error');
+  }
 }
 
 export function renderSessions() {
