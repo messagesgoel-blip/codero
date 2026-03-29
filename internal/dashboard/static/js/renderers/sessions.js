@@ -164,6 +164,18 @@ function _renderSessionsTable(sessions, assignments) {
       },
     },
     {
+      key: 'contextPressure',
+      label: 'Context',
+      render: (r) => {
+        const p = r.contextPressure || 'normal';
+        if (p === 'normal') return '<span style="color:var(--fg-muted)">—</span>';
+        const col = p === 'critical' ? 'var(--error)' : 'var(--warning)';
+        const icon = p === 'critical' ? '🔴' : '🟡';
+        const compact = r.compactCount > 0 ? ` ×${r.compactCount}` : '';
+        return `<span style="color:${col}" title="${p} context pressure${compact ? '; compacted ' + r.compactCount + ' time(s)' : ''}">${icon} ${p}${compact}</span>`;
+      },
+    },
+    {
       key: 'lastHeartbeat',
       label: 'Heartbeat',
       render: (r) => esc(relativeTime(r.lastHeartbeat)),

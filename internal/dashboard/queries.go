@@ -342,7 +342,9 @@ func queryActiveSessions(ctx context.Context, db *sql.DB, limit int) ([]ActiveSe
 func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]ActiveSession, error) {
 	threshold := time.Now().UTC().Add(-scheduler.SessionHeartbeatTTL)
 	rows, err := db.QueryContext(ctx, `
-		SELECT session_id, agent_id, mode, started_at, last_seen_at, last_progress_at, last_io_at
+		SELECT session_id, agent_id, mode, started_at, last_seen_at, last_progress_at, last_io_at,
+		       COALESCE(context_pressure, 'normal') AS context_pressure,
+		       COALESCE(compact_count, 0) AS compact_count
 		FROM agent_sessions
 		WHERE ended_at IS NULL
 		ORDER BY last_seen_at DESC`)
@@ -352,20 +354,23 @@ func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]Ac
 	defer rows.Close()
 
 	type sessionRow struct {
-		SessionID      string
-		AgentID        string
-		Mode           string
-		StartedAt      time.Time
-		LastSeenAt     time.Time
-		LastProgressAt sql.NullTime
-		LastIOAt       sql.NullTime
+		SessionID       string
+		AgentID         string
+		Mode            string
+		StartedAt       time.Time
+		LastSeenAt      time.Time
+		LastProgressAt  sql.NullTime
+		LastIOAt        sql.NullTime
+		ContextPressure string
+		CompactCount    int
 	}
 
 	var sessions []sessionRow
 	seenSessions := map[string]bool{}
 	for rows.Next() {
 		var s sessionRow
-		if err := rows.Scan(&s.SessionID, &s.AgentID, &s.Mode, &s.StartedAt, &s.LastSeenAt, &s.LastProgressAt, &s.LastIOAt); err != nil {
+		if err := rows.Scan(&s.SessionID, &s.AgentID, &s.Mode, &s.StartedAt, &s.LastSeenAt, &s.LastProgressAt, &s.LastIOAt,
+			&s.ContextPressure, &s.CompactCount); err != nil {
 			return nil, fmt.Errorf("queryActiveSessions: agent_sessions scan row: %w", err)
 		}
 		if s.SessionID == "" {
@@ -453,6 +458,8 @@ func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]Ac
 			ProgressAt:      nullTimePtr(s.LastProgressAt),
 			LastIOAt:        nullTimePtr(s.LastIOAt),
 			ElapsedSec:      int64(elapsed.Seconds()),
+			ContextPressure: s.ContextPressure,
+			CompactCount:    s.CompactCount,
 		})
 	}
 	return out, nil
