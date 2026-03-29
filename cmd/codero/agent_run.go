@@ -93,8 +93,9 @@ If the daemon is unreachable, runs the binary directly with no tracking.`,
 				return fmt.Errorf("binary not found: %s", binaryPath)
 			}
 
-			// CODERO_TRACKING=0|false|off disables session tracking entirely.
-			if trackingDisabled() {
+			// CODERO_TRACKING_<AGENT>=0 disables tracking for one agent,
+			// CODERO_TRACKING=0 disables tracking for all agents.
+			if trackingDisabledFor(agentID) {
 				return execBinary(binaryPath, binaryArgs)
 			}
 
@@ -309,9 +310,20 @@ func baseNameWithoutExt(path string) string {
 	return base
 }
 
-// trackingDisabled returns true when the user has set CODERO_TRACKING to a
-// falsy value (0, false, off). Unset or any other value means tracking is on.
-func trackingDisabled() bool {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv("CODERO_TRACKING")))
+// trackingDisabledFor returns true when tracking is disabled for a specific agent
+// via CODERO_TRACKING_<AGENT>=0 or globally via CODERO_TRACKING=0.
+// Agent ID is uppercased with dashes replaced by underscores (e.g. codex-a → CODEX_A).
+func trackingDisabledFor(agentID string) bool {
+	// Per-agent override takes priority.
+	key := "CODERO_TRACKING_" + strings.ToUpper(strings.ReplaceAll(agentID, "-", "_"))
+	if v := envFalsy(os.Getenv(key)); v {
+		return true
+	}
+	// Global fallback.
+	return envFalsy(os.Getenv("CODERO_TRACKING"))
+}
+
+func envFalsy(v string) bool {
+	v = strings.ToLower(strings.TrimSpace(v))
 	return v == "0" || v == "false" || v == "off"
 }
