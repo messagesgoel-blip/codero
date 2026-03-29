@@ -53,9 +53,9 @@ func sessionMetricsCmd(configPath *string) *cobra.Command {
 			}
 			pressureIcon := "✓"
 			switch pressureLabel {
-			case "warning":
+			case string(state.ContextPressureWarning):
 				pressureIcon = "⚠"
-			case "critical":
+			case string(state.ContextPressureCritical):
 				pressureIcon = "✗"
 			}
 
@@ -73,7 +73,7 @@ func sessionMetricsCmd(configPath *string) *cobra.Command {
 			fmt.Fprintln(out)
 
 			// ── Token totals ─────────────────────────────────────────────────
-			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+			w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 			fmt.Fprintf(w, "Metric\tValue\n")
 			fmt.Fprintf(w, "------\t-----\n")
 			fmt.Fprintf(w, "Total requests\t%d\n", summary.TotalRequests)
@@ -94,7 +94,7 @@ func sessionMetricsCmd(configPath *string) *cobra.Command {
 				} else if len(rows) > 0 {
 					fmt.Fprintln(out)
 					fmt.Fprintf(out, "Recent requests (last %d of %d):\n", min(10, len(rows)), len(rows))
-					w2 := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+					w2 := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 					fmt.Fprintf(w2, "Time\tModel\tPrompt\tCompletion\tCumulative\n")
 					fmt.Fprintf(w2, "----\t-----\t------\t----------\t----------\n")
 					start := 0
