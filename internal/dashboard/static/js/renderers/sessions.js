@@ -54,7 +54,7 @@ export function renderSessions() {
   setHtml(container, parts.join(''));
 
   _bindTabBar();
-  if (_tab === 'active') _bindExpandToggles();
+  _bindExpandToggles();
 }
 
 // --- Tab bar ---
@@ -115,7 +115,7 @@ function _renderSessionsTable(sessions, assignments) {
     ? sessions.filter(s =>
         (s.repo || '').toLowerCase().includes(filterVal) ||
         (s.branch || '').toLowerCase().includes(filterVal) ||
-        (s.agent || '').toLowerCase().includes(filterVal))
+        (s.agent || s.ownerAgent || '').toLowerCase().includes(filterVal))
     : sessions;
 
   const columns = [
@@ -194,7 +194,7 @@ function _renderSessionsTable(sessions, assignments) {
 }
 
 function _buildExpandContent(session, assigns) {
-  const sparklinePlaceholder = `<div id="sparkline-${esc(session.id)}" class="sparkline-placeholder">
+  const _mkPlaceholder = (uid) => `<div id="sparkline-${esc(uid)}" data-sparkline-for="${esc(session.id)}" class="sparkline-placeholder">
     <div class="skeleton sparkline-skeleton" style="width:120px;height:30px;display:inline-block;border-radius:4px"></div>
     <a href="/api/v1/dashboard/sessions/metrics/${esc(session.id)}" target="_blank" class="drilldown-link" style="margin-left:8px;font-size:11px;color:var(--accent)">metrics →</a>
   </div>`;
@@ -207,7 +207,7 @@ function _buildExpandContent(session, assigns) {
       { label: 'PR', value: session.prNumber ? esc('#' + session.prNumber) : '—' },
       { label: 'Started', value: esc(relativeTime(session.startedAt)) },
       { label: 'Last Output', value: session.lastIOAt ? esc(relativeTime(session.lastIOAt)) : '—' },
-      { label: 'Context Trend', value: sparklinePlaceholder },
+      { label: 'Context Trend', value: _mkPlaceholder(session.id) },
     ];
     return detailGrid(items);
   }
@@ -224,67 +224,87 @@ function _buildExpandContent(session, assigns) {
       { label: 'PR', value: a.prNumber ? esc('#' + a.prNumber) : '—' },
       { label: 'Started', value: esc(relativeTime(a.startedAt)) },
       { label: 'Ended', value: a.endedAt ? esc(relativeTime(a.endedAt)) : '—' },
-      { label: 'Context Trend', value: sparklinePlaceholder },
+      { label: 'Context Trend', value: _mkPlaceholder(session.id + '-' + a.id) },
     ];
     out += detailGrid(items);
   }
   return out;
 }
 
-// Lazy-load sparkline on row expand
+// Lazy-load sparkline on row expand.
+// Targets all placeholders for the session via [data-sparkline-for] so
+// sessions with multiple assignment grids all get updated.
 function _loadSparkline(sessionId) {
-  const placeholder = document.getElementById('sparkline-' + sessionId);
-  if (!placeholder || placeholder.dataset.loaded) return;
-  placeholder.dataset.loaded = '1';
+  const placeholders = document.querySelectorAll(`[data-sparkline-for="${sessionId}"]`);
+  if (!placeholders.length) return;
+  const unloaded = [...placeholders].filter(el => !el.dataset.loaded);
+  if (!unloaded.length) return;
 
   const safeId = encodeURIComponent(sessionId);
+  const fallbackLink = `<a href="/api/v1/dashboard/sessions/metrics/${safeId}" target="_blank" class="drilldown-link" style="font-size:11px;color:var(--accent)">metrics \u2192</a>`;
   apiFetch(`/api/v1/dashboard/sessions/metrics/${safeId}`).then(data => {
-    const requests = Array.isArray(data?.requests) ? data.requests : [];
-    const values = requests.map(r => r.cumulative_prompt_tokens || 0);
-    const chart = sparklineChart(values, { color: 'var(--accent)' });
+    if (!Array.isArray(data?.requests)) {
+      // Malformed/empty response — leave unloaded so a future expand can retry
+      const noData = '<span style="color:var(--fg-muted);font-size:11px">no metrics yet</span> ' + fallbackLink;
+      // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method
+      for (const p of unloaded) p.innerHTML = noData;
+      return;
+    }
+    const values = data.requests.map(r => {
+      const n = Number(r.cumulative_prompt_tokens);
+      return Number.isFinite(n) ? n : 0;
+    });
     const compact = (data?.compact_count ?? 0) > 0
       ? `<span style="margin-left:6px;font-size:11px;color:var(--fg-muted)">compacted \xd7${Number(data.compact_count)}</span>`
       : '';
     const link = `<a href="/api/v1/dashboard/sessions/metrics/${safeId}" target="_blank" class="drilldown-link" style="margin-left:8px;font-size:11px;color:var(--accent)">metrics \u2192</a>`;
-    // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method
-    placeholder.innerHTML = chart + compact + link;
+    const chart = sparklineChart(values, { color: 'var(--accent)' });
+    const inner = chart + compact + link;
+    for (const p of unloaded) {
+      p.dataset.loaded = '1';
+      // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method
+      p.innerHTML = inner;
+    }
   }).catch(() => {
-    const link = `<a href="/api/v1/dashboard/sessions/metrics/${safeId}" target="_blank" class="drilldown-link" style="font-size:11px;color:var(--accent)">metrics \u2192</a>`;
+    // Network/parse error — leave unloaded so a future expand can retry
+    const noData = '<span style="color:var(--fg-muted);font-size:11px">no metrics yet</span> ' + fallbackLink;
     // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method
-    placeholder.innerHTML = '<span style="color:var(--fg-muted);font-size:11px">no metrics yet</span> ' + link;
+    for (const p of unloaded) p.innerHTML = noData;
   });
 }
 
 // --- Expand-row toggle binding ---
 
 function _bindExpandToggles() {
-  const table = $('sessions-table');
-  if (!table) return;
+  for (const tableId of ['sessions-table', 'history-table']) {
+    const table = $(tableId);
+    if (!table) continue;
 
-  table.addEventListener('click', (e) => {
-    const tr = e.target.closest('tr.expandable');
-    if (!tr) return;
-    const rowId = tr.dataset.rowId;
-    if (!rowId) return;
+    table.addEventListener('click', (e) => {
+      const tr = e.target.closest('tr.expandable');
+      if (!tr) return;
+      const rowId = tr.dataset.rowId;
+      if (!rowId) return;
 
-    const expandRow = table.querySelector(`tr.expand-row[data-expand-for="${rowId}"]`);
-    if (!expandRow) return;
+      const expandRow = table.querySelector(`tr.expand-row[data-expand-for="${rowId}"]`);
+      if (!expandRow) return;
 
-    const isHidden = expandRow.classList.contains('hidden');
-    expandRow.classList.toggle('hidden', !isHidden);
+      const isHidden = expandRow.classList.contains('hidden');
+      expandRow.classList.toggle('hidden', !isHidden);
 
-    const chevron = tr.querySelector('.chevron');
-    if (chevron) chevron.classList.toggle('chevron-open', isHidden);
+      const chevron = tr.querySelector('.chevron');
+      if (chevron) chevron.classList.toggle('chevron-open', isHidden);
 
-    const expanded = store.select('ui').expandedRows;
-    if (isHidden) {
-      expanded.add(rowId);
-      // Lazy-load sparkline when row is opened
-      _loadSparkline(rowId);
-    } else {
-      expanded.delete(rowId);
-    }
-  });
+      const expanded = store.select('ui').expandedRows;
+      if (isHidden) {
+        expanded.add(rowId);
+        // Lazy-load sparkline when row is opened (no-op for history rows)
+        _loadSparkline(rowId);
+      } else {
+        expanded.delete(rowId);
+      }
+    });
+  }
 }
 
 // --- History tab ---
