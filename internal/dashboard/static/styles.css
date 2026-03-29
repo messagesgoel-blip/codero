@@ -471,6 +471,7 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.85em; }
 .repo-filter-chip.active {
   background: var(--accent); color: var(--bg-base); border-color: var(--accent); font-weight: 600;
 }
+:root.light .repo-filter-chip.active { color: var(--fg-primary); }
 
 /* ========== GATE FINDINGS BADGE ========== */
 .findings-count-badge {

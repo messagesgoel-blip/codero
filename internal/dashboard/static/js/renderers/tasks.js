@@ -36,6 +36,11 @@ export function renderTasks() {
     return;
   }
 
+  // Clear stale filter if its repo is no longer in the list
+  if (_repoFilter && !repos.some(r => r.repo === _repoFilter)) {
+    _repoFilter = '';
+  }
+
   const filteredQueue = _repoFilter
     ? queue.filter(q => q.repo === _repoFilter)
     : queue;

@@ -67,7 +67,10 @@ export function renderOverview() {
 // --- Private renderers ---
 
 function _renderActivityFeed(events) {
-  const recent = events.slice(0, 10);
+  const recent = events
+    .filter(e => e.createdAt != null)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .slice(0, 10);
   if (recent.length === 0) {
     return glassCard('Live Activity', '<div class="empty-state">No recent events — waiting for agent activity</div>', { class: 'card-activity' });
   }
@@ -77,7 +80,7 @@ function _renderActivityFeed(events) {
     const repoStr = e.repo ? (e.branch ? `${e.repo}/${e.branch}` : e.repo) : '';
     const agentStr = e.sessionId ? truncId(e.sessionId) : '';
     return `<div class="activity-row">
-      <span class="activity-time">${esc(relativeTime(e.createdAt))}</span>
+      <span class="activity-time">${e.createdAt ? esc(relativeTime(e.createdAt)) : ''}</span>
       ${statusChip(type)}
       ${repoStr ? `<span class="activity-repo">${esc(repoStr)}</span>` : '<span class="activity-repo"></span>'}
       ${agentStr ? `<code class="activity-agent">${esc(agentStr)}</code>` : ''}
