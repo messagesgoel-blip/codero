@@ -24,6 +24,11 @@ export function startRouter() {
 
 function handleHash() {
   const hash = window.location.hash.replace('#', '') || 'overview';
+  // Redirect legacy archives bookmarks to sessions (History tab).
+  if (hash === 'archives') {
+    window.location.hash = '#sessions';
+    return;
+  }
   const route = routes.get(hash);
   if (!route) {
     window.location.hash = '#overview';

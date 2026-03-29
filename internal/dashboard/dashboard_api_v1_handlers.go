@@ -847,6 +847,83 @@ func (h *Handler) handleTrackingConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleAgents serves GET /api/v1/dashboard/agents.
+// Returns per-agent stats aggregated over the last 30 days, merged with
+// tracking config (installed/disabled status from discovered shims).
+func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "")
+		return
+	}
+	setCORSHeaders(w)
+
+	roster, err := queryAgentRoster(r.Context(), h.db)
+	if err != nil {
+		loglib.Error("dashboard: agents query failed",
+			loglib.FieldComponent, "dashboard", "error", err)
+		writeError(w, http.StatusInternalServerError, "agents query failed", "db_error")
+		return
+	}
+
+	// Merge with tracking config to get disabled/installed flags.
+	uc, ucErr := config.LoadUserConfig()
+	if ucErr != nil {
+		loglib.Warn("dashboard: agents: failed to load user config",
+			loglib.FieldComponent, "dashboard", "error", ucErr)
+	}
+	shimsByID := map[string]config.AgentInfo{}
+	if ucErr == nil {
+		shims, discErr := config.DiscoverAgents(uc)
+		if discErr != nil {
+			loglib.Warn("dashboard: agents: failed to discover agent shims",
+				loglib.FieldComponent, "dashboard", "error", discErr)
+		} else {
+			for _, s := range shims {
+				shimsByID[s.AgentID] = s
+			}
+		}
+	}
+
+	// Override status for disabled agents; add shims not yet in DB roster.
+	seenIDs := make(map[string]bool, len(roster))
+	for i := range roster {
+		seenIDs[roster[i].AgentID] = true
+		if info, ok := shimsByID[roster[i].AgentID]; ok {
+			roster[i].Status = agentStatus(roster[i], info.Disabled)
+		}
+	}
+	// Append shim-only agents (discovered but no 30-day history).
+	for _, info := range shimsByID {
+		if !seenIDs[info.AgentID] {
+			status := "idle"
+			if info.Disabled {
+				status = "disabled"
+			}
+			roster = append(roster, AgentRosterRow{
+				AgentID: info.AgentID,
+				Status:  status,
+			})
+		}
+	}
+	if roster == nil {
+		roster = []AgentRosterRow{}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"agents":       roster,
+		"generated_at": time.Now().UTC(),
+	})
+}
+
+// agentStatus derives the display status for an agent roster row.
+// disabled overrides everything; otherwise: active > offline > idle.
+func agentStatus(r AgentRosterRow, disabled bool) string {
+	if disabled {
+		return "disabled"
+	}
+	return r.Status // already set by queryAgentRoster (active/offline/idle)
+}
+
 // handleSessionMetrics serves GET /api/v1/dashboard/sessions/metrics/{session_id}.
 // Returns token usage and context pressure summary for a session.
 func (h *Handler) handleSessionMetrics(w http.ResponseWriter, r *http.Request) {

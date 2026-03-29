@@ -18,6 +18,7 @@ const store = {
     gateConfig: null,
     gateChecks: null,
     compliance: null,
+    agents: null,
     blockReasons: [],
     gateHealth: [],
     chat: { messages: [], conversationId: null, streaming: false },

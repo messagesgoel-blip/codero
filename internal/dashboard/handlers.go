@@ -107,6 +107,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 	// Session token metrics (context pressure / observability)
 	mux.HandleFunc("/api/v1/dashboard/sessions/metrics/", h.handleSessionMetrics)
+
+	// Agent fleet roster
+	mux.HandleFunc("/api/v1/dashboard/agents", h.handleAgents)
 }
 
 // handleOverview serves GET /api/v1/dashboard/overview.

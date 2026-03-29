@@ -1470,6 +1470,119 @@ func percentile(sorted []float64, p float64) float64 {
 	return sorted[lower] + frac*(sorted[upper]-sorted[lower])
 }
 
+// AgentRosterRow holds per-agent aggregated stats from the last 30 days.
+type AgentRosterRow struct {
+	AgentID        string    `json:"agent_id"`
+	ActiveSessions int       `json:"active_sessions"`
+	TotalSessions  int       `json:"total_sessions"`
+	LastSeen       time.Time `json:"last_seen"`
+	AvgElapsedSec  float64   `json:"avg_elapsed_sec"`
+	TotalTokens    int64     `json:"total_tokens"`
+	TokensPerSec   float64   `json:"tokens_per_sec"`
+	ActivePressure string    `json:"active_pressure"`
+	Status         string    `json:"status"` // active | idle | offline | disabled
+}
+
+// queryAgentRoster returns per-agent stats aggregated over the last 30 days.
+// token metrics are joined from session_token_metrics when that table exists.
+func queryAgentRoster(ctx context.Context, db *sql.DB) ([]AgentRosterRow, error) {
+	hasMetrics, err := tableExists(ctx, db, "session_token_metrics")
+	if err != nil {
+		return nil, fmt.Errorf("queryAgentRoster: check session_token_metrics: %w", err)
+	}
+
+	var query string
+	if hasMetrics {
+		query = `
+		SELECT
+		  s.agent_id,
+		  COUNT(*) AS total_sessions,
+		  COUNT(CASE WHEN s.ended_at IS NULL THEN 1 END) AS active_sessions,
+		  MAX(s.last_seen_at) AS last_seen,
+		  AVG(CASE WHEN s.ended_at IS NOT NULL
+		        THEN (strftime('%s', s.ended_at) - strftime('%s', s.started_at))
+		      END) AS avg_elapsed_sec,
+		  COALESCE(SUM(m.total_prompt_tokens + m.total_completion_tokens), 0) AS total_tokens,
+		  MAX(CASE WHEN s.ended_at IS NULL THEN s.context_pressure ELSE NULL END) AS active_pressure
+		FROM agent_sessions s
+		LEFT JOIN (
+		  SELECT session_id,
+		    SUM(prompt_tokens) AS total_prompt_tokens,
+		    SUM(completion_tokens) AS total_completion_tokens
+		  FROM session_token_metrics
+		  GROUP BY session_id
+		) m ON m.session_id = s.session_id
+		WHERE s.started_at > datetime('now', '-30 days')
+		GROUP BY s.agent_id
+		ORDER BY active_sessions DESC, last_seen DESC`
+	} else {
+		query = `
+		SELECT
+		  agent_id,
+		  COUNT(*) AS total_sessions,
+		  COUNT(CASE WHEN ended_at IS NULL THEN 1 END) AS active_sessions,
+		  MAX(last_seen_at) AS last_seen,
+		  AVG(CASE WHEN ended_at IS NOT NULL
+		        THEN (strftime('%s', ended_at) - strftime('%s', started_at))
+		      END) AS avg_elapsed_sec,
+		  0 AS total_tokens,
+		  MAX(CASE WHEN ended_at IS NULL THEN context_pressure ELSE NULL END) AS active_pressure
+		FROM agent_sessions
+		WHERE started_at > datetime('now', '-30 days')
+		GROUP BY agent_id
+		ORDER BY active_sessions DESC, last_seen DESC`
+	}
+
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("queryAgentRoster: query: %w", err)
+	}
+	defer rows.Close()
+
+	offlineThreshold := time.Now().UTC().Add(-5 * time.Minute)
+	var out []AgentRosterRow
+	for rows.Next() {
+		var r AgentRosterRow
+		var lastSeen sql.NullTime
+		var avgElapsed sql.NullFloat64
+		var activePressure sql.NullString
+		if err := rows.Scan(
+			&r.AgentID, &r.TotalSessions, &r.ActiveSessions,
+			&lastSeen, &avgElapsed, &r.TotalTokens, &activePressure,
+		); err != nil {
+			return nil, fmt.Errorf("queryAgentRoster: scan: %w", err)
+		}
+		if lastSeen.Valid {
+			r.LastSeen = lastSeen.Time
+		}
+		if avgElapsed.Valid {
+			r.AvgElapsedSec = avgElapsed.Float64
+		}
+		if activePressure.Valid {
+			r.ActivePressure = activePressure.String
+		}
+		// TokensPerSec = aggregate throughput: total tokens across all sessions
+		// divided by (completed sessions × avg elapsed per session).
+		// This gives tokens/sec as if all completed sessions ran sequentially.
+		// Not meaningful for 0 completed sessions or 0 avg elapsed.
+		completedSessions := r.TotalSessions - r.ActiveSessions
+		if completedSessions > 0 && r.AvgElapsedSec > 0 {
+			r.TokensPerSec = float64(r.TotalTokens) / (float64(completedSessions) * r.AvgElapsedSec)
+		}
+		// Status is assigned by the caller after merging tracking config.
+		// Here we only set the DB-derived status.
+		if r.ActiveSessions > 0 {
+			r.Status = "active"
+		} else if lastSeen.Valid && lastSeen.Time.Before(offlineThreshold) {
+			r.Status = "offline"
+		} else {
+			r.Status = "idle"
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // queryETAMinutes is retained for backwards compatibility.
 // It delegates to queryETADetail and returns only the eta_min value.
 func queryETAMinutes(ctx context.Context, db *sql.DB, repo string) *int {
