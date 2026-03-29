@@ -83,6 +83,10 @@ func (s *sessionService) RegisterSession(ctx context.Context, req *daemonv1.Regi
 
 	// Auto-attach assignment from initial_context so that repo/branch
 	// appear in the dashboard immediately for agent_run sessions.
+	// NOTE: branch_states is intentionally not updated here — it is
+	// populated by the gate-check pipeline. The dashboard's primary path
+	// (queryActiveSessionsFromAgentSessions) reads agent_sessions +
+	// agent_assignments which this code writes to.
 	if repo := req.InitialContext["repo"]; repo != "" {
 		if branch := req.InitialContext["branch"]; branch != "" {
 			assignment := &state.AgentAssignment{
@@ -92,6 +96,7 @@ func (s *sessionService) RegisterSession(ctx context.Context, req *daemonv1.Regi
 				Repo:      repo,
 				Branch:    branch,
 				Worktree:  req.InitialContext["cwd"],
+				TaskID:    req.InitialContext["task_id"],
 				Substatus: state.AssignmentSubstatusInProgress,
 			}
 			if err := state.AttachAgentAssignment(ctx, s.server.db, assignment); err != nil {
