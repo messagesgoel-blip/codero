@@ -11,7 +11,6 @@ import { initPipeline, renderPipeline, refreshPipeline } from './renderers/pipel
 import { initTasks, renderTasks, refreshTasks } from './renderers/tasks.js';
 import { initGate, renderGate, refreshGate } from './renderers/gate.js';
 import { initChat, renderChat, refreshChat, renderFloatingChat } from './renderers/chat.js';
-import { initArchives, renderArchives, refreshArchives } from './renderers/archives.js';
 import { initAgents, renderAgents, refreshAgents } from './renderers/agents.js';
 import { initSettings, renderSettings, refreshSettings } from './renderers/settings.js';
 import { initRepos, renderRepos, refreshRepos } from './renderers/repos.js';
@@ -24,7 +23,6 @@ registerRoute('tasks', { init: initTasks, render: renderTasks, refresh: refreshT
 registerRoute('repos', { init: initRepos, render: renderRepos, refresh: refreshRepos });
 registerRoute('gate', { init: initGate, render: renderGate, refresh: refreshGate });
 registerRoute('chat', { init: initChat, render: renderChat, refresh: refreshChat });
-registerRoute('archives', { init: initArchives, render: renderArchives, refresh: refreshArchives });
 registerRoute('agents', { init: initAgents, render: renderAgents, refresh: refreshAgents });
 registerRoute('settings', { init: initSettings, render: renderSettings, refresh: refreshSettings });
 
@@ -96,6 +94,18 @@ if (chatFloatingBtn && chatFloatingPanel) {
     chatFloatingPanel.style.display = visible ? 'none' : 'flex';
     if (!visible) {
       renderFloatingChat(chatFloatingPanel);
+    }
+  });
+}
+
+// --- Header chat toggle ---
+const btnChatToggle = $('btn-chat-toggle');
+if (btnChatToggle) {
+  btnChatToggle.addEventListener('click', () => {
+    if (chatFloatingPanel) {
+      const visible = chatFloatingPanel.style.display !== 'none';
+      chatFloatingPanel.style.display = visible ? 'none' : 'flex';
+      if (!visible) renderFloatingChat(chatFloatingPanel);
     }
   });
 }
