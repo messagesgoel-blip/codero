@@ -417,11 +417,28 @@ func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]Ac
 
 		// Detect stalled agents: heartbeat is fresh but no recent progress.
 		// This catches rate-limited or silently blocked agents.
-		if activityState == "active" || activityState == "waiting" {
-			if s.LastProgressAt.Valid && !s.LastProgressAt.Time.IsZero() {
-				progressAge := time.Since(s.LastProgressAt.Time)
-				heartbeatAge := time.Since(s.LastSeenAt)
-				if heartbeatAge < stalledHeartbeatThreshold && progressAge > stalledProgressThreshold {
+		// Two cases:
+		//   1. progress_at is set but stale → agent produced output before, now silent.
+		//   2. progress_at is NULL → agent has never produced output; use started_at
+		//      as the reference after a startup grace period to avoid false positives.
+		// Only stall-detect actively working agents; "waiting" covers states like
+		// waiting_for_merge_approval where silence is expected, not a problem.
+		if activityState == "active" {
+			heartbeatAge := time.Since(s.LastSeenAt)
+			if heartbeatAge < stalledHeartbeatThreshold {
+				var progressAge time.Duration
+				if s.LastProgressAt.Valid && !s.LastProgressAt.Time.IsZero() {
+					progressAge = time.Since(s.LastProgressAt.Time)
+				} else {
+					// No output ever recorded; measure from session start.
+					// Only fire after stalledStartupGrace so freshly-launched
+					// agents are not immediately flagged.
+					sinceStart := time.Since(s.StartedAt)
+					if sinceStart > stalledStartupGrace {
+						progressAge = sinceStart
+					}
+				}
+				if progressAge > stalledProgressThreshold {
 					activityState = "stalled"
 				}
 			}
@@ -1123,6 +1140,11 @@ const stalledProgressThreshold = 90 * time.Second
 // stalledHeartbeatThreshold is the max heartbeat age for a session to be
 // considered "alive" for stalled detection. Must be alive to be stalled.
 const stalledHeartbeatThreshold = 2 * time.Minute
+
+// stalledStartupGrace is the time after session start during which a NULL
+// progress_at is not treated as stalled. Covers slow-starting agents that
+// haven't produced any output yet.
+const stalledStartupGrace = 3 * time.Minute
 
 // staleFeedThreshold is the age after which a feed is considered stale.
 const staleFeedThreshold = 5 * time.Minute
