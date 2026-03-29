@@ -304,37 +304,35 @@ function _bindExpandToggles() {
   });
 }
 
-// Known agent IDs for tracking toggles.
-const KNOWN_AGENTS = [
-  'ccli', 'claude-pro', 'opencode',
-  'codex', 'codex-a', 'codex-b', 'codex-c', 'codex-d', 'codex-e',
-  'gcb', 'gca', 'gcli-a', 'gcli-b',
-  'cline', 'vibe', 'aider',
-];
-
 function _renderTrackingPanel(sessions, trackingConfig) {
-  const disabledSet = new Set((trackingConfig && trackingConfig.disabled_agents) || []);
-
-  // Merge known agents with any currently active ones
+  const agentList = (trackingConfig && trackingConfig.agents) || [];
   const activeAgents = new Set(sessions.map(s => s.agent));
-  const allAgents = [...new Set([...KNOWN_AGENTS, ...activeAgents])].sort();
 
-  const rows = allAgents.map(agent => {
-    const isDisabled = disabledSet.has(agent);
-    const isActive = activeAgents.has(agent);
+  if (agentList.length === 0 && activeAgents.size === 0) {
+    return '';
+  }
+
+  const rows = agentList.map(a => {
+    const isActive = activeAgents.has(a.agent_id);
     const activeDot = isActive
-      ? '<span style="color:var(--success);margin-right:6px" title="Currently active">&#9679;</span>'
+      ? '<span style="color:var(--success);margin-right:4px" title="Currently active">&#9679;</span>'
       : '';
-    return `<label class="tracking-toggle" style="display:inline-flex;align-items:center;gap:8px;padding:4px 12px;margin:2px 4px;border-radius:6px;background:var(--glass-bg);cursor:pointer">
-      ${activeDot}<span style="min-width:80px">${esc(agent)}</span>
-      <input type="checkbox" data-agent="${esc(agent)}" ${isDisabled ? '' : 'checked'} style="cursor:pointer">
+    const installedBadge = a.installed
+      ? ''
+      : '<span style="color:var(--destructive);font-size:10px;margin-left:4px" title="Binary not found">&#x2717; missing</span>';
+    const alias = a.shim_name !== a.agent_id
+      ? `<span style="color:var(--fg-muted);font-size:11px;margin-left:4px">(${esc(a.shim_name)})</span>`
+      : '';
+    return `<label class="tracking-toggle" style="display:flex;align-items:center;gap:6px;padding:5px 10px;margin:2px 0;border-radius:6px;background:var(--glass-bg);cursor:pointer;min-width:280px">
+      <input type="checkbox" data-agent="${esc(a.agent_id)}" ${a.disabled ? '' : 'checked'} style="cursor:pointer;flex-shrink:0">
+      ${activeDot}<span style="font-weight:500;min-width:70px">${esc(a.agent_id)}</span>${alias}${installedBadge}
     </label>`;
   }).join('');
 
   return `<div class="glass-card" style="margin-top:16px;padding:16px">
     <h3 style="margin:0 0 8px;font-size:14px;color:var(--fg-muted)">Agent Tracking</h3>
-    <div style="display:flex;flex-wrap:wrap">${rows}</div>
-    <p style="margin:8px 0 0;font-size:11px;color:var(--fg-muted)">Unchecked agents bypass session tracking on next launch. Green dot = currently active.</p>
+    <div style="display:flex;flex-wrap:wrap;gap:2px">${rows}</div>
+    <p style="margin:8px 0 0;font-size:11px;color:var(--fg-muted)">Uncheck to disable tracking on next launch. &#9679; = active now. New shims in ~/.codero/bin/ auto-appear.</p>
   </div>`;
 }
 

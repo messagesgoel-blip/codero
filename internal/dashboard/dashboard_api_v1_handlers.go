@@ -780,12 +780,21 @@ func (h *Handler) handleTrackingConfig(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "load config: "+err.Error(), "config_error")
 			return
 		}
-		agents := uc.DisabledAgents
+		agents, err := config.DiscoverAgents(uc)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "discover agents: "+err.Error(), "config_error")
+			return
+		}
+		disabled := uc.DisabledAgents
+		if disabled == nil {
+			disabled = []string{}
+		}
 		if agents == nil {
-			agents = []string{}
+			agents = []config.AgentInfo{}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"disabled_agents": agents,
+			"disabled_agents": disabled,
+			"agents":          agents,
 			"generated_at":    time.Now().UTC(),
 		})
 	case http.MethodPut:
