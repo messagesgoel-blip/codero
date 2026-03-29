@@ -78,7 +78,7 @@ function _renderTabBar(totalCount, filteredCount) {
   const filterVal = _filter.repo || _filter.branch || '';
   const filterInput = `<input class="filter-input" id="sessions-filter" placeholder="filter repo / branch…" value="${esc(filterVal)}">`;
   const clearBtn = filterVal
-    ? `<button class="filter-clear-btn" id="sessions-filter-clear" title="Clear filter">&#x2715;</button>`
+    ? `<button type="button" class="filter-clear-btn" id="sessions-filter-clear" title="Clear filter" aria-label="Clear sessions filter">&#x2715;</button>`
     : '';
   const countBadge = filterVal && filteredCount !== totalCount
     ? `<span class="filter-count">${filteredCount} of ${totalCount}</span>`
@@ -342,7 +342,7 @@ function _renderHistoryTab(archives) {
     ? archives.filter(a =>
         (a.repo || '').toLowerCase().includes(filterVal) ||
         (a.branch || '').toLowerCase().includes(filterVal) ||
-        (a.agent || '').toLowerCase().includes(filterVal))
+        (a.agent || a.ownerAgent || '').toLowerCase().includes(filterVal))
     : archives;
 
   return _renderTimingAnalytics(filtered) + _renderHistoryTable(filtered);

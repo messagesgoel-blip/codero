@@ -175,7 +175,9 @@ function renderCmdResults(query) {
   // Search sessions
   for (const s of store.state.sessions || []) {
     if ((s.agent || '').toLowerCase().includes(q) || (s.repo || '').toLowerCase().includes(q) || (s.branch || '').toLowerCase().includes(q)) {
-      const sessionLabel = `${s.agent} — ${s.repo}/${s.branch}`;
+      const agent = s.agent || '';
+      const repoBranch = [s.repo, s.branch].filter(Boolean).join('/');
+      const sessionLabel = [agent, repoBranch].filter(Boolean).join(' — ');
       items.push({ icon: '&#9881;', text: sessionLabel.length > 60 ? sessionLabel.slice(0, 57) + '…' : sessionLabel, hint: 'Session', action: () => { window.location.hash = '#sessions'; closeCommandPalette(); } });
     }
   }
