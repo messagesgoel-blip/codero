@@ -49,8 +49,17 @@ export function renderSessions() {
   const assignments = store.select('assignments') || [];
   const archives = store.select('archives') || [];
 
+  const filterVal = (_filter.repo || '').toLowerCase();
+  const totalCount = _tab === 'active' ? sessions.length : archives.length;
+  const filteredCount = filterVal
+    ? (_tab === 'active' ? sessions : archives).filter(s =>
+        (s.repo || '').toLowerCase().includes(filterVal) ||
+        (s.branch || '').toLowerCase().includes(filterVal) ||
+        (s.agent || s.ownerAgent || '').toLowerCase().includes(filterVal)).length
+    : totalCount;
+
   const parts = [
-    _renderTabBar(),
+    _renderTabBar(totalCount, filteredCount),
     _tab === 'active'
       ? _renderActiveTab(sessions, assignments)
       : _renderHistoryTab(archives),
@@ -63,11 +72,18 @@ export function renderSessions() {
 
 // --- Tab bar ---
 
-function _renderTabBar() {
+function _renderTabBar(totalCount, filteredCount) {
   const activeBtn = `<button class="tab-btn${_tab === 'active' ? ' active' : ''}" data-tab="active">Active</button>`;
   const historyBtn = `<button class="tab-btn${_tab === 'history' ? ' active' : ''}" data-tab="history">History</button>`;
-  const filterInput = `<input class="filter-input" id="sessions-filter" placeholder="filter repo / branch…" value="${esc(_filter.repo || _filter.branch || '')}">`;
-  return `<div class="tab-bar">${activeBtn}${historyBtn}${filterInput}</div>`;
+  const filterVal = _filter.repo || _filter.branch || '';
+  const filterInput = `<input class="filter-input" id="sessions-filter" placeholder="filter repo / branch…" value="${esc(filterVal)}">`;
+  const clearBtn = filterVal
+    ? `<button type="button" class="filter-clear-btn" id="sessions-filter-clear" title="Clear filter" aria-label="Clear sessions filter">&#x2715;</button>`
+    : '';
+  const countBadge = filterVal && filteredCount !== totalCount
+    ? `<span class="filter-count">${filteredCount} of ${totalCount}</span>`
+    : '';
+  return `<div class="tab-bar">${activeBtn}${historyBtn}${filterInput}${clearBtn}${countBadge}</div>`;
 }
 
 function _bindTabBar() {
@@ -84,6 +100,13 @@ function _bindTabBar() {
     filterEl.addEventListener('input', e => {
       const v = e.target.value.trim();
       _filter = { repo: v, branch: v };
+      renderSessions();
+    });
+  }
+  const clearEl = document.getElementById('sessions-filter-clear');
+  if (clearEl) {
+    clearEl.addEventListener('click', () => {
+      _filter = { repo: '', branch: '' };
       renderSessions();
     });
   }
@@ -319,7 +342,7 @@ function _renderHistoryTab(archives) {
     ? archives.filter(a =>
         (a.repo || '').toLowerCase().includes(filterVal) ||
         (a.branch || '').toLowerCase().includes(filterVal) ||
-        (a.agent || '').toLowerCase().includes(filterVal))
+        (a.agent || a.ownerAgent || '').toLowerCase().includes(filterVal))
     : archives;
 
   return _renderTimingAnalytics(filtered) + _renderHistoryTable(filtered);

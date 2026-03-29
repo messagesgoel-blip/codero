@@ -191,12 +191,14 @@ function buildFindingsBrowser(findings) {
     const activeCls = sev === activeSeverityFilter ? 'active' : '';
     filterHtml += `<button class="filter-btn ${activeCls}" data-severity="${esc(sev)}">${esc(sev)}</button>`;
   }
-  filterHtml += '</div>';
-
-  // Filter findings
+  // Count badge when filtered
   const filtered = activeSeverityFilter === 'ALL'
     ? findings
     : findings.filter(f => String(f.severity).toUpperCase() === activeSeverityFilter);
+  if (activeSeverityFilter !== 'ALL') {
+    filterHtml += `<span class="filter-count">${filtered.length} of ${findings.length}</span>`;
+  }
+  filterHtml += '</div>';
 
   const columns = [
     { label: 'File', key: 'file' },

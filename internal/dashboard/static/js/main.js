@@ -175,7 +175,10 @@ function renderCmdResults(query) {
   // Search sessions
   for (const s of store.state.sessions || []) {
     if ((s.agent || '').toLowerCase().includes(q) || (s.repo || '').toLowerCase().includes(q) || (s.branch || '').toLowerCase().includes(q)) {
-      items.push({ icon: '&#9881;', text: `${s.agent} — ${s.repo}/${s.branch}`, hint: 'Session', action: () => { window.location.hash = '#sessions'; closeCommandPalette(); } });
+      const agent = s.agent || '';
+      const repoBranch = [s.repo, s.branch].filter(Boolean).join('/');
+      const sessionLabel = [agent, repoBranch].filter(Boolean).join(' — ');
+      items.push({ icon: '&#9881;', text: sessionLabel.length > 60 ? sessionLabel.slice(0, 57) + '…' : sessionLabel, hint: 'Session', action: () => { window.location.hash = '#sessions'; closeCommandPalette(); } });
     }
   }
   // Search queue
@@ -205,8 +208,26 @@ function renderCmdResults(query) {
 }
 
 // --- SSE status indicator ---
-bus.on('sse:connected', () => { setText('hb-sse-status', 'SSE'); });
-bus.on('sse:disconnected', () => { setText('hb-sse-status', 'SSE off'); });
+bus.on('sse:connected', () => {
+  setText('hb-sse-status', 'SSE');
+  const el = $('hb-sse-status');
+  if (el) { el.classList.remove('sse-disconnected'); el.title = 'Live updates connected'; }
+  const banner = $('sse-warn-banner');
+  if (banner) banner.remove();
+});
+bus.on('sse:disconnected', () => {
+  setText('hb-sse-status', 'SSE off');
+  const el = $('hb-sse-status');
+  if (el) { el.classList.add('sse-disconnected'); el.title = 'Live updates disconnected — data may be stale'; }
+  // Show warning banner if not already visible
+  if (!$('sse-warn-banner')) {
+    const banner = document.createElement('div');
+    banner.id = 'sse-warn-banner';
+    banner.className = 'sse-warn-banner';
+    banner.textContent = 'Live updates disconnected — data may be stale';
+    document.querySelector('.content')?.prepend(banner);
+  }
+});
 
 // --- Health bar clock ---
 function updateClock() {
