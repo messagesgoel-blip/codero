@@ -342,7 +342,7 @@ func queryActiveSessions(ctx context.Context, db *sql.DB, limit int) ([]ActiveSe
 func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]ActiveSession, error) {
 	threshold := time.Now().UTC().Add(-scheduler.SessionHeartbeatTTL)
 	rows, err := db.QueryContext(ctx, `
-		SELECT session_id, agent_id, mode, started_at, last_seen_at, last_progress_at
+		SELECT session_id, agent_id, mode, started_at, last_seen_at, last_progress_at, last_io_at
 		FROM agent_sessions
 		WHERE ended_at IS NULL
 		ORDER BY last_seen_at DESC`)
@@ -358,13 +358,14 @@ func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]Ac
 		StartedAt      time.Time
 		LastSeenAt     time.Time
 		LastProgressAt sql.NullTime
+		LastIOAt       sql.NullTime
 	}
 
 	var sessions []sessionRow
 	seenSessions := map[string]bool{}
 	for rows.Next() {
 		var s sessionRow
-		if err := rows.Scan(&s.SessionID, &s.AgentID, &s.Mode, &s.StartedAt, &s.LastSeenAt, &s.LastProgressAt); err != nil {
+		if err := rows.Scan(&s.SessionID, &s.AgentID, &s.Mode, &s.StartedAt, &s.LastSeenAt, &s.LastProgressAt, &s.LastIOAt); err != nil {
 			return nil, fmt.Errorf("queryActiveSessions: agent_sessions scan row: %w", err)
 		}
 		if s.SessionID == "" {
@@ -417,13 +418,21 @@ func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]Ac
 
 		// Detect stalled agents: heartbeat is fresh but no recent progress.
 		// This catches rate-limited or silently blocked agents.
-		if activityState == "active" || activityState == "waiting" {
-			if s.LastProgressAt.Valid && !s.LastProgressAt.Time.IsZero() {
-				progressAge := time.Since(s.LastProgressAt.Time)
-				heartbeatAge := time.Since(s.LastSeenAt)
-				if heartbeatAge < stalledHeartbeatThreshold && progressAge > stalledProgressThreshold {
-					activityState = "stalled"
-				}
+		// Two cases:
+		//   1. progress_at is set but stale → agent produced output before, now silent.
+		//   2. progress_at is NULL → agent has never produced output; use started_at
+		//      as the reference after a startup grace period to avoid false positives.
+		// Only stall-detect actively working agents using the codero I/O wrapper.
+		// last_io_at is only set by the wrapper; sessions without it (legacy or
+		// unwrapped) are not subject to I/O-based stall detection.
+		// "waiting" covers states like waiting_for_merge_approval where silence
+		// is expected, so only "active" is checked here.
+		if activityState == "active" &&
+			s.LastIOAt.Valid && !s.LastIOAt.Time.IsZero() {
+			heartbeatAge := time.Since(s.LastSeenAt)
+			ioAge := time.Since(s.LastIOAt.Time)
+			if heartbeatAge < stalledHeartbeatThreshold && ioAge > stalledProgressThreshold {
+				activityState = "stalled"
 			}
 		}
 

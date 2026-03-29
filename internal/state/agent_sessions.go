@@ -53,6 +53,7 @@ type AgentSession struct {
 	StartedAt       time.Time
 	LastSeenAt      time.Time
 	LastProgressAt  *time.Time
+	LastIOAt        *time.Time
 	EndedAt         *time.Time
 	EndReason       string
 }
@@ -201,7 +202,8 @@ func ValidateHeartbeatSecret(ctx context.Context, db *DB, sessionID, secret stri
 }
 
 // UpdateAgentSessionHeartbeat updates the last_seen_at timestamp for a session.
-// When markProgress is true, it also refreshes last_progress_at.
+// When markProgress is true, it also refreshes last_io_at (raw I/O activity for
+// stall detection) and last_progress_at (60-minute compliance rule).
 func UpdateAgentSessionHeartbeat(ctx context.Context, db *DB, sessionID string, markProgress bool) error {
 	now := time.Now().UTC().Truncate(time.Second)
 
@@ -217,8 +219,9 @@ func UpdateAgentSessionHeartbeat(ctx context.Context, db *DB, sessionID string, 
 	args := []any{now}
 	if markProgress {
 		query += `,
+			last_io_at = ?,
 			last_progress_at = ?`
-		args = append(args, now)
+		args = append(args, now, now)
 	}
 	query += `
 		WHERE session_id = ? AND ended_at IS NULL`
@@ -244,6 +247,7 @@ func UpdateAgentSessionHeartbeat(ctx context.Context, db *DB, sessionID string, 
 		contextRow.Session.LastSeenAt = now
 		if markProgress {
 			contextRow.Session.LastProgressAt = &now
+			contextRow.Session.LastIOAt = &now
 		}
 		rule004 := evaluateRule004HeartbeatProgress(now, &contextRow.Session, &contextRow.Assignment)
 		result := "pass"
@@ -273,7 +277,7 @@ func UpdateAgentSessionHeartbeat(ctx context.Context, db *DB, sessionID string, 
 // GetAgentSession retrieves a session by ID.
 func GetAgentSession(ctx context.Context, db *DB, sessionID string) (*AgentSession, error) {
 	const q = `
-		SELECT session_id, agent_id, mode, tmux_session_name, started_at, last_seen_at, last_progress_at, ended_at, end_reason
+		SELECT session_id, agent_id, mode, tmux_session_name, started_at, last_seen_at, last_progress_at, last_io_at, ended_at, end_reason
 		FROM agent_sessions
 		WHERE session_id = ?`
 
@@ -304,7 +308,7 @@ func ConfirmAgentSession(ctx context.Context, db *DB, sessionID, agentID string)
 // ListActiveAgentSessions returns all sessions without ended_at set.
 func ListActiveAgentSessions(ctx context.Context, db *DB) ([]AgentSession, error) {
 	const q = `
-		SELECT session_id, agent_id, mode, tmux_session_name, started_at, last_seen_at, last_progress_at, ended_at, end_reason
+		SELECT session_id, agent_id, mode, tmux_session_name, started_at, last_seen_at, last_progress_at, last_io_at, ended_at, end_reason
 		FROM agent_sessions
 		WHERE ended_at IS NULL
 		ORDER BY last_seen_at DESC`
@@ -322,7 +326,7 @@ func ListActiveAgentSessions(ctx context.Context, db *DB) ([]AgentSession, error
 func ListExpiredAgentSessions(ctx context.Context, db *DB, ttl time.Duration) ([]AgentSession, error) {
 	threshold := time.Now().UTC().Add(-ttl).Truncate(time.Second)
 	const q = `
-		SELECT session_id, agent_id, mode, tmux_session_name, started_at, last_seen_at, last_progress_at, ended_at, end_reason
+		SELECT session_id, agent_id, mode, tmux_session_name, started_at, last_seen_at, last_progress_at, last_io_at, ended_at, end_reason
 		FROM agent_sessions
 		WHERE ended_at IS NULL AND last_seen_at < ?
 		ORDER BY last_seen_at ASC`
@@ -1635,10 +1639,11 @@ func isLiveTaskConstraintError(err error) bool {
 func scanAgentSession(row *sql.Row) (*AgentSession, error) {
 	var s AgentSession
 	var lastProgressAt sql.NullTime
+	var lastIOAt sql.NullTime
 	var endedAt sql.NullTime
 
 	err := row.Scan(
-		&s.SessionID, &s.AgentID, &s.Mode, &s.TmuxSessionName, &s.StartedAt, &s.LastSeenAt, &lastProgressAt, &endedAt, &s.EndReason,
+		&s.SessionID, &s.AgentID, &s.Mode, &s.TmuxSessionName, &s.StartedAt, &s.LastSeenAt, &lastProgressAt, &lastIOAt, &endedAt, &s.EndReason,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1648,6 +1653,9 @@ func scanAgentSession(row *sql.Row) (*AgentSession, error) {
 	}
 	if lastProgressAt.Valid {
 		s.LastProgressAt = &lastProgressAt.Time
+	}
+	if lastIOAt.Valid {
+		s.LastIOAt = &lastIOAt.Time
 	}
 	if endedAt.Valid {
 		s.EndedAt = &endedAt.Time
@@ -1660,14 +1668,18 @@ func scanAgentSessions(rows *sql.Rows) ([]AgentSession, error) {
 	for rows.Next() {
 		var s AgentSession
 		var lastProgressAt sql.NullTime
+		var lastIOAt sql.NullTime
 		var endedAt sql.NullTime
 		if err := rows.Scan(
-			&s.SessionID, &s.AgentID, &s.Mode, &s.TmuxSessionName, &s.StartedAt, &s.LastSeenAt, &lastProgressAt, &endedAt, &s.EndReason,
+			&s.SessionID, &s.AgentID, &s.Mode, &s.TmuxSessionName, &s.StartedAt, &s.LastSeenAt, &lastProgressAt, &lastIOAt, &endedAt, &s.EndReason,
 		); err != nil {
 			return nil, fmt.Errorf("scan agent session row: %w", err)
 		}
 		if lastProgressAt.Valid {
 			s.LastProgressAt = &lastProgressAt.Time
+		}
+		if lastIOAt.Valid {
+			s.LastIOAt = &lastIOAt.Time
 		}
 		if endedAt.Valid {
 			s.EndedAt = &endedAt.Time
