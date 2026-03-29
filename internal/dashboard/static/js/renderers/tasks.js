@@ -13,7 +13,8 @@ import {
 // Lifecycle
 // ---------------------------------------------------------------------------
 
-let expandWired = false;
+let _pageWired = false;
+let _repoFilter = '';
 
 export function initTasks() {
   store.subscribe('queue', () => renderTasks());
@@ -35,16 +36,22 @@ export function renderTasks() {
     return;
   }
 
+  const filteredQueue = _repoFilter
+    ? queue.filter(q => q.repo === _repoFilter)
+    : queue;
+
   const sections = [
     renderQueueStats(stats, queue),
-    renderQueueTable(queue),
+    renderRepoFilterStrip(repos),
+    renderQueueTable(filteredQueue),
     renderReposSection(repos),
   ];
   setHtml(container, sections.join(''));
 
-  if (!expandWired) {
+  if (!_pageWired) {
     wireExpandRows(container);
-    expandWired = true;
+    wireRepoFilter(container);
+    _pageWired = true;
   }
 }
 
@@ -106,6 +113,33 @@ function priorityBadge(p) {
   else if (val >= 5) cls = 'status-warning';
   else if (val >= 1) cls = 'status-info';
   return `<span class="status-chip ${cls}">P${esc(String(val))}</span>`;
+}
+
+// ---------------------------------------------------------------------------
+// Repo filter chip strip
+// ---------------------------------------------------------------------------
+
+function renderRepoFilterStrip(repos) {
+  if (repos.length === 0) return '';
+  const repoNames = [...new Set(repos.map(r => r.repo))].sort();
+  if (repoNames.length <= 1) return ''; // no point filtering a single repo
+
+  const allCls = !_repoFilter ? 'active' : '';
+  let chips = `<button class="repo-filter-chip ${allCls}" data-repo="">All</button>`;
+  for (const name of repoNames) {
+    const cls = _repoFilter === name ? 'active' : '';
+    chips += `<button class="repo-filter-chip ${cls}" data-repo="${esc(name)}">${esc(name)}</button>`;
+  }
+  return `<div class="repo-filter-strip">${chips}</div>`;
+}
+
+function wireRepoFilter(container) {
+  container.addEventListener('click', e => {
+    const chip = e.target.closest('.repo-filter-chip');
+    if (!chip) return;
+    _repoFilter = chip.dataset.repo || '';
+    renderTasks();
+  });
 }
 
 // ---------------------------------------------------------------------------

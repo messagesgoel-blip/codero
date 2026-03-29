@@ -44,11 +44,17 @@ export function renderGate() {
   const findingsHtml = buildFindingsBrowser(gateChecks);
   const complianceHtml = buildComplianceTable(compliance);
 
+  // Findings is the primary focal point — shown first with a count badge.
+  const findingsCount = extractFindings(gateChecks).length;
+  const findingsHeader = findingsCount > 0
+    ? `<div class="glass-card-header">Findings <span class="findings-count-badge">${findingsCount}</span></div>`
+    : `<div class="glass-card-header">Findings</div>`;
+
   setHtml(container,
+    glassCard('', findingsHeader + findingsHtml, { padding: 'none', class: 'gate-findings-card' }) +
+    glassCard('Block Reasons', chartHtml, { class: 'gate-chart-card' }) +
     glassCard('Gate Pipeline', pipelineHtml, { class: 'gate-pipeline-card' }) +
     glassCard('Gate Controls', togglesHtml, { class: 'gate-toggles-card' }) +
-    glassCard('Block Reasons', chartHtml, { class: 'gate-chart-card' }) +
-    glassCard('Findings', findingsHtml, { padding: 'none', class: 'gate-findings-card' }) +
     complianceHtml
   );
 

@@ -455,3 +455,37 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.85em; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* ========== REPO FILTER STRIP (Tasks page) ========== */
+.repo-filter-strip {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding: 10px 0 6px;
+}
+.repo-filter-chip {
+  background: var(--bg-surface-1); border: 1px solid var(--border);
+  color: var(--fg-secondary); border-radius: 20px;
+  padding: 3px 12px; font-size: 0.75rem; cursor: pointer;
+  transition: background var(--duration-fast), color var(--duration-fast), border-color var(--duration-fast);
+}
+.repo-filter-chip:hover { background: var(--bg-surface-2); color: var(--fg-primary); }
+.repo-filter-chip.active {
+  background: var(--accent); color: var(--bg-base); border-color: var(--accent); font-weight: 600;
+}
+
+/* ========== GATE FINDINGS BADGE ========== */
+.findings-count-badge {
+  display: inline-block; background: var(--destructive); color: #fff;
+  font-size: 0.65rem; font-weight: 700; padding: 1px 6px;
+  border-radius: 10px; vertical-align: middle; margin-left: 4px;
+}
+
+/* ========== ACTIVITY FEED (Overview page) ========== */
+.activity-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 0; border-bottom: 1px solid var(--border);
+  font-size: 0.75rem;
+}
+.activity-row:last-child { border-bottom: none; }
+.activity-time { color: var(--fg-muted); min-width: 58px; flex-shrink: 0; }
+.activity-repo { color: var(--fg-secondary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activity-agent { color: var(--fg-muted); font-family: var(--font-mono); font-size: 0.7rem; flex-shrink: 0; }
