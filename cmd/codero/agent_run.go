@@ -1,9 +1,11 @@
+// Package-level note: CODERO_TRACKING=0|false|off disables all session tracking.
 package main
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -11,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -18,6 +21,38 @@ import (
 	"github.com/codero/codero/internal/session"
 	"github.com/spf13/cobra"
 )
+
+// activityTracker records the last time the child process wrote to stdout/stderr.
+// The heartbeat goroutine reads this to decide whether to mark progress.
+type activityTracker struct {
+	lastActivity atomic.Int64 // unix timestamp of last I/O
+}
+
+func newActivityTracker() *activityTracker {
+	t := &activityTracker{}
+	t.lastActivity.Store(time.Now().Unix())
+	return t
+}
+
+// touch records output activity at the current time.
+func (t *activityTracker) touch() { t.lastActivity.Store(time.Now().Unix()) }
+
+// hasRecentActivity returns true if output was seen within the given window.
+func (t *activityTracker) hasRecentActivity(window time.Duration) bool {
+	last := time.Unix(t.lastActivity.Load(), 0)
+	return time.Since(last) < window
+}
+
+// activityWriter wraps an io.Writer and touches the tracker on every write.
+type activityWriter struct {
+	inner   io.Writer
+	tracker *activityTracker
+}
+
+func (w *activityWriter) Write(p []byte) (int, error) {
+	w.tracker.touch()
+	return w.inner.Write(p)
+}
 
 // agentRunCmd implements `codero agent run` — the smart lifecycle wrapper.
 // It registers a session, heartbeats in the background, execs the real agent
@@ -107,13 +142,16 @@ func runAgentWithTracking(ctx context.Context, agentID, mode, daemonAddr, binary
 	sessionID := result.SessionID
 	secret := result.HeartbeatSecret
 
+	// Activity tracker — heartbeat marks progress only when the child produces output.
+	tracker := newActivityTracker()
+
 	// Background heartbeat
 	hbCtx, hbCancel := context.WithCancel(context.Background())
 	defer hbCancel()
-	go heartbeatLoop(hbCtx, client, sessionID, secret)
+	go heartbeatLoop(hbCtx, client, sessionID, secret, tracker)
 
 	// Run child process
-	exitCode := runChild(binaryPath, binaryArgs, sessionID, agentID, daemonAddr)
+	exitCode := runChild(binaryPath, binaryArgs, sessionID, agentID, daemonAddr, tracker)
 
 	// Finalize — use cancelled/lost rather than completed to avoid
 	// triggering gate-must-pass rules that don't apply to wrapper sessions.
@@ -144,8 +182,14 @@ type exitCodeError struct{ code int }
 
 func (e exitCodeError) Error() string { return fmt.Sprintf("child exited with code %d", e.code) }
 
+// progressWindow is how recently the child must have produced output for
+// the heartbeat to mark progress. Aligned with the heartbeat interval so
+// that one silent interval is enough to flip to heartbeat-only mode.
+const progressWindow = 60 * time.Second
+
 // heartbeatLoop sends heartbeats every 30s until the context is cancelled.
-func heartbeatLoop(ctx context.Context, client *daemongrpc.SessionClient, sessionID, secret string) {
+// markProgress is true only when the child produced recent I/O output.
+func heartbeatLoop(ctx context.Context, client *daemongrpc.SessionClient, sessionID, secret string, tracker *activityTracker) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -153,17 +197,18 @@ func heartbeatLoop(ctx context.Context, client *daemongrpc.SessionClient, sessio
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			_ = client.Heartbeat(ctx, sessionID, secret, true)
+			markProgress := tracker.hasRecentActivity(progressWindow)
+			_ = client.Heartbeat(ctx, sessionID, secret, markProgress)
 		}
 	}
 }
 
 // runChild starts the binary as a child process, forwards signals, and returns the exit code.
-func runChild(binaryPath string, args []string, sessionID, agentID, daemonAddr string) int {
+func runChild(binaryPath string, args []string, sessionID, agentID, daemonAddr string, tracker *activityTracker) int {
 	child := exec.Command(binaryPath, args...) // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	child.Stdin = os.Stdin
-	child.Stdout = os.Stdout
-	child.Stderr = os.Stderr
+	child.Stdout = &activityWriter{inner: os.Stdout, tracker: tracker}
+	child.Stderr = &activityWriter{inner: os.Stderr, tracker: tracker}
 	child.Env = append(os.Environ(),
 		"CODERO_SESSION_ID="+sessionID,
 		"CODERO_AGENT_ID="+agentID,

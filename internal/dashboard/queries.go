@@ -415,6 +415,18 @@ func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]Ac
 			prNumber = lookupPRNumber(ctx, db, assignment.Repo, assignment.Branch)
 		}
 
+		// Detect stalled agents: heartbeat is fresh but no recent progress.
+		// This catches rate-limited or silently blocked agents.
+		if activityState == "active" || activityState == "waiting" {
+			if s.LastProgressAt.Valid && !s.LastProgressAt.Time.IsZero() {
+				progressAge := time.Since(s.LastProgressAt.Time)
+				heartbeatAge := time.Since(s.LastSeenAt)
+				if heartbeatAge < stalledHeartbeatThreshold && progressAge > stalledProgressThreshold {
+					activityState = "stalled"
+				}
+			}
+		}
+
 		agentID := resolveOwnerAgent(s.AgentID, "")
 		out = append(out, ActiveSession{
 			SessionID:       s.SessionID,
@@ -1103,6 +1115,14 @@ func sessionPhaseLabel(state string) string {
 		return "unknown"
 	}
 }
+
+// stalledProgressThreshold is how long progress_at can be stale before
+// an agent is considered stalled (alive but not producing output).
+const stalledProgressThreshold = 90 * time.Second
+
+// stalledHeartbeatThreshold is the max heartbeat age for a session to be
+// considered "alive" for stalled detection. Must be alive to be stalled.
+const stalledHeartbeatThreshold = 2 * time.Minute
 
 // staleFeedThreshold is the age after which a feed is considered stale.
 const staleFeedThreshold = 5 * time.Minute
