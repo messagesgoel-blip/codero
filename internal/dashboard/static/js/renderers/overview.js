@@ -68,7 +68,7 @@ export function renderOverview() {
 
 function _renderActivityFeed(events) {
   const recent = events
-    .filter(e => e.createdAt != null)
+    .filter(e => e.createdAt && !Number.isNaN(Date.parse(e.createdAt)))
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
     .slice(0, 10);
   if (recent.length === 0) {
