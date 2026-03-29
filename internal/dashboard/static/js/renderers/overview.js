@@ -2,8 +2,8 @@
 // Reads from the global store and renders metrics, repo table, and gate health.
 
 import store from '../store.js';
-import { loadOverview, loadRepos, loadHealth, loadGateHealth } from '../api.js';
-import { formatPct, formatDuration, relativeTime, esc, html, setHtml, $, statusChip } from '../utils.js';
+import { loadOverview, loadRepos, loadHealth, loadGateHealth, loadEvents } from '../api.js';
+import { formatPct, formatDuration, relativeTime, esc, html, setHtml, $, statusChip, truncId } from '../utils.js';
 import { metricCard, dataTable, glassCard, skeleton } from '../components.js';
 
 // --- Internal state ---
@@ -19,6 +19,7 @@ export function initOverview() {
   _unsubs.push(store.subscribe('overview', () => renderOverview()));
   _unsubs.push(store.subscribe('repos', () => renderOverview()));
   _unsubs.push(store.subscribe('gateHealth', () => renderOverview()));
+  _unsubs.push(store.subscribe('events', () => renderOverview()));
 }
 
 export async function refreshOverview() {
@@ -27,6 +28,7 @@ export async function refreshOverview() {
     loadRepos(),
     loadHealth(),
     loadGateHealth(),
+    loadEvents(),
   ]);
 }
 
@@ -37,6 +39,7 @@ export function renderOverview() {
   const ov = store.select('overview');
   const repos = store.select('repos');
   const gateHealth = store.select('gateHealth');
+  const events = store.select('events') || [];
 
   // Show skeleton while data loads
   if (!ov) {
@@ -49,6 +52,9 @@ export function renderOverview() {
   // ---- Metric strip (4 glass cards) ----
   parts.push(_renderMetricStrip(ov));
 
+  // ---- Live Activity Feed (SSE-driven) ----
+  parts.push(_renderActivityFeed(events));
+
   // ---- Repos table ----
   parts.push(_renderReposTable(repos || []));
 
@@ -59,6 +65,30 @@ export function renderOverview() {
 }
 
 // --- Private renderers ---
+
+function _renderActivityFeed(events) {
+  const recent = events
+    .filter(e => e.createdAt && !Number.isNaN(Date.parse(e.createdAt)))
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .slice(0, 10);
+  if (recent.length === 0) {
+    return glassCard('Live Activity', '<div class="empty-state">No recent events — waiting for agent activity</div>', { class: 'card-activity' });
+  }
+
+  const rows = recent.map(e => {
+    const type = (e.type || 'event').replace(/_/g, ' ');
+    const repoStr = e.repo ? (e.branch ? `${e.repo}/${e.branch}` : e.repo) : '';
+    const agentStr = e.sessionId ? truncId(e.sessionId) : '';
+    return `<div class="activity-row">
+      <span class="activity-time">${e.createdAt ? esc(relativeTime(e.createdAt)) : ''}</span>
+      ${statusChip(type)}
+      ${repoStr ? `<span class="activity-repo">${esc(repoStr)}</span>` : '<span class="activity-repo"></span>'}
+      ${agentStr ? `<code class="activity-agent">${esc(agentStr)}</code>` : ''}
+    </div>`;
+  }).join('');
+
+  return glassCard('Live Activity', `<div style="padding:4px 16px 8px">${rows}</div>`, { class: 'card-activity' });
+}
 
 function _renderMetricStrip(ov) {
   const cards = [
