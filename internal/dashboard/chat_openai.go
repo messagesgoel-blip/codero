@@ -374,6 +374,8 @@ func sessionCheckpointForChat(s ActiveSession) string {
 			return "REVIEWING"
 		case "completed":
 			return "COMPLETED"
+		case "stalled":
+			return "STALLED"
 		}
 	}
 	if s.Task != nil && s.Task.Phase != "" {

@@ -53,7 +53,7 @@ export function statusChip(state) {
 export function statusClass(state) {
   const s = String(state).toLowerCase();
   if (['active', 'pass', 'passing', 'success', 'merged', 'connected'].includes(s)) return 'status-success';
-  if (['blocked', 'fail', 'failing', 'failure', 'changes_requested'].includes(s)) return 'status-destructive';
+  if (['blocked', 'fail', 'failing', 'failure', 'changes_requested', 'stalled'].includes(s)) return 'status-destructive';
   if (['waiting', 'pending', 'queued', 'in_progress', 'gating'].includes(s)) return 'status-warning';
   if (['stale', 'expired', 'lost', 'abandoned', 'cancelled'].includes(s)) return 'status-muted';
   if (['approved', 'merge_ready', 'completed'].includes(s)) return 'status-info';

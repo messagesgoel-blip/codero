@@ -2,7 +2,7 @@
 // Reads from the global store and renders session table, assignments, and compliance.
 
 import store from '../store.js';
-import { loadSessions, loadAssignments, loadCompliance } from '../api.js';
+import { loadSessions, loadAssignments, loadCompliance, loadTrackingConfig, toggleAgentTracking } from '../api.js';
 import {
   esc, html, statusChip, relativeTime, formatDuration, truncId, setHtml, $,
 } from '../utils.js';
@@ -21,6 +21,7 @@ export function initSessions() {
   _unsubs.push(store.subscribe('sessions', () => renderSessions()));
   _unsubs.push(store.subscribe('assignments', () => renderSessions()));
   _unsubs.push(store.subscribe('compliance', () => renderSessions()));
+  _unsubs.push(store.subscribe('trackingConfig', () => renderSessions()));
 }
 
 export async function refreshSessions() {
@@ -28,6 +29,7 @@ export async function refreshSessions() {
     loadSessions(),
     loadAssignments(),
     loadCompliance(),
+    loadTrackingConfig(),
   ]);
 }
 
@@ -45,6 +47,7 @@ export function renderSessions() {
     return;
   }
 
+  const trackingConfig = store.select('trackingConfig');
   const parts = [];
 
   // ---- Metric strip (4 glass cards) ----
@@ -53,6 +56,9 @@ export function renderSessions() {
   // ---- Sessions table (expandable) ----
   parts.push(_renderSessionsTable(sessions, assignments));
 
+  // ---- Agent tracking toggles ----
+  parts.push(_renderTrackingPanel(sessions, trackingConfig));
+
   // ---- Compliance rules summary ----
   parts.push(_renderComplianceTable(compliance));
 
@@ -60,6 +66,7 @@ export function renderSessions() {
 
   // Bind expand-row click handlers after DOM insertion
   _bindExpandToggles();
+  _bindTrackingToggles();
 }
 
 // --- Private renderers ---
@@ -295,4 +302,62 @@ function _bindExpandToggles() {
       expanded.delete(rowId);
     }
   });
+}
+
+function _renderTrackingPanel(sessions, trackingConfig) {
+  const configAgents = (trackingConfig && trackingConfig.agents) || [];
+  const activeAgents = new Set(sessions.map(s => s.agent).filter(Boolean));
+
+  if (configAgents.length === 0 && activeAgents.size === 0) {
+    return '';
+  }
+
+  // Supplement config list with active agents not yet discovered as shims.
+  const configIds = new Set(configAgents.map(a => a.agent_id));
+  const extraAgents = [...activeAgents]
+    .filter(id => !configIds.has(id))
+    .map(id => ({ agent_id: id, shim_name: id, real_binary: '', installed: true, disabled: false }));
+  const agentList = [...configAgents, ...extraAgents];
+
+  const rows = agentList.map(a => {
+    const isActive = activeAgents.has(a.agent_id);
+    const activeDot = isActive
+      ? '<span style="color:var(--success);margin-right:4px" title="Currently active">&#9679;</span>'
+      : '';
+    const installedBadge = a.installed
+      ? ''
+      : '<span style="color:var(--destructive);font-size:10px;margin-left:4px" title="Binary not found">&#x2717; missing</span>';
+    const alias = a.shim_name !== a.agent_id
+      ? `<span style="color:var(--fg-muted);font-size:11px;margin-left:4px">(${esc(a.shim_name)})</span>`
+      : '';
+    return `<label class="tracking-toggle" style="display:flex;align-items:center;gap:6px;padding:5px 10px;margin:2px 0;border-radius:6px;background:var(--glass-bg);cursor:pointer;min-width:280px">
+      <input type="checkbox" data-agent="${esc(a.agent_id)}" ${a.disabled ? '' : 'checked'} style="cursor:pointer;flex-shrink:0">
+      ${activeDot}<span style="font-weight:500;min-width:70px">${esc(a.agent_id)}</span>${alias}${installedBadge}
+    </label>`;
+  }).join('');
+
+  return `<div class="glass-card" style="margin-top:16px;padding:16px">
+    <h3 style="margin:0 0 8px;font-size:14px;color:var(--fg-muted)">Agent Tracking</h3>
+    <div style="display:flex;flex-wrap:wrap;gap:2px">${rows}</div>
+    <p style="margin:8px 0 0;font-size:11px;color:var(--fg-muted)">Uncheck to disable tracking on next launch. &#9679; = active now. New shims in ~/.codero/bin/ auto-appear.</p>
+  </div>`;
+}
+
+function _bindTrackingToggles() {
+  const toggles = document.querySelectorAll('.tracking-toggle input[type="checkbox"]');
+  for (const el of toggles) {
+    el.addEventListener('change', async (e) => {
+      const agent = e.target.dataset.agent;
+      const disabled = !e.target.checked;
+      const prevChecked = !e.target.checked; // previous state before user clicked
+      e.target.disabled = true;
+      try {
+        await toggleAgentTracking(agent, disabled);
+      } catch (err) {
+        e.target.checked = prevChecked;
+      } finally {
+        e.target.disabled = false;
+      }
+    });
+  }
 }
