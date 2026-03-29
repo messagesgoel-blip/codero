@@ -875,8 +875,15 @@ func resolveDaemonAddr(cmd *cobra.Command) string {
 	if addr := os.Getenv("CODERO_DAEMON_ADDR"); addr != "" {
 		return addr
 	}
-	if uc, err := config.LoadUserConfig(); err == nil && uc.DaemonAddr != "" {
-		return uc.DaemonAddr
+	if uc, err := config.LoadUserConfig(); err == nil {
+		if uc.DaemonAddr != "" {
+			return uc.DaemonAddr
+		}
+	} else {
+		loglib.Warn("failed to load user config",
+			loglib.FieldComponent, "cli",
+			"error", err,
+		)
 	}
 	if daemonReachable(defaultDaemonAddr) {
 		return defaultDaemonAddr

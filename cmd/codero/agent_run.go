@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"os/user"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -221,7 +222,7 @@ func buildSessionContext(binaryPath string) map[string]string {
 	if repo := detectGitRemoteFromCwd(); repo != "" {
 		ctx["repo"] = repo
 	}
-	if branch := detectGitBranchFromCwd(); branch != "" {
+	if branch, err := getCurrentBranch(); err == nil && branch != "" {
 		ctx["branch"] = branch
 	}
 
@@ -246,23 +247,11 @@ func detectGitRemoteFromCwd() string {
 	return ""
 }
 
-// detectGitBranchFromCwd returns the current branch name or "".
-func detectGitBranchFromCwd() string {
-	out, err := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}
-
 // baseNameWithoutExt returns the file name without extension.
 func baseNameWithoutExt(path string) string {
-	base := path
-	if idx := strings.LastIndex(base, "/"); idx >= 0 {
-		base = base[idx+1:]
-	}
-	if idx := strings.LastIndex(base, "."); idx >= 0 {
-		base = base[:idx]
+	base := filepath.Base(path)
+	if ext := filepath.Ext(base); ext != "" {
+		base = strings.TrimSuffix(base, ext)
 	}
 	return base
 }
