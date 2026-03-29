@@ -58,6 +58,11 @@ If the daemon is unreachable, runs the binary directly with no tracking.`,
 				return fmt.Errorf("binary not found: %s", binaryPath)
 			}
 
+			// CODERO_TRACKING=0|false|off disables session tracking entirely.
+			if trackingDisabled() {
+				return execBinary(binaryPath, binaryArgs)
+			}
+
 			daemonAddr := resolveDaemonAddr(cmd)
 			if daemonAddr == "" {
 				// No daemon — just exec the binary directly
@@ -257,4 +262,11 @@ func baseNameWithoutExt(path string) string {
 		base = strings.TrimSuffix(base, ext)
 	}
 	return base
+}
+
+// trackingDisabled returns true when the user has set CODERO_TRACKING to a
+// falsy value (0, false, off). Unset or any other value means tracking is on.
+func trackingDisabled() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("CODERO_TRACKING")))
+	return v == "0" || v == "false" || v == "off"
 }
