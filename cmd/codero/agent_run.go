@@ -20,7 +20,9 @@ import (
 	"github.com/codero/codero/internal/config"
 	daemongrpc "github.com/codero/codero/internal/daemon/grpc"
 	"github.com/codero/codero/internal/session"
+	"github.com/creack/pty"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 // activityTracker records the last time the child process wrote to stdout/stderr.
@@ -206,18 +208,94 @@ func heartbeatLoop(ctx context.Context, client *daemongrpc.SessionClient, sessio
 }
 
 // runChild starts the binary as a child process, forwards signals, and returns the exit code.
+// When stdout is a real TTY (e.g. inside tmux), the child is started inside a PTY so that
+// isatty() checks in the child return true and TUI agents render correctly.
+// Activity is tracked by reading the PTY master output stream.
 func runChild(binaryPath string, args []string, sessionID, agentID, daemonAddr string, tracker *activityTracker) int {
 	child := exec.Command(binaryPath, args...) // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-	child.Stdin = os.Stdin
-	child.Stdout = &activityWriter{inner: os.Stdout, tracker: tracker}
-	child.Stderr = &activityWriter{inner: os.Stderr, tracker: tracker}
 	child.Env = append(os.Environ(),
 		"CODERO_SESSION_ID="+sessionID,
 		"CODERO_AGENT_ID="+agentID,
 		"CODERO_DAEMON_ADDR="+daemonAddr,
 	)
 
-	// Forward signals to child
+	stdoutIsTTY := term.IsTerminal(int(os.Stdout.Fd()))
+
+	if stdoutIsTTY {
+		return runChildPTY(child, tracker)
+	}
+	return runChildPiped(child, tracker)
+}
+
+// runChildPTY starts the child inside a pseudo-terminal so TUI agents see a real TTY.
+// It copies PTY master → os.Stdout while tracking write activity.
+func runChildPTY(child *exec.Cmd, tracker *activityTracker) int {
+	ptmx, err := pty.Start(child)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "codero: pty start failed: %v\n", err)
+		return 1
+	}
+	defer ptmx.Close()
+
+	// Resize PTY to match the outer terminal.
+	if sz, err := pty.GetsizeFull(os.Stdout); err == nil {
+		_ = pty.Setsize(ptmx, sz)
+	}
+
+	// Forward SIGWINCH so the child gets window-resize events.
+	winchCh := make(chan os.Signal, 1)
+	signal.Notify(winchCh, syscall.SIGWINCH)
+	go func() {
+		for range winchCh {
+			if sz, err := pty.GetsizeFull(os.Stdout); err == nil {
+				_ = pty.Setsize(ptmx, sz)
+			}
+		}
+	}()
+
+	// Forward INT/TERM to child process group.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		for sig := range sigCh {
+			if child.Process != nil {
+				_ = child.Process.Signal(sig)
+			}
+		}
+	}()
+
+	// Put the outer terminal into raw mode so keystrokes pass through unmodified.
+	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+	if err == nil {
+		defer term.Restore(int(os.Stdin.Fd()), oldState)
+	}
+
+	// stdin → PTY master (user keystrokes reach the child).
+	go func() { _, _ = io.Copy(ptmx, os.Stdin) }()
+
+	// PTY master → stdout with activity tracking.
+	_, _ = io.Copy(&activityWriter{inner: os.Stdout, tracker: tracker}, ptmx)
+
+	signal.Stop(sigCh)
+	close(sigCh)
+	signal.Stop(winchCh)
+	close(winchCh)
+
+	if err := child.Wait(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return exitErr.ExitCode()
+		}
+		// PTY EOF before Wait is normal; ignore.
+	}
+	return 0
+}
+
+// runChildPiped starts the child with plain pipes (non-TTY fallback).
+func runChildPiped(child *exec.Cmd, tracker *activityTracker) int {
+	child.Stdin = os.Stdin
+	child.Stdout = &activityWriter{inner: os.Stdout, tracker: tracker}
+	child.Stderr = &activityWriter{inner: os.Stderr, tracker: tracker}
+
 	sigCh := make(chan os.Signal, 1)
 	done := make(chan struct{})
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -242,7 +320,7 @@ func runChild(binaryPath string, args []string, sessionID, agentID, daemonAddr s
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return exitErr.ExitCode()
 		}
-		fmt.Fprintf(os.Stderr, "codero: failed to run %s: %v\n", binaryPath, err)
+		fmt.Fprintf(os.Stderr, "codero: failed to run child: %v\n", err)
 		return 1
 	}
 	return 0
