@@ -44,7 +44,7 @@ func newLCTestHandler(t *testing.T) (*dashboard.Handler, *sql.DB) {
 	}
 	db := openLCTestDB(t)
 	store := dashboard.NewSettingsStore(t.TempDir())
-	return dashboard.NewHandler(db, store), db
+	return dashboard.NewHandler(db, store, nil), db
 }
 
 func lctestHasExplicitChatBackendEnv() bool {

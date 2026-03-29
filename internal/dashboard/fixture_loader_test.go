@@ -41,7 +41,7 @@ func TestLoadFixtureDir_WithReportJSON(t *testing.T) {
 		t.Errorf("want ReportPath %q, got %q", reportFile, result.ReportPath)
 	}
 	t.Setenv("CODERO_GATE_CHECK_REPORT_PATH", result.ReportPath)
-	h := dashboard.NewHandler(db, dashboard.NewSettingsStore(t.TempDir()))
+	h := dashboard.NewHandler(db, dashboard.NewSettingsStore(t.TempDir()), nil)
 	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/gate-checks", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("want 200, got %d — body: %s", rec.Code, rec.Body.String())
@@ -65,7 +65,7 @@ func TestLoadFixtureDir_WithSessions(t *testing.T) {
 	}
 
 	// Verify via the handler that active-sessions returns both entries.
-	h := dashboard.NewHandler(db, dashboard.NewSettingsStore(t.TempDir()))
+	h := dashboard.NewHandler(db, dashboard.NewSettingsStore(t.TempDir()), nil)
 	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/active-sessions", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("want 200, got %d — body: %s", rec.Code, rec.Body.String())
@@ -101,7 +101,7 @@ func TestLoadFixtureDir_WithActivity(t *testing.T) {
 		t.Fatalf("LoadFixtureDir: %v", err)
 	}
 
-	h := dashboard.NewHandler(db, dashboard.NewSettingsStore(t.TempDir()))
+	h := dashboard.NewHandler(db, dashboard.NewSettingsStore(t.TempDir()), nil)
 	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/activity", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("want 200, got %d — body: %s", rec.Code, rec.Body.String())
@@ -188,7 +188,7 @@ func TestLoadFixtureDir_WithRuns(t *testing.T) {
 	}
 
 	// Verify via the handler that overview returns runs_today > 0.
-	h := dashboard.NewHandler(db, dashboard.NewSettingsStore(t.TempDir()))
+	h := dashboard.NewHandler(db, dashboard.NewSettingsStore(t.TempDir()), nil)
 	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/overview", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("want 200, got %d — body: %s", rec.Code, rec.Body.String())

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/codero/codero/internal/config"
 	"github.com/codero/codero/internal/redis"
 	"github.com/codero/codero/internal/scheduler"
 )
@@ -25,8 +26,9 @@ func newTestMux(t *testing.T, basePath string) http.Handler {
 	client := redis.New(mr.Addr(), "")
 	queue := scheduler.NewQueue(client)
 	slotCounter := scheduler.NewSlotCounter(client)
+	cfg := config.LoadEnv()
 
-	obs := NewObservabilityServer(client, queue, slotCounter, nil, "127.0.0.1", "0", basePath, "test")
+	obs := NewObservabilityServer(client, queue, slotCounter, nil, "127.0.0.1", "0", basePath, "test", cfg)
 	return obs.server.Handler
 }
 
@@ -130,7 +132,8 @@ func TestObservabilityServer_BindAddress(t *testing.T) {
 	queue := scheduler.NewQueue(client)
 	slotCounter := scheduler.NewSlotCounter(client)
 
-	obs := NewObservabilityServer(client, queue, slotCounter, nil, "127.0.0.1", "9876", "/dashboard", "test")
+	cfg := config.LoadEnv()
+	obs := NewObservabilityServer(client, queue, slotCounter, nil, "127.0.0.1", "9876", "/dashboard", "test", cfg)
 	if obs.server.Addr != "127.0.0.1:9876" {
 		t.Errorf("server.Addr: got %q, want 127.0.0.1:9876", obs.server.Addr)
 	}
@@ -142,7 +145,8 @@ func TestObservabilityServer_AllInterfacesBind(t *testing.T) {
 	slotCounter := scheduler.NewSlotCounter(client)
 
 	// Empty host → binds all interfaces.
-	obs := NewObservabilityServer(client, queue, slotCounter, nil, "", "8080", "/dashboard", "test")
+	cfg := config.LoadEnv()
+	obs := NewObservabilityServer(client, queue, slotCounter, nil, "", "8080", "/dashboard", "test", cfg)
 	if obs.server.Addr != ":8080" {
 		t.Errorf("server.Addr: got %q, want :8080", obs.server.Addr)
 	}

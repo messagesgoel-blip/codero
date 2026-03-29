@@ -202,7 +202,7 @@ func TestGateCheck_LoadReportTUISnapshot_UsesProvidedReport(t *testing.T) {
 		}
 	}
 
-	h := dashboard.NewHandler(nil, dashboard.NewSettingsStore(t.TempDir()))
+	h := dashboard.NewHandler(nil, dashboard.NewSettingsStore(t.TempDir()), nil)
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/dashboard/gate-checks", nil)

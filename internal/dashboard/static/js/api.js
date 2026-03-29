@@ -98,6 +98,10 @@ export async function loadRepos() {
   store.set({ repos: normalizeRepos(data) });
 }
 
+export async function loadNodeRepos() {
+  return apiFetch('node-repos');
+}
+
 export async function loadEvents() {
   const data = await apiFetch('activity');
   store.set({ events: normalizeEvents(data) });
@@ -146,6 +150,10 @@ export async function loadTrackingConfig() {
 export async function loadAgents() {
   const data = await apiFetch('/api/v1/dashboard/agents');
   store.set({ agents: normalizeAgents(data) });
+}
+
+export async function loadAgentSessions(agentId) {
+  return apiFetch(`/api/v1/dashboard/agents/${encodeURIComponent(agentId)}/sessions`);
 }
 
 export async function toggleAgentTracking(agentId, disabled) {

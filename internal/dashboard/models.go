@@ -357,6 +357,25 @@ type DashboardHealth struct {
 	SchemaVersion        string              `json:"schema_version"`
 }
 
+// NodeRepoSummary is a summary of a repository found on the node.
+type NodeRepoSummary struct {
+	Name      string    `json:"name"`
+	Path      string    `json:"path"`
+	Connected bool      `json:"connected"` // true if in Config.Repos
+	IsOrphan  bool      `json:"is_orphan"`  // true if git repo but not in Config.Repos
+	LastScan  time.Time `json:"last_scan"`
+}
+
+// NodeReposResponse is the response for GET /api/v1/dashboard/node-repos.
+type NodeReposResponse struct {
+	Repos         []NodeRepoSummary `json:"repos"`
+	Total         int               `json:"total"`
+	Connected     int               `json:"connected"`
+	Orphans       int               `json:"orphans"`
+	GeneratedAt   time.Time         `json:"generated_at"`
+	SchemaVersion string            `json:"schema_version"`
+}
+
 // GateCheckStatus mirrors gatecheck.CheckStatus for dashboard JSON.
 type GateCheckStatus = string
 

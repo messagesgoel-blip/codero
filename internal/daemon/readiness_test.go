@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/codero/codero/internal/config"
 	"github.com/codero/codero/internal/redis"
 	"github.com/codero/codero/internal/scheduler"
 )
@@ -23,7 +24,8 @@ func newTestObsServer(t *testing.T) *ObservabilityServer {
 	client := redis.New(mr.Addr(), "")
 	queue := scheduler.NewQueue(client)
 	slotCounter := scheduler.NewSlotCounter(client)
-	return NewObservabilityServer(client, queue, slotCounter, nil, "127.0.0.1", "0", "", "test")
+	cfg := config.LoadEnv()
+	return NewObservabilityServer(client, queue, slotCounter, nil, "127.0.0.1", "0", "", "test", cfg)
 }
 
 func TestReady_NotReadyBeforeMarkReady(t *testing.T) {

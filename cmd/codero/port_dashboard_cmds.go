@@ -129,7 +129,7 @@ Examples:
 				if openBrws {
 					return fmt.Errorf("--open cannot be combined with --serve-fixture")
 				}
-				return runDashboardFixture(effectiveHost, effectivePort, normalizedBasePath, repoPath, reportPath, fixtureDirPath, checkMode, reportPathSet)
+				return runDashboardFixture(effectiveHost, effectivePort, normalizedBasePath, repoPath, reportPath, fixtureDirPath, checkMode, reportPathSet, cfg)
 			}
 
 			if checkMode {
@@ -237,7 +237,7 @@ func validateGateChecksBody(body []byte) error {
 	return nil
 }
 
-func runDashboardFixture(bindHost string, bindPort int, basePath, repoPath, reportPath, fixtureDirPath string, checkMode, reportPathSet bool) error {
+func runDashboardFixture(bindHost string, bindPort int, basePath, repoPath, reportPath, fixtureDirPath string, checkMode, reportPathSet bool, cfg *configpkg.Config) error {
 	basePath = normalizeDashboardBasePath(basePath)
 	if repoPath == "" {
 		wd, err := os.Getwd()
@@ -336,7 +336,7 @@ func runDashboardFixture(bindHost string, bindPort int, basePath, repoPath, repo
 	}
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		port := bindPort + attempt
-		obs = daemon.NewObservabilityServer(redisClient, nil, nil, db.Unwrap(), bindHost, strconv.Itoa(port), basePath, version)
+		obs = daemon.NewObservabilityServer(redisClient, nil, nil, db.Unwrap(), bindHost, strconv.Itoa(port), basePath, version, cfg)
 		obs.Start()
 
 		baseURL = dashboardBaseURL(bindHost, port)

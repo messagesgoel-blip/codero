@@ -45,7 +45,7 @@ func TestAssembleChatContextMarkdown_ScopesAndBudget(t *testing.T) {
 	t.Setenv("CODERO_CHAT_MAX_CONTEXT_SIZE", "2000")
 	db := openChatOpenAITestDB(t)
 
-	h := NewHandler(db, NewSettingsStore(t.TempDir()))
+	h := NewHandler(db, NewSettingsStore(t.TempDir()), nil)
 	now := time.Now().UTC()
 
 	for i := 1; i <= 5; i++ {

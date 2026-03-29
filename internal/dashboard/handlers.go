@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/codero/codero/internal/config"
 	"github.com/codero/codero/internal/gate"
 	loglib "github.com/codero/codero/internal/log"
 )
@@ -38,16 +40,18 @@ type Handler struct {
 	settings *SettingsStore
 	convos   *ConversationStore
 	chatCfg  ChatConfig
+	cfg      *config.Config
 }
 
 // NewHandler creates a dashboard Handler backed by db and the given settings store.
-func NewHandler(db *sql.DB, settings *SettingsStore) *Handler {
-	cfg := LoadChatConfig()
+func NewHandler(db *sql.DB, settings *SettingsStore, cfg *config.Config) *Handler {
+	chatCfg := LoadChatConfig()
 	return &Handler{
 		db:       db,
 		settings: settings,
-		convos:   NewConversationStore(cfg.MaxHistory, cfg.ConversationTTL),
-		chatCfg:  cfg,
+		convos:   NewConversationStore(chatCfg.MaxHistory, chatCfg.ConversationTTL),
+		chatCfg:  chatCfg,
+		cfg:      cfg,
 	}
 }
 
@@ -56,6 +60,7 @@ func NewHandler(db *sql.DB, settings *SettingsStore) *Handler {
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/dashboard/overview", h.handleOverview)
 	mux.HandleFunc("/api/v1/dashboard/repos", h.handleRepos)
+	mux.HandleFunc("/api/v1/dashboard/node-repos", h.handleNodeRepos)
 	mux.HandleFunc("/api/v1/dashboard/runs", h.handleRuns)
 	mux.HandleFunc("/api/v1/dashboard/activity", h.handleActivity)
 	mux.HandleFunc("/api/v1/dashboard/block-reasons", h.handleBlockReasons)
@@ -110,6 +115,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 	// Agent fleet roster
 	mux.HandleFunc("/api/v1/dashboard/agents", h.handleAgents)
+	// Agent recent sessions (sub-path: /agents/{id}/sessions)
+	mux.HandleFunc("/api/v1/dashboard/agents/", h.handleAgentSessions)
 }
 
 // handleOverview serves GET /api/v1/dashboard/overview.
@@ -172,6 +179,60 @@ func (h *Handler) handleRepos(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"repos":        repos,
 		"generated_at": time.Now().UTC(),
+	})
+}
+
+// handleNodeRepos serves GET /api/v1/dashboard/node-repos.
+func (h *Handler) handleNodeRepos(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "")
+		return
+	}
+	setCORSHeaders(w)
+
+	// Scan path precedence: CODERO_REPO_PATH parent > /srv/storage/repo/ > CWD parent
+	scanPath := os.Getenv("CODERO_REPO_PATH")
+	if scanPath != "" {
+		scanPath = filepath.Dir(scanPath)
+	} else {
+		// Fallback for this specific node environment
+		if info, err := os.Stat("/srv/storage/repo/"); err == nil && info.IsDir() {
+			scanPath = "/srv/storage/repo/"
+		} else {
+			cwd, _ := os.Getwd()
+			scanPath = filepath.Dir(cwd)
+		}
+	}
+
+	var connectedRepos []string
+	if h.cfg != nil {
+		connectedRepos = h.cfg.Repos
+	}
+	repos, err := ScanNodeRepos(r.Context(), scanPath, connectedRepos)
+	if err != nil {
+		loglib.Error("dashboard: node-repos scan failed",
+			loglib.FieldComponent, "dashboard", "path", scanPath, "error", err)
+		writeError(w, http.StatusInternalServerError, "node-repos scan failed", "scan_error")
+		return
+	}
+
+	connectedCount := 0
+	orphanCount := 0
+	for _, repo := range repos {
+		if repo.Connected {
+			connectedCount++
+		} else {
+			orphanCount++
+		}
+	}
+
+	writeJSON(w, http.StatusOK, NodeReposResponse{
+		Repos:         repos,
+		Total:         len(repos),
+		Connected:     connectedCount,
+		Orphans:       orphanCount,
+		GeneratedAt:   time.Now().UTC(),
+		SchemaVersion: SchemaVersionV1,
 	})
 }
 

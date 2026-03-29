@@ -18,7 +18,6 @@ export function initOverview() {
 
   _unsubs.push(store.subscribe('overview', () => renderOverview()));
   _unsubs.push(store.subscribe('repos', () => renderOverview()));
-  _unsubs.push(store.subscribe('health', () => _updateHealthBar()));
   _unsubs.push(store.subscribe('gateHealth', () => renderOverview()));
 }
 
@@ -152,30 +151,3 @@ function _renderGateHealthTable(gates) {
   return glassCard('Gate Health', tableHtml, { padding: 'none', class: 'card-gate-health' });
 }
 
-// --- Health bar (DB / Redis / GitHub status dots) ---
-
-function _updateHealthBar() {
-  const h = store.select('health');
-  if (!h) return;
-
-  const dotMap = {
-    'health-db': h.db,
-    'health-redis': h.redis,
-    'health-github': h.github,
-  };
-
-  for (const [id, status] of Object.entries(dotMap)) {
-    const el = $(id);
-    if (!el) continue;
-    el.classList.remove('dot-ok', 'dot-warn', 'dot-fail', 'dot-unknown');
-    if (status === true || status === 'ok' || status === 'connected') {
-      el.classList.add('dot-ok');
-    } else if (status === false || status === 'fail' || status === 'error') {
-      el.classList.add('dot-fail');
-    } else if (status === 'degraded' || status === 'slow') {
-      el.classList.add('dot-warn');
-    } else {
-      el.classList.add('dot-unknown');
-    }
-  }
-}
