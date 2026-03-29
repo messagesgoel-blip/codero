@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -62,6 +63,8 @@ func (t *activityTracker) hasRecentActivity(window time.Duration) bool {
 
 // activityWriter wraps an io.Writer and touches the tracker on every write.
 // If tail is non-nil, output is also tee'd to the tail file (capped at tailMaxBytes).
+// ANSI escape sequences are stripped before writing to the tail file so that
+// `codero tail` produces readable plain text.
 type activityWriter struct {
 	inner   io.Writer
 	tracker *activityTracker
@@ -71,13 +74,30 @@ type activityWriter struct {
 
 const tailMaxBytes = 4 * 1024 * 1024 // 4 MB cap per session tail file
 
+// ansiStripper matches ANSI/VT100 escape sequences:
+//   - CSI sequences:  ESC [ <params> <final>
+//   - OSC sequences:  ESC ] <data> BEL  or  ESC ] <data> ST
+//   - Two-byte seqs:  ESC <single char>
+//   - Carriage return: \r (cursor-to-column-0 used by TUIs)
+var ansiStripper = regexp.MustCompile(
+	`\x1b\[[0-9;?]*[A-Za-z@]` + // CSI
+		`|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)` + // OSC
+		`|\x1b[^[\]]` + // 2-byte (ESC x)
+		`|\r`,
+)
+
+func stripANSI(b []byte) []byte {
+	return ansiStripper.ReplaceAll(b, nil)
+}
+
 func (w *activityWriter) Write(p []byte) (int, error) {
 	w.tracker.touch()
 	if w.tail != nil && w.written < tailMaxBytes {
+		plain := stripANSI(p)
 		remaining := tailMaxBytes - w.written
-		chunk := p
+		chunk := plain
 		if int64(len(chunk)) > remaining {
-			chunk = p[:remaining]
+			chunk = plain[:remaining]
 		}
 		n, _ := w.tail.Write(chunk)
 		w.written += int64(n)
