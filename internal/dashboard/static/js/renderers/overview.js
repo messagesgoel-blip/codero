@@ -76,7 +76,7 @@ function _renderActivityFeed(events) {
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
     .slice(0, 10);
   if (recent.length === 0) {
-    return glassCard('Live Activity', '<div class="empty-state">No recent events — waiting for agent activity</div>', { class: 'card-activity' });
+    return glassCard('Live Activity', '<div class="empty-state">No recent events</div>', { class: 'card-activity' });
   }
 
   const rows = recent.map(e => {

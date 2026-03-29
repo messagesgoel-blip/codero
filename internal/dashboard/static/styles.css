@@ -490,3 +490,26 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.85em; }
 .activity-time { color: var(--fg-muted); min-width: 58px; flex-shrink: 0; }
 .activity-repo { color: var(--fg-secondary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .activity-agent { color: var(--fg-muted); font-family: var(--font-mono); font-size: 0.7rem; flex-shrink: 0; }
+
+/* ========== FILTER CLEAR BUTTON + COUNT ========== */
+.filter-clear-btn {
+  background: none; border: 1px solid var(--border); color: var(--fg-muted);
+  border-radius: 50%; width: 20px; height: 20px; line-height: 18px;
+  font-size: 0.65rem; cursor: pointer; padding: 0; text-align: center;
+  transition: background var(--duration-fast), color var(--duration-fast);
+}
+.filter-clear-btn:hover { background: var(--bg-surface-2); color: var(--fg-primary); }
+.filter-count {
+  font-size: 0.72rem; color: var(--fg-muted); align-self: center; margin-left: 2px;
+}
+
+/* ========== SSE DISCONNECT BANNER ========== */
+.sse-warn-banner {
+  background: color-mix(in srgb, var(--warning) 15%, transparent);
+  border: 1px solid var(--warning);
+  color: var(--fg-primary);
+  font-size: 0.8rem; padding: 6px 14px;
+  border-radius: 6px; margin-bottom: 10px;
+  text-align: center;
+}
+.sse-disconnected { color: var(--warning) !important; font-weight: 600; }

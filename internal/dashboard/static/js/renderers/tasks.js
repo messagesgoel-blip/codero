@@ -104,7 +104,7 @@ function renderQueueTable(queue) {
     { label: 'Wait Time', key: 'submissionTime', render: r => relativeTime(r.submissionTime) },
   ];
 
-  const table = dataTable('queue-table', columns, queue, { empty: 'Queue is empty' });
+  const table = dataTable('queue-table', columns, queue, { empty: 'No queued tasks' });
   return glassCard('Queue', table, { padding: 'none' });
 }
 
