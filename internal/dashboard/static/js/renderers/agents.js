@@ -26,6 +26,7 @@ export async function refreshAgents() {
 export function renderAgents() {
   const container = $('page-agents');
   if (!container) return;
+  if (store.state.ui.activeTab !== 'agents') return;
 
   if (!store.select('agents')) {
     setHtml(container, skeleton(6));
@@ -167,7 +168,7 @@ function _bindExpandToggles() {
     const isHidden = expandRow.classList.contains('hidden');
     expandRow.classList.toggle('hidden', !isHidden);
     const chevron = tr.querySelector('.chevron');
-    if (chevron) chevron.classList.toggle('chevron-open', isHidden);
+    if (chevron) chevron.classList.toggle('open', isHidden);
     if (isHidden) _loadAgentSessions(rowId);
   });
 }

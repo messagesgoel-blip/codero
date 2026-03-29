@@ -35,6 +35,7 @@ export async function refreshSessions() {
 export function renderSessions() {
   const container = $('page-sessions');
   if (!container) return;
+  if (store.state.ui.activeTab !== 'sessions') return;
 
   if (_tab === 'active' && !store.select('sessions')) {
     setHtml(container, skeleton(6));
@@ -293,7 +294,7 @@ function _bindExpandToggles() {
       expandRow.classList.toggle('hidden', !isHidden);
 
       const chevron = tr.querySelector('.chevron');
-      if (chevron) chevron.classList.toggle('chevron-open', isHidden);
+      if (chevron) chevron.classList.toggle('open', isHidden);
 
       const expanded = store.select('ui').expandedRows;
       if (isHidden) {

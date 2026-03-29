@@ -6,61 +6,112 @@ import { loadNodeRepos } from '../api.js';
 import {
   esc, $, setHtml, statusChip, relativeTime,
 } from '../utils.js';
-import { glassCard, metricCard } from '../components.js';
+import { glassCard, metricCard, skeleton } from '../components.js';
 
-export default async function renderRepos() {
-  setHtml('header-title', 'Node Repositories');
-  setHtml('main-content', '<div class=\"loading\">Scanning node repositories...</div>');
+let _initialized = false;
 
+// --- Public API ---
+
+export function initRepos() {
+  if (_initialized) return;
+  _initialized = true;
+  store.subscribe('nodeRepos', () => renderRepos());
+  // Bind connect button clicks once on the container (event delegation survives setHtml re-renders)
+  const container = $('page-repos');
+  if (container) _bindConnectButtons(container);
+}
+
+export async function refreshRepos() {
   try {
     const data = await loadNodeRepos();
     store.set({ nodeRepos: data });
-    _render(data);
   } catch (err) {
-    setHtml('main-content', `<div class=\"error\">Failed to scan repositories: ${esc(err.message)}</div>`);
+    store.set({ nodeRepos: { error: err.message } });
   }
 }
 
-function _render(data) {
-  const { repos, connected, orphans, total } = data;
+export function renderRepos() {
+  const container = $('page-repos');
+  if (!container) return;
+  if (store.state.ui.activeTab !== 'repos') return;
 
-  const html = `
-    <div class=\"metric-strip\">
-      ${metricCard('Total Repos', total)}
-      ${metricCard('Connected', connected, { accent: 'success' })}
-      ${metricCard('Orphans', orphans, { accent: orphans > 0 ? 'warn' : '' })}
-    </div>
+  const data = store.select('nodeRepos');
 
-    ${glassCard('All Repositories on Node', `
-      <table class=\"data-table\">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Status</th>
-            <th>Path</th>
-            <th>Last Scanned</th>
-            <th>Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${repos.map(r => `
-            <tr>
-              <td class=\"bold\">${esc(r.name)}</td>
-              <td>${r.connected ? statusChip('connected', { accent: 'success' }) : statusChip('orphan', { accent: 'warn' })}</td>
-              <td class=\"mono smaller secondary\">${esc(r.path)}</td>
-              <td class=\"secondary\">${relativeTime(r.last_scan)}</td>
-              <td>
-                ${r.connected 
-                  ? `<button class=\"btn-ghost btn-sm\" disabled>Connected</button>` 
-                  : `<button class=\"btn-primary btn-sm\" onclick=\"alert('Connection workflow for ${esc(r.name)} coming soon')\">Connect</button>`
-                }
-              </td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    `)}
-  `;
+  if (!data) {
+    setHtml(container, skeleton(4));
+    return;
+  }
 
-  setHtml('main-content', html);
+  if (data.error) {
+    setHtml(container, glassCard('Node Repositories',
+      `<div class="empty-state">Failed to scan: ${esc(data.error)}</div>`));
+    return;
+  }
+
+  const { repos = [], connected = 0, orphans = 0, total = 0 } = data;
+
+  const metricsHtml = `<div class="metric-strip">
+    ${metricCard(String(total), 'Total Repos', 'var(--fg-muted)')}
+    ${metricCard(String(connected), 'Connected', 'var(--success)')}
+    ${metricCard(String(orphans), 'Orphans', orphans > 0 ? 'var(--warning)' : 'var(--fg-muted)')}
+  </div>`;
+
+  const columns = [
+    { key: 'name', label: 'Name' },
+    {
+      key: 'connected',
+      label: 'Status',
+      render: r => r.connected ? statusChip('connected') : statusChip('orphan'),
+    },
+    { key: 'path', label: 'Path', class: 'col-mono' },
+    {
+      key: 'last_scan',
+      label: 'Last Scanned',
+      render: r => esc(relativeTime(r.last_scan)),
+    },
+    {
+      key: '_action',
+      label: 'Action',
+      render: r => r.connected
+        ? `<button class="status-chip status-muted" disabled>Connected</button>`
+        : `<button class="status-chip status-info connect-btn" data-repo="${esc(r.name)}">Connect</button>`,
+    },
+  ];
+
+  const tableHtml = glassCard('All Repositories on Node',
+    metricsHtml + `<div style="padding:0 16px 16px">` +
+    `<p class="text-muted" style="font-size:12px;margin:0 0 12px">Showing all git repositories detected on this node. Connect orphan repos to bring them under Codero management.</p>` +
+    // dataTable expects rows; build inline since column render is custom enough
+    _buildTable(columns, repos) +
+    `</div>`,
+    { padding: 'none', class: 'card-repos' });
+
+  setHtml(container, tableHtml);
+}
+
+function _buildTable(columns, rows) {
+  if (rows.length === 0) {
+    return '<div class="empty-state">No repositories found on node</div>';
+  }
+
+  const thead = `<tr>${columns.map(c => `<th>${esc(c.label)}</th>`).join('')}</tr>`;
+  const tbody = rows.map(r => {
+    const cells = columns.map(c => {
+      const val = c.render ? c.render(r) : esc(String(r[c.key] ?? ''));
+      return `<td${c.class ? ` class="${c.class}"` : ''}>${val}</td>`;
+    }).join('');
+    return `<tr>${cells}</tr>`;
+  }).join('');
+
+  return `<table class="data-table"><thead>${thead}</thead><tbody>${tbody}</tbody></table>`;
+}
+
+function _bindConnectButtons(container) {
+  container.addEventListener('click', e => {
+    const btn = e.target.closest('.connect-btn');
+    if (!btn) return;
+    const repoName = btn.dataset.repo || '';
+    // Connection workflow placeholder — will be wired to API in a future PR
+    alert(`Connection workflow for "${repoName}" coming soon`);
+  });
 }

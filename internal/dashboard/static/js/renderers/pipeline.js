@@ -26,6 +26,7 @@ export async function refreshPipeline() {
 export function renderPipeline() {
   const container = $('page-pipeline');
   if (!container) return;
+  if (store.state.ui.activeTab !== 'pipeline') return;
 
   const pipeline = store.select('pipeline') || [];
   const assignments = store.select('assignments') || [];
