@@ -183,7 +183,7 @@ export function fileDropZone(id) {
 export function sparklineChart(values, opts = {}) {
   const w = opts.width || 120;
   const h = opts.height || 30;
-  const color = opts.color || 'var(--accent)';
+  const color = opts.color || 'var(--accent-warm)';
   if (!values || values.length < 2) {
     // Flat line when no data
     return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" class="sparkline"><line x1="0" y1="${h / 2}" x2="${w}" y2="${h / 2}" stroke="${color}" stroke-width="1.5" opacity="0.4"/></svg>`;
