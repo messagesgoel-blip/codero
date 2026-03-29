@@ -267,6 +267,17 @@ type FeedbackHistoryResponse struct {
 	GeneratedAt   time.Time      `json:"generated_at"`
 }
 
+// ScorecardResponse is the response for GET /api/v1/dashboard/scorecard.
+type ScorecardResponse struct {
+	GatePassRate    string    `json:"gatePassRate"`
+	AvgCycleTime    string    `json:"avgCycleTime"`
+	MergeRate       string    `json:"mergeRate"`
+	ComplianceScore string    `json:"complianceScore"`
+	Summary         string    `json:"summary"`
+	SchemaVersion   string    `json:"schema_version"`
+	GeneratedAt     time.Time `json:"generated_at"`
+}
+
 func (h *Handler) handleFeedback(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "")
@@ -1108,5 +1119,24 @@ func (h *Handler) handleSessionMetrics(w http.ResponseWriter, r *http.Request) {
 		"compact_count":    compactCount,
 		"requests":         requests,
 		"generated_at":     time.Now().UTC(),
+	})
+}
+
+func (h *Handler) handleScorecard(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "")
+		return
+	}
+	setCORSHeaders(w)
+
+	// Stub response — real aggregation is a follow-up
+	writeJSON(w, http.StatusOK, ScorecardResponse{
+		GatePassRate:    "—",
+		AvgCycleTime:    "—",
+		MergeRate:       "—",
+		ComplianceScore: "—",
+		Summary:         "Scorecard data aggregation not yet implemented.",
+		SchemaVersion:   SchemaVersionV1,
+		GeneratedAt:     time.Now().UTC(),
 	})
 }
