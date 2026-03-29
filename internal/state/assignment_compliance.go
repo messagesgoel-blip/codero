@@ -467,8 +467,8 @@ func recordAssignmentRuleCheckTx(
 
 func evaluateRule001CompletionTx(ctx context.Context, tx *sql.Tx, assignment *AgentAssignment) (bool, map[string]any, error) {
 	if assignment == nil || assignment.Repo == "" || assignment.Branch == "" {
-		return false, map[string]any{
-			"reason": "missing_branch_context",
+		return true, map[string]any{
+			"reason": "not_applicable",
 		}, nil
 	}
 

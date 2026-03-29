@@ -67,10 +67,12 @@ func agentRunCmd(configPath *string) *cobra.Command {
 	var (
 		agentID string
 		mode    string
+		taskID  string
+		repo    string
 	)
 
 	cmd := &cobra.Command{
-		Use:   "run [--agent-id name] [--mode mode] -- /path/to/binary [args...]",
+		Use:   "run [--agent-id name] [--mode mode] [--task-id id] [--repo owner/repo] -- /path/to/binary [args...]",
 		Short: "Run an agent binary with automatic session tracking",
 		Long: `Wraps any agent binary with codero session lifecycle management.
 Registers a session, heartbeats in the background, and finalizes on exit.
@@ -108,7 +110,7 @@ If the daemon is unreachable, runs the binary directly with no tracking.`,
 				return execBinary(binaryPath, binaryArgs)
 			}
 
-			err := runAgentWithTracking(cmd.Context(), agentID, mode, daemonAddr, binaryPath, binaryArgs)
+			err := runAgentWithTracking(cmd.Context(), agentID, mode, taskID, repo, daemonAddr, binaryPath, binaryArgs)
 			var exitErr exitCodeError
 			if errors.As(err, &exitErr) {
 				os.Exit(exitErr.code)
@@ -119,12 +121,14 @@ If the daemon is unreachable, runs the binary directly with no tracking.`,
 
 	cmd.Flags().StringVar(&agentID, "agent-id", "", "agent identifier (defaults to binary name)")
 	cmd.Flags().StringVar(&mode, "mode", "coding", "session mode label")
+	cmd.Flags().StringVar(&taskID, "task-id", "", "task identifier to associate with this session (e.g. COD-123)")
+	cmd.Flags().StringVar(&repo, "repo", "", "repository override in owner/repo format (defaults to git remote detection)")
 
 	return cmd
 }
 
 // runAgentWithTracking registers, heartbeats, runs the child, and finalizes.
-func runAgentWithTracking(ctx context.Context, agentID, mode, daemonAddr, binaryPath string, binaryArgs []string) error {
+func runAgentWithTracking(ctx context.Context, agentID, mode, taskID, repoOverride, daemonAddr, binaryPath string, binaryArgs []string) error {
 	// Connect to daemon
 	client, err := daemongrpc.NewSessionClient(daemonAddr)
 	if err != nil {
@@ -136,6 +140,12 @@ func runAgentWithTracking(ctx context.Context, agentID, mode, daemonAddr, binary
 
 	// Build rich metadata
 	initialContext := buildSessionContext(binaryPath)
+	if taskID != "" {
+		initialContext["task_id"] = taskID
+	}
+	if repoOverride != "" {
+		initialContext["repo"] = repoOverride
+	}
 
 	result, err := client.RegisterWithContext(ctx, agentID, mode, initialContext)
 	if err != nil {
