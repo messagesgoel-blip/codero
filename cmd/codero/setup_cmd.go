@@ -137,6 +137,7 @@ func runSetup(force bool) error {
 	}
 
 	fmt.Println("  ✓ Setup complete. Launch any agent normally — sessions auto-track.")
+	fmt.Println("  Tip: Set CODERO_TRACKING=0 to disable session tracking for any agent.")
 	if daemonReachable(daemonAddr) {
 		fmt.Printf("    Dashboard: http://%s/dashboard/\n", daemonAddr)
 	}
