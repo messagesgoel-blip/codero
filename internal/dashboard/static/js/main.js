@@ -32,6 +32,11 @@ function applyTheme(theme) {
   document.documentElement.classList.toggle('dark', theme !== 'light');
   localStorage.setItem('codero-theme', theme);
   store.set({ ui: { theme } });
+  // Swap sidebar logo for light/dark mode
+  const logoImg = document.querySelector('.sidebar-logo-icon');
+  if (logoImg) {
+    logoImg.src = theme === 'light' ? './numera-logo-light.svg' : './numera-logo.svg';
+  }
 }
 
 const btnTheme = $('btn-theme');
