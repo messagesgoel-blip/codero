@@ -157,11 +157,9 @@ func runAgentWithTracking(ctx context.Context, agentID, mode, daemonAddr, binary
 	// Run child process
 	exitCode := runChild(binaryPath, binaryArgs, sessionID, agentID, daemonAddr, tracker)
 
-	// Finalize — use cancelled/lost rather than completed to avoid
-	// triggering gate-must-pass rules that don't apply to wrapper sessions.
 	hbCancel()
-	status := "cancelled"
-	substatus := "terminal_cancelled"
+	status := "completed"
+	substatus := "terminal_finished"
 	if exitCode != 0 {
 		status = "lost"
 		substatus = "terminal_lost"
