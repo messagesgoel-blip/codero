@@ -239,10 +239,10 @@ function _loadSparkline(sessionId) {
 
   const safeId = encodeURIComponent(sessionId);
   apiFetch(`/api/v1/dashboard/sessions/metrics/${safeId}`).then(data => {
-    const requests = data.requests || [];
+    const requests = Array.isArray(data?.requests) ? data.requests : [];
     const values = requests.map(r => r.cumulative_prompt_tokens || 0);
     const chart = sparklineChart(values, { color: 'var(--accent)' });
-    const compact = data.compact_count > 0
+    const compact = (data?.compact_count ?? 0) > 0
       ? `<span style="margin-left:6px;font-size:11px;color:var(--fg-muted)">compacted \xd7${Number(data.compact_count)}</span>`
       : '';
     const link = `<a href="/api/v1/dashboard/sessions/metrics/${safeId}" target="_blank" class="drilldown-link" style="margin-left:8px;font-size:11px;color:var(--accent)">metrics \u2192</a>`;

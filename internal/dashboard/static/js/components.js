@@ -187,8 +187,17 @@ export function sparklineChart(values, opts = {}) {
     // Flat line when no data
     return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" class="sparkline"><line x1="0" y1="${h / 2}" x2="${w}" y2="${h / 2}" stroke="${color}" stroke-width="1.5" opacity="0.4"/></svg>`;
   }
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+  let min = Infinity;
+  let max = -Infinity;
+  for (const n of values) {
+    const v = Number(n);
+    if (!Number.isFinite(v)) continue;
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
+  if (min === Infinity) {
+    return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" class="sparkline"><line x1="0" y1="${h / 2}" x2="${w}" y2="${h / 2}" stroke="${color}" stroke-width="1.5" opacity="0.4"/></svg>`;
+  }
   const range = max - min || 1;
   const pad = 2;
   const points = values.map((v, i) => {

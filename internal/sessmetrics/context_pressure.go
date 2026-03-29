@@ -23,7 +23,8 @@ func modelContextLimit(model string) int64 {
 		return 128_000
 	case strings.Contains(m, "gpt-4"):
 		return 8_192
-	case strings.Contains(m, "o1") || strings.Contains(m, "o3"):
+	case strings.HasPrefix(m, "o1") || strings.HasPrefix(m, "o3") ||
+		strings.Contains(m, "/o1") || strings.Contains(m, "/o3"):
 		return 200_000
 	case strings.Contains(m, "gemini-2.5"):
 		return 1_000_000

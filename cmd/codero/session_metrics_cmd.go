@@ -27,7 +27,7 @@ func sessionMetricsCmd(configPath *string) *cobra.Command {
 				sessionID = resolveSessionIDFromEnv()
 			}
 			if sessionID == "" {
-				return fmt.Errorf("session ID required (pass as argument or set $CODERO_SESSION_ID)")
+				return fmt.Errorf("session ID required (pass as argument or set $CODERO_SESSION_ID / $CODERO_AGENT_SESSION_ID)")
 			}
 
 			cfg, err := loadConfig(*configPathForCmd(cmd))
@@ -113,7 +113,7 @@ func sessionMetricsCmd(configPath *string) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&sessionID, "session", "", "session ID (defaults to $CODERO_SESSION_ID)")
+	cmd.Flags().StringVar(&sessionID, "session", "", "session ID (defaults to $CODERO_SESSION_ID / $CODERO_AGENT_SESSION_ID)")
 	return cmd
 }
 

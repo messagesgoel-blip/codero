@@ -106,8 +106,8 @@ function _renderRosterTable(agents) {
       key: 'tokensPerSec',
       label: 'Tokens/sec',
       class: 'col-num',
-      render: r => r.tokensPerSec > 0
-        ? `<span title="${r.totalTokens.toLocaleString()} total tokens">${r.tokensPerSec.toFixed(1)}</span>`
+      render: r => (r.tokensPerSec ?? 0) > 0
+        ? `<span title="${(r.totalTokens ?? 0).toLocaleString()} total tokens">${(r.tokensPerSec ?? 0).toFixed(1)}</span>`
         : '<span style="color:var(--fg-muted)">—</span>',
     },
     {
@@ -141,8 +141,8 @@ function _buildAgentExpandContent(agent) {
   const items = [
     { label: 'Agent ID', value: `<code>${esc(agent.agentId)}</code>` },
     { label: 'Status', value: _statusChipAgent(agent.status) },
-    { label: 'Total Tokens (30d)', value: esc(agent.totalTokens.toLocaleString()) },
-    { label: 'Tokens/sec', value: agent.tokensPerSec > 0 ? esc(agent.tokensPerSec.toFixed(2)) : '—' },
+    { label: 'Total Tokens (30d)', value: esc((agent.totalTokens ?? 0).toLocaleString()) },
+    { label: 'Tokens/sec', value: (agent.tokensPerSec ?? 0) > 0 ? esc((agent.tokensPerSec ?? 0).toFixed(2)) : '—' },
     { label: 'Avg Elapsed', value: agent.avgElapsedSec > 0 ? esc(formatDuration(agent.avgElapsedSec)) : '—' },
     { label: 'Active Pressure', value: pressureLabel },
   ];

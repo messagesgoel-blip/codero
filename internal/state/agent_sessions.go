@@ -1982,7 +1982,10 @@ func GetTokenMetrics(ctx context.Context, db *DB, sessionID string) ([]TokenMetr
 		}
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("get token metrics: rows iteration: %w", err)
+	}
+	return out, nil
 }
 
 // GetLatestSyncedRequestTime returns the most recent request_time in
@@ -2071,7 +2074,7 @@ func GetTokenMetricSummary(ctx context.Context, db *DB, sessionID string) (*Toke
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get token metric summary: rows iteration: %w", err)
 	}
 	if s.TotalRequests > 0 {
 		s.AvgPromptPerRequest = float64(s.TotalPromptTokens) / float64(s.TotalRequests)

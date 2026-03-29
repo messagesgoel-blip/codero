@@ -26,7 +26,7 @@ function handleHash() {
   const hash = window.location.hash.replace('#', '') || 'overview';
   // Redirect legacy archives bookmarks to sessions (History tab).
   if (hash === 'archives') {
-    window.location.hash = '#sessions';
+    window.location.replace('#sessions');
     return;
   }
   const route = routes.get(hash);
