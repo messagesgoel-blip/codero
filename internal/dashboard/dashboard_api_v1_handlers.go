@@ -7,8 +7,15 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/codero/codero/internal/config"
 )
+
+// trackingConfigMu serializes read-modify-write on ~/.codero/config.yaml
+// to prevent lost updates from concurrent PUT requests.
+var trackingConfigMu sync.Mutex
 
 // ─── §3 Session endpoints ────────────────────────────────────────────────
 
@@ -759,4 +766,72 @@ func (h *Handler) handleArchives(w http.ResponseWriter, r *http.Request) {
 		"schema_version": SchemaVersionV1,
 		"generated_at":   time.Now().UTC(),
 	})
+}
+
+// handleTrackingConfig serves GET/PUT /api/v1/dashboard/tracking-config.
+// GET returns the list of agents with tracking disabled.
+// PUT accepts {"agent_id": "...", "disabled": true/false} to toggle.
+func (h *Handler) handleTrackingConfig(w http.ResponseWriter, r *http.Request) {
+	setCORSHeaders(w)
+	switch r.Method {
+	case http.MethodGet:
+		uc, err := config.LoadUserConfig()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "load config: "+err.Error(), "config_error")
+			return
+		}
+		agents := uc.DisabledAgents
+		if agents == nil {
+			agents = []string{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"disabled_agents": agents,
+			"generated_at":    time.Now().UTC(),
+		})
+	case http.MethodPut:
+		body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "read body: "+err.Error(), "bad_request")
+			return
+		}
+		var req struct {
+			AgentID  string `json:"agent_id"`
+			Disabled bool   `json:"disabled"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "parse body: "+err.Error(), "bad_request")
+			return
+		}
+		if req.AgentID == "" {
+			writeError(w, http.StatusBadRequest, "agent_id is required", "bad_request")
+			return
+		}
+		// Serialize load→modify→save to prevent lost updates.
+		trackingConfigMu.Lock()
+		uc, err := config.LoadUserConfig()
+		if err != nil {
+			trackingConfigMu.Unlock()
+			writeError(w, http.StatusInternalServerError, "load config: "+err.Error(), "config_error")
+			return
+		}
+		uc.SetTrackingDisabled(req.AgentID, req.Disabled)
+		if err := uc.Save(); err != nil {
+			trackingConfigMu.Unlock()
+			writeError(w, http.StatusInternalServerError, "save config: "+err.Error(), "config_error")
+			return
+		}
+		trackingConfigMu.Unlock()
+		agents := uc.DisabledAgents
+		if agents == nil {
+			agents = []string{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"disabled_agents": agents,
+			"generated_at":    time.Now().UTC(),
+		})
+	case http.MethodOptions:
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "")
+	}
 }

@@ -2,7 +2,7 @@
 // Reads from the global store and renders session table, assignments, and compliance.
 
 import store from '../store.js';
-import { loadSessions, loadAssignments, loadCompliance } from '../api.js';
+import { loadSessions, loadAssignments, loadCompliance, loadTrackingConfig, toggleAgentTracking } from '../api.js';
 import {
   esc, html, statusChip, relativeTime, formatDuration, truncId, setHtml, $,
 } from '../utils.js';
@@ -21,6 +21,7 @@ export function initSessions() {
   _unsubs.push(store.subscribe('sessions', () => renderSessions()));
   _unsubs.push(store.subscribe('assignments', () => renderSessions()));
   _unsubs.push(store.subscribe('compliance', () => renderSessions()));
+  _unsubs.push(store.subscribe('trackingConfig', () => renderSessions()));
 }
 
 export async function refreshSessions() {
@@ -28,6 +29,7 @@ export async function refreshSessions() {
     loadSessions(),
     loadAssignments(),
     loadCompliance(),
+    loadTrackingConfig(),
   ]);
 }
 
@@ -45,6 +47,7 @@ export function renderSessions() {
     return;
   }
 
+  const trackingConfig = store.select('trackingConfig');
   const parts = [];
 
   // ---- Metric strip (4 glass cards) ----
@@ -53,6 +56,9 @@ export function renderSessions() {
   // ---- Sessions table (expandable) ----
   parts.push(_renderSessionsTable(sessions, assignments));
 
+  // ---- Agent tracking toggles ----
+  parts.push(_renderTrackingPanel(sessions, trackingConfig));
+
   // ---- Compliance rules summary ----
   parts.push(_renderComplianceTable(compliance));
 
@@ -60,6 +66,7 @@ export function renderSessions() {
 
   // Bind expand-row click handlers after DOM insertion
   _bindExpandToggles();
+  _bindTrackingToggles();
 }
 
 // --- Private renderers ---
@@ -295,4 +302,54 @@ function _bindExpandToggles() {
       expanded.delete(rowId);
     }
   });
+}
+
+// Known agent IDs for tracking toggles.
+const KNOWN_AGENTS = [
+  'ccli', 'claude-pro', 'opencode',
+  'codex', 'codex-a', 'codex-b', 'codex-c', 'codex-d', 'codex-e',
+  'gcb', 'gca', 'gcli-a', 'gcli-b',
+  'cline', 'vibe', 'aider',
+];
+
+function _renderTrackingPanel(sessions, trackingConfig) {
+  const disabledSet = new Set((trackingConfig && trackingConfig.disabled_agents) || []);
+
+  // Merge known agents with any currently active ones
+  const activeAgents = new Set(sessions.map(s => s.agent));
+  const allAgents = [...new Set([...KNOWN_AGENTS, ...activeAgents])].sort();
+
+  const rows = allAgents.map(agent => {
+    const isDisabled = disabledSet.has(agent);
+    const isActive = activeAgents.has(agent);
+    const activeDot = isActive
+      ? '<span style="color:var(--success);margin-right:6px" title="Currently active">&#9679;</span>'
+      : '';
+    return `<label class="tracking-toggle" style="display:inline-flex;align-items:center;gap:8px;padding:4px 12px;margin:2px 4px;border-radius:6px;background:var(--glass-bg);cursor:pointer">
+      ${activeDot}<span style="min-width:80px">${esc(agent)}</span>
+      <input type="checkbox" data-agent="${esc(agent)}" ${isDisabled ? '' : 'checked'} style="cursor:pointer">
+    </label>`;
+  }).join('');
+
+  return `<div class="glass-card" style="margin-top:16px;padding:16px">
+    <h3 style="margin:0 0 8px;font-size:14px;color:var(--fg-muted)">Agent Tracking</h3>
+    <div style="display:flex;flex-wrap:wrap">${rows}</div>
+    <p style="margin:8px 0 0;font-size:11px;color:var(--fg-muted)">Unchecked agents bypass session tracking on next launch. Green dot = currently active.</p>
+  </div>`;
+}
+
+function _bindTrackingToggles() {
+  const toggles = document.querySelectorAll('.tracking-toggle input[type="checkbox"]');
+  for (const el of toggles) {
+    el.addEventListener('change', async (e) => {
+      const agent = e.target.dataset.agent;
+      const disabled = !e.target.checked;
+      e.target.disabled = true;
+      try {
+        await toggleAgentTracking(agent, disabled);
+      } finally {
+        e.target.disabled = false;
+      }
+    });
+  }
 }

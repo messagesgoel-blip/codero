@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/codero/codero/internal/config"
 	daemongrpc "github.com/codero/codero/internal/daemon/grpc"
 	"github.com/codero/codero/internal/session"
 	"github.com/spf13/cobra"
@@ -310,17 +311,23 @@ func baseNameWithoutExt(path string) string {
 	return base
 }
 
-// trackingDisabledFor returns true when tracking is disabled for a specific agent
-// via CODERO_TRACKING_<AGENT>=0 or globally via CODERO_TRACKING=0.
-// Agent ID is uppercased with dashes replaced by underscores (e.g. codex-a → CODEX_A).
+// trackingDisabledFor returns true when tracking is disabled for a specific agent.
+// Priority: env CODERO_TRACKING_<AGENT> > env CODERO_TRACKING > config disabled_agents.
 func trackingDisabledFor(agentID string) bool {
-	// Per-agent override takes priority.
+	// Per-agent env override (highest priority).
 	key := "CODERO_TRACKING_" + strings.ToUpper(strings.ReplaceAll(agentID, "-", "_"))
-	if v := envFalsy(os.Getenv(key)); v {
+	if envFalsy(os.Getenv(key)) {
 		return true
 	}
-	// Global fallback.
-	return envFalsy(os.Getenv("CODERO_TRACKING"))
+	// Global env override.
+	if envFalsy(os.Getenv("CODERO_TRACKING")) {
+		return true
+	}
+	// Config file disabled_agents list.
+	if uc, err := config.LoadUserConfig(); err == nil {
+		return uc.IsTrackingDisabled(agentID)
+	}
+	return false
 }
 
 func envFalsy(v string) bool {

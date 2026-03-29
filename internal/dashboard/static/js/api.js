@@ -138,6 +138,16 @@ export async function loadArchives() {
   store.set({ archives: normalizeArchives(data) });
 }
 
+export async function loadTrackingConfig() {
+  const data = await apiFetch('tracking-config');
+  store.set({ trackingConfig: data });
+}
+
+export async function toggleAgentTracking(agentId, disabled) {
+  const data = await apiPut('tracking-config', { agent_id: agentId, disabled });
+  store.set({ trackingConfig: data });
+}
+
 // --- Normalizers ---
 
 function normalizeOverview(raw) {

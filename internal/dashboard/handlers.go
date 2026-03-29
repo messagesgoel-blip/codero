@@ -92,6 +92,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/dashboard/merge/", h.handleMergeRouter)
 	// §8 Repo config
 	mux.HandleFunc("/api/v1/dashboard/settings/repo-config/", h.handleRepoConfig)
+	// Tracking config
+	mux.HandleFunc("/api/v1/dashboard/tracking-config", h.handleTrackingConfig)
 	// §9 Compliance sub-endpoints
 	mux.HandleFunc("/api/v1/dashboard/compliance/rules", h.handleComplianceRules)
 	mux.HandleFunc("/api/v1/dashboard/compliance/checks/", h.handleComplianceChecks)

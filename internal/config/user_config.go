@@ -12,10 +12,38 @@ import (
 // UserConfig is the per-user config at ~/.codero/config.yaml.
 // It is separate from the daemon Config and holds agent-side settings.
 type UserConfig struct {
-	Version    int                      `yaml:"version"`
-	DaemonAddr string                   `yaml:"daemon_addr"`
-	SetupAt    time.Time                `yaml:"setup_at,omitempty"`
-	Wrappers   map[string]WrapperConfig `yaml:"wrappers,omitempty"`
+	Version        int                      `yaml:"version"`
+	DaemonAddr     string                   `yaml:"daemon_addr"`
+	SetupAt        time.Time                `yaml:"setup_at,omitempty"`
+	Wrappers       map[string]WrapperConfig `yaml:"wrappers,omitempty"`
+	DisabledAgents []string                 `yaml:"disabled_agents,omitempty"`
+}
+
+// IsTrackingDisabled returns true if the given agent ID is in the disabled list.
+func (uc *UserConfig) IsTrackingDisabled(agentID string) bool {
+	for _, a := range uc.DisabledAgents {
+		if a == agentID {
+			return true
+		}
+	}
+	return false
+}
+
+// SetTrackingDisabled adds or removes an agent from the disabled list.
+func (uc *UserConfig) SetTrackingDisabled(agentID string, disabled bool) {
+	if disabled {
+		if !uc.IsTrackingDisabled(agentID) {
+			uc.DisabledAgents = append(uc.DisabledAgents, agentID)
+		}
+	} else {
+		filtered := uc.DisabledAgents[:0]
+		for _, a := range uc.DisabledAgents {
+			if a != agentID {
+				filtered = append(filtered, a)
+			}
+		}
+		uc.DisabledAgents = filtered
+	}
 }
 
 // WrapperConfig records a wrapped agent binary discovered during setup.
