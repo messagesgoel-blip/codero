@@ -139,15 +139,26 @@ type AssignmentDetailResponse struct {
 }
 
 func (h *Handler) handleAssignmentDetail(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "")
-		return
-	}
 	setCORSHeaders(w)
 
-	assignmentID := strings.TrimPrefix(r.URL.Path, "/api/v1/dashboard/assignments/")
+	// Strip prefix and split: "/{id}" or "/{id}/{action}"
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/dashboard/assignments/")
+	parts := strings.SplitN(path, "/", 2)
+	assignmentID := parts[0]
 	if assignmentID == "" {
 		writeError(w, http.StatusBadRequest, "assignment_id required", "missing_id")
+		return
+	}
+
+	// Sub-action route
+	if len(parts) == 2 && parts[1] != "" {
+		h.handleAssignmentAction(w, r, assignmentID, parts[1])
+		return
+	}
+
+	// Default: GET detail
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "")
 		return
 	}
 
@@ -171,6 +182,53 @@ func (h *Handler) handleAssignmentDetail(w http.ResponseWriter, r *http.Request)
 		RuleChecks:        checks,
 		SchemaVersion:     SchemaVersionV1,
 		GeneratedAt:       time.Now().UTC(),
+	})
+}
+
+// AssignmentActionResponse is returned for POST /assignments/{id}/{action}.
+type AssignmentActionResponse struct {
+	AssignmentID  string    `json:"assignment_id"`
+	Action        string    `json:"action"`
+	Status        string    `json:"status"`
+	Message       string    `json:"message,omitempty"`
+	SchemaVersion string    `json:"schema_version"`
+	GeneratedAt   time.Time `json:"generated_at"`
+}
+
+var validAssignmentActions = map[string]bool{
+	"pause": true, "resume": true, "abandon": true, "close": true,
+	"replay": true, "release": true, "release-slot": true,
+}
+
+func (h *Handler) handleAssignmentAction(w http.ResponseWriter, r *http.Request, assignmentID, action string) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "POST required", "")
+		return
+	}
+	if !validAssignmentActions[action] {
+		writeError(w, http.StatusNotFound, "unknown action: "+action, "not_found")
+		return
+	}
+
+	// Verify assignment exists
+	_, err := queryAssignmentByID(r.Context(), h.db, assignmentID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			writeError(w, http.StatusNotFound, "assignment not found", "not_found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "assignment query failed", "db_error")
+		return
+	}
+
+	// TODO: wire to coordinator FSM when ready
+	writeJSON(w, http.StatusOK, AssignmentActionResponse{
+		AssignmentID:  assignmentID,
+		Action:        action,
+		Status:        "accepted",
+		Message:       action + " action accepted (stub — coordinator not yet wired)",
+		SchemaVersion: SchemaVersionV1,
+		GeneratedAt:   time.Now().UTC(),
 	})
 }
 
