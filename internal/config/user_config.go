@@ -124,8 +124,15 @@ type WrapperConfig struct {
 	InstalledAt time.Time `yaml:"installed_at,omitempty"`
 }
 
-// UserConfigDir returns ~/.codero, creating it if needed.
+// UserConfigDir returns the codero config directory.
+// Checks CODERO_USER_CONFIG_DIR first, then falls back to ~/.codero.
 func UserConfigDir() (string, error) {
+	if dir := os.Getenv("CODERO_USER_CONFIG_DIR"); dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return "", fmt.Errorf("user config dir: mkdir: %w", err)
+		}
+		return dir, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("user config dir: %w", err)
