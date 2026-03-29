@@ -2,6 +2,7 @@ package sessmetrics
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	loglib "github.com/codero/codero/internal/log"
@@ -93,7 +94,7 @@ func (d *PressureDetector) WithConfig(cfg PressureConfig) *PressureDetector {
 func (d *PressureDetector) EvaluateAll(ctx context.Context) error {
 	sessions, err := state.ListActiveAgentSessions(ctx, d.db)
 	if err != nil {
-		return err
+		return fmt.Errorf("list active agent sessions: %w", err)
 	}
 	for _, sess := range sessions {
 		if err := d.evaluate(ctx, sess.SessionID); err != nil {
@@ -109,8 +110,11 @@ func (d *PressureDetector) EvaluateAll(ctx context.Context) error {
 
 func (d *PressureDetector) evaluate(ctx context.Context, sessionID string) error {
 	rows, err := state.GetTokenMetrics(ctx, d.db, sessionID)
-	if err != nil || len(rows) == 0 {
-		return err
+	if err != nil {
+		return fmt.Errorf("get token metrics for session %s: %w", sessionID, err)
+	}
+	if len(rows) == 0 {
+		return nil
 	}
 
 	last := rows[len(rows)-1]

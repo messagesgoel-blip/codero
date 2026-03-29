@@ -314,7 +314,9 @@ function _renderTimingAnalytics(archives) {
   if (archives.length > 1) {
     const times = archives.map(a => a.startedAt ? new Date(a.startedAt).getTime() : 0).filter(Boolean);
     if (times.length > 1) {
-      const spanDays = (Math.max(...times) - Math.min(...times)) / (1000 * 60 * 60 * 24);
+      let minTime = times[0], maxTime = times[0];
+      for (const t of times) { if (t < minTime) minTime = t; if (t > maxTime) maxTime = t; }
+      const spanDays = (maxTime - minTime) / (1000 * 60 * 60 * 24);
       if (spanDays > 0) throughput = +(archives.length / spanDays).toFixed(1);
     }
   }

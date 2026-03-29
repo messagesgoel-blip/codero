@@ -137,10 +137,3 @@ func shortModel(model string) string {
 	}
 	return model
 }
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
