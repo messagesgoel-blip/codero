@@ -99,7 +99,9 @@ export async function loadRepos() {
 }
 
 export async function loadNodeRepos() {
-  return apiFetch('node-repos');
+  const data = await apiFetch('node-repos');
+  store.set({ nodeRepos: data });
+  return data;
 }
 
 export async function loadEvents() {
