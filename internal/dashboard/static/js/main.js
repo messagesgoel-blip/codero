@@ -14,14 +14,14 @@ import { initChat, renderChat, refreshChat, renderFloatingChat } from './rendere
 import { initArchives, renderArchives, refreshArchives } from './renderers/archives.js';
 import { initAgents, renderAgents, refreshAgents } from './renderers/agents.js';
 import { initSettings, renderSettings, refreshSettings } from './renderers/settings.js';
-import renderRepos from './renderers/repos.js';
+import { initRepos, renderRepos, refreshRepos } from './renderers/repos.js';
 
 // --- Register all routes ---
 registerRoute('overview', { init: initOverview, render: renderOverview, refresh: refreshOverview });
 registerRoute('sessions', { init: initSessions, render: renderSessions, refresh: refreshSessions });
 registerRoute('pipeline', { init: initPipeline, render: renderPipeline, refresh: refreshPipeline });
 registerRoute('tasks', { init: initTasks, render: renderTasks, refresh: refreshTasks });
-registerRoute('repos', { init: () => {}, render: renderRepos, refresh: renderRepos });
+registerRoute('repos', { init: initRepos, render: renderRepos, refresh: refreshRepos });
 registerRoute('gate', { init: initGate, render: renderGate, refresh: refreshGate });
 registerRoute('chat', { init: initChat, render: renderChat, refresh: refreshChat });
 registerRoute('archives', { init: initArchives, render: renderArchives, refresh: refreshArchives });

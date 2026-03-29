@@ -25,6 +25,7 @@ export function initTasks() {
 export function renderTasks() {
   const container = $('page-tasks');
   if (!container) return;
+  if (store.state.ui.activeTab !== 'tasks') return;
 
   const stats = store.state.queueStats;
   const queue = store.state.queue || [];

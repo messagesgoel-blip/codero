@@ -32,6 +32,7 @@ export async function refreshGate() {
 export function renderGate() {
   const container = $('page-gate');
   if (!container) return;
+  if (store.state.ui.activeTab !== 'gate') return;
 
   const gateChecks = store.select('gateChecks');
   const blockReasons = store.select('blockReasons') || [];

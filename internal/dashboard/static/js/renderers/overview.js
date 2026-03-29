@@ -35,6 +35,7 @@ export async function refreshOverview() {
 export function renderOverview() {
   const container = $('page-overview');
   if (!container) return;
+  if (store.state.ui.activeTab !== 'overview') return;
 
   const ov = store.select('overview');
   const repos = store.select('repos');
