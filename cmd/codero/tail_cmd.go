@@ -31,6 +31,9 @@ Without a session ID, lists the 10 most-recent tail files.`,
 				return listTailFiles()
 			}
 			sessionID := args[0]
+			if sessionID == "" || strings.ContainsAny(sessionID, `/\.`) {
+				return fmt.Errorf("invalid session_id %q: must be a plain session token with no path separators or traversal tokens", sessionID)
+			}
 			logPath := tailPath(sessionID)
 			return streamTailFile(logPath, follow)
 		},

@@ -172,7 +172,8 @@ func runAgentWithTracking(ctx context.Context, agentID, mode, taskID, repoOverri
 		initialContext["task_id"] = taskID
 	}
 	if repoOverride != "" {
-		if !strings.Contains(repoOverride, "/") {
+		parts := strings.SplitN(repoOverride, "/", 2)
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 			return fmt.Errorf("--repo must be in owner/repo format, got %q", repoOverride)
 		}
 		initialContext["repo"] = repoOverride

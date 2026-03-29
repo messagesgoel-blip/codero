@@ -115,7 +115,7 @@ func (s *sessionService) RegisterSession(ctx context.Context, req *daemonv1.Regi
 				loglib.FieldComponent, "grpc",
 				"session_id", sessionID,
 				"repo", repo,
-				"cwd", cwd,
+				"has_cwd", cwd != "",
 				"error", err,
 			)
 		}
