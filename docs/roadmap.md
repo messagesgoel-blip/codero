@@ -61,9 +61,9 @@ Status: `not_started` | `in_progress` | `blocked` | `done`
 
 | ID | Task | Status | Definition of Done |
 |---|---|---|---|
-| P1-A-001 | Wire `/api/v1/dashboard/tasks` endpoint | `not_started` | `GET /api/v1/dashboard/tasks` returns 200 with `{tasks: [], schema_version: "1"}`; Tasks tab shows data |
-| P1-A-002 | Update `dashboard-architecture.md` with new endpoints | `not_started` | Doc lists all current endpoints including `/tracking-config`, `/node-repos`, `/tasks`, `/agents`, `/scorecard` |
-| P1-A-003 | Add env_vars validation tests | `not_started` | Test cases for: empty key, key with `=`, NUL bytes, valid key; all pass in `go test ./internal/dashboard/...` |
+| P1-A-001 | Wire `/api/v1/dashboard/tasks` endpoint | `done` | `GET /api/v1/dashboard/tasks` returns 200 with `{tasks: [], schema_version: "1"}`; Tasks tab shows data |
+| P1-A-002 | Update `dashboard-architecture.md` with new endpoints | `done` | Doc lists all current endpoints including `/tracking-config`, `/node-repos`, `/tasks`, `/agents`, `/scorecard` |
+| P1-A-003 | Add env_vars validation tests | `done` | Test cases for: empty key, key with `=`, NUL bytes, valid key; all pass in `go test ./internal/dashboard/...` |
 
 ### P1-B: Agent Discovery & Setup
 

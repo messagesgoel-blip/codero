@@ -1355,3 +1355,21 @@ func (h *Handler) handleScorecard(w http.ResponseWriter, r *http.Request) {
 		GeneratedAt:     time.Now().UTC(),
 	})
 }
+
+// handleTasks serves GET /api/v1/dashboard/tasks.
+// Returns the current task list (stub: empty until task tracking is wired).
+func (h *Handler) handleTasks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "")
+		return
+	}
+	setCORSHeaders(w)
+
+	tasks := []TaskRow{}
+	writeJSON(w, http.StatusOK, TasksResponse{
+		Tasks:         tasks,
+		Total:         len(tasks),
+		SchemaVersion: SchemaVersionV1,
+		GeneratedAt:   time.Now().UTC(),
+	})
+}
