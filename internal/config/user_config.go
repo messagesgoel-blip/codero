@@ -15,11 +15,28 @@ import (
 // AgentInfo describes a discovered agent shim with runtime status.
 type AgentInfo struct {
 	AgentID    string            `json:"agent_id"`
+	AgentKind  string            `json:"agent_kind,omitempty"`
 	ShimName   string            `json:"shim_name"`
 	RealBinary string            `json:"real_binary"`
 	Installed  bool              `json:"installed"`
 	Disabled   bool              `json:"disabled"`
 	EnvVars    map[string]string `json:"env_vars"`
+}
+
+const (
+	AgentKindClaude   = "claude"
+	AgentKindCodex    = "codex"
+	AgentKindOpenCode = "opencode"
+	AgentKindCopilot  = "copilot"
+	AgentKindGemini   = "gemini"
+)
+
+var supportedAgentKinds = []string{
+	AgentKindClaude,
+	AgentKindCodex,
+	AgentKindOpenCode,
+	AgentKindCopilot,
+	AgentKindGemini,
 }
 
 // shimRe parses: exec codero agent run --agent-id <id> -- "<binary>" "$@"
@@ -51,16 +68,26 @@ func DiscoverAgents(uc *UserConfig) ([]AgentInfo, error) {
 			continue
 		}
 		_, statErr := os.Stat(realBin)
-		var disabled bool
+		var (
+			agentKind string
+			disabled  bool
+		)
 		var envVars map[string]string
 		if uc != nil {
 			disabled = uc.IsTrackingDisabled(agentID)
-			if w, ok := uc.Wrappers[agentID]; ok && w.EnvVars != nil {
-				envVars = w.EnvVars
+			if w, ok := uc.Wrappers[agentID]; ok {
+				agentKind = NormalizeAgentKind(w.AgentKind)
+				if w.EnvVars != nil {
+					envVars = w.EnvVars
+				}
 			}
+		}
+		if agentKind == "" {
+			agentKind = InferAgentKind(agentID, realBin)
 		}
 		agents = append(agents, AgentInfo{
 			AgentID:    agentID,
+			AgentKind:  agentKind,
 			ShimName:   e.Name(),
 			RealBinary: realBin,
 			Installed:  statErr == nil,
@@ -99,6 +126,7 @@ type UserConfig struct {
 	SetupAt        time.Time                `yaml:"setup_at,omitempty"`
 	Wrappers       map[string]WrapperConfig `yaml:"wrappers,omitempty"`
 	DisabledAgents []string                 `yaml:"disabled_agents,omitempty"`
+	Registry       AgentRegistry            `yaml:"registry,omitempty"`
 }
 
 // IsTrackingDisabled returns true if the given agent ID is in the disabled list.
@@ -128,11 +156,23 @@ func (uc *UserConfig) SetTrackingDisabled(agentID string, disabled bool) {
 	}
 }
 
-// WrapperConfig records a wrapped agent binary discovered during setup.
+// WrapperConfig records one Codero-managed launch profile. The map key in
+// UserConfig.Wrappers is the durable profile ID surfaced to runtime/session
+// tracking as agent_id.
 type WrapperConfig struct {
-	RealBinary  string            `yaml:"real_binary"`
-	InstalledAt time.Time         `yaml:"installed_at,omitempty"`
-	EnvVars     map[string]string `yaml:"env_vars,omitempty"`
+	AgentKind         string            `yaml:"agent_kind,omitempty"`
+	RealBinary        string            `yaml:"real_binary"`
+	DisplayName       string            `yaml:"display_name,omitempty"`
+	Aliases           []string          `yaml:"aliases,omitempty"`
+	AuthMode          string            `yaml:"auth_mode,omitempty"`
+	HomeStrategy      string            `yaml:"home_strategy,omitempty"`
+	HomeDir           string            `yaml:"home_dir,omitempty"`
+	ConfigStrategy    string            `yaml:"config_strategy,omitempty"`
+	ConfigPath        string            `yaml:"config_path,omitempty"`
+	PermissionProfile string            `yaml:"permission_profile,omitempty"`
+	DefaultArgs       []string          `yaml:"default_args,omitempty"`
+	InstalledAt       time.Time         `yaml:"installed_at,omitempty"`
+	EnvVars           map[string]string `yaml:"env_vars,omitempty"`
 }
 
 // UserConfigDir returns the codero config directory.
@@ -199,4 +239,43 @@ func (uc *UserConfig) Save() error {
 		return fmt.Errorf("save user config: write: %w", err)
 	}
 	return nil
+}
+
+// SupportedAgentKinds returns the Codero-supported agent kinds for managed
+// launch profiles. The returned slice is a copy and may be modified by callers.
+func SupportedAgentKinds() []string {
+	out := make([]string, len(supportedAgentKinds))
+	copy(out, supportedAgentKinds)
+	return out
+}
+
+// NormalizeAgentKind coerces kind labels to the supported canonical values.
+func NormalizeAgentKind(kind string) string {
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	switch kind {
+	case AgentKindClaude, AgentKindCodex, AgentKindOpenCode, AgentKindCopilot, AgentKindGemini:
+		return kind
+	default:
+		return ""
+	}
+}
+
+// InferAgentKind derives a supported agent kind from a Codero profile ID or
+// underlying binary path. Unknown kinds return an empty string.
+func InferAgentKind(agentID, realBinary string) string {
+	candidates := []string{
+		strings.ToLower(strings.TrimSpace(agentID)),
+		strings.ToLower(strings.TrimSpace(filepath.Base(realBinary))),
+	}
+	for _, candidate := range candidates {
+		if kind := NormalizeAgentKind(candidate); kind != "" {
+			return kind
+		}
+		for _, known := range supportedAgentKinds {
+			if strings.HasPrefix(candidate, known+"-") || strings.HasPrefix(candidate, known+"_") {
+				return known
+			}
+		}
+	}
+	return ""
 }

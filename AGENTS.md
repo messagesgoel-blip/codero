@@ -25,6 +25,22 @@ Does NOT own:
 - API/ops surfaces: daemon observability endpoints (`/health`, `/queue`, `/metrics`, `/gate`)
 - Venv/tool env: `/srv/storage/shared/tools/venvs/codero`
 
+## Managed Agent Profiles
+- In Codero agent runtime work, `agent_id` means the Codero launch profile ID, not the raw upstream binary name.
+- Current supported managed agent kinds are: `claude`, `codex`, `opencode`, `copilot`, `gemini`.
+- Codero-managed shims under `~/.codero/bin` are the only supported source of installed agent profiles.
+- Shell aliases and ad hoc wrapper scripts outside `~/.codero/bin` are not a supported discovery source.
+- Aliases belong to one owning profile; deleting the profile must remove all of its aliases/shims.
+- Registry behavior must preserve:
+  - daemon background refresh every 24 hours
+  - fresh scan on dashboard/CLI reads so deleted profiles disappear immediately
+- When editing agent profile/runtime code, keep profile metadata separate from agent kind:
+  - `agent_id` = launch profile ID
+  - `agent_kind` = upstream CLI family
+- Current validated schema fields live in user config/registry for future launch translation:
+  - `agent_kind`, `auth_mode`, `home_strategy`, `home_dir`, `config_strategy`, `config_path`, `permission_profile`, `default_args`
+- Until profile translation lands in runtime, `env_vars` are the only applied per-profile launch override; do not assume `home_strategy`, `permission_profile`, or `default_args` already affect live launches.
+
 ## Shared Tools (Mandatory)
 - Resolve tooling from: `/srv/storage/shared/tools/bin`
 - Required shared tools include: `ruff`, `gitleaks`, `semgrep`, `pre-commit`, `poetry`

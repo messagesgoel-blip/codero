@@ -882,14 +882,9 @@ func (h *Handler) handleTrackingConfig(w http.ResponseWriter, r *http.Request) {
 	setCORSHeaders(w)
 	switch r.Method {
 	case http.MethodGet:
-		uc, err := config.LoadUserConfig()
+		uc, agents, err := config.LoadUserConfigWithFreshRegistry()
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "load config: "+err.Error(), "config_error")
-			return
-		}
-		agents, err := config.DiscoverAgents(uc)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "discover agents: "+err.Error(), "config_error")
 			return
 		}
 		disabled := uc.DisabledAgents
@@ -897,7 +892,7 @@ func (h *Handler) handleTrackingConfig(w http.ResponseWriter, r *http.Request) {
 			disabled = []string{}
 		}
 		if agents == nil {
-			agents = []config.AgentInfo{}
+			agents = []config.RegisteredAgent{}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"disabled_agents": disabled,
@@ -998,21 +993,15 @@ func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Merge with tracking config to get disabled/installed flags.
-	uc, ucErr := config.LoadUserConfig()
+	_, registryAgents, ucErr := config.LoadUserConfigWithFreshRegistry()
 	if ucErr != nil {
 		loglib.Warn("dashboard: agents: failed to load user config",
 			loglib.FieldComponent, "dashboard", "error", ucErr)
 	}
-	shimsByID := map[string]config.AgentInfo{}
+	registryByID := map[string]config.RegisteredAgent{}
 	if ucErr == nil {
-		shims, discErr := config.DiscoverAgents(uc)
-		if discErr != nil {
-			loglib.Warn("dashboard: agents: failed to discover agent shims",
-				loglib.FieldComponent, "dashboard", "error", discErr)
-		} else {
-			for _, s := range shims {
-				shimsByID[s.AgentID] = s
-			}
+		for _, agent := range registryAgents {
+			registryByID[agent.AgentID] = agent
 		}
 	}
 
@@ -1020,12 +1009,12 @@ func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
 	seenIDs := make(map[string]bool, len(roster))
 	for i := range roster {
 		seenIDs[roster[i].AgentID] = true
-		if info, ok := shimsByID[roster[i].AgentID]; ok {
+		if info, ok := registryByID[roster[i].AgentID]; ok {
 			roster[i].Status = agentStatus(roster[i], info.Disabled)
 		}
 	}
 	// Append shim-only agents (discovered but no 30-day history).
-	for _, info := range shimsByID {
+	for _, info := range registryByID {
 		if !seenIDs[info.AgentID] {
 			status := "idle"
 			if info.Disabled {

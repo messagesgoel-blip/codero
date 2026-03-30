@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -15,6 +16,19 @@ func writeConfig(t *testing.T, content string) string {
 		t.Fatalf("writeConfig: %v", err)
 	}
 	return path
+}
+
+func clearConfigEnvOverrides(t *testing.T) {
+	t.Helper()
+	for _, kv := range os.Environ() {
+		key, _, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		if strings.HasPrefix(key, "CODERO_") || key == "GITHUB_TOKEN" {
+			t.Setenv(key, "")
+		}
+	}
 }
 
 func TestLoadEnv_Defaults(t *testing.T) {
@@ -84,6 +98,8 @@ func TestLoadEnv_Overrides(t *testing.T) {
 }
 
 func TestLoad_ValidConfig(t *testing.T) {
+	clearConfigEnvOverrides(t)
+
 	path := writeConfig(t, `
 github_token: ghp_test
 repos:
@@ -118,6 +134,8 @@ func TestLoad_FileNotFound(t *testing.T) {
 }
 
 func TestLoad_UnknownFields(t *testing.T) {
+	clearConfigEnvOverrides(t)
+
 	path := writeConfig(t, `
 github_token: ghp_test
 repos:
@@ -131,6 +149,8 @@ unexpected: true
 }
 
 func TestLoad_MultipleDocuments(t *testing.T) {
+	clearConfigEnvOverrides(t)
+
 	path := writeConfig(t, `
 github_token: ghp_test
 repos:
@@ -741,6 +761,8 @@ func TestEnvOverrides_APIServerConfig(t *testing.T) {
 }
 
 func TestLoad_SweeperAndAPIServerDurations(t *testing.T) {
+	clearConfigEnvOverrides(t)
+
 	path := writeConfig(t, `
 github_token: ghp_test
 repos:

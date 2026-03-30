@@ -19,6 +19,7 @@ func TestGateCheckSchemaContract(t *testing.T) {
 	root := repoRoot(t)
 	cmd := exec.Command("go", "run", "./cmd/codero", "gate-check", "--json", "--profile", "off")
 	cmd.Dir = root
+	cmd.Env = cleanGitEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("gate-check --json --profile off failed: %v\noutput: %s", err, string(out))
@@ -102,6 +103,7 @@ func TestGateCheckSurfaceParity(t *testing.T) {
 
 	jsonCmd := exec.Command("go", "run", "./cmd/codero", "gate-check", "--json", "--profile", "off", "--report-path", reportPath)
 	jsonCmd.Dir = root
+	jsonCmd.Env = cleanGitEnv()
 	jsonOut, err := jsonCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("gate-check --json --profile off failed: %v\noutput: %s", err, string(jsonOut))
@@ -114,6 +116,7 @@ func TestGateCheckSurfaceParity(t *testing.T) {
 
 	tuiCmd := exec.Command("go", "run", "./cmd/codero", "gate-check", "--tui-snapshot", "--profile", "off", "--report-path", reportPath)
 	tuiCmd.Dir = root
+	tuiCmd.Env = cleanGitEnv()
 	tuiOut, err := tuiCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("gate-check --tui-snapshot --profile off failed: %v\noutput: %s", err, string(tuiOut))
@@ -196,6 +199,7 @@ func TestContract_CheckFailedReasonCode(t *testing.T) {
 		"--report-path", reportPath,
 	)
 	cmd.Dir = root
+	cmd.Env = cleanGitEnv()
 	out, err := cmd.CombinedOutput()
 	// Exit 1 is expected (merge-markers fails).
 	if err == nil {
