@@ -69,9 +69,9 @@ Status: `not_started` | `in_progress` | `blocked` | `done`
 
 | ID | Task | Status | Definition of Done |
 |---|---|---|---|
-| P1-B-001 | Install agent shims for active agents | `not_started` | `codero agent list --json` returns ≥1 agent with `installed: true` |
-| P1-B-002 | Verify agent heartbeat flow | `not_started` | Running a test session creates heartbeat entries; dashboard shows session in Agents tab |
-| P1-B-003 | Document agent setup workflow | `not_started` | `docs/agent-setup.md` exists with step-by-step for Claude Code, Aider, Cursor |
+| P1-B-001 | Install agent shims for active agents | `done` | `codero agent list --json` returns ≥1 agent with `installed: true` |
+| P1-B-002 | Verify agent heartbeat flow | `done` | Running a test session creates heartbeat entries; dashboard shows session in Agents tab |
+| P1-B-003 | Document agent setup workflow | `done` | `docs/agent-setup.md` exists with step-by-step for Claude Code, Aider, Cursor |
 
 ### P1-C: Proving Period Evidence
 
