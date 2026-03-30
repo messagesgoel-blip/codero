@@ -595,6 +595,46 @@ func GetActiveAgentAssignment(ctx context.Context, db *DB, sessionID string) (*A
 	return scanAgentAssignment(row)
 }
 
+// SetSessionTaskID updates the task_id on the active (non-ended) assignment for
+// a session. Returns ErrAgentAssignmentNotFound if there is no active
+// assignment. The repo field is only updated when non-empty.
+func SetSessionTaskID(ctx context.Context, db *DB, sessionID, taskID, repo string) error {
+	if sessionID == "" {
+		return fmt.Errorf("set session task id: session_id is required")
+	}
+	if taskID == "" {
+		return fmt.Errorf("set session task id: task_id is required")
+	}
+	var res sql.Result
+	var err error
+	if repo != "" {
+		res, err = db.sql.ExecContext(ctx, `
+			UPDATE agent_assignments
+			SET task_id = ?, repo = ?, assignment_version = assignment_version + 1
+			WHERE session_id = ? AND ended_at IS NULL`,
+			taskID, repo, sessionID,
+		)
+	} else {
+		res, err = db.sql.ExecContext(ctx, `
+			UPDATE agent_assignments
+			SET task_id = ?, assignment_version = assignment_version + 1
+			WHERE session_id = ? AND ended_at IS NULL`,
+			taskID, sessionID,
+		)
+	}
+	if err != nil {
+		return fmt.Errorf("set session task id: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set session task id: rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrAgentAssignmentNotFound
+	}
+	return nil
+}
+
 // GetAgentAssignmentByID returns a single assignment looked up by its unique ID.
 func GetAgentAssignmentByID(ctx context.Context, db *DB, assignmentID string) (*AgentAssignment, error) {
 	const q = `
