@@ -1,13 +1,18 @@
 // sessions.js — Sessions page renderer.
-// Active tab: live session table with expandable context-pressure sparkline.
-// History tab: archived runs with timing analytics strip.
+// Redesigned with 3-layer info architecture: Row -> Peek -> Deep Dive.
 
 import store from '../store.js';
-import { loadSessions, loadAssignments, loadArchives, apiFetch, sessionAction } from '../api.js';
+import {
+  loadSessions, loadAssignments, loadArchives, apiFetch,
+  sessionAction, loadSessionTail,
+} from '../api.js';
 import {
   esc, html, statusChip, relativeTime, formatDuration, truncId, setHtml, $,
 } from '../utils.js';
-import { metricCard, dataTable, detailGrid, glassCard, skeleton, sparklineChart, toast } from '../components.js';
+import {
+  metricCard, dataTable, detailGrid, glassCard, skeleton,
+  sparklineChart, toast,
+} from '../components.js';
 
 // --- Tab + filter state ---
 let _tab = 'active';   // 'active' | 'history'
@@ -28,14 +33,22 @@ export function initSessions() {
   _unsubs.push(store.subscribe('assignments', () => renderSessions()));
   _unsubs.push(store.subscribe('archives', () => { if (_tab === 'history') renderSessions(); }));
 
-  // Event delegation for status filter chips (survives re-renders)
+  // Event delegation for status filter chips + terminal refreshes
   const container = $('page-sessions');
   if (container) {
     container.addEventListener('click', (e) => {
       const chip = e.target.closest('[data-status]');
-      if (!chip) return;
-      _statusFilter = chip.dataset.status || '';
-      renderSessions();
+      if (chip) {
+        _statusFilter = chip.dataset.status || '';
+        renderSessions();
+        return;
+      }
+
+      const refreshBtn = e.target.closest('[data-action="refresh-tail"]');
+      if (refreshBtn) {
+        const sid = refreshBtn.dataset.sessionId;
+        if (sid) _loadTail(sid);
+      }
     });
   }
 }
@@ -177,13 +190,12 @@ function _renderSessionsTable(sessions, assignments) {
   if (_statusFilter) {
     filtered = filtered.filter(s => (s.inferredStatus || s.inferred_status || 'unknown') === _statusFilter);
   }
-  // Attention-first sort: waiting_for_input first (oldest), working (most recent), idle, unknown
+  // Attention-first sort
   const statusOrder = { waiting_for_input: 0, working: 1, idle: 2, unknown: 3 };
   filtered = [...filtered].sort((a, b) => {
     const sa = statusOrder[a.inferredStatus || a.inferred_status || 'unknown'] ?? 3;
     const sb = statusOrder[b.inferredStatus || b.inferred_status || 'unknown'] ?? 3;
     if (sa !== sb) return sa - sb;
-    // Within same status: most recent first (except waiting which is oldest first)
     if (sa === 0) return new Date(a.startedAt || 0) - new Date(b.startedAt || 0);
     return new Date(b.startedAt || 0) - new Date(a.startedAt || 0);
   });
@@ -204,43 +216,8 @@ function _renderSessionsTable(sessions, assignments) {
       },
     },
     {
-      key: 'task',
-      label: 'Task',
-      render: r => esc(r.task || '—'),
-    },
-    {
-      key: 'state',
-      label: 'State',
-      render: r => statusChip(r.state || 'unknown'),
-    },
-    {
-      key: 'lastIOAt',
-      label: 'Last Output',
-      render: r => {
-        if (!r.lastIOAt) return '<span style="color:var(--fg-muted)">—</span>';
-        const age = (Date.now() - new Date(r.lastIOAt).getTime()) / 1000;
-        const style = age > 90 ? 'color:var(--warning)' : 'color:var(--success)';
-        return `<span style="${style}">${esc(relativeTime(r.lastIOAt))}</span>`;
-      },
-    },
-    {
-      key: 'contextPressure',
-      label: 'Context',
-      render: r => {
-        const allowed = { normal: 'normal', warning: 'warning', critical: 'critical' };
-        const p = allowed[r.contextPressure] || 'normal';
-        if (p === 'normal') return '<span style="color:var(--fg-muted)">—</span>';
-        const col = p === 'critical' ? 'var(--error)' : 'var(--warning)';
-        const icon = p === 'critical' ? '🔴' : '🟡';
-        const compactN = Number.isFinite(Number(r.compactCount)) ? Math.floor(Number(r.compactCount)) : 0;
-        const compact = compactN > 0 ? ` \u00d7${compactN}` : '';
-        const title = esc(p + ' context pressure' + (compactN > 0 ? '; compacted ' + compactN + ' time(s)' : ''));
-        return `<span style="color:${col}" title="${title}">${icon} ${esc(p)}${compact}</span>`;
-      },
-    },
-    {
       key: 'inferredStatus',
-      label: 'Agent Status',
+      label: 'Status',
       render: r => {
         const s = r.inferredStatus || r.inferred_status || 'unknown';
         const map = {
@@ -251,21 +228,40 @@ function _renderSessionsTable(sessions, assignments) {
         };
         const e = map[s] || map.unknown;
         let label = esc(e.label);
-        // Stuck waiting: > 10 min since last status update
         const updatedAt = r.inferredStatusUpdatedAt || r.inferred_status_updated_at;
         if (s === 'waiting_for_input' && updatedAt) {
           const waitingAge = (Date.now() - new Date(updatedAt).getTime()) / 60000;
-          if (waitingAge > 10) {
-            label += ' <span class="stale-badge">stale</span>';
-          }
+          if (waitingAge > 10) label += ' <span class="stale-badge">stale</span>';
         }
         return `<span class="agent-status ${e.cls}">${label}</span>`;
       },
     },
     {
-      key: 'lastHeartbeat',
-      label: 'Heartbeat',
-      render: r => esc(relativeTime(r.lastHeartbeat)),
+      key: 'activity',
+      label: 'Activity',
+      class: 'col-sparkline',
+      render: r => `<div class="sparkline-row-placeholder" data-sparkline-for="${esc(r.id)}"></div>`,
+    },
+    {
+      key: 'context',
+      label: 'Context',
+      render: r => {
+        const p = r.contextPressure || 'normal';
+        if (p === 'normal') return '<span style="color:var(--fg-muted)">normal</span>';
+        const col = p === 'critical' ? 'var(--destructive)' : 'var(--warning)';
+        const compact = r.compactCount > 0 ? ` \u00d7${r.compactCount}` : '';
+        return `<span style="color:${col};font-weight:600">${esc(p)}${compact}</span>`;
+      },
+    },
+    {
+      key: 'lastIOAt',
+      label: 'Last I/O',
+      render: r => {
+        if (!r.lastIOAt) return '<span style="color:var(--fg-muted)">—</span>';
+        const age = (Date.now() - new Date(r.lastIOAt).getTime()) / 1000;
+        const style = age > 90 ? 'color:var(--warning)' : 'color:var(--success)';
+        return `<span style="${style}">${esc(relativeTime(r.lastIOAt))}</span>`;
+      },
     },
     {
       key: 'elapsedSec',
@@ -277,7 +273,6 @@ function _renderSessionsTable(sessions, assignments) {
   const rows = filtered.map(s => {
     const row = { ...s, _id: s.id };
     const sessionAssigns = assignmentsBySession.get(s.id) || [];
-    // Inject sparkline placeholder — filled in lazily on expand
     row._expandHtml = _buildExpandContent(s, sessionAssigns);
     return row;
   });
@@ -291,156 +286,170 @@ function _renderSessionsTable(sessions, assignments) {
 }
 
 function _buildExpandContent(session, assigns) {
-  const _mkPlaceholder = (uid) => `<div id="sparkline-${esc(uid)}" data-sparkline-for="${esc(session.id)}" class="sparkline-placeholder">
-    <div class="skeleton sparkline-skeleton" style="width:120px;height:30px;display:inline-block;border-radius:4px"></div>
-    <a href="/api/v1/dashboard/sessions/metrics/${esc(session.id)}" target="_blank" class="drilldown-link" style="margin-left:8px;font-size:11px;color:var(--accent-warm)">metrics →</a>
-  </div>`;
+  const safeId = esc(session.id);
+  
+  // Left: Metadata
+  const metaItems = [
+    { label: 'Session ID', value: `<code>${esc(truncId(session.id, 12))}</code>` },
+    { label: 'Task', value: esc(session.task || '—') },
+    { label: 'Worktree', value: esc(session.worktree || '—') },
+    { label: 'PR', value: session.prNumber ? esc('#' + session.prNumber) : '—' },
+    { label: 'Started', value: esc(relativeTime(session.startedAt)) },
+  ];
+  const metaHtml = detailGrid(metaItems);
 
-  if (assigns.length === 0) {
-    const items = [
-      { label: 'Session ID', value: esc(truncId(session.id, 12)) },
-      { label: 'Mode', value: esc(session.mode || '—') },
-      { label: 'Worktree', value: esc(session.worktree || '—') },
-      { label: 'PR', value: session.prNumber ? esc('#' + session.prNumber) : '—' },
-      { label: 'Started', value: esc(relativeTime(session.startedAt)) },
-      { label: 'Last Output', value: session.lastIOAt ? esc(relativeTime(session.lastIOAt)) : '—' },
-      { label: 'Context Trend', value: _mkPlaceholder(session.id) },
-    ];
-    return detailGrid(items);
-  }
+  // Center: Operational Stats + Sparkline
+  const statsHtml = `
+    <div class="expand-stats">
+      <div class="expand-stat-group">
+        <span class="detail-label">Context Pressure Trend</span>
+        <div id="sparkline-${safeId}" data-sparkline-for="${safeId}" class="sparkline-placeholder">
+          ${skeleton(1)}
+        </div>
+      </div>
+      <div class="metrics-link-row">
+        <a href="/api/v1/dashboard/sessions/metrics/${safeId}" target="_blank" class="drilldown-link">deep metrics →</a>
+      </div>
+      ${_renderAssignmentActions(assigns)}
+    </div>
+  `;
 
-  let out = '';
-  for (const a of assigns) {
-    const items = [
-      { label: 'Assignment', value: esc(truncId(a.id, 12)) },
-      { label: 'Substatus', value: a.substatus ? statusChip(a.substatus) : '—' },
-      { label: 'Blocked Reason', value: esc(a.blockedReason || '—') },
-      { label: 'Task ID', value: esc(a.taskId || '—') },
-      { label: 'Worktree', value: esc(session.worktree || '—') },
-      { label: 'Branch State', value: a.branchState ? statusChip(a.branchState) : '—' },
-      { label: 'PR', value: a.prNumber ? esc('#' + a.prNumber) : '—' },
-      { label: 'Started', value: esc(relativeTime(a.startedAt)) },
-      { label: 'Ended', value: a.endedAt ? esc(relativeTime(a.endedAt)) : '—' },
-      { label: 'Context Trend', value: _mkPlaceholder(session.id + '-' + a.id) },
-    ];
-    out += detailGrid(items);
-    
-    // Operator action buttons
-    const actions = ['pause', 'resume', 'abandon', 'close', 'replay', 'release', 'release-slot'];
-    const destructiveActions = new Set(['abandon', 'close']);
-    out += '<div class="session-actions">';
-    for (const act of actions) {
-      const cls = destructiveActions.has(act) ? 'btn-sm destructive' : 'btn-sm';
-      out += `<button class="${cls}" data-action="${esc(act)}" data-assignment-id="${esc(a.id)}">${esc(act)}</button>`;
-    }
-    out += '</div>';
-  }
-  return out;
+  // Right: Console Peek
+  const consoleHtml = `
+    <div class="console-peek">
+      <div class="console-peek-header">
+        <span>Console Peek</span>
+        <div class="console-peek-actions">
+          <button class="btn-ghost btn-xs" data-action="refresh-tail" data-session-id="${safeId}">refresh</button>
+        </div>
+      </div>
+      <div id="tail-${safeId}" class="console-peek-body mono">
+        <div class="skeleton-container" style="padding:0">
+          <div class="skeleton-line" style="width:90%"></div>
+          <div class="skeleton-line" style="width:70%"></div>
+          <div class="skeleton-line" style="width:80%"></div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  return `
+    <div class="session-expand-container">
+      <div class="expand-col meta-col">${metaHtml}</div>
+      <div class="expand-col stats-col">${statsHtml}</div>
+      <div class="expand-col console-col">${consoleHtml}</div>
+    </div>
+  `;
 }
 
-// Lazy-load sparkline on row expand.
-// Targets all placeholders for the session via [data-sparkline-for] so
-// sessions with multiple assignment grids all get updated.
+function _renderAssignmentActions(assigns) {
+  if (!assigns || assigns.length === 0) return '';
+  let out = '<div class="session-actions-container">';
+  for (const a of assigns) {
+    out += `<div class="assignment-action-row">
+      <span class="action-label">${esc(truncId(a.id, 8))}</span>
+      <div class="session-actions">`;
+    const actions = ['pause', 'resume', 'abandon', 'close', 'replay'];
+    const destructive = new Set(['abandon', 'close']);
+    for (const act of actions) {
+      const cls = destructive.has(act) ? 'btn-sm destructive' : 'btn-sm';
+      out += `<button class="${cls}" data-action="${esc(act)}" data-assignment-id="${esc(a.id)}">${esc(act)}</button>`;
+    }
+    out += `</div></div>`;
+  }
+  return out + '</div>';
+}
+
+// Lazy-load sparkline and tail on expansion
 function _loadSparkline(sessionId) {
   const placeholders = document.querySelectorAll(`[data-sparkline-for="${sessionId}"]`);
   if (!placeholders.length) return;
-  const unloaded = [...placeholders].filter(el => !el.dataset.loaded);
-  if (!unloaded.length) return;
 
   const safeId = encodeURIComponent(sessionId);
-  const fallbackLink = `<a href="/api/v1/dashboard/sessions/metrics/${safeId}" target="_blank" class="drilldown-link" style="font-size:11px;color:var(--accent-warm)">metrics \u2192</a>`;
   apiFetch(`/api/v1/dashboard/sessions/metrics/${safeId}`).then(data => {
-    if (!Array.isArray(data?.requests)) {
-      // Malformed/empty response — leave unloaded so a future expand can retry
-      const noData = '<span style="color:var(--fg-muted);font-size:11px">no metrics yet</span> ' + fallbackLink;
-      // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method
-      for (const p of unloaded) p.innerHTML = noData;
+    if (!Array.isArray(data?.requests)) return;
+    const values = data.requests.map(r => Number(r.cumulative_prompt_tokens) || 0);
+    const chart = sparklineChart(values, { color: 'var(--accent-warm)' });
+    const rowChart = sparklineChart(values, { color: 'var(--accent)', width: 60, height: 20 });
+
+    for (const p of placeholders) {
+      if (p.classList.contains('sparkline-row-placeholder')) {
+        p.innerHTML = rowChart;
+      } else {
+        const compact = (data?.compact_count ?? 0) > 0
+          ? `<span class="compact-count">compacted \xd7${data.compact_count}</span>`
+          : '';
+        p.innerHTML = chart + compact;
+      }
+      p.dataset.loaded = '1';
+    }
+  }).catch(() => {});
+}
+
+async function _loadTail(sessionId) {
+  const el = document.getElementById(`tail-${sessionId}`);
+  if (!el) return;
+
+  try {
+    const data = await loadSessionTail(sessionId, 20);
+    if (!data.lines || data.lines.length === 0) {
+      el.innerHTML = '<span class="text-muted">No logs available</span>';
       return;
     }
-    const values = data.requests.map(r => {
-      const n = Number(r.cumulative_prompt_tokens);
-      return Number.isFinite(n) ? n : 0;
-    });
-    const compact = (data?.compact_count ?? 0) > 0
-      ? `<span style="margin-left:6px;font-size:11px;color:var(--fg-muted)">compacted \xd7${Number(data.compact_count)}</span>`
-      : '';
-    const link = `<a href="/api/v1/dashboard/sessions/metrics/${safeId}" target="_blank" class="drilldown-link" style="margin-left:8px;font-size:11px;color:var(--accent-warm)">metrics \u2192</a>`;
-    const chart = sparklineChart(values, { color: 'var(--accent-warm)' });
-    const inner = chart + compact + link;
-    for (const p of unloaded) {
-      p.dataset.loaded = '1';
-      // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method
-      p.innerHTML = inner;
-    }
-  }).catch(() => {
-    // Network/parse error — leave unloaded so a future expand can retry
-    const noData = '<span style="color:var(--fg-muted);font-size:11px">no metrics yet</span> ' + fallbackLink;
-    // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method
-    for (const p of unloaded) p.innerHTML = noData;
-  });
+    // Render lines with simple ANSI-like color mapping if needed, or just esc
+    const htmlLines = data.lines.map(l => `<div class="console-line">${esc(l)}</div>`).join('');
+    el.innerHTML = htmlLines;
+    el.scrollTop = el.scrollHeight;
+  } catch (err) {
+    el.innerHTML = `<span class="text-destructive">Failed to load logs: ${esc(err.message)}</span>`;
+  }
 }
 
 // --- Expand-row toggle binding ---
 
 function _bindExpandToggles() {
-  for (const tableId of ['sessions-table', 'history-table']) {
-    const table = $(tableId);
-    if (!table) continue;
+  const table = $('sessions-table');
+  if (!table) return;
 
-    table.addEventListener('click', (e) => {
-      // Handle operator action button clicks
-      const actionBtn = e.target.closest('.btn-sm[data-action]');
-      if (actionBtn) {
-        e.stopPropagation();
-        const action = actionBtn.dataset.action;
-        const assignmentId = actionBtn.dataset.assignmentId;
-        if (action && assignmentId) {
-          actionBtn.disabled = true;
-          actionBtn.textContent = action + '…';
-          sessionAction(assignmentId, action)
-            .then(res => {
-              const level = res.status === 'not_implemented' ? 'info' : 'success';
-              toast(`${action}: ${res.message || 'done'}`, level);
-              refreshSessions();
-            })
-            .catch(err => {
-              toast(`${action} failed: ${err.message}`, 'error');
-            })
-            .finally(() => {
-              actionBtn.disabled = false;
-              actionBtn.textContent = action;
-            });
-        }
-        return;
-      }
+  table.addEventListener('click', (e) => {
+    // Action buttons
+    const actionBtn = e.target.closest('.btn-sm[data-action]');
+    if (actionBtn) {
+      e.stopPropagation();
+      const { action, assignmentId } = actionBtn.dataset;
+      actionBtn.disabled = true;
+      sessionAction(assignmentId, action)
+        .then(res => {
+          toast(`${action}: ${res.message || 'done'}`, res.status === 'not_implemented' ? 'info' : 'success');
+          refreshSessions();
+        })
+        .catch(err => toast(`${action} failed: ${err.message}`, 'error'))
+        .finally(() => actionBtn.disabled = false);
+      return;
+    }
 
-      const tr = e.target.closest('tr.expandable');
-      if (!tr) return;
-      const rowId = tr.dataset.rowId;
-      if (!rowId) return;
+    const tr = e.target.closest('tr.expandable');
+    if (!tr) return;
+    const rowId = tr.dataset.rowId;
+    const expandRow = table.querySelector(`tr.expand-row[data-expand-for="${rowId}"]`);
+    if (!expandRow) return;
 
-      const expandRow = table.querySelector(`tr.expand-row[data-expand-for="${rowId}"]`);
-      if (!expandRow) return;
+    const isHidden = expandRow.classList.contains('hidden');
+    expandRow.classList.toggle('hidden', !isHidden);
+    tr.querySelector('.chevron')?.classList.toggle('open', isHidden);
 
-      const isHidden = expandRow.classList.contains('hidden');
-      expandRow.classList.toggle('hidden', !isHidden);
+    if (isHidden) {
+      _loadSparkline(rowId);
+      _loadTail(rowId);
+    }
+  });
 
-      const chevron = tr.querySelector('.chevron');
-      if (chevron) chevron.classList.toggle('open', isHidden);
-
-      const expanded = store.select('ui').expandedRows;
-      if (isHidden) {
-        expanded.add(rowId);
-        // Lazy-load sparkline when row is opened (no-op for history rows)
-        _loadSparkline(rowId);
-      } else {
-        expanded.delete(rowId);
-      }
-    });
-  }
+  // Initial load for row sparklines (if visible)
+  const rowPlaceholders = table.querySelectorAll('.sparkline-row-placeholder:not([data-loaded])');
+  rowPlaceholders.forEach(p => _loadSparkline(p.dataset.sparklineFor));
 }
 
-// --- History tab ---
+// --- History tab --- (remains largely same but updated result chips)
 
 function _renderHistoryTab(archives) {
   const filterVal = (_filter.repo || '').toLowerCase();
@@ -456,29 +465,16 @@ function _renderHistoryTab(archives) {
 
 function _renderTimingAnalytics(archives) {
   const completed = archives.filter(a => a.durationSec != null && a.durationSec >= 0);
-  const totalRuns = archives.length;
   const avgDuration = completed.length > 0
     ? completed.reduce((sum, a) => sum + a.durationSec, 0) / completed.length
     : -1;
   const successCount = archives.filter(a => ['success', 'merged', 'completed'].includes((a.result || '').toLowerCase())).length;
-  const passRate = totalRuns > 0 ? Math.round((successCount / totalRuns) * 100) : -1;
-  // Throughput: sessions per day over the window spanned by the archives
-  let throughput = 0;
-  if (archives.length > 1) {
-    const times = archives.map(a => a.startedAt ? new Date(a.startedAt).getTime() : 0).filter(Boolean);
-    if (times.length > 1) {
-      let minTime = times[0], maxTime = times[0];
-      for (const t of times) { if (t < minTime) minTime = t; if (t > maxTime) maxTime = t; }
-      const spanDays = (maxTime - minTime) / (1000 * 60 * 60 * 24);
-      if (spanDays > 0) throughput = +(archives.length / spanDays).toFixed(1);
-    }
-  }
+  const passRate = archives.length > 0 ? Math.round((successCount / archives.length) * 100) : -1;
 
   const strip = [
-    metricCard(totalRuns, 'Total Runs', 'var(--fg-muted)'),
-    metricCard(formatDuration(avgDuration), 'Avg Duration', 'var(--stage-gating)'),
-    metricCard(passRate >= 0 ? passRate + '%' : '—', 'Pass Rate', passRate >= 80 ? 'var(--success)' : passRate >= 50 ? 'var(--warning)' : 'var(--destructive)'),
-    metricCard(throughput > 0 ? throughput + '/day' : '—', 'Throughput', 'var(--info)'),
+    metricCard(archives.length, 'Total Runs', 'var(--fg-muted)'),
+    metricCard(formatDuration(avgDuration), 'Avg Duration', 'var(--accent-warm)'),
+    metricCard(passRate >= 0 ? passRate + '%' : '—', 'Pass Rate', passRate >= 80 ? 'var(--success)' : 'var(--warning)'),
   ].join('');
 
   return `<div class="metric-strip">${strip}</div>`;
@@ -497,22 +493,8 @@ function _renderHistoryTable(archives) {
       label: 'Result',
       render: r => _resultChip(r.result),
     },
-    {
-      key: 'durationSec',
-      label: 'Duration',
-      render: r => formatDuration(r.durationSec),
-    },
-    {
-      key: 'endedAt',
-      label: 'Ended',
-      render: r => r.endedAt ? esc(relativeTime(r.endedAt)) : '<span style="color:var(--fg-muted)">—</span>',
-    },
-    {
-      key: 'commitCount',
-      label: 'Commits',
-      class: 'col-num',
-      render: r => esc(String(r.commitCount ?? 0)),
-    },
+    { key: 'durationSec', label: 'Duration', render: r => formatDuration(r.durationSec) },
+    { key: 'endedAt', label: 'Ended', render: r => r.endedAt ? esc(relativeTime(r.endedAt)) : '—' },
   ];
 
   const rows = archives.map(a => ({
@@ -521,22 +503,15 @@ function _renderHistoryTable(archives) {
     _expandHtml: _buildHistoryExpandContent(a),
   }));
 
-  const tableHtml = dataTable('history-table', columns, rows, {
-    expandable: true,
-    empty: 'No archived runs',
-  });
-
-  return glassCard('Run History', tableHtml, { padding: 'none', class: 'card-history' });
+  return glassCard('Run History', dataTable('history-table', columns, rows, { expandable: true }), { padding: 'none' });
 }
 
 function _buildHistoryExpandContent(archive) {
   const items = [
-    { label: 'Session ID', value: archive.sessionId ? `<code>${esc(truncId(archive.sessionId, 16))}</code>` : '—' },
+    { label: 'Session ID', value: `<code>${esc(archive.sessionId || '—')}</code>` },
     { label: 'Task', value: esc(archive.taskId || '—') },
-    { label: 'Task Source', value: esc(archive.taskSource || '—') },
     { label: 'Started', value: archive.startedAt ? esc(new Date(archive.startedAt).toLocaleString()) : '—' },
     { label: 'Ended', value: archive.endedAt ? esc(new Date(archive.endedAt).toLocaleString()) : '—' },
-    { label: 'Merge SHA', value: archive.mergeSha ? `<code>${esc(truncId(archive.mergeSha, 10))}</code>` : '—' },
   ];
   return detailGrid(items);
 }
@@ -546,6 +521,5 @@ function _resultChip(result) {
   const r = String(result).toLowerCase();
   if (['success', 'merged', 'completed'].includes(r)) return statusChip('success');
   if (['failure', 'failed', 'error'].includes(r)) return statusChip('fail');
-  if (['cancelled', 'abandoned', 'timeout'].includes(r)) return statusChip('cancelled');
   return statusChip(result);
 }

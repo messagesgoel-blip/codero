@@ -158,6 +158,10 @@ export async function loadAgentSessions(agentId) {
   return apiFetch(`/api/v1/dashboard/agents/${encodeURIComponent(agentId)}/sessions`);
 }
 
+export async function loadSessionTail(sessionId, lines = 50) {
+  return apiFetch(`/api/v1/dashboard/sessions/${encodeURIComponent(sessionId)}/tail?lines=${lines}`);
+}
+
 export async function toggleAgentTracking(agentId, disabled) {
   const data = await apiPut('tracking-config', { agent_id: agentId, disabled });
   store.set({ trackingConfig: data });
