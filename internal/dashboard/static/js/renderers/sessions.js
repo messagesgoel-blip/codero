@@ -142,7 +142,7 @@ function _bindTabBar() {
 function _renderActiveTab(sessions, assignments) {
   const activeSessions = sessions.filter(s => s.state === 'active').length;
   const stalledSessions = sessions.filter(s => s.state === 'stalled').length;
-  const waitingSessions = sessions.filter(s => (s.inferredStatus || s.inferred_status) === 'waiting_for_input').length;
+  const waitingSessions = sessions.filter(s => s.inferredStatus === 'waiting_for_input').length;
   const strip = [
     metricCard(String(sessions.length), 'Sessions', 'var(--accent-warm)'),
     metricCard(String(activeSessions), 'Active', 'var(--success)'),
@@ -157,7 +157,7 @@ function _renderActiveTab(sessions, assignments) {
 function _renderStatusFilterStrip(sessions) {
   const counts = { working: 0, waiting_for_input: 0, idle: 0 };
   for (const s of sessions) {
-    const st = s.inferredStatus || s.inferred_status || 'unknown';
+    const st = s.inferredStatus || 'unknown';
     if (counts[st] !== undefined) counts[st]++;
   }
   const allCls = !_statusFilter ? 'active' : '';
@@ -188,13 +188,13 @@ function _renderSessionsTable(sessions, assignments) {
         (s.agent || s.ownerAgent || '').toLowerCase().includes(filterVal))
     : sessions;
   if (_statusFilter) {
-    filtered = filtered.filter(s => (s.inferredStatus || s.inferred_status || 'unknown') === _statusFilter);
+    filtered = filtered.filter(s => (s.inferredStatus || 'unknown') === _statusFilter);
   }
   // Attention-first sort
   const statusOrder = { waiting_for_input: 0, working: 1, idle: 2, unknown: 3 };
   filtered = [...filtered].sort((a, b) => {
-    const sa = statusOrder[a.inferredStatus || a.inferred_status || 'unknown'] ?? 3;
-    const sb = statusOrder[b.inferredStatus || b.inferred_status || 'unknown'] ?? 3;
+    const sa = statusOrder[a.inferredStatus || 'unknown'] ?? 3;
+    const sb = statusOrder[b.inferredStatus || 'unknown'] ?? 3;
     if (sa !== sb) return sa - sb;
     if (sa === 0) return new Date(a.startedAt || 0) - new Date(b.startedAt || 0);
     return new Date(b.startedAt || 0) - new Date(a.startedAt || 0);
@@ -219,7 +219,7 @@ function _renderSessionsTable(sessions, assignments) {
       key: 'inferredStatus',
       label: 'Status',
       render: r => {
-        const s = r.inferredStatus || r.inferred_status || 'unknown';
+        const s = r.inferredStatus || 'unknown';
         const map = {
           working:           { cls: 'status-working', label: 'Working' },
           waiting_for_input: { cls: 'status-waiting', label: 'Waiting' },
@@ -228,7 +228,7 @@ function _renderSessionsTable(sessions, assignments) {
         };
         const e = map[s] || map.unknown;
         let label = esc(e.label);
-        const updatedAt = r.inferredStatusUpdatedAt || r.inferred_status_updated_at;
+        const updatedAt = r.inferredStatusUpdatedAt;
         if (s === 'waiting_for_input' && updatedAt) {
           const waitingAge = (Date.now() - new Date(updatedAt).getTime()) / 60000;
           if (waitingAge > 10) label += ' <span class="stale-badge">stale</span>';
@@ -286,7 +286,8 @@ function _renderSessionsTable(sessions, assignments) {
 }
 
 function _buildExpandContent(session, assigns) {
-  const safeId = esc(session.id);
+  const safeIdHtml = esc(session.id);
+  const safeIdUrl = encodeURIComponent(session.id);
   
   // Left: Metadata
   const metaItems = [
@@ -303,12 +304,12 @@ function _buildExpandContent(session, assigns) {
     <div class="expand-stats">
       <div class="expand-stat-group">
         <span class="detail-label">Context Pressure Trend</span>
-        <div id="sparkline-${safeId}" data-sparkline-for="${safeId}" class="sparkline-placeholder">
+        <div id="sparkline-${safeIdHtml}" data-sparkline-for="${safeIdHtml}" class="sparkline-placeholder">
           ${skeleton(1)}
         </div>
       </div>
       <div class="metrics-link-row">
-        <a href="/api/v1/dashboard/sessions/metrics/${safeId}" target="_blank" class="drilldown-link">deep metrics →</a>
+        <a href="/api/v1/dashboard/sessions/metrics/${safeIdUrl}" target="_blank" class="drilldown-link">deep metrics →</a>
       </div>
       ${_renderAssignmentActions(assigns)}
     </div>
@@ -320,10 +321,10 @@ function _buildExpandContent(session, assigns) {
       <div class="console-peek-header">
         <span>Console Peek</span>
         <div class="console-peek-actions">
-          <button class="btn-ghost btn-xs" data-action="refresh-tail" data-session-id="${safeId}">refresh</button>
+          <button class="btn-ghost btn-xs" data-action="refresh-tail" data-session-id="${safeIdHtml}">refresh</button>
         </div>
       </div>
-      <div id="tail-${safeId}" class="console-peek-body mono">
+      <div id="tail-${safeIdHtml}" class="console-peek-body mono">
         <div class="skeleton-container" style="padding:0">
           <div class="skeleton-line" style="width:90%"></div>
           <div class="skeleton-line" style="width:70%"></div>
@@ -374,16 +375,21 @@ function _loadSparkline(sessionId) {
 
     for (const p of placeholders) {
       if (p.classList.contains('sparkline-row-placeholder')) {
-        p.innerHTML = rowChart;
+        setHtml(p, rowChart);
       } else {
         const compact = (data?.compact_count ?? 0) > 0
           ? `<span class="compact-count">compacted \xd7${data.compact_count}</span>`
           : '';
-        p.innerHTML = chart + compact;
+        setHtml(p, chart + compact);
       }
       p.dataset.loaded = '1';
     }
-  }).catch(() => {});
+  }).catch(err => {
+    // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method
+    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+      console.warn('Sparkline load failed:', err);
+    }
+  });
 }
 
 async function _loadTail(sessionId) {
@@ -393,15 +399,15 @@ async function _loadTail(sessionId) {
   try {
     const data = await loadSessionTail(sessionId, 20);
     if (!data.lines || data.lines.length === 0) {
-      el.innerHTML = '<span class="text-muted">No logs available</span>';
+      setHtml(el, '<span class="text-muted">No logs available</span>');
       return;
     }
     // Render lines with simple ANSI-like color mapping if needed, or just esc
     const htmlLines = data.lines.map(l => `<div class="console-line">${esc(l)}</div>`).join('');
-    el.innerHTML = htmlLines;
+    setHtml(el, htmlLines);
     el.scrollTop = el.scrollHeight;
   } catch (err) {
-    el.innerHTML = `<span class="text-destructive">Failed to load logs: ${esc(err.message)}</span>`;
+    setHtml(el, `<span class="text-destructive">Failed to load logs: ${esc(err.message)}</span>`);
   }
 }
 

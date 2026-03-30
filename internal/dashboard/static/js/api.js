@@ -173,6 +173,7 @@ export async function updateAgentEnvVars(agentId, envVars) {
   store.set({ trackingConfig: data });
   return data;
 }
+
 // --- Normalizers ---
 
 function normalizeOverview(raw) {
@@ -197,6 +198,11 @@ function normalizeSessions(raw) {
     lastIOAt: s.last_io_at,
     contextPressure: s.context_pressure || 'normal',
     compactCount: s.compact_count || 0,
+    inferredStatus: s.inferred_status || 'unknown',
+    inferredStatusUpdatedAt: s.inferred_status_updated_at || null,
+    workingDurationSec: s.working_duration_sec ?? 0,
+    idleDurationSec: s.idle_duration_sec ?? 0,
+    outputMB: s.output_mb ?? 0,
   }));
 }
 
