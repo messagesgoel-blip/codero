@@ -11,10 +11,10 @@ import { initPipeline, renderPipeline, refreshPipeline } from './renderers/pipel
 import { initTasks, renderTasks, refreshTasks } from './renderers/tasks.js';
 import { initGate, renderGate, refreshGate } from './renderers/gate.js';
 import { initChat, renderChat, refreshChat, renderFloatingChat } from './renderers/chat.js';
-import { initArchives, renderArchives, refreshArchives } from './renderers/archives.js';
 import { initAgents, renderAgents, refreshAgents } from './renderers/agents.js';
 import { initSettings, renderSettings, refreshSettings } from './renderers/settings.js';
 import { initRepos, renderRepos, refreshRepos } from './renderers/repos.js';
+import { initScorecard, renderScorecard, refreshScorecard } from './renderers/scorecard.js';
 
 // --- Register all routes ---
 registerRoute('overview', { init: initOverview, render: renderOverview, refresh: refreshOverview });
@@ -24,9 +24,9 @@ registerRoute('tasks', { init: initTasks, render: renderTasks, refresh: refreshT
 registerRoute('repos', { init: initRepos, render: renderRepos, refresh: refreshRepos });
 registerRoute('gate', { init: initGate, render: renderGate, refresh: refreshGate });
 registerRoute('chat', { init: initChat, render: renderChat, refresh: refreshChat });
-registerRoute('archives', { init: initArchives, render: renderArchives, refresh: refreshArchives });
 registerRoute('agents', { init: initAgents, render: renderAgents, refresh: refreshAgents });
 registerRoute('settings', { init: initSettings, render: renderSettings, refresh: refreshSettings });
+registerRoute('scorecard', { init: initScorecard, render: renderScorecard, refresh: refreshScorecard });
 
 // --- Theme ---
 function applyTheme(theme) {
@@ -34,6 +34,11 @@ function applyTheme(theme) {
   document.documentElement.classList.toggle('dark', theme !== 'light');
   localStorage.setItem('codero-theme', theme);
   store.set({ ui: { theme } });
+  // Swap sidebar logo for light/dark mode
+  const logoImg = document.querySelector('.sidebar-logo-icon');
+  if (logoImg) {
+    logoImg.src = theme === 'light' ? './numera-logo-light.svg' : './numera-logo.svg';
+  }
 }
 
 const btnTheme = $('btn-theme');
@@ -49,7 +54,7 @@ applyTheme(store.state.ui.theme);
 const titleMap = {
   overview: 'Overview', sessions: 'Sessions', agents: 'Agents', pipeline: 'Delivery Pipeline',
   tasks: 'Tasks', repos: 'Node Repositories', gate: 'Gate Checks', chat: 'Chat Assistant',
-  archives: 'Archives & Timing', settings: 'Settings',
+  settings: 'Settings', scorecard: 'Scorecard',
 };
 store.subscribe('ui', (ui) => {
   setText('header-title', titleMap[ui.activeTab] || 'Codero');
@@ -96,6 +101,18 @@ if (chatFloatingBtn && chatFloatingPanel) {
     chatFloatingPanel.style.display = visible ? 'none' : 'flex';
     if (!visible) {
       renderFloatingChat(chatFloatingPanel);
+    }
+  });
+}
+
+// --- Header chat toggle ---
+const btnChatToggle = $('btn-chat-toggle');
+if (btnChatToggle) {
+  btnChatToggle.addEventListener('click', () => {
+    if (chatFloatingPanel) {
+      const visible = chatFloatingPanel.style.display !== 'none';
+      chatFloatingPanel.style.display = visible ? 'none' : 'flex';
+      if (!visible) renderFloatingChat(chatFloatingPanel);
     }
   });
 }

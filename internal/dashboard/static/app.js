@@ -619,7 +619,7 @@ function renderArchitectureTab() {
     '<div class="page-header"><h2>Architecture</h2><p>Service flow and integration map</p></div>' +
     '<div class="arch-container" style="text-align:center;padding:3rem">' +
     '<div style="display:inline-flex;flex-direction:column;gap:1.5rem;align-items:center">' +
-    '<div class="arch-node" style="border-color:var(--primary)">codero gate-check</div>' +
+    '<div class="arch-node" style="border-color:var(--accent)">codero gate-check</div>' +
     '<div style="color:var(--text-muted)">\u2193</div>' +
     '<div style="display:flex;gap:1.5rem;flex-wrap:wrap;justify-content:center">' +
       '<div class="arch-node">gitleaks</div>' +

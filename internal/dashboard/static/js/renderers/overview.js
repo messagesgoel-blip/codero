@@ -96,7 +96,7 @@ function _renderActivityFeed(events) {
 
 function _renderMetricStrip(ov) {
   const cards = [
-    metricCard(String(ov.runsToday), 'Runs Today', 'var(--accent)'),
+    metricCard(String(ov.runsToday), 'Runs Today', 'var(--accent-warm)'),
     metricCard(formatPct(ov.passRate), 'Pass Rate', _passRateColor(ov.passRate)),
     metricCard(String(ov.blockedCount), 'Blocked', ov.blockedCount > 0 ? 'var(--destructive)' : 'var(--success)'),
     metricCard(formatDuration(ov.avgGateSec), 'Avg Gate Time', 'var(--info)'),

@@ -139,15 +139,26 @@ type AssignmentDetailResponse struct {
 }
 
 func (h *Handler) handleAssignmentDetail(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "")
-		return
-	}
 	setCORSHeaders(w)
 
-	assignmentID := strings.TrimPrefix(r.URL.Path, "/api/v1/dashboard/assignments/")
+	// Strip prefix and split: "/{id}" or "/{id}/{action}"
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/dashboard/assignments/")
+	parts := strings.SplitN(path, "/", 2)
+	assignmentID := parts[0]
 	if assignmentID == "" {
 		writeError(w, http.StatusBadRequest, "assignment_id required", "missing_id")
+		return
+	}
+
+	// Sub-action route
+	if len(parts) == 2 && parts[1] != "" {
+		h.handleAssignmentAction(w, r, assignmentID, parts[1])
+		return
+	}
+
+	// Default: GET detail
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "")
 		return
 	}
 
@@ -171,6 +182,53 @@ func (h *Handler) handleAssignmentDetail(w http.ResponseWriter, r *http.Request)
 		RuleChecks:        checks,
 		SchemaVersion:     SchemaVersionV1,
 		GeneratedAt:       time.Now().UTC(),
+	})
+}
+
+// AssignmentActionResponse is returned for POST /assignments/{id}/{action}.
+type AssignmentActionResponse struct {
+	AssignmentID  string    `json:"assignment_id"`
+	Action        string    `json:"action"`
+	Status        string    `json:"status"`
+	Message       string    `json:"message,omitempty"`
+	SchemaVersion string    `json:"schema_version"`
+	GeneratedAt   time.Time `json:"generated_at"`
+}
+
+var validAssignmentActions = map[string]bool{
+	"pause": true, "resume": true, "abandon": true, "close": true,
+	"replay": true, "release": true, "release-slot": true,
+}
+
+func (h *Handler) handleAssignmentAction(w http.ResponseWriter, r *http.Request, assignmentID, action string) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "POST required", "")
+		return
+	}
+	if !validAssignmentActions[action] {
+		writeError(w, http.StatusNotFound, "unknown action: "+action, "not_found")
+		return
+	}
+
+	// Verify assignment exists
+	_, err := queryAssignmentByID(r.Context(), h.db, assignmentID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			writeError(w, http.StatusNotFound, "assignment not found", "not_found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "assignment query failed", "db_error")
+		return
+	}
+
+	// TODO: wire to coordinator FSM when ready
+	writeJSON(w, http.StatusNotImplemented, AssignmentActionResponse{
+		AssignmentID:  assignmentID,
+		Action:        action,
+		Status:        "not_implemented",
+		Message:       action + " action not yet implemented — coordinator FSM not wired",
+		SchemaVersion: SchemaVersionV1,
+		GeneratedAt:   time.Now().UTC(),
 	})
 }
 
@@ -207,6 +265,17 @@ type FeedbackHistoryResponse struct {
 	Total         int            `json:"total"`
 	SchemaVersion string         `json:"schema_version"`
 	GeneratedAt   time.Time      `json:"generated_at"`
+}
+
+// ScorecardResponse is the response for GET /api/v1/dashboard/scorecard.
+type ScorecardResponse struct {
+	GatePassRate    string    `json:"gatePassRate"`
+	AvgCycleTime    string    `json:"avgCycleTime"`
+	MergeRate       string    `json:"mergeRate"`
+	ComplianceScore string    `json:"complianceScore"`
+	Summary         string    `json:"summary"`
+	SchemaVersion   string    `json:"schema_version"`
+	GeneratedAt     time.Time `json:"generated_at"`
 }
 
 func (h *Handler) handleFeedback(w http.ResponseWriter, r *http.Request) {
@@ -1056,5 +1125,24 @@ func (h *Handler) handleSessionMetrics(w http.ResponseWriter, r *http.Request) {
 		"compact_count":    compactCount,
 		"requests":         requests,
 		"generated_at":     time.Now().UTC(),
+	})
+}
+
+func (h *Handler) handleScorecard(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "")
+		return
+	}
+	setCORSHeaders(w)
+
+	// Stub response — real aggregation is a follow-up
+	writeJSON(w, http.StatusOK, ScorecardResponse{
+		GatePassRate:    "—",
+		AvgCycleTime:    "—",
+		MergeRate:       "—",
+		ComplianceScore: "—",
+		Summary:         "Scorecard data aggregation not yet implemented.",
+		SchemaVersion:   SchemaVersionV1,
+		GeneratedAt:     time.Now().UTC(),
 	})
 }

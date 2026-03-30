@@ -137,11 +137,11 @@ function _renderRosterTable(agents) {
 }
 
 function _buildAgentExpandContent(agent) {
-  const pressureIcon = agent.activePressure === 'critical' ? '🔴'
-    : agent.activePressure === 'warning' ? '🟡' : '';
-  const pressureLabel = pressureIcon
-    ? `${pressureIcon} ${esc(agent.activePressure)}`
-    : '<span style="color:var(--fg-muted)">normal</span>';
+  const pressureLabel = agent.activePressure === 'critical'
+    ? `<span class="pressure-dot critical"></span>${esc(agent.activePressure)}`
+    : agent.activePressure === 'warning'
+      ? `<span class="pressure-dot warning"></span>${esc(agent.activePressure)}`
+      : '<span style="color:var(--fg-muted)">normal</span>';
 
   const items = [
     { label: 'Agent ID', value: `<code>${esc(agent.agentId)}</code>` },

@@ -3,7 +3,7 @@
 // History tab: archived runs with timing analytics strip.
 
 import store from '../store.js';
-import { loadSessions, loadAssignments, loadArchives, apiFetch } from '../api.js';
+import { loadSessions, loadAssignments, loadArchives, apiFetch, sessionAction } from '../api.js';
 import {
   esc, html, statusChip, relativeTime, formatDuration, truncId, setHtml, $,
 } from '../utils.js';
@@ -118,7 +118,7 @@ function _renderActiveTab(sessions, assignments) {
   const activeSessions = sessions.filter(s => s.state === 'active').length;
   const stalledSessions = sessions.filter(s => s.state === 'stalled').length;
   const strip = [
-    metricCard(String(sessions.length), 'Sessions', 'var(--accent)'),
+    metricCard(String(sessions.length), 'Sessions', 'var(--accent-warm)'),
     metricCard(String(activeSessions), 'Active', 'var(--success)'),
     metricCard(String(stalledSessions), 'Stalled', stalledSessions > 0 ? 'var(--warning)' : 'var(--fg-muted)'),
     metricCard(String(assignments.length), 'Assignments', 'var(--info)'),
@@ -226,7 +226,7 @@ function _renderSessionsTable(sessions, assignments) {
 function _buildExpandContent(session, assigns) {
   const _mkPlaceholder = (uid) => `<div id="sparkline-${esc(uid)}" data-sparkline-for="${esc(session.id)}" class="sparkline-placeholder">
     <div class="skeleton sparkline-skeleton" style="width:120px;height:30px;display:inline-block;border-radius:4px"></div>
-    <a href="/api/v1/dashboard/sessions/metrics/${esc(session.id)}" target="_blank" class="drilldown-link" style="margin-left:8px;font-size:11px;color:var(--accent)">metrics →</a>
+    <a href="/api/v1/dashboard/sessions/metrics/${esc(session.id)}" target="_blank" class="drilldown-link" style="margin-left:8px;font-size:11px;color:var(--accent-warm)">metrics →</a>
   </div>`;
 
   if (assigns.length === 0) {
@@ -257,6 +257,16 @@ function _buildExpandContent(session, assigns) {
       { label: 'Context Trend', value: _mkPlaceholder(session.id + '-' + a.id) },
     ];
     out += detailGrid(items);
+    
+    // Operator action buttons
+    const actions = ['pause', 'resume', 'abandon', 'close', 'replay', 'release', 'release-slot'];
+    const destructiveActions = new Set(['abandon', 'close']);
+    out += '<div class="session-actions">';
+    for (const act of actions) {
+      const cls = destructiveActions.has(act) ? 'btn-sm destructive' : 'btn-sm';
+      out += `<button class="${cls}" data-action="${esc(act)}" data-assignment-id="${esc(a.id)}">${esc(act)}</button>`;
+    }
+    out += '</div>';
   }
   return out;
 }
@@ -271,7 +281,7 @@ function _loadSparkline(sessionId) {
   if (!unloaded.length) return;
 
   const safeId = encodeURIComponent(sessionId);
-  const fallbackLink = `<a href="/api/v1/dashboard/sessions/metrics/${safeId}" target="_blank" class="drilldown-link" style="font-size:11px;color:var(--accent)">metrics \u2192</a>`;
+  const fallbackLink = `<a href="/api/v1/dashboard/sessions/metrics/${safeId}" target="_blank" class="drilldown-link" style="font-size:11px;color:var(--accent-warm)">metrics \u2192</a>`;
   apiFetch(`/api/v1/dashboard/sessions/metrics/${safeId}`).then(data => {
     if (!Array.isArray(data?.requests)) {
       // Malformed/empty response — leave unloaded so a future expand can retry
@@ -287,8 +297,8 @@ function _loadSparkline(sessionId) {
     const compact = (data?.compact_count ?? 0) > 0
       ? `<span style="margin-left:6px;font-size:11px;color:var(--fg-muted)">compacted \xd7${Number(data.compact_count)}</span>`
       : '';
-    const link = `<a href="/api/v1/dashboard/sessions/metrics/${safeId}" target="_blank" class="drilldown-link" style="margin-left:8px;font-size:11px;color:var(--accent)">metrics \u2192</a>`;
-    const chart = sparklineChart(values, { color: 'var(--accent)' });
+    const link = `<a href="/api/v1/dashboard/sessions/metrics/${safeId}" target="_blank" class="drilldown-link" style="margin-left:8px;font-size:11px;color:var(--accent-warm)">metrics \u2192</a>`;
+    const chart = sparklineChart(values, { color: 'var(--accent-warm)' });
     const inner = chart + compact + link;
     for (const p of unloaded) {
       p.dataset.loaded = '1';
@@ -311,6 +321,32 @@ function _bindExpandToggles() {
     if (!table) continue;
 
     table.addEventListener('click', (e) => {
+      // Handle operator action button clicks
+      const actionBtn = e.target.closest('.btn-sm[data-action]');
+      if (actionBtn) {
+        e.stopPropagation();
+        const action = actionBtn.dataset.action;
+        const assignmentId = actionBtn.dataset.assignmentId;
+        if (action && assignmentId) {
+          actionBtn.disabled = true;
+          actionBtn.textContent = action + '…';
+          sessionAction(assignmentId, action)
+            .then(res => {
+              const level = res.status === 'not_implemented' ? 'info' : 'success';
+              toast(`${action}: ${res.message || 'done'}`, level);
+              refreshSessions();
+            })
+            .catch(err => {
+              toast(`${action} failed: ${err.message}`, 'error');
+            })
+            .finally(() => {
+              actionBtn.disabled = false;
+              actionBtn.textContent = action;
+            });
+        }
+        return;
+      }
+
       const tr = e.target.closest('tr.expandable');
       if (!tr) return;
       const rowId = tr.dataset.rowId;

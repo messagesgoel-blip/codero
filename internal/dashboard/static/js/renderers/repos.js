@@ -23,8 +23,7 @@ export function initRepos() {
 
 export async function refreshRepos() {
   try {
-    const data = await loadNodeRepos();
-    store.set({ nodeRepos: data });
+    await loadNodeRepos();
   } catch (err) {
     store.set({ nodeRepos: { error: err.message } });
   }

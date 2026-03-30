@@ -99,7 +99,9 @@ export async function loadRepos() {
 }
 
 export async function loadNodeRepos() {
-  return apiFetch('node-repos');
+  const data = await apiFetch('node-repos');
+  store.set({ nodeRepos: data });
+  return data;
 }
 
 export async function loadEvents() {
@@ -262,4 +264,15 @@ function normalizeArchives(raw) {
     durationSec: a.duration_seconds, commitCount: a.commit_count,
     mergeSha: a.merge_sha, taskSource: a.task_source, archivedAt: a.archived_at,
   }));
+}
+
+// ---- Operator Actions ----
+
+export function sessionAction(assignmentId, action) {
+  return apiPost(`assignments/${encodeURIComponent(assignmentId)}/${encodeURIComponent(action)}`, {});
+}
+
+export async function loadScorecard() {
+  const data = await apiFetch('scorecard');
+  store.set({ scorecard: data });
 }

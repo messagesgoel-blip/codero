@@ -20,6 +20,7 @@ export function initArchives() {
 export function renderArchives() {
   const container = $('page-archives');
   if (!container) return;
+  if (store.state.ui.activeTab !== 'archives') return;
 
   const archives = store.state.archives || [];
 

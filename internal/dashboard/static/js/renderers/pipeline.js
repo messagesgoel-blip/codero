@@ -12,9 +12,13 @@ const STAGES = [
   'PR_ACTIVE', 'MONITORING', 'MERGE_READY', 'MERGED',
 ];
 
+let _initialized = false;
+
 // ---- public API ---------------------------------------------------------
 
 export function initPipeline() {
+  if (_initialized) return;
+  _initialized = true;
   store.subscribe('pipeline', () => renderPipeline());
   store.subscribe('assignments', () => renderPipeline());
 }
