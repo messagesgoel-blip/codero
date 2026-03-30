@@ -1042,6 +1042,7 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 		sessionID       string
 		heartbeatSecret string
 		markProgress    bool
+		inferredStatus  string
 	)
 
 	cmd := &cobra.Command{
@@ -1058,14 +1059,29 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 				heartbeatSecret = os.Getenv("CODERO_HEARTBEAT_SECRET")
 			}
 
+			// Normalize and validate status if provided.
+			normalizedStatus := ""
+			if inferredStatus != "" {
+				normalizedStatus = state.NormalizeStatus(inferredStatus)
+				if normalizedStatus == "" {
+					return fmt.Errorf("invalid --status value %q: accepted values are working, waiting_for_input, idle, unknown (also accepts pretooluse, posttooluse, notification, waiting as aliases)", inferredStatus)
+				}
+			}
+
 			if daemonAddr := resolveDaemonAddr(cmd); daemonAddr != "" {
 				client, err := daemongrpc.NewSessionClient(daemonAddr)
 				if err != nil {
 					return fmt.Errorf("session heartbeat: %w", err)
 				}
 				defer client.Close()
-				if err := client.Heartbeat(cmd.Context(), sessionID, heartbeatSecret, markProgress); err != nil {
-					return fmt.Errorf("session heartbeat: %w", err)
+				if normalizedStatus != "" {
+					if err := client.HeartbeatWithStatus(cmd.Context(), sessionID, heartbeatSecret, markProgress, normalizedStatus); err != nil {
+						return fmt.Errorf("session heartbeat: %w", err)
+					}
+				} else {
+					if err := client.Heartbeat(cmd.Context(), sessionID, heartbeatSecret, markProgress); err != nil {
+						return fmt.Errorf("session heartbeat: %w", err)
+					}
 				}
 				return nil
 			}
@@ -1076,6 +1092,9 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 			}
 			defer cleanup()
 
+			if normalizedStatus != "" {
+				return store.HeartbeatWithStatus(cmd.Context(), sessionID, heartbeatSecret, markProgress, normalizedStatus)
+			}
 			return store.Heartbeat(cmd.Context(), sessionID, heartbeatSecret, markProgress)
 		},
 	}
@@ -1083,6 +1102,7 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&sessionID, "session-id", "", "session identifier (defaults to CODERO_SESSION_ID)")
 	cmd.Flags().StringVar(&heartbeatSecret, "heartbeat-secret", "", "heartbeat secret (defaults to CODERO_HEARTBEAT_SECRET)")
 	cmd.Flags().BoolVar(&markProgress, "progress", false, "also refresh session progress_at for active work")
+	cmd.Flags().StringVar(&inferredStatus, "status", "", "agent status: working, waiting_for_input, idle, unknown")
 
 	return cmd
 }

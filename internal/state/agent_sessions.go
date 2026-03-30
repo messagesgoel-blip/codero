@@ -2231,3 +2231,24 @@ func GetTokenMetricSummary(ctx context.Context, db *DB, sessionID string) (*Toke
 	}
 	return s, nil
 }
+
+// TransitionIdleSessions marks active sessions as idle when both last_io_at
+// and inferred_status_updated_at are older than the given threshold.
+// Called by the sessmetrics monitor on every tick.
+func TransitionIdleSessions(ctx context.Context, db *DB, now, threshold time.Time) error {
+	_, err := db.sql.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET inferred_status = 'idle',
+		    inferred_status_updated_at = ?
+		WHERE ended_at IS NULL
+		  AND inferred_status NOT IN ('waiting_for_input', 'unknown')
+		  AND last_io_at IS NOT NULL
+		  AND last_io_at < ?
+		  AND inferred_status_updated_at IS NOT NULL
+		  AND inferred_status_updated_at < ?`,
+		now, threshold, threshold)
+	if err != nil {
+		return fmt.Errorf("transition idle sessions: %w", err)
+	}
+	return nil
+}
