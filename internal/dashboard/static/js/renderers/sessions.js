@@ -255,18 +255,22 @@ function _renderSessionsTable(sessions, assignments) {
     },
     {
       key: 'lastIOAt',
-      label: 'Last I/O',
+      label: 'Activity',
       render: r => {
-        if (!r.lastIOAt) return '<span style="color:var(--fg-muted)">—</span>';
-        const age = (Date.now() - new Date(r.lastIOAt).getTime()) / 1000;
-        const style = age > 90 ? 'color:var(--warning)' : 'color:var(--success)';
-        return `<span style="${style}">${esc(relativeTime(r.lastIOAt))}</span>`;
+        const io = r.lastIOAt ? `<span style="display:block">${esc(relativeTime(r.lastIOAt))}</span>` : '<span style="color:var(--fg-muted)">—</span>';
+        const out = r.outputMB ? `<span style="font-size:0.65rem;color:var(--fg-muted)">out: ${esc(r.outputMB.toFixed(1))} MB</span>` : '';
+        return `<div>${io}${out}</div>`;
       },
     },
     {
       key: 'elapsedSec',
-      label: 'Elapsed',
-      render: r => esc(formatDuration(r.elapsedSec)),
+      label: 'Runtime',
+      render: r => {
+        const total = `<span style="display:block">${esc(formatDuration(r.elapsedSec))}</span>`;
+        const work = r.workingDurationSec ? `<span style="font-size:0.65rem;color:var(--success)">w: ${esc(formatDuration(r.workingDurationSec))}</span>` : '';
+        const idle = r.idleDurationSec ? `<span style="font-size:0.65rem;color:var(--warning);margin-left:6px">i: ${esc(formatDuration(r.idleDurationSec))}</span>` : '';
+        return `<div>${total}<div>${work}${idle}</div></div>`;
+      },
     },
   ];
 
@@ -296,6 +300,9 @@ function _buildExpandContent(session, assigns) {
     { label: 'Worktree', value: esc(session.worktree || '—') },
     { label: 'PR', value: session.prNumber ? esc('#' + session.prNumber) : '—' },
     { label: 'Started', value: esc(relativeTime(session.startedAt)) },
+    { label: 'Working', value: session.workingDurationSec ? esc(formatDuration(session.workingDurationSec)) : '—' },
+    { label: 'Idle', value: session.idleDurationSec ? esc(formatDuration(session.idleDurationSec)) : '—' },
+    { label: 'Output', value: session.outputMB ? esc(session.outputMB.toFixed(2)) + ' MB' : '—' },
   ];
   const metaHtml = detailGrid(metaItems);
 
@@ -363,7 +370,7 @@ function _renderAssignmentActions(assigns) {
 
 // Lazy-load sparkline and tail on expansion
 function _loadSparkline(sessionId) {
-  const placeholders = document.querySelectorAll(`[data-sparkline-for="${sessionId}"]`);
+  const placeholders = document.querySelectorAll(`[data-sparkline-for="${CSS.escape(sessionId)}"]`);
   if (!placeholders.length) return;
 
   const safeId = encodeURIComponent(sessionId);
@@ -427,7 +434,7 @@ function _bindExpandToggles() {
       sessionAction(assignmentId, action)
         .then(res => {
           toast(`${action}: ${res.message || 'done'}`, res.status === 'not_implemented' ? 'info' : 'success');
-          refreshSessions();
+          return refreshSessions();
         })
         .catch(err => toast(`${action} failed: ${err.message}`, 'error'))
         .finally(() => actionBtn.disabled = false);
@@ -437,7 +444,7 @@ function _bindExpandToggles() {
     const tr = e.target.closest('tr.expandable');
     if (!tr) return;
     const rowId = tr.dataset.rowId;
-    const expandRow = table.querySelector(`tr.expand-row[data-expand-for="${rowId}"]`);
+    const expandRow = table.querySelector(`tr.expand-row[data-expand-for="${CSS.escape(rowId)}"]`);
     if (!expandRow) return;
 
     const isHidden = expandRow.classList.contains('hidden');
