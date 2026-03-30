@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -241,8 +242,20 @@ func (h *Handler) handleAssignmentAction(w http.ResponseWriter, r *http.Request,
 	}
 
 	if err := state.PerformAssignmentAction(r.Context(), state.NewDB(h.db), assignmentID, action); err != nil {
-		loglib.Error("dashboard: assignment action failed", "assignment_id", assignmentID, "action", action, "error", err)
-		writeError(w, http.StatusInternalServerError, "action failed: "+err.Error(), "action_error")
+		// Map state errors to appropriate HTTP status codes
+		switch {
+		case errors.Is(err, state.ErrAgentAssignmentNotFound):
+			writeError(w, http.StatusNotFound, "assignment not found", "not_found")
+		case errors.Is(err, state.ErrAssignmentEnded):
+			writeError(w, http.StatusConflict, "assignment already ended", "already_ended")
+		case errors.Is(err, state.ErrInvalidTransition):
+			writeError(w, http.StatusConflict, "invalid state transition", "invalid_transition")
+		case strings.Contains(err.Error(), "unknown action"):
+			writeError(w, http.StatusBadRequest, "unknown action: "+action, "unknown_action")
+		default:
+			loglib.Error("dashboard: assignment action failed", "assignment_id", assignmentID, "action", action, "error", err)
+			writeError(w, http.StatusInternalServerError, "action failed: "+err.Error(), "action_error")
+		}
 		return
 	}
 
@@ -911,6 +924,21 @@ func (h *Handler) handleTrackingConfig(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "agent_id is required", "bad_request")
 			return
 		}
+		// Validate env_vars: reject empty keys, keys containing '=' or NUL, values with NUL
+		for k, v := range req.EnvVars {
+			if k == "" {
+				writeError(w, http.StatusBadRequest, "env_vars key cannot be empty", "bad_request")
+				return
+			}
+			if strings.Contains(k, "=") {
+				writeError(w, http.StatusBadRequest, "env_vars key cannot contain '='", "bad_request")
+				return
+			}
+			if strings.ContainsRune(k, '\x00') || strings.ContainsRune(v, '\x00') {
+				writeError(w, http.StatusBadRequest, "env_vars cannot contain NUL bytes", "bad_request")
+				return
+			}
+		}
 		// Serialize load→modify→save to prevent lost updates.
 		trackingConfigMu.Lock()
 		uc, err := config.LoadUserConfig()
@@ -1055,15 +1083,23 @@ func (h *Handler) handleAgentSessions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleSessionTailRouter(w http.ResponseWriter, r *http.Request) {
-	// URL format: /api/v1/dashboard/sessions/{id}/tail
+	// URL format: /api/v1/dashboard/sessions/{id} or /api/v1/dashboard/sessions/{id}/tail
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/dashboard/sessions/"), "/")
-	if len(parts) < 2 || parts[0] == "" {
+	if len(parts) == 0 || parts[0] == "" {
 		h.handleSessionDetail(w, r)
 		return
 	}
 	sessionID := parts[0]
-	action := parts[1]
 
+	// No action or empty action -> session detail
+	if len(parts) == 1 || parts[1] == "" {
+		// Restore the original URL path for handleSessionDetail
+		r.URL.Path = "/api/v1/dashboard/sessions/" + sessionID
+		h.handleSessionDetail(w, r)
+		return
+	}
+
+	action := parts[1]
 	if action == "tail" {
 		h.handleSessionTail(w, r, sessionID)
 		return
@@ -1125,7 +1161,23 @@ func (h *Handler) handleSessionTail(w http.ResponseWriter, r *http.Request, sess
 
 	var lines []string
 	scanner := bufio.NewScanner(f)
-	skipFirst := offset > 0
+	// Only skip the first scanned line if we actually landed mid-line
+	// (i.e., offset > 0 and the byte before offset is not a newline)
+	skipFirst := false
+	if offset > 0 {
+		// Read one byte before offset to check if we're at a line boundary
+		if _, err := f.Seek(offset-1, 0); err == nil {
+			var prevByte [1]byte
+			if _, err := f.Read(prevByte[:]); err == nil && prevByte[0] != '\n' {
+				skipFirst = true
+			}
+		}
+		// Seek back to offset
+		if _, err := f.Seek(offset, 0); err != nil {
+			writeError(w, http.StatusInternalServerError, "seek tail: "+err.Error(), "fs_error")
+			return
+		}
+	}
 	for scanner.Scan() {
 		if skipFirst {
 			skipFirst = false

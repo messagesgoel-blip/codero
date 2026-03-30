@@ -32,9 +32,13 @@ func TailPath(sessionID string) (string, error) {
 	}
 	base := TailDir()
 	p := filepath.Join(base, sessionID+".log")
-	cleanP := filepath.Clean(p)
-	cleanBase := filepath.Clean(base)
-	if !strings.HasPrefix(cleanP, cleanBase+string(os.PathSeparator)) {
+	// Use filepath.Rel to properly validate path doesn't escape base
+	rel, err := filepath.Rel(base, p)
+	if err != nil {
+		return "", fmt.Errorf("invalid session ID: %w", err)
+	}
+	// Check if the relative path tries to escape (starts with ..)
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return "", fmt.Errorf("invalid session ID: path escapes tail directory")
 	}
 	return p, nil
