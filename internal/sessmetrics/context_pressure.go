@@ -124,7 +124,7 @@ func (d *PressureDetector) evaluate(ctx context.Context, sessionID string) error
 	// Use the most common model from recent requests to get the context limit.
 	limit := modelContextLimit(last.Model)
 	if limit > 0 {
-		pct := float64(last.CumulativePromptTokens) / float64(limit)
+		pct := float64(last.PromptTokens) / float64(limit)
 		switch {
 		case pct >= d.cfg.CriticalPct:
 			level = state.ContextPressureCritical

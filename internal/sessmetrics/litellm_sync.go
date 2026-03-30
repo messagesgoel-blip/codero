@@ -9,10 +9,8 @@ import (
 	"fmt"
 	"time"
 
-	// register the postgres driver
-	_ "github.com/lib/pq"
+	_ "github.com/lib/pq" // register the postgres driver
 
-	loglib "github.com/codero/codero/internal/log"
 	"github.com/codero/codero/internal/state"
 )
 
@@ -140,13 +138,8 @@ func (s *LiteLLMSyncer) Sync(ctx context.Context) (int, error) {
 			RequestTime:                r.startTime,
 		}
 		if err := state.UpsertTokenMetric(ctx, s.db, row); err != nil {
-			loglib.Warn("sessmetrics: upsert failed",
-				loglib.FieldComponent, "sessmetrics",
-				"session_id", coderoSessionID.String,
-				"request_id", r.requestID,
-				"error", err,
-			)
-			continue
+			return imported, fmt.Errorf("upsert token metric (session=%s request=%s): %w",
+				coderoSessionID.String, r.requestID, err)
 		}
 		imported++
 	}

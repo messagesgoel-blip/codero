@@ -21,3 +21,5 @@ ALTER TABLE agent_sessions ADD COLUMN context_pressure   TEXT    DEFAULT 'normal
 ALTER TABLE agent_sessions ADD COLUMN last_compact_at    DATETIME;
 ALTER TABLE agent_sessions ADD COLUMN compact_count      INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE agent_sessions ADD COLUMN litellm_session_id TEXT;                       -- LiteLLM session_id (UUID) for correlation
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_sessions_litellm_session_id ON agent_sessions(litellm_session_id) WHERE litellm_session_id IS NOT NULL;
