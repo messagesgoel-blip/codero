@@ -85,7 +85,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 	// §3 Session endpoints
 	mux.HandleFunc("/api/v1/dashboard/sessions", h.handleSessions)
-	mux.HandleFunc("/api/v1/dashboard/sessions/", h.handleSessionDetail)
+	// Note: /sessions/ registered below with tail router which dispatches to detail
 	// §4 Assignment detail
 	mux.HandleFunc("/api/v1/dashboard/assignments/", h.handleAssignmentDetail)
 	// §5 Feedback
