@@ -155,6 +155,23 @@ func (s *sessionService) Heartbeat(ctx context.Context, req *daemonv1.HeartbeatR
 		return nil, status.Errorf(codes.Internal, "heartbeat: %v", err)
 	}
 
+	// Extract optional inferred_status from gRPC metadata.
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		if vals := md.Get("x-inferred-status"); len(vals) > 0 {
+			normalized := state.NormalizeStatus(vals[0])
+			if normalized != "" {
+				if err := state.UpdateInferredStatus(ctx, s.server.db, req.SessionId, normalized); err != nil {
+					loglib.Warn("grpc: inferred status update failed",
+						loglib.FieldComponent, "grpc",
+						"session_id", req.SessionId,
+						"status", normalized,
+						"error", err,
+					)
+				}
+			}
+		}
+	}
+
 	return &daemonv1.HeartbeatResponse{
 		Acknowledged: true,
 		ServerTime:   timestamppb.New(time.Now()),

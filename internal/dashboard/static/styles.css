@@ -525,3 +525,14 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.85em; }
 .btn-sm:hover { background: var(--bg-surface-3); color: var(--fg-primary); }
 .btn-sm.destructive { color: var(--destructive); border-color: var(--destructive); }
 .btn-sm.destructive:hover { background: var(--destructive-bg); }
+
+/* ========== AGENT STATUS ========== */
+.agent-status { font-size: 0.75rem; font-weight: 600; padding: 2px 8px; border-radius: 9999px; white-space: nowrap; }
+.status-working { color: var(--success); background: var(--success-bg); }
+.status-waiting { color: var(--warning); background: rgba(255, 170, 0, 0.12); font-weight: 700; }
+.status-idle { color: var(--fg-muted); }
+.status-unknown { color: var(--fg-muted); }
+.stale-badge { font-size: 0.65rem; color: var(--destructive); margin-left: 4px; }
+
+/* ========== STATUS FILTER STRIP ========== */
+.status-filter-strip { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }

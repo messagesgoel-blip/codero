@@ -121,6 +121,28 @@ func (s *Store) Heartbeat(ctx context.Context, sessionID, heartbeatSecret string
 	return nil
 }
 
+// HeartbeatWithStatus sends a heartbeat and updates inferred_status.
+// Used by CLI --status flag for direct-DB fallback path.
+func (s *Store) HeartbeatWithStatus(ctx context.Context, sessionID, heartbeatSecret string, markProgress bool, inferredStatus string) error {
+	if err := s.Heartbeat(ctx, sessionID, heartbeatSecret, markProgress); err != nil {
+		return err
+	}
+	if inferredStatus != "" {
+		normalized := state.NormalizeStatus(inferredStatus)
+		if normalized != "" {
+			if err := state.UpdateInferredStatus(ctx, s.db, sessionID, normalized); err != nil {
+				return fmt.Errorf("update inferred status: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+// ListActiveSessions returns all active (non-ended) sessions.
+func (s *Store) ListActiveSessions(ctx context.Context) ([]state.AgentSession, error) {
+	return state.ListActiveAgentSessions(ctx, s.db)
+}
+
 // AttachAssignment fills in repo/branch/worktree/task_id when a task is claimed or assigned.
 // It also updates the branch session tracking fields for dashboard visibility.
 func (s *Store) AttachAssignment(

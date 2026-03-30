@@ -12,6 +12,7 @@ import { metricCard, dataTable, detailGrid, glassCard, skeleton, sparklineChart,
 // --- Tab + filter state ---
 let _tab = 'active';   // 'active' | 'history'
 let _filter = { repo: '', branch: '' };
+let _statusFilter = ''; // '' | 'working' | 'waiting_for_input' | 'idle'
 
 // --- Internal state ---
 let _initialized = false;
@@ -26,6 +27,17 @@ export function initSessions() {
   _unsubs.push(store.subscribe('sessions', () => renderSessions()));
   _unsubs.push(store.subscribe('assignments', () => renderSessions()));
   _unsubs.push(store.subscribe('archives', () => { if (_tab === 'history') renderSessions(); }));
+
+  // Event delegation for status filter chips (survives re-renders)
+  const container = $('page-sessions');
+  if (container) {
+    container.addEventListener('click', (e) => {
+      const chip = e.target.closest('[data-status]');
+      if (!chip) return;
+      _statusFilter = chip.dataset.status || '';
+      renderSessions();
+    });
+  }
 }
 
 export async function refreshSessions() {
@@ -117,14 +129,32 @@ function _bindTabBar() {
 function _renderActiveTab(sessions, assignments) {
   const activeSessions = sessions.filter(s => s.state === 'active').length;
   const stalledSessions = sessions.filter(s => s.state === 'stalled').length;
+  const waitingSessions = sessions.filter(s => (s.inferredStatus || s.inferred_status) === 'waiting_for_input').length;
   const strip = [
     metricCard(String(sessions.length), 'Sessions', 'var(--accent-warm)'),
     metricCard(String(activeSessions), 'Active', 'var(--success)'),
+    metricCard(String(waitingSessions), 'Waiting', waitingSessions > 0 ? 'var(--warning)' : 'var(--fg-muted)'),
     metricCard(String(stalledSessions), 'Stalled', stalledSessions > 0 ? 'var(--warning)' : 'var(--fg-muted)'),
     metricCard(String(assignments.length), 'Assignments', 'var(--info)'),
   ];
   const metricsHtml = `<div class="metric-strip">${strip.join('')}</div>`;
-  return metricsHtml + _renderSessionsTable(sessions, assignments);
+  return metricsHtml + _renderStatusFilterStrip(sessions) + _renderSessionsTable(sessions, assignments);
+}
+
+function _renderStatusFilterStrip(sessions) {
+  const counts = { working: 0, waiting_for_input: 0, idle: 0 };
+  for (const s of sessions) {
+    const st = s.inferredStatus || s.inferred_status || 'unknown';
+    if (counts[st] !== undefined) counts[st]++;
+  }
+  const allCls = !_statusFilter ? 'active' : '';
+  const chips = [
+    `<button class="repo-filter-chip ${allCls}" data-status="">All</button>`,
+    `<button class="repo-filter-chip ${_statusFilter === 'working' ? 'active' : ''}" data-status="working">Working (${counts.working})</button>`,
+    `<button class="repo-filter-chip ${_statusFilter === 'waiting_for_input' ? 'active' : ''}" data-status="waiting_for_input">Waiting (${counts.waiting_for_input})</button>`,
+    `<button class="repo-filter-chip ${_statusFilter === 'idle' ? 'active' : ''}" data-status="idle">Idle (${counts.idle})</button>`,
+  ];
+  return `<div class="status-filter-strip">${chips.join('')}</div>`;
 }
 
 function _renderSessionsTable(sessions, assignments) {
@@ -136,14 +166,27 @@ function _renderSessionsTable(sessions, assignments) {
     assignmentsBySession.get(a.sessionId).push(a);
   }
 
-  // Client-side filter
+  // Client-side filter: text + status
   const filterVal = (_filter.repo || '').toLowerCase();
-  const filtered = filterVal
+  let filtered = filterVal
     ? sessions.filter(s =>
         (s.repo || '').toLowerCase().includes(filterVal) ||
         (s.branch || '').toLowerCase().includes(filterVal) ||
         (s.agent || s.ownerAgent || '').toLowerCase().includes(filterVal))
     : sessions;
+  if (_statusFilter) {
+    filtered = filtered.filter(s => (s.inferredStatus || s.inferred_status || 'unknown') === _statusFilter);
+  }
+  // Attention-first sort: waiting_for_input first (oldest), working (most recent), idle, unknown
+  const statusOrder = { waiting_for_input: 0, working: 1, idle: 2, unknown: 3 };
+  filtered = [...filtered].sort((a, b) => {
+    const sa = statusOrder[a.inferredStatus || a.inferred_status || 'unknown'] ?? 3;
+    const sb = statusOrder[b.inferredStatus || b.inferred_status || 'unknown'] ?? 3;
+    if (sa !== sb) return sa - sb;
+    // Within same status: most recent first (except waiting which is oldest first)
+    if (sa === 0) return new Date(a.startedAt || 0) - new Date(b.startedAt || 0);
+    return new Date(b.startedAt || 0) - new Date(a.startedAt || 0);
+  });
 
   const columns = [
     {
@@ -193,6 +236,30 @@ function _renderSessionsTable(sessions, assignments) {
         const compact = compactN > 0 ? ` \u00d7${compactN}` : '';
         const title = esc(p + ' context pressure' + (compactN > 0 ? '; compacted ' + compactN + ' time(s)' : ''));
         return `<span style="color:${col}" title="${title}">${icon} ${esc(p)}${compact}</span>`;
+      },
+    },
+    {
+      key: 'inferredStatus',
+      label: 'Agent Status',
+      render: r => {
+        const s = r.inferredStatus || r.inferred_status || 'unknown';
+        const map = {
+          working:           { cls: 'status-working', label: 'Working' },
+          waiting_for_input: { cls: 'status-waiting', label: 'Waiting' },
+          idle:              { cls: 'status-idle',    label: 'Idle' },
+          unknown:           { cls: 'status-unknown', label: '—' },
+        };
+        const e = map[s] || map.unknown;
+        let label = esc(e.label);
+        // Stuck waiting: > 10 min since last status update
+        const updatedAt = r.inferredStatusUpdatedAt || r.inferred_status_updated_at;
+        if (s === 'waiting_for_input' && updatedAt) {
+          const waitingAge = (Date.now() - new Date(updatedAt).getTime()) / 60000;
+          if (waitingAge > 10) {
+            label += ' <span class="stale-badge">stale</span>';
+          }
+        }
+        return `<span class="agent-status ${e.cls}">${label}</span>`;
       },
     },
     {

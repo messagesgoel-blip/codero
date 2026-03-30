@@ -10,6 +10,7 @@ import (
 
 // Monitor runs the LiteLLM syncer and pressure detector on a fixed interval.
 type Monitor struct {
+	stateDB  *state.DB
 	syncer   *LiteLLMSyncer
 	detector *PressureDetector
 	interval time.Duration
@@ -19,6 +20,7 @@ type Monitor struct {
 // (pressure detection still runs on any manually-inserted rows).
 func NewMonitor(pgDSN string, db *state.DB, interval time.Duration) *Monitor {
 	m := &Monitor{
+		stateDB:  db,
 		detector: NewPressureDetector(db),
 		interval: interval,
 	}
@@ -74,6 +76,13 @@ func (m *Monitor) runOnce(ctx context.Context) {
 
 	if err := m.detector.EvaluateAll(tctx); err != nil {
 		loglib.Warn("sessmetrics: pressure evaluation error",
+			loglib.FieldComponent, "sessmetrics",
+			"error", err,
+		)
+	}
+
+	if err := transitionIdleSessions(ctx, m.stateDB); err != nil {
+		loglib.Warn("sessmetrics: idle transition error",
 			loglib.FieldComponent, "sessmetrics",
 			"error", err,
 		)
