@@ -102,3 +102,55 @@ A task is done only when all are true:
 2. Required tests/gates pass.
 3. Changes are committed on a task branch.
 4. PR is opened with required context.
+
+## Live Deployment
+
+**Deployment directory:** Set via `CODERO_DEPLOY_DIR` env var (defaults to standard deploy location)
+
+**Sync script:** `scripts/sync-live.sh`
+
+```bash
+# Required env vars
+export CODERO_DEPLOY_DIR=/path/to/deploy
+export CODERO_PROXY_IP=172.25.0.31  # IP on proxy network
+export CODERO_PROXY_NETWORK=proxy   # Optional, defaults to proxy
+
+# One-command deploy (auto-increments patch version)
+./scripts/sync-live.sh
+
+# Or specify version
+./scripts/sync-live.sh v1.0.3
+```
+
+The script:
+1. Syncs repo files to `$CODERO_DEPLOY_DIR` (excludes `.env`, `.git`, runtime dirs)
+2. Updates `CODERO_VERSION` in `.env`
+3. Builds Docker image
+4. Recreates container with current env vars via `--env-file`
+5. Waits for health check
+
+**Manual deploy steps:**
+```bash
+# 1. Set deploy directory
+DEPLOY_DIR="${CODERO_DEPLOY_DIR:-<default-path>}"
+
+# 2. Sync files
+rsync -av --exclude '.git' --exclude 'bin/' /srv/storage/repo/codero/.worktrees/main/ "$DEPLOY_DIR/"
+
+# 3. Update version
+sed -i 's/CODERO_VERSION=.*/CODERO_VERSION=v1.0.X/' "$DEPLOY_DIR/.env"
+
+# 4. Build and restart
+cd "$DEPLOY_DIR"
+docker build -t codero:v1.0.X .
+docker rm -f codero
+# Then docker run with env vars from .env
+```
+
+**Container config:**
+- Network: `proxy` at `172.25.0.31`
+- Port: `127.0.0.1:8110:8080`
+- Redis: `codero-redis-prod` on same network
+- Volumes: `codero-db`, `codero-logs`, `codero-pids`, `codero-tmp`, `codero-snapshots`
+
+**Health endpoint:** `http://127.0.0.1:8110/health`
