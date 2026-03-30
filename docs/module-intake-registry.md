@@ -6,7 +6,7 @@ Hard guardrail: no bulk copy from ghwatcher. Only module-level intake with contr
 
 Classification and source-selection rules live in:
 
-- `docs/module-intake-policy.md`
+- `AGENTS.md`
 - `docs/borrowed-components.md`
 - `docs/roadmap-intake-map.md`
 

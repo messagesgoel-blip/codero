@@ -128,6 +128,6 @@ No-go:
 ## Related Docs
 
 - `docs/roadmap.md`
-- `docs/module-intake-policy.md`
+- `AGENTS.md`
 - `docs/borrowed-components.md`
 - `docs/module-intake-registry.md`

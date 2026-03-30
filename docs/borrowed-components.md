@@ -62,6 +62,6 @@ Even from permissive sources, do not import:
 
 ## Related Docs
 
-- `docs/module-intake-policy.md`
+- `AGENTS.md`
 - `docs/module-intake-registry.md`
 - `docs/roadmap-intake-map.md`

@@ -882,6 +882,8 @@ func (h *Handler) handleTrackingConfig(w http.ResponseWriter, r *http.Request) {
 	setCORSHeaders(w)
 	switch r.Method {
 	case http.MethodGet:
+		// Intentionally force a fresh scan here so deleted local profiles disappear
+		// from the operator UI immediately after they are removed from disk.
 		uc, agents, err := config.LoadUserConfigWithFreshRegistry()
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "load config: "+err.Error(), "config_error")
@@ -992,7 +994,8 @@ func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Merge with tracking config to get disabled/installed flags.
+	// Intentionally force a fresh scan here so deleted local profiles disappear
+	// from the operator UI immediately after they are removed from disk.
 	_, registryAgents, ucErr := config.LoadUserConfigWithFreshRegistry()
 	if ucErr != nil {
 		loglib.Warn("dashboard: agents: failed to load user config",

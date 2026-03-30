@@ -41,6 +41,64 @@ Does NOT own:
   - `agent_kind`, `auth_mode`, `home_strategy`, `home_dir`, `config_strategy`, `config_path`, `permission_profile`, `default_args`
 - Until profile translation lands in runtime, `env_vars` are the only applied per-profile launch override; do not assume `home_strategy`, `permission_profile`, or `default_args` already affect live launches.
 
+## Module Intake Rules
+- Roadmap first: every intake must map to an existing roadmap item, contract gap, or proving gap.
+- Contract first: no copied code lands without contract linkage, tests, rollback notes, and attribution metadata.
+- Smallest useful slice only: Codero borrows implementation patterns, not upstream branding, taxonomy, or UI identity.
+- Direct code intake is allowed only for narrow, identifiable slices from permissive licenses that Codero can cover with tests.
+- Safe default direct-intake licenses:
+  - MIT
+  - Apache-2.0
+  - BSD-2-Clause
+  - BSD-3-Clause
+  - ISC
+  - 0BSD
+- Case-by-case only until explicitly reviewed:
+  - MPL-2.0
+  - LGPL
+  - EPL
+- Reference-only by default for Codero's current license posture:
+  - GPL
+  - AGPL
+  - SSPL
+  - BSL
+- Intake modes:
+  - `direct code`: copy a small permissive slice with attribution and tests
+  - `behavior`: reimplement the upstream behavior inside Codero's own architecture
+  - `reference-only`: use the source for research, screenshots, naming, or operational guidance only
+- Every intake record must capture:
+  - roadmap target
+  - source repo and URL
+  - source license
+  - source commit, tag, or review date
+  - intake mode
+  - files touched in Codero
+  - contract or spec link
+  - tests added or updated
+  - rollback path
+  - attribution note
+- Required workflow:
+  1. Identify the roadmap item or contract gap.
+  2. Choose one to three upstream candidates.
+  3. Classify each candidate by license and intake mode.
+  4. Record the source in `docs/borrowed-components.md`.
+  5. Record the intake in `docs/module-intake-registry.md` when a normative module or copied slice is adopted.
+  6. Write or update the relevant contract before landing implementation.
+  7. Import or reimplement the smallest useful slice.
+  8. Add parity, unit, contract, or integration coverage.
+  9. Document rollback notes and attribution.
+- Things we do not copy:
+  - full upstream terminal UIs
+  - upstream branding or terminology when Codero already has a clearer term
+  - end-to-end frameworks when only one subsystem is needed
+  - code that would force Codero into an incompatible open-source license
+  - code that bypasses Codero contracts, tests, or deterministic state rules
+- Related intake docs:
+  - `docs/borrowed-components.md`
+  - `docs/roadmap-intake-map.md`
+  - `docs/module-intake-registry.md`
+- Codero is intended to become an open-source project. Before the first public release, keep direct code intake conservative and ensure root license/notice files plus copied-code attribution exist.
+
 ## Shared Tools (Mandatory)
 - Resolve tooling from: `/srv/storage/shared/tools/bin`
 - Required shared tools include: `ruff`, `gitleaks`, `semgrep`, `pre-commit`, `poetry`

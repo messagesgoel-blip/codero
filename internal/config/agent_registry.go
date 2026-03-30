@@ -1,11 +1,14 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	loglib "github.com/codero/codero/internal/log"
 )
 
 const DefaultAgentRegistryScanInterval = 24 * time.Hour
@@ -95,7 +98,7 @@ func (uc *UserConfig) RefreshAgentRegistry(now time.Time) ([]RegisteredAgent, er
 
 	discovered, err := DiscoverAgents(uc)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("refresh agent registry: discover agents: %w", err)
 	}
 
 	prev := uc.Registry.Agents
@@ -246,6 +249,10 @@ func loadUserConfigWithRegistry(maxAge time.Duration, forceRefresh bool) (*UserC
 		return nil, nil, refreshErr
 	}
 	if err := uc.Save(); err != nil {
+		loglib.Warn("config: fresh agent registry save failed",
+			loglib.FieldComponent, "config",
+			"error", err,
+		)
 		return uc, agents, nil
 	}
 	return uc, agents, nil

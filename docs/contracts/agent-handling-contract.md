@@ -219,10 +219,10 @@ results, review findings, and suggested next action.
 
 ## Core Invariants
 
-1. One live `session_id` maps to exactly one running agent process.
-2. One live session maps to at most one live assignment.
-3. One task maps to at most one live assignment.
-4. One branch maps to at most one live owner session.
+1. A live `session_id` maps to exactly one running agent process.
+2. Each live session maps to at most one live assignment.
+3. Any task maps to at most one live assignment.
+4. Each branch maps to at most one live owner session.
 5. The launcher owns the heartbeat secret.
 6. The agent never owns merge, handoff, or stale-session recovery.
 7. SQLite is the source of truth; detached terminal sessions are runtime evidence.

@@ -43,7 +43,6 @@ Install pre-commit hook for a repo:
 - `docs/roadmaps/codero-roadmap-v5.md`
 - `docs/roadmap.md`
 - `docs/architecture.md`
-- `docs/module-intake-policy.md`
 - `docs/borrowed-components.md`
 - `docs/roadmap-intake-map.md`
 - `docs/module-intake-registry.md`
