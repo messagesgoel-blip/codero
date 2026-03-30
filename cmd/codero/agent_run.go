@@ -28,17 +28,19 @@ import (
 )
 
 // tailDir returns the directory used for per-session output tail files.
-// Override via CODERO_TAIL_DIR env var; defaults to codero-tails under os.TempDir().
+// Deprecated: use session.TailDir
 func tailDir() string {
-	if d := os.Getenv("CODERO_TAIL_DIR"); d != "" {
-		return d
-	}
-	return filepath.Join(os.TempDir(), "codero-tails")
+	return session.TailDir()
 }
 
 // tailPath returns the tail file path for a session.
+// Deprecated: use session.TailPath
 func tailPath(sessionID string) string {
-	return filepath.Join(tailDir(), sessionID+".log")
+	p, err := session.TailPath(sessionID)
+	if err != nil {
+		return ""
+	}
+	return p
 }
 
 // activityTracker records the last time the child process wrote to stdout/stderr.

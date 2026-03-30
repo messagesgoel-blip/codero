@@ -1,11 +1,13 @@
 package dashboard
 
 import (
+	"bufio"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/codero/codero/internal/config"
 	loglib "github.com/codero/codero/internal/log"
+	"github.com/codero/codero/internal/session"
 	"github.com/codero/codero/internal/state"
 )
 
@@ -1051,6 +1054,101 @@ func (h *Handler) handleAgentSessions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"sessions": sessions})
 }
 
+func (h *Handler) handleSessionTailRouter(w http.ResponseWriter, r *http.Request) {
+	// URL format: /api/v1/dashboard/sessions/{id}/tail
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/dashboard/sessions/"), "/")
+	if len(parts) < 2 || parts[0] == "" {
+		h.handleSessionDetail(w, r)
+		return
+	}
+	sessionID := parts[0]
+	action := parts[1]
+
+	if action == "tail" {
+		h.handleSessionTail(w, r, sessionID)
+		return
+	}
+
+	// Unknown action: return 404 instead of falling through with malformed sessionID
+	http.NotFound(w, r)
+}
+
+func (h *Handler) handleSessionTail(w http.ResponseWriter, r *http.Request, sessionID string) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "")
+		return
+	}
+	setCORSHeaders(w)
+
+	lineCount := queryInt(r, "lines", 50)
+	if lineCount > 500 {
+		lineCount = 500
+	}
+
+	path, err := session.TailPath(sessionID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid session ID: "+err.Error(), "invalid_input")
+		return
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"session_id":   sessionID,
+				"lines":        []string{},
+				"error":        "tail file not found",
+				"generated_at": time.Now().UTC(),
+			})
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "open tail: "+err.Error(), "fs_error")
+		return
+	}
+	defer f.Close()
+
+	// Simple tail: read last 32KB
+	const bufSize = 32 * 1024
+	info, err := f.Stat()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "stat tail: "+err.Error(), "fs_error")
+		return
+	}
+
+	offset := info.Size() - bufSize
+	if offset < 0 {
+		offset = 0
+	}
+	if _, err := f.Seek(offset, 0); err != nil {
+		writeError(w, http.StatusInternalServerError, "seek tail: "+err.Error(), "fs_error")
+		return
+	}
+
+	var lines []string
+	scanner := bufio.NewScanner(f)
+	skipFirst := offset > 0
+	for scanner.Scan() {
+		if skipFirst {
+			skipFirst = false
+			continue
+		}
+		lines = append(lines, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "scan tail: "+err.Error(), "fs_error")
+		return
+	}
+
+	if len(lines) > lineCount {
+		lines = lines[len(lines)-lineCount:]
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"session_id":   sessionID,
+		"lines":        lines,
+		"generated_at": time.Now().UTC(),
+	})
+}
+
 // agentStatus derives the display status for an agent roster row.
 // disabled overrides everything; otherwise: active > offline > idle.
 func agentStatus(r AgentRosterRow, disabled bool) string {
@@ -1176,17 +1274,12 @@ func (h *Handler) handleScorecard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Map proving metrics to dashboard scorecard fields
-	// Note: ProvingScorecard uses integer counts; we format them for display.
 	gatePassRate := "—"
 	if card.PrecommitReviews7Days > 0 {
-		// Ideally we would subtract failures, but ProvingScorecard doesn't track 
-		// pass vs fail counts separately yet. We'll show the raw volume.
 		gatePassRate = fmt.Sprintf("%d runs", card.PrecommitReviews7Days)
 	}
 
 	avgCycleTime := "—"
-	// TODO: add cycle time aggregation to ProvingScorecard
-
 	mergeRate := "—"
 	if card.BranchesReviewed7Days > 0 {
 		mergeRate = fmt.Sprintf("%d/wk", card.BranchesReviewed7Days)

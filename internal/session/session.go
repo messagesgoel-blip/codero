@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,8 +15,34 @@ import (
 	"github.com/codero/codero/internal/state"
 )
 
+// TailDir returns the directory used for per-session output tail files.
+// Override via CODERO_TAIL_DIR env var; defaults to codero-tails under os.TempDir().
+func TailDir() string {
+	if d := os.Getenv("CODERO_TAIL_DIR"); d != "" {
+		return d
+	}
+	return filepath.Join(os.TempDir(), "codero-tails")
+}
+
+// TailPath returns the tail file path for a session.
+// Returns an error if sessionID contains path traversal sequences.
+func TailPath(sessionID string) (string, error) {
+	if strings.Contains(sessionID, "..") || strings.ContainsAny(sessionID, "/\\") {
+		return "", fmt.Errorf("invalid session ID: path traversal detected")
+	}
+	base := TailDir()
+	p := filepath.Join(base, sessionID+".log")
+	cleanP := filepath.Clean(p)
+	cleanBase := filepath.Clean(base)
+	if !strings.HasPrefix(cleanP, cleanBase+string(os.PathSeparator)) {
+		return "", fmt.Errorf("invalid session ID: path escapes tail directory")
+	}
+	return p, nil
+}
+
 var (
 	ErrMissingSessionID  = errors.New("session_id is required")
+	ErrInvalidSessionID  = errors.New("session_id contains invalid characters")
 	ErrMissingAgentID    = errors.New("agent_id is required")
 	ErrMissingAssignment = errors.New("repo and branch are required to attach assignment")
 	ErrMissingStatus     = errors.New("status is required")
