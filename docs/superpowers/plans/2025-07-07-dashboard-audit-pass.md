@@ -990,7 +990,7 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 ### Task 6.3: Add action buttons to session expand panel
 
 **Files:**
-- Modify: `internal/dashboard/static/js/renderers/sessions.js` (_buildExpandContent + _bindExpandToggles)
+- Modify: `internal/dashboard/static/js/renderers/sessions.js` (`_buildExpandContent` + `_bindExpandToggles`)
 - Modify: `internal/dashboard/static/styles.css` (add .session-actions, .btn-sm styles)
 
 - [ ] **Step 1: Add button CSS**

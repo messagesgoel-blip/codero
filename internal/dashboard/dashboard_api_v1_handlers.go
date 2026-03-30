@@ -222,11 +222,11 @@ func (h *Handler) handleAssignmentAction(w http.ResponseWriter, r *http.Request,
 	}
 
 	// TODO: wire to coordinator FSM when ready
-	writeJSON(w, http.StatusOK, AssignmentActionResponse{
+	writeJSON(w, http.StatusNotImplemented, AssignmentActionResponse{
 		AssignmentID:  assignmentID,
 		Action:        action,
-		Status:        "accepted",
-		Message:       action + " action accepted (stub — coordinator not yet wired)",
+		Status:        "not_implemented",
+		Message:       action + " action not yet implemented — coordinator FSM not wired",
 		SchemaVersion: SchemaVersionV1,
 		GeneratedAt:   time.Now().UTC(),
 	})

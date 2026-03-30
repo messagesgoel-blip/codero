@@ -329,7 +329,8 @@ function _bindExpandToggles() {
           actionBtn.textContent = action + '…';
           sessionAction(assignmentId, action)
             .then(res => {
-              toast(`${action}: ${res.message || 'done'}`, 'success');
+              const level = res.status === 'not_implemented' ? 'info' : 'success';
+              toast(`${action}: ${res.message || 'done'}`, level);
               refreshSessions();
             })
             .catch(err => {

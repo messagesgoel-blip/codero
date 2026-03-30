@@ -18,6 +18,7 @@ export async function refreshScorecard() {
   try {
     await loadScorecard();
   } catch (err) {
+    store.set({ scorecard: { error: err.message } });
     toast('Failed to load scorecard: ' + err.message, 'error');
   }
 }

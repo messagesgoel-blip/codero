@@ -1,5 +1,5 @@
 /* Codero Dashboard — Numera-branded design system */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import 'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap';
 
 /* ========== DESIGN TOKENS ========== */
 :root {
@@ -416,7 +416,7 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.85em; }
 
 .chat-floating-btn {
   position: fixed; bottom: calc(var(--health-h) + 16px); right: 16px;
-  width: 44px; height: 44px; border-radius: 50%; background: var(--accent); color: white;
+  width: 44px; height: 44px; border-radius: 50%; background: var(--accent); color: var(--accent-fg);
   border: none; font-size: 1.25rem; cursor: pointer; box-shadow: var(--shadow-lg); z-index: 30;
   transition: transform var(--duration-normal) var(--ease-expo);
 }

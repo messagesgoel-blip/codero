@@ -35,7 +35,7 @@ export function initGate() {
       const varName = e.target.id.replace('gate-toggle-', '');
       const newValue = e.target.checked;
       try {
-        await apiPut('settings/gate-config/' + encodeURIComponent(varName), { value: newValue });
+        await apiPut('settings/gate-config/' + encodeURIComponent(varName), { value: String(newValue) });
         await loadGateConfig();
       } catch (err) {
         e.target.checked = !newValue;

@@ -54,7 +54,7 @@ applyTheme(store.state.ui.theme);
 const titleMap = {
   overview: 'Overview', sessions: 'Sessions', agents: 'Agents', pipeline: 'Delivery Pipeline',
   tasks: 'Tasks', repos: 'Node Repositories', gate: 'Gate Checks', chat: 'Chat Assistant',
-  archives: 'Archives & Timing', settings: 'Settings', scorecard: 'Scorecard',
+  settings: 'Settings', scorecard: 'Scorecard',
 };
 store.subscribe('ui', (ui) => {
   setText('header-title', titleMap[ui.activeTab] || 'Codero');
