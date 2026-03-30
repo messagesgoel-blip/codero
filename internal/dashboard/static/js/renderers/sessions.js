@@ -217,10 +217,11 @@ function _renderSessionsTable(sessions, assignments) {
       key: 'lastIOAt',
       label: 'Last Output',
       render: r => {
-        if (!r.lastIOAt) return '<span style="color:var(--fg-muted)">—</span>';
-        const age = (Date.now() - new Date(r.lastIOAt).getTime()) / 1000;
-        const style = age > 90 ? 'color:var(--warning)' : 'color:var(--success)';
-        return `<span style="${style}">${esc(relativeTime(r.lastIOAt))}</span>`;
+        const age = r.lastIOAt ? (Date.now() - new Date(r.lastIOAt).getTime()) / 1000 : null;
+        const style = age != null ? (age > 90 ? 'color:var(--warning)' : 'color:var(--success)') : 'color:var(--fg-muted)';
+        const io = r.lastIOAt ? `<span style="${style}">${esc(relativeTime(r.lastIOAt))}</span>` : '—';
+        const out = r.outputMB ? `<span style="display:block;font-size:0.65rem;color:var(--fg-muted)">out: ${esc(r.outputMB.toFixed(1))} MB</span>` : '';
+        return `<div>${io}${out}</div>`;
       },
     },
     {
@@ -270,7 +271,12 @@ function _renderSessionsTable(sessions, assignments) {
     {
       key: 'elapsedSec',
       label: 'Elapsed',
-      render: r => esc(formatDuration(r.elapsedSec)),
+      render: r => {
+        const total = `<span>${esc(formatDuration(r.elapsedSec))}</span>`;
+        const work = r.workingDurationSec ? `<span style="display:block;font-size:0.65rem;color:var(--success)">w: ${esc(formatDuration(r.workingDurationSec))}</span>` : '';
+        const idle = r.idleDurationSec ? `<span style="display:block;font-size:0.65rem;color:var(--warning)">i: ${esc(formatDuration(r.idleDurationSec))}</span>` : '';
+        return `<div>${total}${work}${idle}</div>`;
+      },
     },
   ];
 
@@ -303,6 +309,9 @@ function _buildExpandContent(session, assigns) {
       { label: 'Worktree', value: esc(session.worktree || '—') },
       { label: 'PR', value: session.prNumber ? esc('#' + session.prNumber) : '—' },
       { label: 'Started', value: esc(relativeTime(session.startedAt)) },
+      { label: 'Working', value: session.workingDurationSec ? esc(formatDuration(session.workingDurationSec)) : '—' },
+      { label: 'Idle', value: session.idleDurationSec ? esc(formatDuration(session.idleDurationSec)) : '—' },
+      { label: 'Output', value: session.outputMB ? esc(session.outputMB.toFixed(2)) + ' MB' : '—' },
       { label: 'Last Output', value: session.lastIOAt ? esc(relativeTime(session.lastIOAt)) : '—' },
       { label: 'Context Trend', value: _mkPlaceholder(session.id) },
     ];
@@ -342,7 +351,7 @@ function _buildExpandContent(session, assigns) {
 // Targets all placeholders for the session via [data-sparkline-for] so
 // sessions with multiple assignment grids all get updated.
 function _loadSparkline(sessionId) {
-  const placeholders = document.querySelectorAll(`[data-sparkline-for="${sessionId}"]`);
+  const placeholders = document.querySelectorAll(`[data-sparkline-for="${CSS.escape(sessionId)}"]`);
   if (!placeholders.length) return;
   const unloaded = [...placeholders].filter(el => !el.dataset.loaded);
   if (!unloaded.length) return;
@@ -401,7 +410,7 @@ function _bindExpandToggles() {
             .then(res => {
               const level = res.status === 'not_implemented' ? 'info' : 'success';
               toast(`${action}: ${res.message || 'done'}`, level);
-              refreshSessions();
+              return refreshSessions();
             })
             .catch(err => {
               toast(`${action} failed: ${err.message}`, 'error');
@@ -419,7 +428,7 @@ function _bindExpandToggles() {
       const rowId = tr.dataset.rowId;
       if (!rowId) return;
 
-      const expandRow = table.querySelector(`tr.expand-row[data-expand-for="${rowId}"]`);
+      const expandRow = table.querySelector(`tr.expand-row[data-expand-for="${CSS.escape(rowId)}"]`);
       if (!expandRow) return;
 
       const isHidden = expandRow.classList.contains('hidden');

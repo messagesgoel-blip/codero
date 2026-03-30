@@ -179,7 +179,7 @@ function wireExpandRows(container) {
     const row = e.target.closest('tr.expandable');
     if (!row) return;
     const rowId = row.dataset.rowId;
-    const expandRow = container.querySelector(`tr.expand-row[data-expand-for="${rowId}"]`);
+    const expandRow = container.querySelector(`tr.expand-row[data-expand-for="${CSS.escape(rowId)}"]`);
     if (expandRow) {
       expandRow.classList.toggle('hidden');
       const chevron = row.querySelector('.chevron');
