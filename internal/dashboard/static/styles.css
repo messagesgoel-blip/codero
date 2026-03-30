@@ -151,7 +151,7 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.85em; }
   user-select: none; white-space: nowrap;
 }
 .nav-item:hover { background: var(--bg-surface-2); color: var(--fg-primary); }
-.nav-item.active { background: rgba(0, 255, 136, 0.12); color: var(--accent); }
+.nav-item.active { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
 .nav-icon { width: 20px; text-align: center; font-size: 15px; flex-shrink: 0; }
 
 .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
@@ -341,7 +341,7 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.85em; }
   border: 2px dashed var(--border); border-radius: var(--radius-lg); padding: 32px;
   text-align: center; cursor: pointer; transition: all var(--duration-normal);
 }
-.file-drop-zone:hover, .file-drop-zone.dragover { border-color: var(--accent); background: rgba(0, 255, 136, 0.05); }
+.file-drop-zone:hover, .file-drop-zone.dragover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 5%, transparent); }
 .file-drop-icon { font-size: 2rem; margin-bottom: 8px; }
 .file-drop-text { color: var(--fg-muted); font-size: 0.875rem; }
 .file-drop-input { display: none; }

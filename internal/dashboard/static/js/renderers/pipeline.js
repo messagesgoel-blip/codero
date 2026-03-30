@@ -100,7 +100,7 @@ function buildKanban(pipeline) {
 // ---- PR status table -----------------------------------------------------
 
 function buildPrTable(assignments) {
-  const withPr = assignments.filter(a => a.prNumber || a.substatus || a.state);
+  const withPr = assignments.filter(a => a.prNumber || a.substatus);
 
   const columns = [
     { label: 'Agent', key: 'agent' },

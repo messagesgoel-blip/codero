@@ -32,6 +32,10 @@ export function renderScorecard() {
     setHtml(container, skeleton(6));
     return;
   }
+  if (data.error) {
+    setHtml(container, glassCard('Scorecard', `<div class="empty-state">Failed to load scorecard: ${esc(data.error)}</div>`));
+    return;
+  }
 
   const metrics = [
     metricCard(String(data.gatePassRate ?? '—'), 'Gate Pass Rate', 'var(--accent)'),

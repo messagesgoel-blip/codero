@@ -127,9 +127,9 @@ function buildToggleControls(gateChecks, gateConfig) {
   }
 
   const configMap = new Map();
-  if (gateConfig && gateConfig.vars) {
-    for (const v of gateConfig.vars) {
-      configMap.set(v.name, v);
+  if (gateConfig && gateConfig.checks) {
+    for (const check of gateConfig.checks) {
+      configMap.set(check.envVar, { value: check.currentValue });
     }
   }
 
