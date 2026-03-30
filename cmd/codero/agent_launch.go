@@ -30,6 +30,8 @@ func agentCmd(configPath *string) *cobra.Command {
 	cmd.AddCommand(agentLaunchCmd(configPath))
 	cmd.AddCommand(agentRunCmd(configPath))
 	cmd.AddCommand(agentHooksCmd(configPath))
+	cmd.AddCommand(agentListCmd(configPath))
+	cmd.AddCommand(agentNextCmd(configPath))
 	return cmd
 }
 

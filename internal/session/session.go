@@ -138,6 +138,11 @@ func (s *Store) HeartbeatWithStatus(ctx context.Context, sessionID, heartbeatSec
 	return nil
 }
 
+// ListActiveSessions returns all active (non-ended) sessions.
+func (s *Store) ListActiveSessions(ctx context.Context) ([]state.AgentSession, error) {
+	return state.ListActiveAgentSessions(ctx, s.db)
+}
+
 // AttachAssignment fills in repo/branch/worktree/task_id when a task is claimed or assigned.
 // It also updates the branch session tracking fields for dashboard visibility.
 func (s *Store) AttachAssignment(
