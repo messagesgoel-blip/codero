@@ -69,13 +69,48 @@ All dashboard-specific endpoints live under `/api/v1/dashboard/`.
 |--------|------|-------------|
 | GET | `/api/v1/dashboard/overview` | Today's run count, pass rate, blocked count, avg gate time, 7d sparkline |
 | GET | `/api/v1/dashboard/repos` | Repo list with latest branch, state, last-run info, gate pills |
+| GET | `/api/v1/dashboard/node-repos` | Discovered git repos on the node with connected/orphan status |
 | GET | `/api/v1/dashboard/runs` | 50 most recent review runs |
 | GET | `/api/v1/dashboard/activity` | 50 most recent delivery events |
 | GET | `/api/v1/dashboard/block-reasons` | Ranked error sources from findings |
 | GET | `/api/v1/dashboard/gate-health` | Per-provider pass rates |
+| GET | `/api/v1/dashboard/active-sessions` | Currently active agent sessions with heartbeat/context data |
+| GET | `/api/v1/dashboard/assignments` | Agent assignment list with state, PR, and timing info |
+| GET | `/api/v1/dashboard/assignments/{id}` | Single assignment detail |
+| GET | `/api/v1/dashboard/agent-events` | Agent session event stream |
+| GET | `/api/v1/dashboard/agents` | Per-agent stats aggregated over last 30 days |
+| GET | `/api/v1/dashboard/agents/{id}/sessions` | Recent sessions for a specific agent |
+| GET | `/api/v1/dashboard/sessions` | Session list with filtering/pagination |
+| GET | `/api/v1/dashboard/sessions/{id}` | Single session detail |
+| GET | `/api/v1/dashboard/sessions/{id}/tail` | Live tail of session output |
+| GET | `/api/v1/dashboard/sessions/metrics/{id}` | Session token metrics (context pressure/observability) |
+| GET | `/api/v1/dashboard/tasks` | Task list for the Tasks tab |
+| GET | `/api/v1/dashboard/pipeline` | Pipeline view with active assignment cards |
+| GET | `/api/v1/dashboard/scorecard` | Phase 1F scorecard with gate pass rate, cycle time, compliance |
+| GET | `/api/v1/dashboard/archives` | Session archives for TUI/dashboard parity |
+| GET | `/api/v1/dashboard/tracking-config` | Agent tracking config (disabled agents, env vars) |
+| PUT | `/api/v1/dashboard/tracking-config` | Toggle agent tracking or update env vars |
+| GET | `/api/v1/dashboard/compliance` | Compliance rules and per-assignment checks |
+| GET | `/api/v1/dashboard/compliance/rules` | Compliance rule definitions |
+| GET | `/api/v1/dashboard/compliance/checks/{id}` | Per-assignment compliance checks |
+| GET | `/api/v1/dashboard/compliance/violations` | Compliance violation list |
+| GET | `/api/v1/dashboard/gate-checks` | Latest gate-check report with per-check results |
+| GET | `/api/v1/dashboard/gate/{action}` | Gate actions (trigger, status, cancel) |
+| GET | `/api/v1/dashboard/merge/{action}` | Merge actions routed by sub-path |
+| GET | `/api/v1/dashboard/queue` | Current review queue |
+| GET | `/api/v1/dashboard/queue/stats` | Queue statistics |
+| GET | `/api/v1/dashboard/health` | DB connectivity, feed freshness, security score, ETA |
 | GET | `/api/v1/dashboard/settings` | Integrations + gate pipeline config |
 | PUT | `/api/v1/dashboard/settings` | Validated settings update (persisted, audited) |
+| GET | `/api/v1/dashboard/settings/gate-config` | Gate config key-value pairs |
+| GET | `/api/v1/dashboard/settings/gate-config/{key}` | Individual gate config value |
+| GET | `/api/v1/dashboard/settings/repo-config/{repo}` | Per-repo configuration |
+| GET | `/api/v1/dashboard/feedback/history` | Feedback history for sessions |
+| POST | `/api/v1/dashboard/feedback/{id}` | Submit feedback for a session |
 | POST | `/api/v1/dashboard/chat` | LiteLLM-backed review-process assistant for the live dashboard |
+| POST | `/api/v1/chat/ask` | Alias for `/api/v1/dashboard/chat` |
+| GET | `/api/v1/chat/history` | Chat conversation list |
+| GET | `/api/v1/chat/history/{id}` | Single conversation history |
 | POST | `/api/v1/dashboard/manual-review-upload` | Drag/drop file upload for manual review |
 | GET | `/api/v1/dashboard/events` | SSE stream of live delivery events |
 
