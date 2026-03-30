@@ -92,6 +92,9 @@ type ActiveSession struct {
 	ProgressAt              *time.Time  `json:"progress_at,omitempty"`
 	LastIOAt                *time.Time  `json:"last_io_at,omitempty"`
 	ElapsedSec              int64       `json:"elapsed_sec"`
+	WorkingDurationSec      int64       `json:"working_duration_sec"`
+	IdleDurationSec         int64       `json:"idle_duration_sec"`
+	OutputMB                float64     `json:"output_mb"`
 	ContextPressure         string      `json:"context_pressure,omitempty"` // normal|warning|critical
 	CompactCount            int         `json:"compact_count,omitempty"`
 	InferredStatus          string      `json:"inferred_status,omitempty"` // unknown|working|waiting_for_input|idle

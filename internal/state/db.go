@@ -30,6 +30,13 @@ type DB struct {
 	sql *sql.DB
 }
 
+// NewDB wraps an existing *sql.DB connection.
+// Primarily used by the dashboard API which shares a connection pool
+// initialized by the daemon.
+func NewDB(sqldb *sql.DB) *DB {
+	return &DB{sql: sqldb}
+}
+
 // Open opens (or creates) the SQLite database at path, enables WAL mode, and
 // runs all pending numbered migrations embedded in the binary.
 //

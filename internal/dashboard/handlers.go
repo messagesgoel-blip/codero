@@ -115,9 +115,12 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 	// Agent fleet roster
 	mux.HandleFunc("/api/v1/dashboard/agents", h.handleAgents)
-	// Agent recent sessions (sub-path: /agents/{id}/sessions)
+	// Session recent sessions (sub-path: /agents/{id}/sessions)
 	mux.HandleFunc("/api/v1/dashboard/agents/", h.handleAgentSessions)
 	mux.HandleFunc("/api/v1/dashboard/scorecard", h.handleScorecard)
+
+	// §3.1 Session tail
+	mux.HandleFunc("/api/v1/dashboard/sessions/", h.handleSessionTailRouter)
 }
 
 // handleOverview serves GET /api/v1/dashboard/overview.

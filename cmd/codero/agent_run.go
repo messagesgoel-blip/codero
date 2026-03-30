@@ -28,17 +28,19 @@ import (
 )
 
 // tailDir returns the directory used for per-session output tail files.
-// Override via CODERO_TAIL_DIR env var; defaults to codero-tails under os.TempDir().
+// Deprecated: use session.TailDir
 func tailDir() string {
-	if d := os.Getenv("CODERO_TAIL_DIR"); d != "" {
-		return d
-	}
-	return filepath.Join(os.TempDir(), "codero-tails")
+	return session.TailDir()
 }
 
 // tailPath returns the tail file path for a session.
+// Deprecated: use session.TailPath
 func tailPath(sessionID string) string {
-	return filepath.Join(tailDir(), sessionID+".log")
+	p, err := session.TailPath(sessionID)
+	if err != nil {
+		return ""
+	}
+	return p
 }
 
 // activityTracker records the last time the child process wrote to stdout/stderr.
@@ -308,7 +310,15 @@ func heartbeatLoop(ctx context.Context, client *daemongrpc.SessionClient, sessio
 // Activity is tracked by reading the PTY master output stream.
 func runChild(binaryPath string, args []string, sessionID, agentID, daemonAddr string, tracker *activityTracker, tailFile *os.File) int {
 	child := exec.Command(binaryPath, args...) // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-	child.Env = append(os.Environ(),
+	env := os.Environ()
+	if uc, err := config.LoadUserConfig(); err == nil && uc != nil {
+		if w, ok := uc.Wrappers[agentID]; ok && w.EnvVars != nil {
+			for k, v := range w.EnvVars {
+				env = append(env, k+"="+v)
+			}
+		}
+	}
+	child.Env = append(env,
 		"CODERO_SESSION_ID="+sessionID,
 		"CODERO_AGENT_ID="+agentID,
 		"CODERO_DAEMON_ADDR="+daemonAddr,

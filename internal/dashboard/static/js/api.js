@@ -158,9 +158,20 @@ export async function loadAgentSessions(agentId) {
   return apiFetch(`/api/v1/dashboard/agents/${encodeURIComponent(agentId)}/sessions`);
 }
 
+export async function loadSessionTail(sessionId, lines = 50) {
+  return apiFetch(`/api/v1/dashboard/sessions/${encodeURIComponent(sessionId)}/tail?lines=${lines}`);
+}
+
 export async function toggleAgentTracking(agentId, disabled) {
   const data = await apiPut('tracking-config', { agent_id: agentId, disabled });
   store.set({ trackingConfig: data });
+  return data;
+}
+
+export async function updateAgentEnvVars(agentId, envVars) {
+  const data = await apiPut('tracking-config', { agent_id: agentId, env_vars: envVars });
+  store.set({ trackingConfig: data });
+  return data;
 }
 
 // --- Normalizers ---
@@ -187,6 +198,11 @@ function normalizeSessions(raw) {
     lastIOAt: s.last_io_at,
     contextPressure: s.context_pressure || 'normal',
     compactCount: s.compact_count || 0,
+    inferredStatus: s.inferred_status || 'unknown',
+    inferredStatusUpdatedAt: s.inferred_status_updated_at || null,
+    workingDurationSec: s.working_duration_sec ?? 0,
+    idleDurationSec: s.idle_duration_sec ?? 0,
+    outputMB: s.output_mb ?? 0,
   }));
 }
 

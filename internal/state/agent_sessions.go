@@ -2232,6 +2232,106 @@ func GetTokenMetricSummary(ctx context.Context, db *DB, sessionID string) (*Toke
 	return s, nil
 }
 
+// PerformAssignmentAction executes an operator-initiated action on an active
+// assignment (e.g. pause, resume, abandon, close). It validates the transition
+// using the assignment FSM and records the outcome in the state store.
+func PerformAssignmentAction(ctx context.Context, db *DB, assignmentID, action string) error {
+	action = strings.ToLower(strings.TrimSpace(action))
+
+	tx, err := db.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("perform assignment action: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Load assignment
+	row := tx.QueryRowContext(ctx, `
+		SELECT assignment_id, session_id, agent_id, repo, branch, worktree, task_id,
+		       state, blocked_reason, assignment_substatus,
+		       assignment_version, delivery_state, started_at, ended_at, end_reason, superseded_by
+		FROM agent_assignments
+		WHERE assignment_id = ?`,
+		assignmentID,
+	)
+	assignment, err := scanAgentAssignment(row)
+	if err != nil {
+		return fmt.Errorf("perform assignment action: load assignment %s: %w", assignmentID, err)
+	}
+	if assignment.EndedAt != nil {
+		return fmt.Errorf("perform assignment action: assignment %s already ended", assignmentID)
+	}
+
+	var (
+		nextState     assignmentLifecycleState
+		nextSubstatus string
+		endReason     string
+		isTerminal    bool
+	)
+
+	switch action {
+	case "pause":
+		nextState = assignmentStateBlocked
+		nextSubstatus = AssignmentSubstatusBlockedPolicy
+	case "resume":
+		nextState = assignmentStateActive
+		nextSubstatus = AssignmentSubstatusInProgress
+	case "abandon":
+		nextState = assignmentStateLost
+		nextSubstatus = AssignmentSubstatusTerminalStuckAbandoned
+		endReason = "operator_abandoned"
+		isTerminal = true
+	case "close":
+		nextState = assignmentStateCancelled
+		nextSubstatus = AssignmentSubstatusTerminalCancelled
+		endReason = "operator_closed"
+		isTerminal = true
+	default:
+		return fmt.Errorf("perform assignment action: unknown action %q", action)
+	}
+
+	// Validate transition via FSM
+	if err := ValidateAssignmentStateTransition(assignmentLifecycleState(assignment.State), nextState); err != nil {
+		return fmt.Errorf("perform assignment action: %w", err)
+	}
+
+	now := time.Now().UTC()
+	updateSQL := `
+		UPDATE agent_assignments
+		SET state = ?, assignment_substatus = ?, blocked_reason = ?,
+		    assignment_version = assignment_version + 1`
+	args := []any{string(nextState), nextSubstatus, blockedReasonFromSubstatus(nextSubstatus)}
+
+	if isTerminal {
+		updateSQL += `, ended_at = ?, end_reason = ?`
+		args = append(args, now, endReason)
+	}
+	updateSQL += ` WHERE assignment_id = ? AND ended_at IS NULL`
+	args = append(args, assignmentID)
+
+	if _, err := tx.ExecContext(ctx, updateSQL, args...); err != nil {
+		return fmt.Errorf("perform assignment action: update: %w", err)
+	}
+
+	// Record event
+	if err := appendAgentEventTx(ctx, tx, assignment.SessionID, assignment.AgentID, "operator_action_applied", map[string]any{
+		"assignment_id":  assignmentID,
+		"action":         action,
+		"from_state":     assignment.State,
+		"to_state":       string(nextState),
+		"next_substatus": nextSubstatus,
+	}); err != nil {
+		return fmt.Errorf("perform assignment action: append event: %w", err)
+	}
+
+	if isTerminal {
+		if err := clearAssignmentBranchOwnershipTx(ctx, tx, assignment); err != nil {
+			return fmt.Errorf("perform assignment action: clear ownership: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
+
 // TransitionIdleSessions marks active sessions as idle when both last_io_at
 // and inferred_status_updated_at are older than the given threshold.
 // Called by the sessmetrics monitor on every tick.

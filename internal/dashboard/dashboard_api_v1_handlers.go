@@ -1,10 +1,13 @@
 package dashboard
 
 import (
+	"bufio"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -12,6 +15,8 @@ import (
 
 	"github.com/codero/codero/internal/config"
 	loglib "github.com/codero/codero/internal/log"
+	"github.com/codero/codero/internal/session"
+	"github.com/codero/codero/internal/state"
 )
 
 // trackingConfigMu serializes read-modify-write on ~/.codero/config.yaml
@@ -222,12 +227,30 @@ func (h *Handler) handleAssignmentAction(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	// TODO: wire to coordinator FSM when ready
-	writeJSON(w, http.StatusNotImplemented, AssignmentActionResponse{
+	// For actions not yet supported by state engine, return not_implemented
+	if action == "replay" || action == "release" || action == "release-slot" {
+		writeJSON(w, http.StatusNotImplemented, AssignmentActionResponse{
+			AssignmentID:  assignmentID,
+			Action:        action,
+			Status:        "not_implemented",
+			Message:       action + " action not yet supported in this version",
+			SchemaVersion: SchemaVersionV1,
+			GeneratedAt:   time.Now().UTC(),
+		})
+		return
+	}
+
+	if err := state.PerformAssignmentAction(r.Context(), state.NewDB(h.db), assignmentID, action); err != nil {
+		loglib.Error("dashboard: assignment action failed", "assignment_id", assignmentID, "action", action, "error", err)
+		writeError(w, http.StatusInternalServerError, "action failed: "+err.Error(), "action_error")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, AssignmentActionResponse{
 		AssignmentID:  assignmentID,
 		Action:        action,
-		Status:        "not_implemented",
-		Message:       action + " action not yet implemented — coordinator FSM not wired",
+		Status:        "accepted",
+		Message:       fmt.Sprintf("Assignment %s %s action accepted", assignmentID, action),
 		SchemaVersion: SchemaVersionV1,
 		GeneratedAt:   time.Now().UTC(),
 	})
@@ -876,8 +899,9 @@ func (h *Handler) handleTrackingConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var req struct {
-			AgentID  string `json:"agent_id"`
-			Disabled bool   `json:"disabled"`
+			AgentID  string            `json:"agent_id"`
+			Disabled *bool             `json:"disabled,omitempty"`
+			EnvVars  map[string]string `json:"env_vars,omitempty"`
 		}
 		if err := json.Unmarshal(body, &req); err != nil {
 			writeError(w, http.StatusBadRequest, "parse body: "+err.Error(), "bad_request")
@@ -895,7 +919,17 @@ func (h *Handler) handleTrackingConfig(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "load config: "+err.Error(), "config_error")
 			return
 		}
-		uc.SetTrackingDisabled(req.AgentID, req.Disabled)
+		if req.Disabled != nil {
+			uc.SetTrackingDisabled(req.AgentID, *req.Disabled)
+		}
+		if req.EnvVars != nil {
+			if uc.Wrappers == nil {
+				uc.Wrappers = make(map[string]config.WrapperConfig)
+			}
+			wConf := uc.Wrappers[req.AgentID]
+			wConf.EnvVars = req.EnvVars
+			uc.Wrappers[req.AgentID] = wConf
+		}
 		if err := uc.Save(); err != nil {
 			trackingConfigMu.Unlock()
 			writeError(w, http.StatusInternalServerError, "save config: "+err.Error(), "config_error")
@@ -1020,6 +1054,101 @@ func (h *Handler) handleAgentSessions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"sessions": sessions})
 }
 
+func (h *Handler) handleSessionTailRouter(w http.ResponseWriter, r *http.Request) {
+	// URL format: /api/v1/dashboard/sessions/{id}/tail
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/dashboard/sessions/"), "/")
+	if len(parts) < 2 || parts[0] == "" {
+		h.handleSessionDetail(w, r)
+		return
+	}
+	sessionID := parts[0]
+	action := parts[1]
+
+	if action == "tail" {
+		h.handleSessionTail(w, r, sessionID)
+		return
+	}
+
+	// Unknown action: return 404 instead of falling through with malformed sessionID
+	http.NotFound(w, r)
+}
+
+func (h *Handler) handleSessionTail(w http.ResponseWriter, r *http.Request, sessionID string) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "")
+		return
+	}
+	setCORSHeaders(w)
+
+	lineCount := queryInt(r, "lines", 50)
+	if lineCount > 500 {
+		lineCount = 500
+	}
+
+	path, err := session.TailPath(sessionID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid session ID: "+err.Error(), "invalid_input")
+		return
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"session_id":   sessionID,
+				"lines":        []string{},
+				"error":        "tail file not found",
+				"generated_at": time.Now().UTC(),
+			})
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "open tail: "+err.Error(), "fs_error")
+		return
+	}
+	defer f.Close()
+
+	// Simple tail: read last 32KB
+	const bufSize = 32 * 1024
+	info, err := f.Stat()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "stat tail: "+err.Error(), "fs_error")
+		return
+	}
+
+	offset := info.Size() - bufSize
+	if offset < 0 {
+		offset = 0
+	}
+	if _, err := f.Seek(offset, 0); err != nil {
+		writeError(w, http.StatusInternalServerError, "seek tail: "+err.Error(), "fs_error")
+		return
+	}
+
+	var lines []string
+	scanner := bufio.NewScanner(f)
+	skipFirst := offset > 0
+	for scanner.Scan() {
+		if skipFirst {
+			skipFirst = false
+			continue
+		}
+		lines = append(lines, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "scan tail: "+err.Error(), "fs_error")
+		return
+	}
+
+	if len(lines) > lineCount {
+		lines = lines[len(lines)-lineCount:]
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"session_id":   sessionID,
+		"lines":        lines,
+		"generated_at": time.Now().UTC(),
+	})
+}
+
 // agentStatus derives the display status for an agent roster row.
 // disabled overrides everything; otherwise: active > offline > idle.
 func agentStatus(r AgentRosterRow, disabled bool) string {
@@ -1136,13 +1265,40 @@ func (h *Handler) handleScorecard(w http.ResponseWriter, r *http.Request) {
 	}
 	setCORSHeaders(w)
 
-	// Stub response — real aggregation is a follow-up
+	// Fetch Phase 1F proving period metrics
+	card, err := state.ComputeProvingScorecard(r.Context(), state.NewDB(h.db))
+	if err != nil {
+		loglib.Error("dashboard: scorecard compute failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to compute scorecard", "db_error")
+		return
+	}
+
+	// Map proving metrics to dashboard scorecard fields
+	gatePassRate := "—"
+	if card.PrecommitReviews7Days > 0 {
+		gatePassRate = fmt.Sprintf("%d runs", card.PrecommitReviews7Days)
+	}
+
+	avgCycleTime := "—"
+	mergeRate := "—"
+	if card.BranchesReviewed7Days > 0 {
+		mergeRate = fmt.Sprintf("%d/wk", card.BranchesReviewed7Days)
+	}
+
+	complianceScore := "100%"
+	if card.ManualDBRepairs > 0 || card.MissedFeedbackDeliveries > 0 {
+		complianceScore = "needs attention"
+	}
+
+	summary := fmt.Sprintf("Phase 1F Proving in progress. %d branches reviewed in last 7 days. %d pre-commit runs. %d stale detections recorded.",
+		card.BranchesReviewed7Days, card.PrecommitReviews7Days, card.StaleDetections30Days)
+
 	writeJSON(w, http.StatusOK, ScorecardResponse{
-		GatePassRate:    "—",
-		AvgCycleTime:    "—",
-		MergeRate:       "—",
-		ComplianceScore: "—",
-		Summary:         "Scorecard data aggregation not yet implemented.",
+		GatePassRate:    gatePassRate,
+		AvgCycleTime:    avgCycleTime,
+		MergeRate:       mergeRate,
+		ComplianceScore: complianceScore,
+		Summary:         summary,
 		SchemaVersion:   SchemaVersionV1,
 		GeneratedAt:     time.Now().UTC(),
 	})
