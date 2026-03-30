@@ -46,16 +46,89 @@ var ErrAssignmentEnded = errors.New("assignment already ended")
 
 // AgentSession is a row from agent_sessions.
 type AgentSession struct {
-	SessionID       string
-	AgentID         string
-	Mode            string
-	TmuxSessionName string
-	StartedAt       time.Time
-	LastSeenAt      time.Time
-	LastProgressAt  *time.Time
-	LastIOAt        *time.Time
-	EndedAt         *time.Time
-	EndReason       string
+	SessionID               string
+	AgentID                 string
+	Mode                    string
+	TmuxSessionName         string
+	StartedAt               time.Time
+	LastSeenAt              time.Time
+	LastProgressAt          *time.Time
+	LastIOAt                *time.Time
+	EndedAt                 *time.Time
+	EndReason               string
+	InferredStatus          string
+	InferredStatusUpdatedAt *time.Time
+}
+
+// Inferred status constants.
+const (
+	InferredStatusUnknown         = "unknown"
+	InferredStatusWorking         = "working"
+	InferredStatusWaitingForInput = "waiting_for_input"
+	InferredStatusIdle            = "idle"
+)
+
+// NormalizeStatus maps various status strings to canonical values.
+// Returns empty string for invalid input.
+func NormalizeStatus(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "working", "pretooluse", "posttooluse":
+		return InferredStatusWorking
+	case "waiting_for_input", "waiting", "notification":
+		return InferredStatusWaitingForInput
+	case "idle":
+		return InferredStatusIdle
+	case "unknown", "":
+		return InferredStatusUnknown
+	default:
+		return ""
+	}
+}
+
+// StatusPrecedence returns numeric rank for override comparison.
+// Higher value = higher precedence.
+func StatusPrecedence(s string) int {
+	switch s {
+	case InferredStatusWaitingForInput:
+		return 3
+	case InferredStatusWorking:
+		return 2
+	case InferredStatusIdle:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// IsActionableStatus returns true for statuses that qualify for operator attention.
+func IsActionableStatus(s string) bool {
+	return s == InferredStatusWaitingForInput || s == InferredStatusWorking
+}
+
+// UpdateInferredStatus writes inferred_status only if the new value has equal or higher
+// precedence than the current value. Atomic in DB — safe under concurrent writes.
+func UpdateInferredStatus(ctx context.Context, db *DB, sessionID, newStatus string) error {
+	newStatus = NormalizeStatus(newStatus)
+	if newStatus == "" {
+		return fmt.Errorf("invalid inferred_status value")
+	}
+	now := time.Now().UTC()
+	_, err := db.sql.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET inferred_status = ?,
+		    inferred_status_updated_at = ?
+		WHERE session_id = ?
+		  AND ended_at IS NULL
+		  AND ? >= (CASE inferred_status
+		      WHEN 'waiting_for_input' THEN 3
+		      WHEN 'working' THEN 2
+		      WHEN 'idle' THEN 1
+		      ELSE 0 END)`,
+		newStatus, now, sessionID, StatusPrecedence(newStatus))
+	if err != nil {
+		return fmt.Errorf("update inferred status: %w", err)
+	}
+	return nil
 }
 
 // AgentAssignment is a row from agent_assignments.
@@ -277,7 +350,7 @@ func UpdateAgentSessionHeartbeat(ctx context.Context, db *DB, sessionID string, 
 // GetAgentSession retrieves a session by ID.
 func GetAgentSession(ctx context.Context, db *DB, sessionID string) (*AgentSession, error) {
 	const q = `
-		SELECT session_id, agent_id, mode, tmux_session_name, started_at, last_seen_at, last_progress_at, last_io_at, ended_at, end_reason
+		SELECT session_id, agent_id, mode, tmux_session_name, started_at, last_seen_at, last_progress_at, last_io_at, ended_at, end_reason, inferred_status, inferred_status_updated_at
 		FROM agent_sessions
 		WHERE session_id = ?`
 
@@ -308,7 +381,7 @@ func ConfirmAgentSession(ctx context.Context, db *DB, sessionID, agentID string)
 // ListActiveAgentSessions returns all sessions without ended_at set.
 func ListActiveAgentSessions(ctx context.Context, db *DB) ([]AgentSession, error) {
 	const q = `
-		SELECT session_id, agent_id, mode, tmux_session_name, started_at, last_seen_at, last_progress_at, last_io_at, ended_at, end_reason
+		SELECT session_id, agent_id, mode, tmux_session_name, started_at, last_seen_at, last_progress_at, last_io_at, ended_at, end_reason, inferred_status, inferred_status_updated_at
 		FROM agent_sessions
 		WHERE ended_at IS NULL
 		ORDER BY last_seen_at DESC`
@@ -326,7 +399,7 @@ func ListActiveAgentSessions(ctx context.Context, db *DB) ([]AgentSession, error
 func ListExpiredAgentSessions(ctx context.Context, db *DB, ttl time.Duration) ([]AgentSession, error) {
 	threshold := time.Now().UTC().Add(-ttl).Truncate(time.Second)
 	const q = `
-		SELECT session_id, agent_id, mode, tmux_session_name, started_at, last_seen_at, last_progress_at, last_io_at, ended_at, end_reason
+		SELECT session_id, agent_id, mode, tmux_session_name, started_at, last_seen_at, last_progress_at, last_io_at, ended_at, end_reason, inferred_status, inferred_status_updated_at
 		FROM agent_sessions
 		WHERE ended_at IS NULL AND last_seen_at < ?
 		ORDER BY last_seen_at ASC`
@@ -1681,9 +1754,10 @@ func scanAgentSession(row *sql.Row) (*AgentSession, error) {
 	var lastProgressAt sql.NullTime
 	var lastIOAt sql.NullTime
 	var endedAt sql.NullTime
+	var inferredStatusUpdatedAt sql.NullTime
 
 	err := row.Scan(
-		&s.SessionID, &s.AgentID, &s.Mode, &s.TmuxSessionName, &s.StartedAt, &s.LastSeenAt, &lastProgressAt, &lastIOAt, &endedAt, &s.EndReason,
+		&s.SessionID, &s.AgentID, &s.Mode, &s.TmuxSessionName, &s.StartedAt, &s.LastSeenAt, &lastProgressAt, &lastIOAt, &endedAt, &s.EndReason, &s.InferredStatus, &inferredStatusUpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1700,6 +1774,9 @@ func scanAgentSession(row *sql.Row) (*AgentSession, error) {
 	if endedAt.Valid {
 		s.EndedAt = &endedAt.Time
 	}
+	if inferredStatusUpdatedAt.Valid {
+		s.InferredStatusUpdatedAt = &inferredStatusUpdatedAt.Time
+	}
 	return &s, nil
 }
 
@@ -1710,8 +1787,9 @@ func scanAgentSessions(rows *sql.Rows) ([]AgentSession, error) {
 		var lastProgressAt sql.NullTime
 		var lastIOAt sql.NullTime
 		var endedAt sql.NullTime
+		var inferredStatusUpdatedAt sql.NullTime
 		if err := rows.Scan(
-			&s.SessionID, &s.AgentID, &s.Mode, &s.TmuxSessionName, &s.StartedAt, &s.LastSeenAt, &lastProgressAt, &lastIOAt, &endedAt, &s.EndReason,
+			&s.SessionID, &s.AgentID, &s.Mode, &s.TmuxSessionName, &s.StartedAt, &s.LastSeenAt, &lastProgressAt, &lastIOAt, &endedAt, &s.EndReason, &s.InferredStatus, &inferredStatusUpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan agent session row: %w", err)
 		}
@@ -1723,6 +1801,9 @@ func scanAgentSessions(rows *sql.Rows) ([]AgentSession, error) {
 		}
 		if endedAt.Valid {
 			s.EndedAt = &endedAt.Time
+		}
+		if inferredStatusUpdatedAt.Valid {
+			s.InferredStatusUpdatedAt = &inferredStatusUpdatedAt.Time
 		}
 		sessions = append(sessions, s)
 	}

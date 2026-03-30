@@ -141,6 +141,26 @@ func (c *SessionClient) Heartbeat(ctx context.Context, sessionID, heartbeatSecre
 	return nil
 }
 
+// HeartbeatWithStatus sends a heartbeat and optionally updates inferred_status.
+// The status is passed via gRPC metadata (x-inferred-status) to avoid proto changes.
+func (c *SessionClient) HeartbeatWithStatus(ctx context.Context, sessionID, heartbeatSecret string, markProgress bool, inferredStatus string) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	ctx = metadata.AppendToOutgoingContext(ctx, "x-heartbeat-secret", heartbeatSecret)
+	if inferredStatus != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-inferred-status", inferredStatus)
+	}
+	_, err := c.client.Heartbeat(ctx, &daemonv1.HeartbeatRequest{
+		SessionId:    sessionID,
+		MarkProgress: markProgress,
+	})
+	if err != nil {
+		return fmt.Errorf("heartbeat with status: %w", err)
+	}
+	return nil
+}
+
 // Confirm verifies the agent identity matches the registered session.
 func (c *SessionClient) Confirm(ctx context.Context, sessionID, agentID string) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
