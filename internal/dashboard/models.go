@@ -77,23 +77,25 @@ type ActiveTask struct {
 
 // ActiveSession is one row in the active-sessions panel.
 type ActiveSession struct {
-	SessionID       string      `json:"session_id"`
-	AgentID         string      `json:"agent_id"`
-	Repo            string      `json:"repo"`
-	Branch          string      `json:"branch"`
-	Worktree        string      `json:"worktree,omitempty"`
-	PRNumber        int         `json:"pr_number"`
-	OwnerAgent      string      `json:"owner_agent"`
-	Mode            string      `json:"mode,omitempty"`
-	ActivityState   string      `json:"activity_state"`
-	Task            *ActiveTask `json:"task,omitempty"`
-	StartedAt       time.Time   `json:"started_at"`
-	LastHeartbeatAt time.Time   `json:"last_heartbeat_at"`
-	ProgressAt      *time.Time  `json:"progress_at,omitempty"`
-	LastIOAt        *time.Time  `json:"last_io_at,omitempty"`
-	ElapsedSec      int64       `json:"elapsed_sec"`
-	ContextPressure string      `json:"context_pressure,omitempty"` // normal|warning|critical
-	CompactCount    int         `json:"compact_count,omitempty"`
+	SessionID               string      `json:"session_id"`
+	AgentID                 string      `json:"agent_id"`
+	Repo                    string      `json:"repo"`
+	Branch                  string      `json:"branch"`
+	Worktree                string      `json:"worktree,omitempty"`
+	PRNumber                int         `json:"pr_number"`
+	OwnerAgent              string      `json:"owner_agent"`
+	Mode                    string      `json:"mode,omitempty"`
+	ActivityState           string      `json:"activity_state"`
+	Task                    *ActiveTask `json:"task,omitempty"`
+	StartedAt               time.Time   `json:"started_at"`
+	LastHeartbeatAt         time.Time   `json:"last_heartbeat_at"`
+	ProgressAt              *time.Time  `json:"progress_at,omitempty"`
+	LastIOAt                *time.Time  `json:"last_io_at,omitempty"`
+	ElapsedSec              int64       `json:"elapsed_sec"`
+	ContextPressure         string      `json:"context_pressure,omitempty"` // normal|warning|critical
+	CompactCount            int         `json:"compact_count,omitempty"`
+	InferredStatus          string      `json:"inferred_status,omitempty"` // unknown|working|waiting_for_input|idle
+	InferredStatusUpdatedAt *time.Time  `json:"inferred_status_updated_at,omitempty"`
 }
 
 // ActiveSessionsResponse is the response for GET /api/v1/dashboard/active-sessions.
@@ -362,7 +364,7 @@ type NodeRepoSummary struct {
 	Name      string    `json:"name"`
 	Path      string    `json:"path"`
 	Connected bool      `json:"connected"` // true if in Config.Repos
-	IsOrphan  bool      `json:"is_orphan"`  // true if git repo but not in Config.Repos
+	IsOrphan  bool      `json:"is_orphan"` // true if git repo but not in Config.Repos
 	LastScan  time.Time `json:"last_scan"`
 }
 

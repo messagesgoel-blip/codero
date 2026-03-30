@@ -18,33 +18,30 @@ func querySessions(ctx context.Context, db *sql.DB, status string, limit, offset
 		return []SessionRow{}, 0, nil
 	}
 
-	// Count total matching rows.
-	countQuery := `SELECT COUNT(*) FROM agent_sessions`
-	args := []interface{}{}
-	if status != "" {
-		switch status {
-		case "active":
-			countQuery += ` WHERE ended_at IS NULL`
-		case "ended":
-			countQuery += ` WHERE ended_at IS NOT NULL`
-		}
+	// Build WHERE clause based on status filter.
+	where := ""
+	switch status {
+	case "active":
+		where = ` WHERE ended_at IS NULL`
+	case "ended":
+		where = ` WHERE ended_at IS NOT NULL`
+	case "working":
+		where = ` WHERE ended_at IS NULL AND inferred_status = 'working'`
+	case "waiting_for_input":
+		where = ` WHERE ended_at IS NULL AND inferred_status = 'waiting_for_input'`
+	case "idle":
+		where = ` WHERE ended_at IS NULL AND inferred_status = 'idle'`
 	}
+
+	// Count total matching rows.
 	var total int
-	if err := db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_sessions`+where).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("querySessions: count: %w", err)
 	}
 
 	// Query rows.
-	query := `SELECT session_id, agent_id, mode, COALESCE(tmux_session_name, ''), started_at, last_seen_at, ended_at, end_reason FROM agent_sessions`
-	if status != "" {
-		switch status {
-		case "active":
-			query += ` WHERE ended_at IS NULL`
-		case "ended":
-			query += ` WHERE ended_at IS NOT NULL`
-		}
-	}
-	query += ` ORDER BY started_at DESC LIMIT ? OFFSET ?`
+	query := `SELECT session_id, agent_id, mode, COALESCE(tmux_session_name, ''), COALESCE(inferred_status, 'unknown'), started_at, last_seen_at, ended_at, end_reason FROM agent_sessions` + where +
+		` ORDER BY started_at DESC LIMIT ? OFFSET ?`
 
 	rows, err := db.QueryContext(ctx, query, limit, offset)
 	if err != nil {
@@ -57,7 +54,7 @@ func querySessions(ctx context.Context, db *sql.DB, status string, limit, offset
 		var s SessionRow
 		var endedAt sql.NullTime
 		var endReason sql.NullString
-		if err := rows.Scan(&s.SessionID, &s.AgentID, &s.Mode, &s.TmuxSessionName, &s.StartedAt, &s.LastSeenAt, &endedAt, &endReason); err != nil {
+		if err := rows.Scan(&s.SessionID, &s.AgentID, &s.Mode, &s.TmuxSessionName, &s.InferredStatus, &s.StartedAt, &s.LastSeenAt, &endedAt, &endReason); err != nil {
 			return nil, 0, fmt.Errorf("querySessions: scan: %w", err)
 		}
 		if endedAt.Valid {

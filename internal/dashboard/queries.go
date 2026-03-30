@@ -344,7 +344,9 @@ func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]Ac
 	rows, err := db.QueryContext(ctx, `
 		SELECT session_id, agent_id, mode, started_at, last_seen_at, last_progress_at, last_io_at,
 		       COALESCE(context_pressure, 'normal') AS context_pressure,
-		       COALESCE(compact_count, 0) AS compact_count
+		       COALESCE(compact_count, 0) AS compact_count,
+		       COALESCE(inferred_status, 'unknown') AS inferred_status,
+		       inferred_status_updated_at
 		FROM agent_sessions
 		WHERE ended_at IS NULL
 		ORDER BY last_seen_at DESC`)
@@ -354,15 +356,17 @@ func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]Ac
 	defer rows.Close()
 
 	type sessionRow struct {
-		SessionID       string
-		AgentID         string
-		Mode            string
-		StartedAt       time.Time
-		LastSeenAt      time.Time
-		LastProgressAt  sql.NullTime
-		LastIOAt        sql.NullTime
-		ContextPressure string
-		CompactCount    int
+		SessionID               string
+		AgentID                 string
+		Mode                    string
+		StartedAt               time.Time
+		LastSeenAt              time.Time
+		LastProgressAt          sql.NullTime
+		LastIOAt                sql.NullTime
+		ContextPressure         string
+		CompactCount            int
+		InferredStatus          string
+		InferredStatusUpdatedAt sql.NullTime
 	}
 
 	var sessions []sessionRow
@@ -370,7 +374,7 @@ func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]Ac
 	for rows.Next() {
 		var s sessionRow
 		if err := rows.Scan(&s.SessionID, &s.AgentID, &s.Mode, &s.StartedAt, &s.LastSeenAt, &s.LastProgressAt, &s.LastIOAt,
-			&s.ContextPressure, &s.CompactCount); err != nil {
+			&s.ContextPressure, &s.CompactCount, &s.InferredStatus, &s.InferredStatusUpdatedAt); err != nil {
 			return nil, fmt.Errorf("queryActiveSessions: agent_sessions scan row: %w", err)
 		}
 		if s.SessionID == "" {
@@ -443,23 +447,25 @@ func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]Ac
 
 		agentID := resolveOwnerAgent(s.AgentID, "")
 		out = append(out, ActiveSession{
-			SessionID:       s.SessionID,
-			AgentID:         agentID,
-			Repo:            assignment.Repo,
-			Branch:          assignment.Branch,
-			Worktree:        assignment.Worktree,
-			PRNumber:        prNumber,
-			OwnerAgent:      agentID,
-			Mode:            s.Mode,
-			ActivityState:   activityState,
-			Task:            task,
-			StartedAt:       startedAt,
-			LastHeartbeatAt: s.LastSeenAt,
-			ProgressAt:      nullTimePtr(s.LastProgressAt),
-			LastIOAt:        nullTimePtr(s.LastIOAt),
-			ElapsedSec:      int64(elapsed.Seconds()),
-			ContextPressure: s.ContextPressure,
-			CompactCount:    s.CompactCount,
+			SessionID:               s.SessionID,
+			AgentID:                 agentID,
+			Repo:                    assignment.Repo,
+			Branch:                  assignment.Branch,
+			Worktree:                assignment.Worktree,
+			PRNumber:                prNumber,
+			OwnerAgent:              agentID,
+			Mode:                    s.Mode,
+			ActivityState:           activityState,
+			Task:                    task,
+			StartedAt:               startedAt,
+			LastHeartbeatAt:         s.LastSeenAt,
+			ProgressAt:              nullTimePtr(s.LastProgressAt),
+			LastIOAt:                nullTimePtr(s.LastIOAt),
+			ElapsedSec:              int64(elapsed.Seconds()),
+			ContextPressure:         s.ContextPressure,
+			CompactCount:            s.CompactCount,
+			InferredStatus:          s.InferredStatus,
+			InferredStatusUpdatedAt: nullTimePtr(s.InferredStatusUpdatedAt),
 		})
 	}
 	return out, nil
