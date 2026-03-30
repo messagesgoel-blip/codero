@@ -2,7 +2,7 @@
 
 Status: active
 Owner: sanjay
-Updated: 2026-03-29
+Updated: 2026-03-30
 
 ---
 
@@ -50,16 +50,72 @@ removal + roadmap consolidation).
 - Proving period metrics and scorecard
 - All 11 specs certified
 
-### What remains for Phase 1 exit
+---
 
-The exit gate is evidence-based, not time-based:
+## Task Tracker — Phase 1 Exit
 
-- [ ] 14 consecutive days of daily use without manual DB repair
-- [ ] Zero missed feedback deliveries
-- [ ] Zero silent queue stalls
-- [ ] Minimum: 3 branches reviewed/week, 10 pre-commit reviews/project/week
-- [ ] Recovery drills: Redis restart, daemon restart, SIGKILL, duplicate webhook
-- [ ] Pre-commit enforcement by hook, not policy alone
+Tasks are trackable units with explicit IDs and definitions of done.
+Status: `not_started` | `in_progress` | `blocked` | `done`
+
+### P1-A: Dashboard API Gaps
+
+| ID | Task | Status | Definition of Done |
+|---|---|---|---|
+| P1-A-001 | Wire `/api/v1/dashboard/tasks` endpoint | `not_started` | `GET /api/v1/dashboard/tasks` returns 200 with `{tasks: [], schema_version: "1"}`; Tasks tab shows data |
+| P1-A-002 | Update `dashboard-architecture.md` with new endpoints | `not_started` | Doc lists all current endpoints including `/tracking-config`, `/node-repos`, `/tasks`, `/agents`, `/scorecard` |
+| P1-A-003 | Add env_vars validation tests | `not_started` | Test cases for: empty key, key with `=`, NUL bytes, valid key; all pass in `go test ./internal/dashboard/...` |
+
+### P1-B: Agent Discovery & Setup
+
+| ID | Task | Status | Definition of Done |
+|---|---|---|---|
+| P1-B-001 | Install agent shims for active agents | `not_started` | `codero agent list --json` returns ≥1 agent with `installed: true` |
+| P1-B-002 | Verify agent heartbeat flow | `not_started` | Running a test session creates heartbeat entries; dashboard shows session in Agents tab |
+| P1-B-003 | Document agent setup workflow | `not_started` | `docs/agent-setup.md` exists with step-by-step for Claude Code, Aider, Cursor |
+
+### P1-C: Proving Period Evidence
+
+| ID | Task | Status | Definition of Done |
+|---|---|---|---|
+| P1-C-001 | 14 consecutive days without DB repair | `not_started` | Log audit shows no manual DB intervention for 14 days; `grep -c "manual.*repair" logs/` = 0 |
+| P1-C-002 | Zero missed feedback deliveries | `not_started` | Query `SELECT COUNT(*) FROM delivery_events WHERE status='missed'` returns 0 |
+| P1-C-003 | Zero silent queue stalls | `not_started` | No queue item stuck >30min without heartbeat; Redis lease expiry recovery tested |
+| P1-C-004 | Min 3 branches reviewed/week | `not_started` | `SELECT COUNT(DISTINCT branch) FROM review_runs WHERE started_at > now() - INTERVAL '7 days'` ≥ 3 |
+| P1-C-005 | Min 10 pre-commit reviews/project/week | `not_started` | `SELECT COUNT(*) FROM precommit_reviews WHERE created_at > now() - INTERVAL '7 days'` ≥ 10 per repo |
+| P1-C-006 | Scorecard shows real metrics | `not_started` | `/api/v1/dashboard/scorecard` returns non-zero counts for `branches_reviewed_7_days`, `precommit_reviews_7_days` |
+
+### P1-D: Recovery Drills
+
+| ID | Task | Status | Definition of Done |
+|---|---|---|---|
+| P1-D-001 | Redis restart drill | `not_started` | Redis killed and restarted; daemon reconnects within 30s; no data loss; documented in runbook |
+| P1-D-002 | Daemon restart drill | `not_started` | `docker restart codero`; container healthy within 60s; queue state preserved |
+| P1-D-003 | SIGKILL recovery drill | `not_started` | `kill -9` daemon process; container restarts; SQLite WAL replay succeeds; no corruption |
+| P1-D-004 | Duplicate webhook drill | `not_started` | Send duplicate webhook; second event deduped; no duplicate queue entries |
+| P1-D-005 | Document drill results | `not_started` | `docs/runbooks/recovery-drills.md` exists with dated pass/fail for each drill |
+
+### P1-E: Pre-Commit Enforcement
+
+| ID | Task | Status | Definition of Done |
+|---|---|---|---|
+| P1-E-001 | Pre-commit hook enforcement verified | `not_started` | `git commit` without passing gate fails; `git commit --no-verify` blocked by server-side hook or policy |
+| P1-E-002 | Hook installation documented | `done` | `AGENTS.md` and `docs/agent-preflight.md` document hook setup |
+
+---
+
+## Phase 1 Exit Gate Summary
+
+| Gate | Blocking Tasks | Status |
+|---|---|---|
+| 14 days without DB repair | P1-C-001 | `not_started` |
+| Zero missed deliveries | P1-C-002 | `not_started` |
+| Zero silent queue stalls | P1-C-003 | `not_started` |
+| 3+ branches reviewed/week | P1-C-004 | `not_started` |
+| 10+ pre-commit reviews/week | P1-C-005 | `not_started` |
+| Recovery drills complete | P1-D-* | `not_started` |
+| Pre-commit enforcement | P1-E-001 | `not_started` |
+
+**Phase 1 Exit:** All tasks in P1-C and P1-D marked `done`.
 
 ---
 
