@@ -2,7 +2,7 @@
 
 Status: active
 Owner: sanjay
-Updated: 2026-03-28
+Updated: 2026-03-29
 
 ---
 
@@ -39,6 +39,13 @@ removal + roadmap consolidation).
 - Delivery pipeline (submit-to-merge FSM)
 - Web dashboard (overview, settings, live activity, chat, session drill-down, archives)
 - CLI: submit, heartbeat, poll, why, commit-gate, gate-status, gate-check, queue, branch, events, scorecard
+- Agent status detection: `inferred_status` column with precedence model (PR #137)
+  - `codero session heartbeat --status=working|waiting_for_input|idle`
+  - `codero agent hooks --install|--print` (Claude Code hook generator)
+  - `codero agent list [--status] [--json] [--quiet]`
+  - `codero agent next [--json|--print-id|--print-url]`
+  - Idle transition in sessmetrics monitor (guarded, precedence-aware)
+  - Dashboard: Agent Status column, filter chip strip, attention-first sort, stale-waiting badge
 - Auto-merge (opt-in squash merge on `merge_ready`)
 - Proving period metrics and scorecard
 - All 11 specs certified
