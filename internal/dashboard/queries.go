@@ -446,6 +446,38 @@ func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]Ac
 		}
 
 		agentID := resolveOwnerAgent(s.AgentID, "")
+
+		// Compute Active/Idle durations based on inferred status
+		var workingSec, idleSec int64
+		if s.InferredStatusUpdatedAt.Valid {
+			statusDuration := time.Since(s.InferredStatusUpdatedAt.Time).Seconds()
+			if statusDuration < 0 {
+				statusDuration = 0
+			}
+			if s.InferredStatus == "idle" || s.InferredStatus == "waiting_for_input" {
+				idleSec = int64(statusDuration)
+				workingSec = int64(elapsed.Seconds()) - idleSec
+			} else if s.InferredStatus == "working" {
+				workingSec = int64(elapsed.Seconds())
+				// We don't have historical idle time without event log parsing, so we approximate
+			}
+		} else {
+			workingSec = int64(elapsed.Seconds())
+		}
+		if workingSec < 0 {
+			workingSec = 0
+		}
+
+		// Compute OutputMB
+		var outputMB float64
+		tailPath := filepath.Join(os.TempDir(), "codero-tails", s.SessionID+".log")
+		if d := os.Getenv("CODERO_TAIL_DIR"); d != "" {
+			tailPath = filepath.Join(d, s.SessionID+".log")
+		}
+		if stat, err := os.Stat(tailPath); err == nil && !stat.IsDir() {
+			outputMB = float64(stat.Size()) / (1024 * 1024)
+		}
+
 		out = append(out, ActiveSession{
 			SessionID:               s.SessionID,
 			AgentID:                 agentID,
@@ -462,6 +494,9 @@ func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]Ac
 			ProgressAt:              nullTimePtr(s.LastProgressAt),
 			LastIOAt:                nullTimePtr(s.LastIOAt),
 			ElapsedSec:              int64(elapsed.Seconds()),
+			WorkingDurationSec:      workingSec,
+			IdleDurationSec:         idleSec,
+			OutputMB:                outputMB,
 			ContextPressure:         s.ContextPressure,
 			CompactCount:            s.CompactCount,
 			InferredStatus:          s.InferredStatus,

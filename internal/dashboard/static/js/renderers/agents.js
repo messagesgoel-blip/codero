@@ -1,11 +1,11 @@
-// agents.js — Agents page renderer: fleet roster, load distribution, tracking toggles.
+// agents.js — Agents page renderer: open agents, available agents, and env var tracking.
 
 import store from '../store.js';
-import { loadAgents, loadAgentSessions, loadTrackingConfig, toggleAgentTracking } from '../api.js';
+import { loadAgents, loadSessions, loadTrackingConfig, toggleAgentTracking, updateAgentEnvVars } from '../api.js';
 import {
   esc, html, statusChip, relativeTime, formatDuration, setHtml, $,
 } from '../utils.js';
-import { metricCard, dataTable, detailGrid, glassCard, skeleton, barChart, toast } from '../components.js';
+import { dataTable, glassCard, skeleton, showModal, toast } from '../components.js';
 
 // --- Internal state ---
 let _initialized = false;
@@ -16,11 +16,12 @@ export function initAgents() {
   if (_initialized) return;
   _initialized = true;
   store.subscribe('agents', () => renderAgents());
+  store.subscribe('sessions', () => renderAgents());
   store.subscribe('trackingConfig', () => renderAgents());
 }
 
 export async function refreshAgents() {
-  const results = await Promise.allSettled([loadAgents(), loadTrackingConfig()]);
+  const results = await Promise.allSettled([loadAgents(), loadSessions(), loadTrackingConfig()]);
   if (results.some(r => r.status === 'rejected')) {
     toast('Some agent data failed to load', 'error');
   }
@@ -31,258 +32,154 @@ export function renderAgents() {
   if (!container) return;
   if (store.state.ui.activeTab !== 'agents') return;
 
-  if (!store.select('agents')) {
+  if (!store.select('agents') || !store.select('trackingConfig')) {
     setHtml(container, skeleton(6));
     return;
   }
 
   const agents = store.select('agents') || [];
+  const sessions = store.select('sessions') || [];
   const trackingConfig = store.select('trackingConfig');
 
   const parts = [
-    _renderMetricStrip(agents),
-    _renderRosterTable(agents),
-    _renderLoadDistribution(agents),
-    _renderTrackingPanel(agents, trackingConfig),
+    _renderOpenAgents(sessions),
+    '<div style="height:16px"></div>',
+    _renderAvailableAgents(agents, sessions, trackingConfig)
   ];
   setHtml(container, parts.join(''));
 
   _bindTrackingToggles();
-  _bindExpandToggles();
+  _bindEnvVarButtons(trackingConfig);
 }
 
 // --- Private renderers ---
 
-function _renderMetricStrip(agents) {
-  const total = agents.length;
-  const active = agents.filter(a => a.status === 'active').length;
-  const idle = agents.filter(a => a.status === 'idle').length;
-  const offline = agents.filter(a => a.status === 'offline').length;
-
-  const cards = [
-    metricCard(String(total), 'Total Agents', 'var(--fg-muted)'),
-    metricCard(String(active), 'Active Now', 'var(--success)'),
-    metricCard(String(idle), 'Idle', 'var(--fg-muted)'),
-    metricCard(String(offline), 'Offline', 'var(--warning)'),
-  ];
-  return `<div class="metric-strip">${cards.join('')}</div>`;
-}
-
-function _statusChipAgent(status) {
-  const map = {
-    active: 'active',
-    idle: 'idle',
-    offline: 'warning',
-    disabled: 'disabled',
-  };
-  return statusChip(map[status] || status);
-}
-
-function _renderRosterTable(agents) {
+function _renderOpenAgents(sessions) {
+  // Only active sessions
+  const activeSessions = sessions.filter(s => s.status === 'active' || !s.endedAt);
+  
   const columns = [
-    {
-      key: 'agentId',
-      label: 'Agent',
-      render: r => esc(r.agentId || '—'),
+    { key: 'agentId', label: 'Agent', render: r => esc(r.agentId || r.ownerAgent || '—') },
+    { key: 'repo', label: 'Repo / Branch', render: r => {
+        const repo = esc(r.repo || '—');
+        const branch = esc(r.branch || '');
+        return branch ? `${repo} / <code>${branch}</code>` : repo;
+      }
     },
-    {
-      key: 'status',
-      label: 'Status',
-      render: r => _statusChipAgent(r.status),
+    { key: 'context', label: 'Context', render: r => {
+        const p = r.contextPressure || 'normal';
+        const col = p === 'critical' ? 'var(--destructive)' : p === 'warning' ? 'var(--warning)' : 'var(--fg-muted)';
+        const icon = p === 'critical' ? '🔴' : p === 'warning' ? '🟡' : '';
+        return `<span style="color:${col}">${icon} ${esc(p)}</span>`;
+      }
     },
-    {
-      key: 'activeSessions',
-      label: 'Active',
-      class: 'col-num',
-      render: r => esc(String(r.activeSessions)),
-    },
-    {
-      key: 'totalSessions',
-      label: 'Total (30d)',
-      class: 'col-num',
-      render: r => esc(String(r.totalSessions)),
-    },
-    {
-      key: 'avgElapsedSec',
-      label: 'Avg Elapsed',
-      render: r => r.avgElapsedSec > 0 ? esc(formatDuration(r.avgElapsedSec)) : '<span style="color:var(--fg-muted)">—</span>',
-    },
-    {
-      key: 'tokensPerSec',
-      label: 'Tokens/sec',
-      class: 'col-num',
-      render: r => (r.tokensPerSec ?? 0) > 0
-        ? `<span title="${(r.totalTokens ?? 0).toLocaleString()} total tokens">${(r.tokensPerSec ?? 0).toFixed(1)}</span>`
-        : '<span style="color:var(--fg-muted)">—</span>',
-    },
-    {
-      key: 'lastSeen',
-      label: 'Last Seen',
-      render: r => r.lastSeen ? esc(relativeTime(r.lastSeen)) : '<span style="color:var(--fg-muted)">—</span>',
-    },
+    { key: 'outputMb', label: 'Output (MB)', render: r => r.outputMb > 0 ? `${r.outputMb.toFixed(2)} MB` : '—' },
+    { key: 'activeTime', label: 'Active Time', render: r => formatDuration(r.workingDurationSec || 0) },
+    { key: 'idleTime', label: 'Idle Time', render: r => formatDuration(r.idleDurationSec || 0) },
+    { key: 'status', label: 'Status', render: r => statusChip(r.inferredStatus || 'unknown') }
   ];
 
-  const rows = agents.map(a => ({
-    ...a,
-    _id: a.agentId,
-    _expandHtml: _buildAgentExpandContent(a),
+  const rows = activeSessions.map(s => ({
+    _id: s.sessionId || s.id,
+    agentId: s.agentId || s.ownerAgent,
+    repo: s.repo,
+    branch: s.branch,
+    contextPressure: s.contextPressure || s.context_pressure,
+    outputMb: s.outputMb || s.output_mb || 0,
+    workingDurationSec: s.workingDurationSec || s.working_duration_sec || 0,
+    idleDurationSec: s.idleDurationSec || s.idle_duration_sec || 0,
+    inferredStatus: s.inferredStatus || s.inferred_status
   }));
 
-  const tableHtml = dataTable('agents-table', columns, rows, {
-    expandable: true,
-    empty: 'No agents discovered',
-  });
-
-  return glassCard('Agent Roster', tableHtml, { padding: 'none', class: 'card-agents' });
+  const tableHtml = dataTable('open-agents-table', columns, rows, { empty: 'No open agents' });
+  return glassCard('Open Agents', tableHtml, { padding: 'none', class: 'card-agents' });
 }
 
-function _buildAgentExpandContent(agent) {
-  const pressureLabel = agent.activePressure === 'critical'
-    ? `<span class="pressure-dot critical"></span>${esc(agent.activePressure)}`
-    : agent.activePressure === 'warning'
-      ? `<span class="pressure-dot warning"></span>${esc(agent.activePressure)}`
-      : '<span style="color:var(--fg-muted)">normal</span>';
-
-  const items = [
-    { label: 'Agent ID', value: `<code>${esc(agent.agentId)}</code>` },
-    { label: 'Status', value: _statusChipAgent(agent.status) },
-    { label: 'Total Tokens (30d)', value: esc((agent.totalTokens ?? 0).toLocaleString()) },
-    { label: 'Tokens/sec', value: (agent.tokensPerSec ?? 0) > 0 ? esc((agent.tokensPerSec ?? 0).toFixed(2)) : '—' },
-    { label: 'Avg Elapsed', value: agent.avgElapsedSec > 0 ? esc(formatDuration(agent.avgElapsedSec)) : '—' },
-    { label: 'Active Pressure', value: pressureLabel },
-  ];
-  const sessionsPlaceholder = `<div id="agent-sessions-${esc(agent.agentId)}" style="margin-top:12px">` +
-    `<div class="skeleton" style="height:72px;border-radius:6px"></div></div>`;
-  return detailGrid(items) + sessionsPlaceholder;
-}
-
-// --- Expand toggle + lazy session history ---
-
-function _bindExpandToggles() {
-  const table = $('agents-table');
-  if (!table) return;
-  table.addEventListener('click', (e) => {
-    const tr = e.target.closest('tr.expandable');
-    if (!tr) return;
-    const rowId = tr.dataset.rowId;
-    if (!rowId) return;
-    const expandRow = table.querySelector(`tr.expand-row[data-expand-for="${rowId}"]`);
-    if (!expandRow) return;
-    const isHidden = expandRow.classList.contains('hidden');
-    expandRow.classList.toggle('hidden', !isHidden);
-    const chevron = tr.querySelector('.chevron');
-    if (chevron) chevron.classList.toggle('open', isHidden);
-    if (isHidden) _loadAgentSessions(rowId);
-  });
-}
-
-async function _loadAgentSessions(agentId) {
-  const container = document.getElementById(`agent-sessions-${agentId}`);
-  if (!container || container.dataset.loaded) return;
-
-  let data;
-  try {
-    data = await loadAgentSessions(agentId);
-  } catch (_) {
-    setHtml(container, '<span style=\"color:var(--fg-muted);font-size:12px\">Could not load session history</span>');
-    return;
-  }
-
-  const sessions = data?.sessions || [];
-  if (sessions.length === 0) {
-    container.dataset.loaded = '1';
-    setHtml(container, '<span style=\"color:var(--fg-muted);font-size:12px\">No recent sessions</span>');
-    return;
-  }
-
-  const rows = sessions.map(s => {
-    const elapsedSec = s.ended_at
-      ? (new Date(s.ended_at) - new Date(s.started_at)) / 1000
-      : null;
-    const elapsed = elapsedSec != null ? esc(formatDuration(elapsedSec)) : '—';
-    const state = s.ended_at
-      ? `<span style=\"color:var(--fg-muted)\">${esc(s.end_reason || 'done')}</span>`
-      : statusChip('active');
-    return `<tr>
-      <td style=\"padding:2px 8px 2px 0\">${esc(relativeTime(s.started_at))}</td>
-      <td style=\"padding:2px 8px 2px 0\">${esc(s.repo || '—')}</td>
-      <td style=\"padding:2px 8px 2px 0\"><code>${esc(s.branch || '—')}</code></td>
-      <td style=\"padding:2px 8px 2px 0\">${elapsed}</td>
-      <td style=\"padding:2px 0\">${state}</td>
-    </tr>`;
-  }).join('');
-
-  container.dataset.loaded = '1';
-  setHtml(container, `
-    <h4 style=\"margin:0 0 6px;font-size:12px;color:var(--fg-muted)\">Recent Sessions</h4>
-    <table style=\"width:100%;font-size:12px;border-collapse:collapse\">
-      <thead><tr style=\"color:var(--fg-muted)\">
-        <th style=\"text-align:left;padding:2px 8px 2px 0;font-weight:500\">Started</th>
-        <th style=\"text-align:left;padding:2px 8px 2px 0;font-weight:500\">Repo</th>
-        <th style=\"text-align:left;padding:2px 8px 2px 0;font-weight:500\">Branch</th>
-        <th style=\"text-align:left;padding:2px 8px 2px 0;font-weight:500\">Elapsed</th>
-        <th style=\"text-align:left;padding:2px 0;font-weight:500\">State</th>
-      </tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`);
-}
-
-function _renderLoadDistribution(agents) {
-  const active = agents.filter(a => a.activeSessions > 0);
-  if (active.length === 0) {
-    return glassCard('Load Distribution', '<div class="empty-state">No active sessions</div>', { class: 'card-load-dist' });
-  }
-  const items = active.map(a => ({ label: a.agentId, value: a.activeSessions }));
-  return glassCard('Load Distribution', barChart(items), { class: 'card-load-dist' });
-}
-
-function _renderTrackingPanel(agents, trackingConfig) {
+function _renderAvailableAgents(agents, sessions, trackingConfig) {
   const configAgents = (trackingConfig && trackingConfig.agents) || [];
-  const activeAgents = new Set(agents.map(a => a.agentId).filter(Boolean));
+  
+  // Create a map of open agents to filter them out from available
+  const activeSessions = sessions.filter(s => s.status === 'active' || !s.endedAt);
+  const openAgentIds = new Set(activeSessions.map(s => s.agentId || s.ownerAgent));
+  
+  // Combine agents from roster and config
+  const availableMap = new Map();
+  
+  // From config
+  for (const c of configAgents) {
+    if (!openAgentIds.has(c.agent_id)) {
+      availableMap.set(c.agent_id, {
+        agentId: c.agent_id,
+        alias: c.shim_name,
+        tracked: !c.disabled,
+        installed: c.installed,
+        envVars: c.env_vars || {},
+        lastUsed: null
+      });
+    }
+  }
+  
+  // From roster (for last used)
+  for (const a of agents) {
+    if (!openAgentIds.has(a.agentId)) {
+      if (!availableMap.has(a.agentId)) {
+        availableMap.set(a.agentId, {
+          agentId: a.agentId,
+          alias: a.agentId,
+          tracked: a.status !== 'disabled',
+          installed: true,
+          envVars: {},
+          lastUsed: a.lastSeen
+        });
+      } else {
+        availableMap.get(a.agentId).lastUsed = a.lastSeen;
+      }
+    }
+  }
 
-  if (configAgents.length === 0 && activeAgents.size === 0) return '';
+  const rows = Array.from(availableMap.values());
 
-  const configIds = new Set(configAgents.map(a => a.agent_id));
-  const extraAgents = [...activeAgents]
-    .filter(id => !configIds.has(id))
-    .map(id => ({ agent_id: id, shim_name: id, real_binary: '', installed: true, disabled: false }));
-  const agentList = [...configAgents, ...extraAgents];
+  const columns = [
+    { key: 'agentId', label: 'Agent', render: r => {
+        let label = `<span style="font-weight:500">${esc(r.agentId)}</span>`;
+        if (r.alias && r.alias !== r.agentId) {
+          label += ` <span style="color:var(--fg-muted);font-size:11px">(${esc(r.alias)})</span>`;
+        }
+        if (!r.installed) {
+          label += ` <span style="color:var(--destructive);font-size:10px;margin-left:4px" title="Binary not found">&#x2717; missing</span>`;
+        }
+        return label;
+      }
+    },
+    { key: 'lastUsed', label: 'Last Used', render: r => r.lastUsed ? esc(relativeTime(r.lastUsed)) : '<span style="color:var(--fg-muted)">—</span>' },
+    { key: 'tracked', label: 'Tracked', render: r => `
+        <label class="tracking-toggle" style="display:flex;align-items:center;cursor:pointer;">
+          <input type="checkbox" data-agent="${esc(r.agentId)}" ${r.tracked ? 'checked' : ''} style="cursor:pointer;margin-right:6px">
+          <span style="font-size:12px">${r.tracked ? 'Yes' : 'No'}</span>
+        </label>
+      `
+    },
+    { key: 'actions', label: '', render: r => `
+        <button class="btn-ghost btn-env" data-agent="${esc(r.agentId)}" style="font-size:11px;border:1px solid var(--border);border-radius:4px">Env Vars</button>
+      `
+    }
+  ];
 
-  const rows = agentList.map(a => {
-    const isActive = activeAgents.has(a.agent_id);
-    const activeDot = isActive
-      ? '<span style="color:var(--success);margin-right:4px" title="Currently active">&#9679;</span>'
-      : '';
-    const installedBadge = a.installed
-      ? ''
-      : '<span style="color:var(--destructive);font-size:10px;margin-left:4px" title="Binary not found">&#x2717; missing</span>';
-    const alias = a.shim_name !== a.agent_id
-      ? `<span style="color:var(--fg-muted);font-size:11px;margin-left:4px">(${esc(a.shim_name)})</span>`
-      : '';
-    return `<label class="tracking-toggle" style="display:flex;align-items:center;gap:6px;padding:5px 10px;margin:2px 0;border-radius:6px;background:var(--glass-bg);cursor:pointer;min-width:280px">
-      <input type="checkbox" data-agent="${esc(a.agent_id)}" ${a.disabled ? '' : 'checked'} style="cursor:pointer;flex-shrink:0">
-      ${activeDot}<span style="font-weight:500;min-width:70px">${esc(a.agent_id)}</span>${alias}${installedBadge}
-    </label>`;
-  }).join('');
-
-  return `<div class="glass-card" style="margin-top:16px;padding:16px">
-    <h3 style="margin:0 0 8px;font-size:14px;color:var(--fg-muted)">Agent Tracking</h3>
-    <div style="display:flex;flex-wrap:wrap;gap:2px">${rows}</div>
-    <p style="margin:8px 0 0;font-size:11px;color:var(--fg-muted)">Uncheck to disable tracking on next launch. &#9679; = active now. New shims in ~/.codero/bin/ auto-appear.</p>
-  </div>`;
+  const tableHtml = dataTable('available-agents-table', columns, rows, { empty: 'No available agents' });
+  return glassCard('Available Agents', tableHtml, { padding: 'none', class: 'card-agents' });
 }
 
 function _bindTrackingToggles() {
-  const toggles = document.querySelectorAll('#page-agents .tracking-toggle input[type="checkbox"]');
+  const toggles = document.querySelectorAll('.tracking-toggle input[type="checkbox"]');
   for (const el of toggles) {
     el.addEventListener('change', async (e) => {
       const agent = e.target.dataset.agent;
       const disabled = !e.target.checked;
-      // Capture original state (before the change) to enable rollback on failure.
       const originalChecked = !e.target.checked;
       e.target.disabled = true;
       try {
         await toggleAgentTracking(agent, disabled);
+        refreshAgents();
       } catch (_err) {
         e.target.checked = originalChecked;
       } finally {
@@ -291,3 +188,79 @@ function _bindTrackingToggles() {
     });
   }
 }
+
+function _bindEnvVarButtons(trackingConfig) {
+  const btns = document.querySelectorAll('.btn-env');
+  for (const btn of btns) {
+    btn.addEventListener('click', async (e) => {
+      const agentId = e.target.dataset.agent;
+      const agents = (trackingConfig && trackingConfig.agents) || [];
+      const agent = agents.find(a => a.agent_id === agentId);
+      const envVars = (agent && agent.env_vars) ? { ...agent.env_vars } : {};
+      
+      let varsHtml = Object.entries(envVars).map(([k, v]) => `
+        <div style="display:flex;gap:8px;margin-bottom:8px;" class="env-row">
+          <input type="text" value="${esc(k)}" class="env-key" placeholder="KEY" style="flex:1;padding:6px;background:var(--bg-surface-1);border:1px solid var(--border);color:var(--fg-primary);border-radius:4px;">
+          <input type="text" value="${esc(v)}" class="env-val" placeholder="VALUE" style="flex:2;padding:6px;background:var(--bg-surface-1);border:1px solid var(--border);color:var(--fg-primary);border-radius:4px;">
+          <button type="button" class="btn-destructive env-del" style="padding:4px 8px;border-radius:4px;">&times;</button>
+        </div>
+      `).join('');
+      
+      if (!varsHtml) {
+        varsHtml = `
+        <div style="display:flex;gap:8px;margin-bottom:8px;" class="env-row">
+          <input type="text" class="env-key" placeholder="KEY" style="flex:1;padding:6px;background:var(--bg-surface-1);border:1px solid var(--border);color:var(--fg-primary);border-radius:4px;">
+          <input type="text" class="env-val" placeholder="VALUE" style="flex:2;padding:6px;background:var(--bg-surface-1);border:1px solid var(--border);color:var(--fg-primary);border-radius:4px;">
+          <button type="button" class="btn-destructive env-del" style="padding:4px 8px;border-radius:4px;">&times;</button>
+        </div>`;
+      }
+
+      const bodyHtml = `
+        <div id="env-var-list" style="max-height:300px;overflow-y:auto;padding-right:8px;margin-bottom:12px;">
+          ${varsHtml}
+        </div>
+        <button id="add-env-var" class="btn-secondary" style="font-size:12px;padding:4px 8px;border-radius:4px;">+ Add Env Var</button>
+      `;
+
+      const action = await showModal(`Env Vars: ${esc(agentId)}`, bodyHtml, [
+        { id: 'cancel', label: 'Cancel' },
+        { id: 'save', label: 'Save', primary: true }
+      ]);
+      
+      if (action === 'save') {
+        const newVars = {};
+        document.querySelectorAll('.env-row').forEach(row => {
+          const k = row.querySelector('.env-key').value.trim();
+          const v = row.querySelector('.env-val').value.trim();
+          if (k) newVars[k] = v;
+        });
+        try {
+          await updateAgentEnvVars(agentId, newVars);
+          toast('Env vars updated successfully', 'success');
+          refreshAgents();
+        } catch (err) {
+          toast('Failed to update env vars', 'error');
+        }
+      }
+    });
+  }
+}
+
+// Global delegated event listener for dynamically added modal buttons
+document.addEventListener('click', (e) => {
+  if (e.target.id === 'add-env-var') {
+    const list = document.getElementById('env-var-list');
+    const row = document.createElement('div');
+    row.className = 'env-row';
+    row.style.cssText = 'display:flex;gap:8px;margin-bottom:8px;';
+    // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method
+    row.innerHTML = `
+      <input type="text" class="env-key" placeholder="KEY" style="flex:1;padding:6px;background:var(--bg-surface-1);border:1px solid var(--border);color:var(--fg-primary);border-radius:4px;">
+      <input type="text" class="env-val" placeholder="VALUE" style="flex:2;padding:6px;background:var(--bg-surface-1);border:1px solid var(--border);color:var(--fg-primary);border-radius:4px;">
+      <button type="button" class="btn-destructive env-del" style="padding:4px 8px;border-radius:4px;">&times;</button>
+    `;
+    list.appendChild(row);
+  } else if (e.target.classList.contains('env-del')) {
+    e.target.closest('.env-row').remove();
+  }
+});

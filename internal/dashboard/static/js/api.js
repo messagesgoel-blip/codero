@@ -161,8 +161,14 @@ export async function loadAgentSessions(agentId) {
 export async function toggleAgentTracking(agentId, disabled) {
   const data = await apiPut('tracking-config', { agent_id: agentId, disabled });
   store.set({ trackingConfig: data });
+  return data;
 }
 
+export async function updateAgentEnvVars(agentId, envVars) {
+  const data = await apiPut('tracking-config', { agent_id: agentId, env_vars: envVars });
+  store.set({ trackingConfig: data });
+  return data;
+}
 // --- Normalizers ---
 
 function normalizeOverview(raw) {

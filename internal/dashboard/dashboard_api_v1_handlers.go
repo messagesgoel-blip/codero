@@ -3,6 +3,7 @@ package dashboard
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/codero/codero/internal/config"
 	loglib "github.com/codero/codero/internal/log"
+	"github.com/codero/codero/internal/state"
 )
 
 // trackingConfigMu serializes read-modify-write on ~/.codero/config.yaml
@@ -222,12 +224,30 @@ func (h *Handler) handleAssignmentAction(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	// TODO: wire to coordinator FSM when ready
-	writeJSON(w, http.StatusNotImplemented, AssignmentActionResponse{
+	// For actions not yet supported by state engine, return not_implemented
+	if action == "replay" || action == "release" || action == "release-slot" {
+		writeJSON(w, http.StatusNotImplemented, AssignmentActionResponse{
+			AssignmentID:  assignmentID,
+			Action:        action,
+			Status:        "not_implemented",
+			Message:       action + " action not yet supported in this version",
+			SchemaVersion: SchemaVersionV1,
+			GeneratedAt:   time.Now().UTC(),
+		})
+		return
+	}
+
+	if err := state.PerformAssignmentAction(r.Context(), state.NewDB(h.db), assignmentID, action); err != nil {
+		loglib.Error("dashboard: assignment action failed", "assignment_id", assignmentID, "action", action, "error", err)
+		writeError(w, http.StatusInternalServerError, "action failed: "+err.Error(), "action_error")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, AssignmentActionResponse{
 		AssignmentID:  assignmentID,
 		Action:        action,
-		Status:        "not_implemented",
-		Message:       action + " action not yet implemented — coordinator FSM not wired",
+		Status:        "accepted",
+		Message:       fmt.Sprintf("Assignment %s %s action accepted", assignmentID, action),
 		SchemaVersion: SchemaVersionV1,
 		GeneratedAt:   time.Now().UTC(),
 	})
@@ -876,8 +896,9 @@ func (h *Handler) handleTrackingConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var req struct {
-			AgentID  string `json:"agent_id"`
-			Disabled bool   `json:"disabled"`
+			AgentID  string            `json:"agent_id"`
+			Disabled *bool             `json:"disabled,omitempty"`
+			EnvVars  map[string]string `json:"env_vars,omitempty"`
 		}
 		if err := json.Unmarshal(body, &req); err != nil {
 			writeError(w, http.StatusBadRequest, "parse body: "+err.Error(), "bad_request")
@@ -895,7 +916,17 @@ func (h *Handler) handleTrackingConfig(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "load config: "+err.Error(), "config_error")
 			return
 		}
-		uc.SetTrackingDisabled(req.AgentID, req.Disabled)
+		if req.Disabled != nil {
+			uc.SetTrackingDisabled(req.AgentID, *req.Disabled)
+		}
+		if req.EnvVars != nil {
+			if uc.Wrappers == nil {
+				uc.Wrappers = make(map[string]config.WrapperConfig)
+			}
+			wConf := uc.Wrappers[req.AgentID]
+			wConf.EnvVars = req.EnvVars
+			uc.Wrappers[req.AgentID] = wConf
+		}
 		if err := uc.Save(); err != nil {
 			trackingConfigMu.Unlock()
 			writeError(w, http.StatusInternalServerError, "save config: "+err.Error(), "config_error")
@@ -1136,13 +1167,45 @@ func (h *Handler) handleScorecard(w http.ResponseWriter, r *http.Request) {
 	}
 	setCORSHeaders(w)
 
-	// Stub response — real aggregation is a follow-up
+	// Fetch Phase 1F proving period metrics
+	card, err := state.ComputeProvingScorecard(r.Context(), state.NewDB(h.db))
+	if err != nil {
+		loglib.Error("dashboard: scorecard compute failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to compute scorecard", "db_error")
+		return
+	}
+
+	// Map proving metrics to dashboard scorecard fields
+	// Note: ProvingScorecard uses integer counts; we format them for display.
+	gatePassRate := "—"
+	if card.PrecommitReviews7Days > 0 {
+		// Ideally we would subtract failures, but ProvingScorecard doesn't track 
+		// pass vs fail counts separately yet. We'll show the raw volume.
+		gatePassRate = fmt.Sprintf("%d runs", card.PrecommitReviews7Days)
+	}
+
+	avgCycleTime := "—"
+	// TODO: add cycle time aggregation to ProvingScorecard
+
+	mergeRate := "—"
+	if card.BranchesReviewed7Days > 0 {
+		mergeRate = fmt.Sprintf("%d/wk", card.BranchesReviewed7Days)
+	}
+
+	complianceScore := "100%"
+	if card.ManualDBRepairs > 0 || card.MissedFeedbackDeliveries > 0 {
+		complianceScore = "needs attention"
+	}
+
+	summary := fmt.Sprintf("Phase 1F Proving in progress. %d branches reviewed in last 7 days. %d pre-commit runs. %d stale detections recorded.",
+		card.BranchesReviewed7Days, card.PrecommitReviews7Days, card.StaleDetections30Days)
+
 	writeJSON(w, http.StatusOK, ScorecardResponse{
-		GatePassRate:    "—",
-		AvgCycleTime:    "—",
-		MergeRate:       "—",
-		ComplianceScore: "—",
-		Summary:         "Scorecard data aggregation not yet implemented.",
+		GatePassRate:    gatePassRate,
+		AvgCycleTime:    avgCycleTime,
+		MergeRate:       mergeRate,
+		ComplianceScore: complianceScore,
+		Summary:         summary,
 		SchemaVersion:   SchemaVersionV1,
 		GeneratedAt:     time.Now().UTC(),
 	})

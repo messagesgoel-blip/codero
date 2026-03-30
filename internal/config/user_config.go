@@ -14,11 +14,12 @@ import (
 
 // AgentInfo describes a discovered agent shim with runtime status.
 type AgentInfo struct {
-	AgentID    string `json:"agent_id"`
-	ShimName   string `json:"shim_name"`
-	RealBinary string `json:"real_binary"`
-	Installed  bool   `json:"installed"`
-	Disabled   bool   `json:"disabled"`
+	AgentID    string            `json:"agent_id"`
+	ShimName   string            `json:"shim_name"`
+	RealBinary string            `json:"real_binary"`
+	Installed  bool              `json:"installed"`
+	Disabled   bool              `json:"disabled"`
+	EnvVars    map[string]string `json:"env_vars"`
 }
 
 // shimRe parses: exec codero agent run --agent-id <id> -- "<binary>" "$@"
@@ -51,8 +52,12 @@ func DiscoverAgents(uc *UserConfig) ([]AgentInfo, error) {
 		}
 		_, statErr := os.Stat(realBin)
 		var disabled bool
+		var envVars map[string]string
 		if uc != nil {
 			disabled = uc.IsTrackingDisabled(agentID)
+			if w, ok := uc.Wrappers[agentID]; ok && w.EnvVars != nil {
+				envVars = w.EnvVars
+			}
 		}
 		agents = append(agents, AgentInfo{
 			AgentID:    agentID,
@@ -60,6 +65,7 @@ func DiscoverAgents(uc *UserConfig) ([]AgentInfo, error) {
 			RealBinary: realBin,
 			Installed:  statErr == nil,
 			Disabled:   disabled,
+			EnvVars:    envVars,
 		})
 	}
 	return agents, nil
@@ -124,8 +130,9 @@ func (uc *UserConfig) SetTrackingDisabled(agentID string, disabled bool) {
 
 // WrapperConfig records a wrapped agent binary discovered during setup.
 type WrapperConfig struct {
-	RealBinary  string    `yaml:"real_binary"`
-	InstalledAt time.Time `yaml:"installed_at,omitempty"`
+	RealBinary  string            `yaml:"real_binary"`
+	InstalledAt time.Time         `yaml:"installed_at,omitempty"`
+	EnvVars     map[string]string `yaml:"env_vars,omitempty"`
 }
 
 // UserConfigDir returns the codero config directory.

@@ -308,7 +308,15 @@ func heartbeatLoop(ctx context.Context, client *daemongrpc.SessionClient, sessio
 // Activity is tracked by reading the PTY master output stream.
 func runChild(binaryPath string, args []string, sessionID, agentID, daemonAddr string, tracker *activityTracker, tailFile *os.File) int {
 	child := exec.Command(binaryPath, args...) // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-	child.Env = append(os.Environ(),
+	env := os.Environ()
+	if uc, err := config.LoadUserConfig(); err == nil && uc != nil {
+		if w, ok := uc.Wrappers[agentID]; ok && w.EnvVars != nil {
+			for k, v := range w.EnvVars {
+				env = append(env, k+"="+v)
+			}
+		}
+	}
+	child.Env = append(env,
 		"CODERO_SESSION_ID="+sessionID,
 		"CODERO_AGENT_ID="+agentID,
 		"CODERO_DAEMON_ADDR="+daemonAddr,
