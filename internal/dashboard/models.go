@@ -381,6 +381,22 @@ type NodeReposResponse struct {
 	SchemaVersion string            `json:"schema_version"`
 }
 
+// TaskRow is one row in the tasks list.
+type TaskRow struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+	Phase  string `json:"phase,omitempty"`
+}
+
+// TasksResponse is the response for GET /api/v1/dashboard/tasks.
+type TasksResponse struct {
+	Tasks         []TaskRow `json:"tasks"`
+	Total         int       `json:"total"`
+	GeneratedAt   time.Time `json:"generated_at"`
+	SchemaVersion string    `json:"schema_version"`
+}
+
 // GateCheckStatus mirrors gatecheck.CheckStatus for dashboard JSON.
 type GateCheckStatus = string
 

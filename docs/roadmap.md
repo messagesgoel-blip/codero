@@ -61,17 +61,17 @@ Status: `not_started` | `in_progress` | `blocked` | `done`
 
 | ID | Task | Status | Definition of Done |
 |---|---|---|---|
-| P1-A-001 | Wire `/api/v1/dashboard/tasks` endpoint | `not_started` | `GET /api/v1/dashboard/tasks` returns 200 with `{tasks: [], schema_version: "1"}`; Tasks tab shows data |
-| P1-A-002 | Update `dashboard-architecture.md` with new endpoints | `not_started` | Doc lists all current endpoints including `/tracking-config`, `/node-repos`, `/tasks`, `/agents`, `/scorecard` |
-| P1-A-003 | Add env_vars validation tests | `not_started` | Test cases for: empty key, key with `=`, NUL bytes, valid key; all pass in `go test ./internal/dashboard/...` |
+| P1-A-001 | Wire `/api/v1/dashboard/tasks` endpoint | `done` | `GET /api/v1/dashboard/tasks` returns 200 with `{tasks: [], schema_version: "1"}`; Tasks tab shows data |
+| P1-A-002 | Update `dashboard-architecture.md` with new endpoints | `done` | Doc lists all current endpoints including `/tracking-config`, `/node-repos`, `/tasks`, `/agents`, `/scorecard` |
+| P1-A-003 | Add env_vars validation tests | `done` | Test cases for: empty key, key with `=`, NUL bytes, valid key; all pass in `go test ./internal/dashboard/...` |
 
 ### P1-B: Agent Discovery & Setup
 
 | ID | Task | Status | Definition of Done |
 |---|---|---|---|
-| P1-B-001 | Install agent shims for active agents | `not_started` | `codero agent list --json` returns ≥1 agent with `installed: true` |
-| P1-B-002 | Verify agent heartbeat flow | `not_started` | Running a test session creates heartbeat entries; dashboard shows session in Agents tab |
-| P1-B-003 | Document agent setup workflow | `not_started` | `docs/agent-setup.md` exists with step-by-step for Claude Code, Aider, Cursor |
+| P1-B-001 | Install agent shims for active agents | `done` | `codero agent list --json` returns ≥1 agent with `installed: true` |
+| P1-B-002 | Verify agent heartbeat flow | `done` | Running a test session creates heartbeat entries; dashboard shows session in Agents tab |
+| P1-B-003 | Document agent setup workflow | `done` | `docs/agent-setup.md` exists with step-by-step for Claude Code, Aider, Cursor |
 
 ### P1-C: Proving Period Evidence
 

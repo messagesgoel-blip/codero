@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/codero/codero/internal/config"
 	"github.com/codero/codero/internal/state"
 )
 
@@ -61,6 +62,20 @@ func agentListCmd(_ *string) *cobra.Command {
 				return nil
 			}
 
+			// Discover agents from shims for installed status
+			uc, ucErr := config.LoadUserConfig()
+			if ucErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not load user config: %v\n", ucErr)
+			}
+			discovered, discErr := config.DiscoverAgents(uc)
+			if discErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not discover agents: %v\n", discErr)
+			}
+			discoveredMap := make(map[string]config.AgentInfo)
+			for _, d := range discovered {
+				discoveredMap[d.AgentID] = d
+			}
+
 			if jsonOutput {
 				type sessionJSON struct {
 					SessionID      string `json:"session_id"`
@@ -69,10 +84,15 @@ func agentListCmd(_ *string) *cobra.Command {
 					ElapsedSec     int64  `json:"elapsed_sec"`
 					LastSeenAt     string `json:"last_seen_at"`
 					TmuxSession    string `json:"tmux_session,omitempty"`
+					Installed      bool   `json:"installed"`
 				}
 				var out []sessionJSON
 				for _, s := range sessions {
 					elapsed := int64(time.Since(s.StartedAt).Seconds())
+					installed := false
+					if info, ok := discoveredMap[s.AgentID]; ok {
+						installed = info.Installed
+					}
 					out = append(out, sessionJSON{
 						SessionID:      s.SessionID,
 						AgentID:        s.AgentID,
@@ -80,6 +100,7 @@ func agentListCmd(_ *string) *cobra.Command {
 						ElapsedSec:     elapsed,
 						LastSeenAt:     s.LastSeenAt.Format(time.RFC3339),
 						TmuxSession:    s.TmuxSessionName,
+						Installed:      installed,
 					})
 				}
 				if out == nil {
@@ -92,13 +113,18 @@ func agentListCmd(_ *string) *cobra.Command {
 
 			// Plain text table.
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "AGENT\tSTATUS\tELAPSED\tLAST SEEN\tSESSION ID")
+			fmt.Fprintln(w, "AGENT\tSTATUS\tINSTALLED\tELAPSED\tLAST SEEN\tSESSION ID")
 			for _, s := range sessions {
 				elapsed := formatElapsed(time.Since(s.StartedAt))
 				lastSeen := formatElapsed(time.Since(s.LastSeenAt))
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s ago\t%s\n",
+				installed := "no"
+				if info, ok := discoveredMap[s.AgentID]; ok && info.Installed {
+					installed = "yes"
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s ago\t%s\n",
 					s.AgentID,
 					s.InferredStatus,
+					installed,
 					elapsed,
 					lastSeen,
 					truncateID(s.SessionID, 12),
