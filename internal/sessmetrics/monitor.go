@@ -50,8 +50,15 @@ func (m *Monitor) Run(ctx context.Context) {
 }
 
 func (m *Monitor) runOnce(ctx context.Context) {
+	timeout := m.interval
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	tctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	if m.syncer != nil {
-		n, err := m.syncer.Sync(ctx)
+		n, err := m.syncer.Sync(tctx)
 		if err != nil {
 			loglib.Warn("sessmetrics: litellm sync error",
 				loglib.FieldComponent, "sessmetrics",
@@ -65,7 +72,7 @@ func (m *Monitor) runOnce(ctx context.Context) {
 		}
 	}
 
-	if err := m.detector.EvaluateAll(ctx); err != nil {
+	if err := m.detector.EvaluateAll(tctx); err != nil {
 		loglib.Warn("sessmetrics: pressure evaluation error",
 			loglib.FieldComponent, "sessmetrics",
 			"error", err,

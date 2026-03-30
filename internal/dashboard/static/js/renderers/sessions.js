@@ -184,12 +184,15 @@ function _renderSessionsTable(sessions, assignments) {
       key: 'contextPressure',
       label: 'Context',
       render: r => {
-        const p = r.contextPressure || 'normal';
+        const allowed = { normal: 'normal', warning: 'warning', critical: 'critical' };
+        const p = allowed[r.contextPressure] || 'normal';
         if (p === 'normal') return '<span style="color:var(--fg-muted)">—</span>';
         const col = p === 'critical' ? 'var(--error)' : 'var(--warning)';
         const icon = p === 'critical' ? '🔴' : '🟡';
-        const compact = r.compactCount > 0 ? ` ×${r.compactCount}` : '';
-        return `<span style="color:${col}" title="${p} context pressure${compact ? '; compacted ' + r.compactCount + ' time(s)' : ''}">${icon} ${p}${compact}</span>`;
+        const compactN = Number.isFinite(Number(r.compactCount)) ? Math.floor(Number(r.compactCount)) : 0;
+        const compact = compactN > 0 ? ` \u00d7${compactN}` : '';
+        const title = esc(p + ' context pressure' + (compactN > 0 ? '; compacted ' + compactN + ' time(s)' : ''));
+        return `<span style="color:${col}" title="${title}">${icon} ${esc(p)}${compact}</span>`;
       },
     },
     {

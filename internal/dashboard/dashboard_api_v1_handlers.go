@@ -1033,12 +1033,18 @@ func (h *Handler) handleSessionMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch pressure/compact fields from the session row.
-	var pressure string
+	pressure := "normal"
 	var compactCount int
-	_ = h.db.QueryRowContext(r.Context(),
+	if err := h.db.QueryRowContext(r.Context(),
 		`SELECT COALESCE(context_pressure, 'normal'), COALESCE(compact_count, 0)
 		 FROM agent_sessions WHERE session_id = ?`, sessionID).
-		Scan(&pressure, &compactCount)
+		Scan(&pressure, &compactCount); err != nil && err != sql.ErrNoRows {
+		loglib.Warn("dashboard: session pressure query failed",
+			loglib.FieldComponent, "dashboard",
+			"session_id", sessionID,
+			"error", err,
+		)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"session_id":       sessionID,

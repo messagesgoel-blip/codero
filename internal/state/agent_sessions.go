@@ -2030,6 +2030,13 @@ func GetTokenMetrics(ctx context.Context, db *DB, sessionID string) ([]TokenMetr
 
 // GetLatestSyncedRequestTime returns the most recent request_time in
 // session_token_metrics, used by the LiteLLM syncer as an import cursor.
+//
+// LIMITATION: This uses a global MAX(request_time) across all sessions, which
+// means if one session's sync fails partway through, the cursor still advances
+// past those rows via other sessions' later timestamps. This is acceptable for
+// now but should be replaced with per-session cursors (e.g. a separate
+// sync_cursors table keyed by litellm_session_id) to guarantee no rows are
+// permanently skipped.
 func GetLatestSyncedRequestTime(ctx context.Context, db *DB) (time.Time, error) {
 	var s sql.NullString
 	if err := db.sql.QueryRowContext(ctx,
