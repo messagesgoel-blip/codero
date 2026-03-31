@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -16,11 +15,21 @@ import (
 
 func repoRoot(t *testing.T) string {
 	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("unable to resolve test file path")
+
+	if wd, err := os.Getwd(); err == nil {
+		for dir := filepath.Clean(wd); ; dir = filepath.Dir(dir) {
+			if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+				return dir
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+		}
 	}
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+
+	t.Fatal("unable to locate repo root from current working directory")
+	return ""
 }
 
 func cleanGitEnv() []string {

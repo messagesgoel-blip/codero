@@ -17,6 +17,24 @@ func writeConfig(t *testing.T, content string) string {
 	return path
 }
 
+func clearLoadOverrideEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		"CODERO_REDIS_ADDR",
+		"CODERO_REDIS_PASS",
+		"CODERO_PID_FILE",
+		"CODERO_READY_FILE",
+		"CODERO_LOG_LEVEL",
+		"CODERO_LOG_PATH",
+		"CODERO_DB_PATH",
+		"CODERO_OBSERVABILITY_PORT",
+		"GITHUB_TOKEN",
+		"CODERO_REPOS",
+	} {
+		t.Setenv(key, "")
+	}
+}
+
 func TestLoadEnv_Defaults(t *testing.T) {
 	t.Setenv("CODERO_REDIS_ADDR", "")
 	t.Setenv("CODERO_REDIS_PASS", "")
@@ -84,6 +102,7 @@ func TestLoadEnv_Overrides(t *testing.T) {
 }
 
 func TestLoad_ValidConfig(t *testing.T) {
+	clearLoadOverrideEnv(t)
 	path := writeConfig(t, `
 github_token: ghp_test
 repos:
@@ -111,6 +130,7 @@ db_path: /tmp/test.db
 }
 
 func TestLoad_FileNotFound(t *testing.T) {
+	clearLoadOverrideEnv(t)
 	_, err := Load("/nonexistent/path/codero.yaml")
 	if !errors.Is(err, ErrConfigNotFound) {
 		t.Fatalf("want ErrConfigNotFound, got %v", err)
@@ -118,6 +138,7 @@ func TestLoad_FileNotFound(t *testing.T) {
 }
 
 func TestLoad_UnknownFields(t *testing.T) {
+	clearLoadOverrideEnv(t)
 	path := writeConfig(t, `
 github_token: ghp_test
 repos:
@@ -131,6 +152,7 @@ unexpected: true
 }
 
 func TestLoad_MultipleDocuments(t *testing.T) {
+	clearLoadOverrideEnv(t)
 	path := writeConfig(t, `
 github_token: ghp_test
 repos:
