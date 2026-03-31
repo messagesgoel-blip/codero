@@ -2,13 +2,18 @@
 
 **Version:** 1.0
 **Last Updated:** 2026-03-30
-**Status:** active
+**Status:** planned
 
 ## Purpose
 
 This contract defines how external bot shells deliver messages into a live
 agent terminal session while Codero remains the source of truth for policy,
 auth, review state, and GitHub mutation.
+
+At capture time, Codero does not yet ship a repo-local PTY delivery runtime for
+this contract. The currently proven implementation lives in shared tooling
+outside this repository; this document records the target behavior that a
+future Codero-owned implementation must satisfy.
 
 It formalizes the PTY-first runtime direction for human-attached sessions:
 
@@ -54,7 +59,7 @@ They may not:
 - bypass Codero auth or policy checks
 - mutate GitHub state outside Codero-owned contracts
 
-## Canonical Operations
+## Target Operations
 
 The PTY delivery flow is modeled as the following logical operations:
 
@@ -66,12 +71,13 @@ The PTY delivery flow is modeled as the following logical operations:
 - `status` — report process and session metadata
 - `stop` — terminate a managed session
 
-Low-level raw text injection may exist as an implementation detail, but `deliver`
-is the normative high-level operation for bot-to-session messaging.
+Low-level raw text injection may exist as an implementation detail, but
+`deliver` is the target high-level operation for bot-to-session messaging once
+Codero owns this runtime directly.
 
 ## Delivery State Model
 
-`deliver` must distinguish the following observable states:
+The target `deliver` flow must distinguish the following observable states:
 
 - `ready` — the session is at an input prompt or other family-specific idle view
 - `accepted` — the delivered prompt has been acknowledged or queued by the CLI
@@ -143,10 +149,10 @@ If the session is already idle, `deliver` must not send an interruption key.
 - Completion must not depend on a single answer glyph; a rendered answer plus a
   settled ready footer is sufficient.
 
-## Current Proven Interrupted-Work Smokes
+## External Validation Evidence
 
-The following disposable live smokes were verified before this contract was
-captured:
+The following disposable live smokes were verified in the shared reference
+helper before this contract was captured:
 
 - Codex:
   - `CONDITIONAL_ESC_OK`
@@ -160,13 +166,14 @@ captured:
 - OpenCode:
   - `OPENCODE_INTERRUPT_LIVE_OK`
 
-These tokens are evidence that the current interrupted-work `deliver` path can
+These tokens are evidence that the shared interrupted-work `deliver` path can
 reach a real final answer across all supported managed families.
 
 ## Implementation Notes
 
-The current reference helper lives outside this repo in shared tooling, but this
-document is the contract that future Codero-owned implementations must satisfy.
+The current reference helper lives outside this repo in shared tooling. This
+document is a planned Codero contract, not a claim that `internal/tmux` already
+implements the full PTY delivery surface described above.
 
 Reference implementation and tests at capture time:
 
