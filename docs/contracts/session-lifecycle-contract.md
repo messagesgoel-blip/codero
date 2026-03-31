@@ -43,6 +43,8 @@ secret, err := store.RegisterWithTmux(ctx, sessionID, agentID, mode, tmuxSession
 
 - Stores `tmux_session_name` for later retrieval
 - Used for session reattachment after coordinator restart
+- Provides the continuity anchor used by external bot-shell PTY delivery; see
+  `docs/contracts/bot-pty-delivery-contract.md`
 
 ### Heartbeat
 

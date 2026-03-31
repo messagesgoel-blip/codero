@@ -70,6 +70,8 @@ Sessions track agent engagement:
 
 Key behaviors:
 - **Tmux support**: `RegisterWithTmux` stores tmux session name for reattachment
+- **PTY bot delivery**: external bot shells injecting messages into live agent
+  sessions must follow `docs/contracts/bot-pty-delivery-contract.md`
 - **Idempotency**: Re-register updates existing session
 - **Lazy assignment**: Branch state must exist before attach
 
