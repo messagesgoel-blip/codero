@@ -955,6 +955,12 @@ func sessionRegisterCmd(configPath *string) *cobra.Command {
 						return fmt.Errorf("session register: %w", err)
 					}
 					result = &daemongrpc.RegisterResult{SessionID: sessionID, HeartbeatSecret: secret}
+				} else if sessionID != "" {
+					secret, err := client.RegisterWithSession(cmd.Context(), sessionID, agentID, mode)
+					if err != nil {
+						return fmt.Errorf("session register: %w", err)
+					}
+					result = &daemongrpc.RegisterResult{SessionID: sessionID, HeartbeatSecret: secret}
 				} else {
 					result, err = client.Register(cmd.Context(), agentID, mode)
 					if err != nil {

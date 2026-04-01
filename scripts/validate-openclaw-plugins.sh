@@ -34,17 +34,17 @@ APPROVED_PLUGINS=("litellm" "acpx")
 
 log_pass() {
     echo -e "${GREEN}PASS${NC}: $1"
-    ((PASS++))
+    PASS=$((PASS + 1))
 }
 
 log_fail() {
     echo -e "${RED}FAIL${NC}: $1"
-    ((FAIL++))
+    FAIL=$((FAIL + 1))
 }
 
 log_warn() {
     echo -e "${YELLOW}WARN${NC}: $1"
-    ((WARN++))
+    WARN=$((WARN + 1))
 }
 
 check_config_exists() {
@@ -158,12 +158,13 @@ check_provider_localhost() {
     local base_url
     base_url=$(jq -r '.models.providers.litellm.baseUrl // ""' "$OPENCLAW_CONFIG" 2>/dev/null)
 
-    if [[ "$base_url" == "http://localhost"* ]]; then
-        log_pass "LiteLLM provider uses localhost endpoint ($base_url)"
+    if [[ "$base_url" == "http://localhost"* || "$base_url" == "http://127.0.0.1"* ]]; then
+        log_pass "LiteLLM provider uses loopback endpoint ($base_url)"
     elif [ -z "$base_url" ]; then
         log_warn "No LiteLLM baseUrl configured"
     else
-        log_warn "LiteLLM provider does not use localhost: $base_url"
+        log_fail "LiteLLM provider must use a loopback endpoint, got: $base_url"
+        return 1
     fi
 }
 

@@ -321,10 +321,13 @@ func (p *Pipeline) Submit(ctx context.Context, assignmentID, worktree string) er
 				// BND-004: emit structured event envelope for feedback delivery.
 				// Codero emits structured payloads only; OpenClaw owns PTY injection timing.
 				replyTo := p.buildReplyToEndpoint(assignment)
+				findings := fbItemsToEventItems(fb.CIFailures)
+				findings = append(findings, fbItemsToEventItems(fb.GateFindings)...)
+				findings = append(findings, fbItemsToEventItems(fb.CodeReview)...)
 				payload := event.FeedbackInjectPayload{
 					AssignmentID: assignmentID,
 					SessionID:    assignment.SessionID,
-					Findings:     fbItemsToEventItems(fb.GateFindings),
+					Findings:     findings,
 					GateFindings: fbItemsToEventItems(fb.GateFindings),
 					ReviewNotes:  fbItemsToEventItems(fb.CodeReview),
 				}
@@ -968,15 +971,13 @@ func (defaultNotifier) Notify(worktree, notificationType, assignmentID string) {
 
 // buildReplyToEndpoint constructs the OpenClaw reply_to endpoint for an assignment.
 // BND-004: reply_to is an OpenClaw endpoint, not a PTY path.
+// TmuxName is intentionally left empty — it is populated by the launch wrapper
+// when the real tmux session name is known.
 func (p *Pipeline) buildReplyToEndpoint(assignment *state.AgentAssignment) event.ReplyToEndpoint {
-	ep := event.ReplyToEndpoint{
+	return event.ReplyToEndpoint{
 		Type:      "openclaw_session",
 		SessionID: assignment.SessionID,
 	}
-	if assignment.Worktree != "" {
-		ep.TmuxName = assignment.Worktree
-	}
-	return ep
 }
 
 // fbItemsToEventItems converts FeedbackItem to event.FeedbackItem.

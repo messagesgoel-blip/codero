@@ -6,6 +6,7 @@
 package event
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -81,8 +82,16 @@ func (e Envelope) Validate() error {
 	if e.Type == "" {
 		return fmt.Errorf("event: type is required")
 	}
+	switch e.Type {
+	case EventTypeTaskDeliver, EventTypeFeedbackInject, EventTypeGateResult, EventTypeReviewFindings, EventTypeSessionStatus:
+	default:
+		return fmt.Errorf("event: unsupported type %q", e.Type)
+	}
 	if e.Source == "" {
 		return fmt.Errorf("event: source is required")
+	}
+	if e.Source != "codero" {
+		return fmt.Errorf("event: source must be codero, got %q", e.Source)
 	}
 	if err := e.ReplyTo.Validate(); err != nil {
 		return fmt.Errorf("event: reply_to: %w", err)
@@ -92,6 +101,10 @@ func (e Envelope) Validate() error {
 	}
 	if e.Payload == nil {
 		return fmt.Errorf("event: payload is required")
+	}
+	payload := bytes.TrimSpace(e.Payload)
+	if len(payload) == 0 || bytes.Equal(payload, []byte("null")) || !json.Valid(payload) || payload[0] != '{' {
+		return fmt.Errorf("event: payload must be a structured JSON object")
 	}
 	if e.SchemaVersion != CurrentSchemaVersion {
 		return fmt.Errorf("event: unsupported schema_version %q, want %q", e.SchemaVersion, CurrentSchemaVersion)
