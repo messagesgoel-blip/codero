@@ -35,6 +35,9 @@ OpenClaw is an adapter, not a workflow authority. Plugins must not:
 - Bypass the shared PTY bridge for session delivery
 - Hold secrets that belong only in Codero or agent runtimes
 
+**Authority reference:** `docs/contracts/actor-boundaries.md` defines the full
+ownership model that plugin behavior must not contradict.
+
 ## Approved Plugin Allowlist
 
 The following plugins are approved for the Codero OpenClaw baseline:

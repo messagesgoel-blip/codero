@@ -89,6 +89,10 @@ surface the same decisions:
 
 ## Canonical Roles
 
+**Authority reference:** `docs/contracts/actor-boundaries.md` defines the full
+actor ownership model and hop boundaries. The roles below are consistent with
+that document.
+
 ### 1. Control Plane
 
 The Codero control plane is the durable source of truth for:
