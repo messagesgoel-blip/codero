@@ -1,7 +1,7 @@
 # OpenClaw Privilege Profile for Codero
 
-Status: shadow-mode / Codero-local  
-Task: TOOL-002 (contained)  
+Status: shadow-mode / Codero-local
+Task: TOOL-002 (contained)
 Date: 2026-04-01
 
 ## Purpose

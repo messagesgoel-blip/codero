@@ -117,6 +117,13 @@ All dashboard-specific endpoints live under `/api/v1/dashboard/`.
 Existing observability endpoints (`/health`, `/queue`, `/metrics`, `/gate`) are
 **unchanged**.
 
+External bot shells such as OpenClaw are allowed to present and relay Codero
+state, but PTY delivery into live managed sessions must follow
+`docs/contracts/bot-pty-delivery-contract.md`. That contract defines how
+message injection, busy-session interruption, and family-specific accepted /
+processing / final-answer detection work without changing Codero's source of
+truth.
+
 ---
 
 ## Data Sources

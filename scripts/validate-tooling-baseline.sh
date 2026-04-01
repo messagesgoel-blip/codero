@@ -75,11 +75,11 @@ check_executable() {
     fi
 }
 
-echo "========================================="
+echo "-----------------------------------------"
 echo "Codero Tooling Baseline Validation"
 echo "Task: TOOL-001 (shadow mode)"
 echo "Date: $(date -Iseconds)"
-echo "========================================="
+echo "-----------------------------------------"
 echo
 
 echo "--- Shared Env Bootstrap ---"
@@ -125,9 +125,9 @@ check_exists "$SHARED_TOOL_VENVS/pr-agent" "pr-agent venv" no || true
 check_exists "$SHARED_TOOL_VENVS/tooling" "tooling venv" no || true
 echo
 
-echo "========================================="
+echo "-----------------------------------------"
 echo "Summary"
-echo "========================================="
+echo "-----------------------------------------"
 echo -e "Passed: ${GREEN}$PASS${NC}"
 echo -e "Failed: ${RED}$FAIL${NC}"
 echo -e "Warnings: ${YELLOW}$WARN${NC}"

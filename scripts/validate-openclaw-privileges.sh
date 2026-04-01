@@ -102,27 +102,27 @@ check_no_redis_creds() {
 
 check_approved_plugins() {
     local plugins_ok=true
-    
+
     # Check that litellm and acpx are present (approved)
     if ! grep -q '"litellm":' "$OPENCLAW_CONFIG" 2>/dev/null; then
         log_warn "Approved plugin 'litellm' not found"
         plugins_ok=false
     fi
-    
+
     if ! grep -q '"acpx":' "$OPENCLAW_CONFIG" 2>/dev/null; then
         log_warn "Approved plugin 'acpx' not found"
         plugins_ok=false
     fi
-    
+
     # Count enabled plugins (rough check)
     local plugin_count
     plugin_count=$(grep -c '"enabled": true' "$OPENCLAW_CONFIG" 2>/dev/null || echo 0)
-    
+
     if [ "$plugin_count" -gt 2 ]; then
         log_warn "More than 2 plugins enabled ($plugin_count) — review allowlist"
         plugins_ok=false
     fi
-    
+
     if [ "$plugins_ok" = true ]; then
         log_pass "Plugin configuration matches approved allowlist"
     fi
@@ -158,12 +158,12 @@ check_provider_localhost() {
     fi
 }
 
-echo "========================================="
+echo "-----------------------------------------"
 echo "OpenClaw Privilege Profile Validation"
 echo "Task: TOOL-002 (shadow mode)"
 echo "Date: $(date -Iseconds)"
 echo "Config: $OPENCLAW_CONFIG"
-echo "========================================="
+echo "-----------------------------------------"
 echo
 
 # Must check config exists first
@@ -198,9 +198,9 @@ echo "--- PTY Transport ---"
 check_pty_bridge
 
 echo
-echo "========================================="
+echo "-----------------------------------------"
 echo "Summary"
-echo "========================================="
+echo "-----------------------------------------"
 echo -e "Passed: ${GREEN}$PASS${NC}"
 echo -e "Failed: ${RED}$FAIL${NC}"
 echo -e "Warnings: ${YELLOW}$WARN${NC}"

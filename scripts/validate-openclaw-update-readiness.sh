@@ -74,7 +74,7 @@ check_jq_available() {
 check_version_documented() {
     local version
     version=$(jq -r '.meta.lastTouchedVersion // "unknown"' "$OPENCLAW_CONFIG" 2>/dev/null)
-    
+
     if [ "$version" != "unknown" ] && [ -n "$version" ]; then
         log_pass "Version is documented: $version"
         echo "       Last touched: $(jq -r '.meta.lastTouchedAt // "unknown"' "$OPENCLAW_CONFIG" 2>/dev/null)"
@@ -94,7 +94,7 @@ check_no_auto_update() {
 check_wizard_metadata() {
     local wizard_version
     wizard_version=$(jq -r '.wizard.lastRunVersion // "unknown"' "$OPENCLAW_CONFIG" 2>/dev/null)
-    
+
     if [ "$wizard_version" != "unknown" ] && [ -n "$wizard_version" ]; then
         log_pass "Wizard metadata available: version $wizard_version"
         echo "       Last run: $(jq -r '.wizard.lastRunAt // "unknown"' "$OPENCLAW_CONFIG" 2>/dev/null)"
@@ -107,7 +107,7 @@ check_wizard_metadata() {
 run_baseline_validator() {
     local script="$1"
     local name="$2"
-    
+
     if [ -x "$script" ]; then
         echo
         log_info "Running $name..."
@@ -139,12 +139,12 @@ check_validators_exist() {
     done
 }
 
-echo "========================================="
+echo "-----------------------------------------"
 echo "OpenClaw Update Readiness Validation"
 echo "Task: TOOL-004 (shadow mode)"
 echo "Date: $(date -Iseconds)"
 echo "Config: $OPENCLAW_CONFIG"
-echo "========================================="
+echo "-----------------------------------------"
 echo
 
 # Prerequisite checks
@@ -182,18 +182,18 @@ run_baseline_validator "$SCRIPT_DIR/validate-openclaw-privileges.sh" "Privilege 
 run_baseline_validator "$SCRIPT_DIR/validate-openclaw-plugins.sh" "Plugin policy validator"
 
 echo
-echo "========================================="
+echo "-----------------------------------------"
 echo "Current Baseline Summary"
-echo "========================================="
+echo "-----------------------------------------"
 echo "Version:     $(jq -r '.meta.lastTouchedVersion // "unknown"' "$OPENCLAW_CONFIG" 2>/dev/null)"
 echo "Plugins:     $(jq -r '.plugins.entries | keys | join(", ")' "$OPENCLAW_CONFIG" 2>/dev/null)"
 echo "Gateway:     $(jq -r '.gateway.bind // "unknown"' "$OPENCLAW_CONFIG" 2>/dev/null) / $(jq -r '.gateway.auth.mode // "unknown"' "$OPENCLAW_CONFIG" 2>/dev/null)"
 echo "Provider:    $(jq -r '.models.providers.litellm.baseUrl // "unknown"' "$OPENCLAW_CONFIG" 2>/dev/null)"
 
 echo
-echo "========================================="
+echo "-----------------------------------------"
 echo "Validation Summary"
-echo "========================================="
+echo "-----------------------------------------"
 echo -e "Passed: ${GREEN}$PASS${NC}"
 echo -e "Failed: ${RED}$FAIL${NC}"
 echo -e "Warnings: ${YELLOW}$WARN${NC}"

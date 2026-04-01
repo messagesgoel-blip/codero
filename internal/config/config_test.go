@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+// writeConfig writes a temporary codero.yaml test fixture and returns its path.
 func writeConfig(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "codero.yaml")
@@ -18,6 +19,7 @@ func writeConfig(t *testing.T, content string) string {
 	return path
 }
 
+// clearConfigEnvOverrides clears every env override that Load and its helpers read.
 func clearConfigEnvOverrides(t *testing.T) {
 	t.Helper()
 	for _, kv := range os.Environ() {
@@ -29,6 +31,12 @@ func clearConfigEnvOverrides(t *testing.T) {
 			t.Setenv(key, "")
 		}
 	}
+}
+
+// clearLoadOverrideEnv removes every env override that Load and its helpers read.
+func clearLoadOverrideEnv(t *testing.T) {
+	t.Helper()
+	clearConfigEnvOverrides(t)
 }
 
 func TestLoadEnv_Defaults(t *testing.T) {
@@ -98,8 +106,7 @@ func TestLoadEnv_Overrides(t *testing.T) {
 }
 
 func TestLoad_ValidConfig(t *testing.T) {
-	clearConfigEnvOverrides(t)
-
+	clearLoadOverrideEnv(t)
 	path := writeConfig(t, `
 github_token: ghp_test
 repos:
@@ -127,6 +134,7 @@ db_path: /tmp/test.db
 }
 
 func TestLoad_FileNotFound(t *testing.T) {
+	clearLoadOverrideEnv(t)
 	_, err := Load("/nonexistent/path/codero.yaml")
 	if !errors.Is(err, ErrConfigNotFound) {
 		t.Fatalf("want ErrConfigNotFound, got %v", err)
@@ -134,8 +142,7 @@ func TestLoad_FileNotFound(t *testing.T) {
 }
 
 func TestLoad_UnknownFields(t *testing.T) {
-	clearConfigEnvOverrides(t)
-
+	clearLoadOverrideEnv(t)
 	path := writeConfig(t, `
 github_token: ghp_test
 repos:
@@ -149,8 +156,7 @@ unexpected: true
 }
 
 func TestLoad_MultipleDocuments(t *testing.T) {
-	clearConfigEnvOverrides(t)
-
+	clearLoadOverrideEnv(t)
 	path := writeConfig(t, `
 github_token: ghp_test
 repos:

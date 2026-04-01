@@ -43,6 +43,8 @@ secret, err := store.RegisterWithTmux(ctx, sessionID, agentID, mode, tmuxSession
 
 - Stores `tmux_session_name` for later retrieval
 - Used for session reattachment after coordinator restart
+- Provides the continuity anchor used by external bot-shell PTY delivery; see
+  `docs/contracts/bot-pty-delivery-contract.md`
 
 ### Heartbeat
 
@@ -179,4 +181,8 @@ Default timeout: 5 minutes without heartbeat
 
 - Mark session as `archived` with result `failed`
 - Release any owned branches
-- Clean up worktree lock files
+- Delivery lock cleanup is not performed by `ExpireAgentSession`; that timeout
+  handler only archives the session and clears branch ownership.
+- Worktree lock removal currently happens in delivery execution cleanup such as
+  the deferred `Unlock(worktree)` path in `internal/delivery_pipeline/pipeline.go`
+  and in stale-lock cleanup, not in the session timeout handler itself.

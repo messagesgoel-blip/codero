@@ -1,7 +1,7 @@
 # Codero Tooling Baseline
 
-Status: shadow-mode / Codero-local  
-Task: TOOL-001 (contained)  
+Status: shadow-mode / Codero-local
+Task: TOOL-001 (contained)
 Date: 2026-04-01
 
 ## Purpose
@@ -127,7 +127,7 @@ the shared toolkit.
 
 The working OpenClaw configuration for Codero smoke tests is at:
 
-`$OPENCLAW_CONFIG_PATH`  
+`$OPENCLAW_CONFIG_PATH`
 default example: `$HOME/.openclaw-codero-smoke/openclaw.json`
 
 Key shape:

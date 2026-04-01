@@ -70,7 +70,7 @@ check_approved_plugin_enabled() {
     local plugin="$1"
     local enabled
     enabled=$(jq -r ".plugins.entries.${plugin}.enabled // false" "$OPENCLAW_CONFIG" 2>/dev/null)
-    
+
     if [ "$enabled" = "true" ]; then
         log_pass "Approved plugin '$plugin' is enabled"
     else
@@ -81,12 +81,12 @@ check_approved_plugin_enabled() {
 check_no_unapproved_plugins() {
     local enabled_plugins
     enabled_plugins=$(jq -r '.plugins.entries | to_entries[] | select(.value.enabled == true) | .key' "$OPENCLAW_CONFIG" 2>/dev/null)
-    
+
     local unapproved_found=false
-    
+
     while IFS= read -r plugin; do
         [ -z "$plugin" ] && continue
-        
+
         local is_approved=false
         for approved in "${APPROVED_PLUGINS[@]}"; do
             if [ "$plugin" = "$approved" ]; then
@@ -94,13 +94,13 @@ check_no_unapproved_plugins() {
                 break
             fi
         done
-        
+
         if [ "$is_approved" = false ]; then
             log_fail "Unapproved plugin '$plugin' is enabled"
             unapproved_found=true
         fi
     done <<< "$enabled_plugins"
-    
+
     if [ "$unapproved_found" = false ]; then
         log_pass "No unapproved plugins enabled"
     fi
@@ -109,7 +109,7 @@ check_no_unapproved_plugins() {
 check_plugin_count() {
     local count
     count=$(jq '[.plugins.entries | to_entries[] | select(.value.enabled == true)] | length' "$OPENCLAW_CONFIG" 2>/dev/null)
-    
+
     if [ "$count" -eq 2 ]; then
         log_pass "Exactly 2 plugins enabled (matches baseline)"
     elif [ "$count" -lt 2 ]; then
@@ -122,7 +122,7 @@ check_plugin_count() {
 check_no_forbidden_creds_in_plugins() {
     local plugin_configs
     plugin_configs=$(jq -r '.plugins.entries | to_entries[] | .value.config // {}' "$OPENCLAW_CONFIG" 2>/dev/null)
-    
+
     if echo "$plugin_configs" | grep -qE 'GITHUB_TOKEN|CODERO_DB_PATH|CODERO_REDIS'; then
         log_fail "Forbidden credentials found in plugin configs"
     else
@@ -133,7 +133,7 @@ check_no_forbidden_creds_in_plugins() {
 check_litellm_config() {
     local litellm_config
     litellm_config=$(jq -r '.plugins.entries.litellm.config // {}' "$OPENCLAW_CONFIG" 2>/dev/null)
-    
+
     # litellm config should be empty or minimal
     if [ "$litellm_config" = "{}" ] || [ -z "$litellm_config" ]; then
         log_pass "litellm plugin config is minimal"
@@ -145,7 +145,7 @@ check_litellm_config() {
 check_acpx_config() {
     local acpx_config
     acpx_config=$(jq -r '.plugins.entries.acpx.config // {}' "$OPENCLAW_CONFIG" 2>/dev/null)
-    
+
     # acpx config should be empty or minimal
     if [ "$acpx_config" = "{}" ] || [ -z "$acpx_config" ]; then
         log_pass "acpx plugin config is minimal"
@@ -157,7 +157,7 @@ check_acpx_config() {
 check_provider_localhost() {
     local base_url
     base_url=$(jq -r '.models.providers.litellm.baseUrl // ""' "$OPENCLAW_CONFIG" 2>/dev/null)
-    
+
     if [[ "$base_url" == "http://localhost"* ]]; then
         log_pass "LiteLLM provider uses localhost endpoint ($base_url)"
     elif [ -z "$base_url" ]; then
@@ -167,12 +167,12 @@ check_provider_localhost() {
     fi
 }
 
-echo "========================================="
+echo "-----------------------------------------"
 echo "OpenClaw Plugin Policy Validation"
 echo "Task: TOOL-003 (shadow mode)"
 echo "Date: $(date -Iseconds)"
 echo "Config: $OPENCLAW_CONFIG"
-echo "========================================="
+echo "-----------------------------------------"
 echo
 
 # Prerequisite checks
@@ -205,9 +205,9 @@ check_acpx_config
 check_provider_localhost
 
 echo
-echo "========================================="
+echo "-----------------------------------------"
 echo "Summary"
-echo "========================================="
+echo "-----------------------------------------"
 echo -e "Passed: ${GREEN}$PASS${NC}"
 echo -e "Failed: ${RED}$FAIL${NC}"
 echo -e "Warnings: ${YELLOW}$WARN${NC}"

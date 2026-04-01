@@ -1,7 +1,7 @@
 # OpenClaw Update Policy for Codero
 
-Status: shadow-mode / Codero-local  
-Task: TOOL-004 (contained)  
+Status: shadow-mode / Codero-local
+Task: TOOL-004 (contained)
 Date: 2026-04-01
 
 ## Purpose

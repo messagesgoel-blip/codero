@@ -1,8 +1,8 @@
 # Actor Boundaries and Hop Model
 
-**Version:** 1.0  
-**Task:** BND-001  
-**Last Updated:** 2026-04-01  
+**Version:** 1.0
+**Task:** BND-001
+**Last Updated:** 2026-04-01
 **Status:** canonical for Codero repo
 
 ## Purpose
