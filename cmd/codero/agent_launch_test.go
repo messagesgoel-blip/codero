@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,14 @@ import (
 	"github.com/codero/codero/internal/state"
 	"github.com/codero/codero/internal/tmux"
 )
+
+type failingRegisterBackend struct {
+	*session.Store
+}
+
+func (f *failingRegisterBackend) RegisterWithTmux(context.Context, string, string, string, string) (string, error) {
+	return "", errors.New("register failed")
+}
 
 type fastExitExecutor struct {
 	*tmux.MockExecutor
@@ -81,18 +90,60 @@ func TestRunAgentLaunch_WritesFilesAndCleansUp(t *testing.T) {
 	if len(exec.KilledNames) != 1 || exec.KilledNames[0] != tmuxName {
 		t.Fatalf("tmux kill: got %v, want %s", exec.KilledNames, tmuxName)
 	}
-	if len(exec.SentKeys) != 1 {
-		t.Fatalf("send keys: expected 1 (combined env+command), got %d: %v", len(exec.SentKeys), exec.SentKeys)
+	if len(exec.Respawned) != 1 {
+		t.Fatalf("respawn window: expected 1 launch, got %d: %+v", len(exec.Respawned), exec.Respawned)
 	}
-	sent := exec.SentKeys[0].Command
-	if !strings.Contains(sent, "CODERO_SESSION_ID='"+sessionID+"'") {
-		t.Fatalf("send-keys should export CODERO_SESSION_ID, got: %s", sent)
+	launch := exec.Respawned[0].Command
+	if len(launch) < 4 {
+		t.Fatalf("respawn-window command too short: %+v", launch)
 	}
-	if !strings.Contains(sent, "CODERO_AGENT_ID='"+agentID+"'") {
-		t.Fatalf("send-keys should export CODERO_AGENT_ID, got: %s", sent)
+	if launch[0] != "env" || launch[1] != "-i" {
+		t.Fatalf("respawn-window should start with env -i, got: %+v", launch)
 	}
-	if !strings.Contains(sent, "&& exec echo hello") {
-		t.Fatalf("send-keys should contain agent command after && exec, got: %s", sent)
+	hasSessionID := false
+	hasAgentID := false
+	hasWorktree := false
+	hasMode := false
+	hasRuntimeSessionMD := false
+	hasTmuxName := false
+	hasStartedAt := false
+	hasWriteLog := false
+	for _, arg := range launch[2:] {
+		switch {
+		case arg == "CODERO_SESSION_ID="+sessionID:
+			hasSessionID = true
+		case arg == "CODERO_AGENT_ID="+agentID:
+			hasAgentID = true
+		case arg == "CODERO_WORKTREE="+worktree:
+			hasWorktree = true
+		case arg == "CODERO_SESSION_MODE=agent":
+			hasMode = true
+		case strings.HasPrefix(arg, "CODERO_RUNTIME_SESSION_MD="):
+			hasRuntimeSessionMD = true
+		case arg == "CODERO_TMUX_NAME="+tmuxName:
+			hasTmuxName = true
+		case arg == "CODERO_STARTED_AT="+startedAt.Format(time.RFC3339):
+			hasStartedAt = true
+		case arg == "CODERO_AGENT_WRITE_SESSION_LOG=true":
+			hasWriteLog = true
+		}
+	}
+	for name, ok := range map[string]bool{
+		"CODERO_SESSION_ID":              hasSessionID,
+		"CODERO_AGENT_ID":                hasAgentID,
+		"CODERO_WORKTREE":                hasWorktree,
+		"CODERO_SESSION_MODE":            hasMode,
+		"CODERO_RUNTIME_SESSION_MD":      hasRuntimeSessionMD,
+		"CODERO_TMUX_NAME":               hasTmuxName,
+		"CODERO_STARTED_AT":              hasStartedAt,
+		"CODERO_AGENT_WRITE_SESSION_LOG": hasWriteLog,
+	} {
+		if !ok {
+			t.Fatalf("respawn-window missing %s: %+v", name, launch)
+		}
+	}
+	if got := launch[len(launch)-2:]; len(got) != 2 || got[0] != "echo" || got[1] != "hello" {
+		t.Fatalf("respawn-window should exec agent command directly, got: %+v", launch)
 	}
 
 	sessionMD, err := os.ReadFile(filepath.Join(worktree, ".codero", "SESSION.md"))
@@ -121,8 +172,8 @@ func TestRunAgentLaunch_WritesFilesAndCleansUp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read hook: %v", err)
 	}
-	if !strings.Contains(string(hook), `TMUX_NAME="`+tmuxName+`"`) {
-		t.Fatalf("hook missing tmux name")
+	if !strings.Contains(string(hook), `TMUX_NAME="${4:-}"`) {
+		t.Fatalf("hook should read tmux name from argv: %s", hook)
 	}
 
 	logPath := filepath.Join(worktree, ".codero", "session-log.txt")
@@ -144,6 +195,39 @@ func TestRunAgentLaunch_WritesFilesAndCleansUp(t *testing.T) {
 	}
 }
 
+func TestRunAgentLaunch_CleansUpCoderoArtifactsOnRegisterFailure(t *testing.T) {
+	const (
+		agentID   = "agent-fail"
+		sessionID = "99999999-aaaa-bbbb-cccc-dddddddddddd"
+	)
+	startedAt := time.Date(2026, 3, 26, 14, 0, 0, 0, time.UTC)
+	withDeterministicLaunch(t, sessionID, startedAt)
+
+	store, _, cleanup := openTestStore(t)
+	defer cleanup()
+
+	worktree := t.TempDir()
+	exec := &fastExitExecutor{MockExecutor: tmux.NewMockExecutor()}
+	cfg := &AgentLaunchConfig{
+		AgentID:      agentID,
+		RepoPath:     worktree,
+		Mode:         "agent",
+		AgentCommand: []string{"echo", "hello"},
+		TmuxExecutor: exec,
+	}
+
+	err := runAgentLaunch(context.Background(), cfg, &failingRegisterBackend{Store: store})
+	if err == nil {
+		t.Fatal("expected register failure")
+	}
+	if _, statErr := os.Stat(filepath.Join(worktree, ".codero")); !os.IsNotExist(statErr) {
+		t.Fatalf(".codero should be cleaned up on register failure, stat err=%v", statErr)
+	}
+	if len(exec.KilledNames) != 1 {
+		t.Fatalf("expected tmux cleanup on register failure, got %v", exec.KilledNames)
+	}
+}
+
 func TestAgentLaunch_ParityWithShellWrapper(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash unavailable")
@@ -153,8 +237,8 @@ func TestAgentLaunch_ParityWithShellWrapper(t *testing.T) {
 	}
 
 	const (
-		agentID   = "agent-2"
-		sessionID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	agentID   = "agent-2"
+	sessionID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 	)
 	startedAt := time.Date(2026, 3, 26, 13, 0, 0, 0, time.UTC)
 	withDeterministicLaunch(t, sessionID, startedAt)
@@ -164,7 +248,6 @@ func TestAgentLaunch_ParityWithShellWrapper(t *testing.T) {
 
 	goWorktree := t.TempDir()
 	shellWorktree := t.TempDir()
-	tmuxName := tmux.SessionName(agentID, sessionID)
 
 	execMock := &fastExitExecutor{MockExecutor: tmux.NewMockExecutor()}
 	goCfg := &AgentLaunchConfig{
@@ -213,14 +296,119 @@ func TestAgentLaunch_ParityWithShellWrapper(t *testing.T) {
 		filepath.Join(goWorktree, ".codero", "AGENT.md"),
 		filepath.Join(shellWorktree, ".codero", "AGENT.md"),
 	)
-	compareFile(t,
-		filepath.Join(goWorktree, ".codero", "hooks", "on-feedback"),
-		filepath.Join(shellWorktree, ".codero", "hooks", "on-feedback"),
-	)
-
 	hook := mustRead(t, filepath.Join(shellWorktree, ".codero", "hooks", "on-feedback"))
-	if !strings.Contains(hook, `TMUX_NAME="`+tmuxName+`"`) {
-		t.Fatalf("hook missing tmux name")
+	if !strings.Contains(hook, "feedback/pending") {
+		t.Fatalf("hook should mark pending feedback: %s", hook)
+	}
+}
+
+func TestResolveWorktree_UsesPorcelainBranchLine(t *testing.T) {
+	repoRoot, worktreePath, branch := setupGitWorktreeRepo(t, "master", "feature-codero")
+
+	got := resolveWorktree(repoRoot, branch)
+	if got != worktreePath {
+		t.Fatalf("resolveWorktree(%q, %q) = %q, want %q", repoRoot, branch, got, worktreePath)
+	}
+}
+
+func TestResolveWorktree_UsesMainBranchWorktree(t *testing.T) {
+	repoRoot, worktreePath, branch := setupGitWorktreeRepo(t, "master", "main")
+
+	got := resolveWorktree(repoRoot, branch)
+	if got != worktreePath {
+		t.Fatalf("resolveWorktree(%q, %q) = %q, want %q", repoRoot, branch, got, worktreePath)
+	}
+}
+
+func TestResolveWorktree_UsesMasterBranchWorktree(t *testing.T) {
+	repoRoot, worktreePath, branch := setupGitWorktreeRepo(t, "main", "master")
+
+	got := resolveWorktree(repoRoot, branch)
+	if got != worktreePath {
+		t.Fatalf("resolveWorktree(%q, %q) = %q, want %q", repoRoot, branch, got, worktreePath)
+	}
+}
+
+func TestRunAgentLaunch_ExportsResolvedWorktree(t *testing.T) {
+	const (
+		agentID   = "agent-3"
+		sessionID = "99999999-8888-7777-6666-555555555555"
+		branch    = "feature-codero"
+	)
+	startedAt := time.Date(2026, 3, 26, 14, 0, 0, 0, time.UTC)
+	withDeterministicLaunch(t, sessionID, startedAt)
+
+	repoRoot, worktreePath, _ := setupGitWorktreeRepo(t, "master", branch)
+	store, _, cleanup := openTestStore(t)
+	defer cleanup()
+
+	exec := &fastExitExecutor{MockExecutor: tmux.NewMockExecutor()}
+	cfg := &AgentLaunchConfig{
+		AgentID:      agentID,
+		RepoPath:     repoRoot,
+		Branch:       branch,
+		Mode:         "agent",
+		AgentCommand: []string{"echo", "hello"},
+		WriteLog:     false,
+		TmuxExecutor: exec,
+	}
+
+	if err := runAgentLaunch(context.Background(), cfg, store); err != nil {
+		t.Fatalf("runAgentLaunch: %v", err)
+	}
+	if len(exec.Respawned) != 1 {
+		t.Fatalf("respawn window: expected 1 launch, got %d: %+v", len(exec.Respawned), exec.Respawned)
+	}
+
+	launch := exec.Respawned[0].Command
+	want := "CODERO_WORKTREE=" + worktreePath
+	for _, arg := range launch {
+		if arg == want {
+			return
+		}
+	}
+	t.Fatalf("respawn-window env missing resolved worktree: got %+v, want %s", launch, want)
+}
+
+func TestRunAgentLaunch_CleansUpOnRespawnFailure(t *testing.T) {
+	const (
+		agentID   = "agent-4"
+		sessionID = "77777777-6666-5555-4444-333333333333"
+		branch    = "feature-cleanup"
+	)
+	startedAt := time.Date(2026, 3, 26, 15, 0, 0, 0, time.UTC)
+	withDeterministicLaunch(t, sessionID, startedAt)
+
+	repoRoot, _, _ := setupGitWorktreeRepo(t, "master", branch)
+	store, db, cleanup := openTestStore(t)
+	defer cleanup()
+
+	exec := &fastExitExecutor{MockExecutor: tmux.NewMockExecutor()}
+	exec.RespawnErr = errors.New("respawn failed")
+	tmuxName := tmux.SessionName(agentID, sessionID)
+	cfg := &AgentLaunchConfig{
+		AgentID:      agentID,
+		RepoPath:     repoRoot,
+		Branch:       branch,
+		Mode:         "agent",
+		AgentCommand: []string{"echo", "hello"},
+		WriteLog:     false,
+		TmuxExecutor: exec,
+	}
+
+	err := runAgentLaunch(context.Background(), cfg, store)
+	if err == nil {
+		t.Fatal("runAgentLaunch should fail when respawn-window fails")
+	}
+	if len(exec.KilledNames) != 1 || exec.KilledNames[0] != tmuxName {
+		t.Fatalf("tmux cleanup on respawn failure: got %v, want %s", exec.KilledNames, tmuxName)
+	}
+	row, err := state.GetAgentSession(context.Background(), db, sessionID)
+	if err != nil {
+		t.Fatalf("GetAgentSession: %v", err)
+	}
+	if row.EndedAt == nil || row.EndReason != "lost" {
+		t.Fatalf("session should be finalized as lost after respawn failure, got %+v", row)
 	}
 }
 
@@ -240,6 +428,47 @@ func mustRead(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(data)
+}
+
+func setupGitWorktreeRepo(t *testing.T, initBranch, targetBranch string) (repoRoot, worktreePath, resolvedBranch string) {
+	t.Helper()
+
+	repoRoot = filepath.Join(t.TempDir(), "repo")
+	worktreePath = filepath.Join(t.TempDir(), "agent-checkout")
+	resolvedBranch = targetBranch
+
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+
+	mustGit(t, repoRoot, "init")
+	mustGit(t, repoRoot, "config", "user.name", "Codero Test")
+	mustGit(t, repoRoot, "config", "user.email", "codero@example.com")
+	mustGit(t, repoRoot, "symbolic-ref", "HEAD", "refs/heads/"+initBranch)
+
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("root\n"), 0o644); err != nil {
+		t.Fatalf("write repo file: %v", err)
+	}
+	mustGit(t, repoRoot, "add", "README.md")
+	mustGit(t, repoRoot, "commit", "-m", "init")
+	if targetBranch != initBranch {
+		mustGit(t, repoRoot, "branch", targetBranch)
+	}
+	mustGit(t, repoRoot, "worktree", "add", worktreePath, targetBranch)
+
+	return repoRoot, worktreePath, resolvedBranch
+}
+
+func mustGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, string(out))
+	}
+	return string(out)
 }
 
 func writeStub(t *testing.T, dir, name, content string) {

@@ -106,6 +106,7 @@ func ListCoderoSessions(ctx context.Context) ([]string, error) {
 type Executor interface {
 	HasSession(ctx context.Context, name string) bool
 	NewSession(ctx context.Context, name, workdir string) error
+	RespawnWindow(ctx context.Context, name string, command []string) error
 	SendKeys(ctx context.Context, name, command string) error
 	KillSession(ctx context.Context, name string) error
 	CapturePane(ctx context.Context, name string) (string, error)
@@ -120,6 +121,11 @@ func (RealExecutor) HasSession(ctx context.Context, name string) bool {
 }
 func (RealExecutor) NewSession(ctx context.Context, name, workdir string) error {
 	return NewSession(ctx, name, workdir)
+}
+func (RealExecutor) RespawnWindow(ctx context.Context, name string, command []string) error {
+	args := append([]string{"respawn-window", "-k", "-t", name}, command...)
+	cmd := exec.CommandContext(ctx, "tmux", args...)
+	return cmd.Run()
 }
 func (RealExecutor) SendKeys(ctx context.Context, name, command string) error {
 	return SendKeys(ctx, name, command)
@@ -139,9 +145,11 @@ type MockExecutor struct {
 	Sessions      map[string]bool   // name → alive
 	PaneContent   map[string]string // name → captured content
 	CreatedNames  []string
+	Respawned     []SentRespawn
 	KilledNames   []string
 	SentKeys      []SentKey
 	NewSessionErr error
+	RespawnErr    error
 	SendKeysErr   error
 	KillErr       error
 	CaptureErr    error
@@ -151,6 +159,12 @@ type MockExecutor struct {
 type SentKey struct {
 	Name    string
 	Command string
+}
+
+// SentRespawn records a RespawnWindow call.
+type SentRespawn struct {
+	Name    string
+	Command []string
 }
 
 // NewMockExecutor creates a MockExecutor with empty state.
@@ -171,6 +185,14 @@ func (m *MockExecutor) NewSession(_ context.Context, name, _ string) error {
 	}
 	m.Sessions[name] = true
 	m.CreatedNames = append(m.CreatedNames, name)
+	return nil
+}
+
+func (m *MockExecutor) RespawnWindow(_ context.Context, name string, command []string) error {
+	if m.RespawnErr != nil {
+		return m.RespawnErr
+	}
+	m.Respawned = append(m.Respawned, SentRespawn{Name: name, Command: append([]string{}, command...)})
 	return nil
 }
 

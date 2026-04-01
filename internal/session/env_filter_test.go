@@ -20,6 +20,13 @@ func TestFilterEnvFrom_Agent(t *testing.T) {
 		"CODERO_REDIS_PASS=secret123",
 		"GITHUB_TOKEN=ghp_xxxxxxxxxxxx",
 		"GH_TOKEN=ghp_yyyyyyyyyyyy",
+		"CODERO_HEARTBEAT_SECRET=hbsecret",
+		"CODERO_GITHUB_TOKEN=ghp_codero",
+		"CODERO_LITELLM_MASTER_KEY=litellm-secret",
+		"LITELLM_API_KEY=litellm-key",
+		"CODERO_LITELLM_API_KEY=codero-litellm-key",
+		"CODERO_AIDER_GEMINI_API_KEY=gemini-aider-secret",
+		"CODERO_GEMINI_SECOND_PASS_API_KEY=gemini-second-pass-secret",
 		"CODERO_WEBHOOK_SECRET=whsec_zzz",
 		"CODERO_AUTO_MERGE_ENABLED=true",
 		"OPENCLAW_STATE_DIR=<FAKE:openclaw-state>",
@@ -34,6 +41,11 @@ func TestFilterEnvFrom_Agent(t *testing.T) {
 		"CODERO_REDIS_PASS",
 		"GITHUB_TOKEN",
 		"GH_TOKEN",
+		"CODERO_HEARTBEAT_SECRET",
+		"CODERO_GITHUB_TOKEN",
+		"CODERO_LITELLM_MASTER_KEY",
+		"CODERO_AIDER_GEMINI_API_KEY",
+		"CODERO_GEMINI_SECOND_PASS_API_KEY",
 		"CODERO_WEBHOOK_SECRET",
 		"CODERO_AUTO_MERGE_ENABLED",
 	}
@@ -53,6 +65,8 @@ func TestFilterEnvFrom_Agent(t *testing.T) {
 		"CODERO_SESSION_ID",
 		"CODERO_AGENT_ID",
 		"CODERO_DAEMON_ADDR",
+		"LITELLM_API_KEY",
+		"CODERO_LITELLM_API_KEY",
 		"OPENCLAW_STATE_DIR",
 	}
 	for _, a := range allowed {
@@ -75,6 +89,14 @@ func TestFilterEnvFrom_OpenClaw(t *testing.T) {
 		"CODERO_SESSION_ID=sess-456",
 		"CODERO_DB_PATH=<FAKE:db-path>",
 		"CODERO_REDIS_PASS=secret",
+		"CODERO_HEARTBEAT_SECRET=hbsecret",
+		"CODERO_GITHUB_TOKEN=ghp_codero",
+		"LITELLM_API_KEY=litellm-key",
+		"LITELLM_MASTER_KEY=litellm-secret",
+		"CODERO_LITELLM_MASTER_KEY=litellm-secret",
+		"CODERO_LITELLM_API_KEY=codero-litellm-key",
+		"CODERO_AIDER_GEMINI_API_KEY=gemini-aider-secret",
+		"CODERO_GEMINI_SECOND_PASS_API_KEY=gemini-second-pass-secret",
 		"GITHUB_TOKEN=ghp_xxxxx",
 		"OPENCLAW_STATE_DIR=<FAKE:oc-state>",
 		"OPENCLAW_CONFIG_PATH=<FAKE:oc-config>",
@@ -86,6 +108,14 @@ func TestFilterEnvFrom_OpenClaw(t *testing.T) {
 	forbidden := []string{
 		"CODERO_DB_PATH",
 		"CODERO_REDIS_PASS",
+		"CODERO_HEARTBEAT_SECRET",
+		"CODERO_GITHUB_TOKEN",
+		"LITELLM_API_KEY",
+		"LITELLM_MASTER_KEY",
+		"CODERO_LITELLM_MASTER_KEY",
+		"CODERO_LITELLM_API_KEY",
+		"CODERO_AIDER_GEMINI_API_KEY",
+		"CODERO_GEMINI_SECOND_PASS_API_KEY",
 		"GITHUB_TOKEN",
 	}
 	for _, f := range forbidden {
@@ -143,6 +173,8 @@ func TestIsForbiddenForAgent(t *testing.T) {
 		{"GH_TOKEN", true},
 		{"CODERO_WEBHOOK_SECRET", true},
 		{"CODERO_AUTO_MERGE_ENABLED", true},
+		{"LITELLM_API_KEY", false},
+		{"CODERO_LITELLM_API_KEY", false},
 		{"PATH", false},
 		{"HOME", false},
 		{"CODERO_SESSION_ID", false},
@@ -166,6 +198,14 @@ func TestIsForbiddenForOpenClaw(t *testing.T) {
 		{"CODERO_DB_PATH", true},
 		{"CODERO_REDIS_ADDR", true},
 		{"GITHUB_TOKEN", true},
+		{"CODERO_HEARTBEAT_SECRET", true},
+		{"CODERO_GITHUB_TOKEN", true},
+		{"LITELLM_API_KEY", true},
+		{"LITELLM_MASTER_KEY", true},
+		{"CODERO_LITELLM_MASTER_KEY", true},
+		{"CODERO_LITELLM_API_KEY", true},
+		{"CODERO_AIDER_GEMINI_API_KEY", true},
+		{"CODERO_GEMINI_SECOND_PASS_API_KEY", true},
 		{"PATH", false},
 		{"OPENCLAW_STATE_DIR", false},
 		{"CODERO_SESSION_ID", false},
@@ -188,7 +228,6 @@ func TestFilterEnvStrict(t *testing.T) {
 		"TERM=xterm",
 		"CODERO_SESSION_ID=sess-123",
 		"CODERO_AGENT_ID=claude",
-		"RANDOM_VAR=should_be_filtered",
 		"CODERO_DB_PATH=<FAKE:db-path>",
 		"OPENCLAW_STATE_DIR=<FAKE:oc-state>",
 	}
@@ -207,7 +246,7 @@ func TestFilterEnvStrict(t *testing.T) {
 
 	for _, e := range filtered {
 		key := envKey(e)
-		if !slices.Contains(allowedKeys, key) && !strings.HasPrefix(key, "OPENCLAW_") {
+		if !slices.Contains(allowedKeys, key) {
 			t.Errorf("strict filter should not include %s", key)
 		}
 	}

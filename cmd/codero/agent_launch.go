@@ -140,9 +140,10 @@ func runAgentLaunch(ctx context.Context, cfg *AgentLaunchConfig, backend session
 
 	// Step 4: Resolve worktree
 	worktreePath := cfg.RepoPath
-	if cfg.Branch != "" && cfg.Branch != "main" && cfg.Branch != "master" {
+	if cfg.Branch != "" {
 		worktreePath = resolveWorktree(cfg.RepoPath, cfg.Branch)
 	}
+	coderoDir := filepath.Join(worktreePath, ".codero")
 
 	// Step 5: Create tmux session (SL-9)
 	if err := exec.NewSession(ctx, tmuxName, worktreePath); err != nil {
@@ -153,11 +154,11 @@ func runAgentLaunch(ctx context.Context, cfg *AgentLaunchConfig, backend session
 	if _, err := backend.RegisterWithTmux(ctx, sessionID, cfg.AgentID, cfg.Mode, tmuxName); err != nil {
 		// Cleanup tmux on registration failure
 		_ = exec.KillSession(ctx, tmuxName)
+		_ = os.RemoveAll(coderoDir)
 		return fmt.Errorf("step 6: register session: %w", err)
 	}
 
 	// Step 7: Write SESSION.md to worktree
-	coderoDir := filepath.Join(worktreePath, ".codero")
 	_ = os.MkdirAll(coderoDir, 0o755)
 	startedAt := agentLaunchNow().UTC()
 	sessionMD := fmt.Sprintf(`# Codero Session
@@ -179,35 +180,47 @@ Use 'codero submit' to deliver your work.
 	// Step 9: Configure notification hook
 	hooksDir := filepath.Join(coderoDir, "hooks")
 	_ = os.MkdirAll(hooksDir, 0o755)
-	hookScript := fmt.Sprintf(`#!/bin/bash
+	hookScript := `#!/bin/bash
 WORKTREE="$1"
 TYPE="$2"
-TMUX_NAME="%s"
-tmux display-message -t "$TMUX_NAME" "Codero: $TYPE update available" 2>/dev/null || true
+TMUX_NAME="${4:-}"
+if [ -n "$TMUX_NAME" ]; then
+  tmux display-message -t "$TMUX_NAME" "Codero: $TYPE update available" 2>/dev/null || true
+fi
 touch "$WORKTREE/.codero/feedback/pending" 2>/dev/null || true
-`, tmuxName)
+`
 	_ = os.WriteFile(filepath.Join(hooksDir, "on-feedback"), []byte(hookScript), 0o755)
 
-	// Step 10: Launch agent inside tmux with session env vars
-	// BND-002: Only export agent-safe vars. The tmux session starts with a clean
-	// shell that does not inherit parent env, so control-plane secrets (DB, Redis,
-	// GitHub) are not exposed to the agent process.
-	envExport := fmt.Sprintf("export CODERO_SESSION_ID='%s' CODERO_AGENT_ID='%s'",
-		shellEscape(sessionID), shellEscape(cfg.AgentID))
-	if cfg.DaemonAddr != "" {
-		envExport += fmt.Sprintf(" CODERO_DAEMON_ADDR='%s'", shellEscape(cfg.DaemonAddr))
+	// Step 10: Launch agent inside the detached tmux session.
+	// Use env -i to clear inherited env, then pass argv directly to tmux so the
+	// command is not reparsed by a shell.
+	agentArgs := cfg.AgentCommand
+	if len(agentArgs) == 0 {
+		agentArgs = []string{"bash"}
 	}
-
-	agentCmd := strings.Join(cfg.AgentCommand, " ")
-	if agentCmd == "" {
-		agentCmd = "bash" // default shell if no command given
-	}
-	// Combine export and command in one send to avoid tmux keystroke racing.
-	// Use exec to replace the outer shell so there's no nested shell left behind.
-	fullCmd := envExport + " && exec " + agentCmd
-	if err := exec.SendKeys(ctx, tmuxName, fullCmd); err != nil {
-		// Non-fatal; the session is alive, agent command just failed to send
-		fmt.Fprintf(os.Stderr, "warning: failed to send agent command: %v\n", err)
+	agentEnv := session.BuildAgentEnv(
+		sessionID,
+		cfg.AgentID,
+		cfg.DaemonAddr,
+		worktreePath,
+		cfg.Mode,
+		filepath.Join(coderoDir, "SESSION.md"),
+		tmuxName,
+		startedAt.Format(time.RFC3339),
+		cfg.WriteLog,
+	)
+	respawnArgs := append([]string{"env", "-i"}, agentEnv...)
+	respawnArgs = append(respawnArgs, agentArgs...)
+	if err := exec.RespawnWindow(ctx, tmuxName+":0", respawnArgs); err != nil {
+		_ = backend.Finalize(ctx, sessionID, cfg.AgentID, session.Completion{
+			Status:     "lost",
+			Substatus:  "terminal_lost",
+			Summary:    fmt.Sprintf("tmux respawn failed: %v", err),
+			FinishedAt: agentLaunchNow().UTC(),
+		})
+		_ = exec.KillSession(ctx, tmuxName)
+		_ = os.RemoveAll(coderoDir)
+		return fmt.Errorf("step 10: launch agent in tmux: %w", err)
 	}
 
 	// Step 11: Wait for agent exit (monitor tmux session)
@@ -263,24 +276,52 @@ func waitForTmuxExit(ctx context.Context, exec tmux.Executor, name string) int {
 
 // resolveWorktree returns the worktree path for a branch, or falls back to repoPath.
 func resolveWorktree(repoPath, branch string) string {
+	if repoPath == "" || branch == "" {
+		return repoPath
+	}
+
 	// Check for existing worktree
 	cmd := exec.Command("git", "-C", repoPath, "worktree", "list", "--porcelain")
 	out, err := cmd.Output()
 	if err != nil {
 		return repoPath
 	}
-	for _, line := range strings.Split(string(out), "\n") {
-		if strings.HasPrefix(line, "worktree ") {
-			wtPath := strings.TrimPrefix(line, "worktree ")
-			if strings.Contains(wtPath, branch) {
-				return wtPath
+
+	entries := strings.Split(strings.TrimSpace(string(out)), "\n\n")
+	for _, entry := range entries {
+		var wtPath string
+		var branchRef string
+		for _, line := range strings.Split(entry, "\n") {
+			switch {
+			case strings.HasPrefix(line, "worktree "):
+				wtPath = strings.TrimPrefix(line, "worktree ")
+			case strings.HasPrefix(line, "branch "):
+				branchRef = strings.TrimPrefix(line, "branch ")
 			}
+		}
+		if wtPath != "" && worktreeBranchMatches(branchRef, branch) {
+			return wtPath
 		}
 	}
 	return repoPath
 }
 
-// shellEscape escapes a string for safe use inside single-quoted shell values.
-func shellEscape(s string) string {
-	return strings.ReplaceAll(s, "'", `'\''`)
+// resolveWorktreeForRun returns the worktree path to export for agent execution.
+// It matches the launch-time worktree resolution, but falls back to the current
+// process working directory for non-tmux launch paths that do not have a repoPath.
+func resolveWorktreeForRun(repoPath, branch string) string {
+	if repoPath != "" {
+		return resolveWorktree(repoPath, branch)
+	}
+	if cwd, err := os.Getwd(); err == nil && cwd != "" {
+		return cwd
+	}
+	return repoPath
+}
+
+func worktreeBranchMatches(branchRef, branch string) bool {
+	if branchRef == "" {
+		return false
+	}
+	return strings.TrimPrefix(branchRef, "refs/heads/") == branch
 }

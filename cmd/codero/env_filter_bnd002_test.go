@@ -38,6 +38,8 @@ func TestBND002_EnvFiltering_AgentDoesNotReceiveForbiddenVars(t *testing.T) {
 		"CODERO_AGENT_ID=claude",
 		"CODERO_DAEMON_ADDR=127.0.0.1:8110",
 		"CODERO_WORKTREE=<FAKE:worktree>",
+		"LITELLM_API_KEY=litellm-key",
+		"CODERO_LITELLM_API_KEY=codero-litellm-key",
 		"OPENCLAW_STATE_DIR=<FAKE:openclaw-state>",
 	}
 
@@ -69,6 +71,8 @@ func TestBND002_EnvFiltering_AgentDoesNotReceiveForbiddenVars(t *testing.T) {
 		"CODERO_AGENT_ID",
 		"CODERO_DAEMON_ADDR",
 		"CODERO_WORKTREE",
+		"LITELLM_API_KEY",
+		"CODERO_LITELLM_API_KEY",
 		"OPENCLAW_STATE_DIR",
 	}
 	for _, a := range allowed {
@@ -91,6 +95,8 @@ func TestBND002_EnvFiltering_OpenClawDoesNotReceiveForbiddenVars(t *testing.T) {
 		"CODERO_REDIS_PASS=secret",
 		"GITHUB_TOKEN=ghp_xxxxx",
 		"GH_TOKEN=ghp_yyyyy",
+		"LITELLM_API_KEY=litellm-key",
+		"CODERO_LITELLM_API_KEY=codero-litellm-key",
 		// Vars that SHOULD reach OpenClaw
 		"OPENCLAW_STATE_DIR=<FAKE:oc-state>",
 		"OPENCLAW_CONFIG_PATH=<FAKE:oc-config>",
@@ -204,6 +210,8 @@ func TestBND002_ForbiddenLists_Completeness(t *testing.T) {
 		"CODERO_REDIS_PASS",
 		"GITHUB_TOKEN",
 		"GH_TOKEN",
+		"LITELLM_API_KEY",
+		"CODERO_LITELLM_API_KEY",
 	}
 
 	for _, v := range mustBeForbiddenForOpenClaw {
@@ -249,5 +257,23 @@ func TestBND002_Precedence_ExplicitOverImplicit(t *testing.T) {
 	// Both should be present; exec.Cmd uses the last one
 	if count < 1 {
 		t.Error("Expected at least one CODERO_SESSION_ID entry")
+	}
+}
+
+// TestBND002_FallbackEnv_PreservesResolvedAgentID verifies that degraded agent
+// execution re-applies the resolved agent identity after filtering.
+func TestBND002_FallbackEnv_PreservesResolvedAgentID(t *testing.T) {
+	t.Setenv("CODERO_AGENT_ID", "stale-agent")
+
+	env := buildFallbackEnv("resolved-agent")
+	found := false
+	for _, e := range env {
+		if e == "CODERO_AGENT_ID=resolved-agent" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("fallback env should preserve resolved agent id, got: %v", env)
 	}
 }
