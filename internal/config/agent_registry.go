@@ -242,7 +242,7 @@ func loadUserConfigWithRegistry(maxAge time.Duration, forceRefresh bool) (*UserC
 
 	uc, err := LoadUserConfig()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("load user config with registry: %w", err)
 	}
 
 	now := time.Now().UTC()
@@ -253,7 +253,7 @@ func loadUserConfigWithRegistry(maxAge time.Duration, forceRefresh bool) (*UserC
 	agents, refreshErr := uc.RefreshAgentRegistry(now)
 	if refreshErr != nil {
 		cached := uc.RegisteredAgents()
-		if len(cached) > 0 {
+		if !uc.Registry.LastScan.IsZero() {
 			return uc, cached, nil
 		}
 		return nil, nil, refreshErr

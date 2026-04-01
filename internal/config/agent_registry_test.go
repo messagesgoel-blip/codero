@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -245,6 +246,55 @@ func TestRegistryStale_EmptyRegistryAfterScanIsFresh(t *testing.T) {
 
 	if uc.RegistryStale(now.Add(time.Hour), 24*time.Hour) {
 		t.Fatal("RegistryStale should treat a recent empty registry as fresh")
+	}
+}
+
+func TestLoadUserConfigWithRegistry_WrapsLoadErrors(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "blocked")
+	if err := os.WriteFile(blocker, []byte("not-a-directory"), 0o644); err != nil {
+		t.Fatalf("write blocker: %v", err)
+	}
+	t.Setenv("CODERO_USER_CONFIG_DIR", blocker)
+
+	_, _, err := LoadUserConfigWithRegistry(24 * time.Hour)
+	if err == nil {
+		t.Fatal("LoadUserConfigWithRegistry should fail when the config dir cannot be created")
+	}
+	if !strings.Contains(err.Error(), "load user config with registry:") {
+		t.Fatalf("error=%q, want wrapped registry context", err)
+	}
+}
+
+func TestLoadUserConfigWithFreshRegistry_FallsBackToPriorEmptyScan(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CODERO_USER_CONFIG_DIR", dir)
+
+	uc := &UserConfig{
+		Version: 1,
+		Registry: AgentRegistry{
+			LastScan: time.Now().UTC(),
+			Agents:   map[string]RegisteredAgent{},
+		},
+	}
+	if err := uc.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "bin"), []byte("not-a-directory"), 0o644); err != nil {
+		t.Fatalf("write bin blocker: %v", err)
+	}
+
+	gotUC, agents, err := LoadUserConfigWithFreshRegistry()
+	if err != nil {
+		t.Fatalf("LoadUserConfigWithFreshRegistry: %v", err)
+	}
+	if gotUC == nil {
+		t.Fatal("gotUC=nil, want cached config")
+	}
+	if gotUC.Registry.LastScan.IsZero() {
+		t.Fatal("Registry.LastScan unexpectedly cleared")
+	}
+	if len(agents) != 0 {
+		t.Fatalf("len(agents)=%d, want 0", len(agents))
 	}
 }
 
