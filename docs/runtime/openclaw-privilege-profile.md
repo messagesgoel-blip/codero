@@ -47,6 +47,8 @@ This role is defined by the canonical spec at
 
 ## Authority Boundaries
 
+**Authoritative reference:** `docs/contracts/actor-boundaries.md`
+
 The canonical message path is:
 
 ```
@@ -61,6 +63,9 @@ GitHub directly for state-changing operations.
 | OpenClaw -> Codero | session register, heartbeat, submit, observe, report | become source of truth, decide merge readiness, write to GitHub |
 | Codero -> OpenClaw | findings, session state, submit outcomes, merge outcomes | send adapter-specific free-form text as the contract |
 | OpenClaw -> Agent | task instructions, gate findings, review findings, operator messages | infer durable truth from PTY text alone |
+
+For the full hop permission matrix and actor ownership model, see
+`docs/contracts/actor-boundaries.md`.
 
 ## Allowed
 
