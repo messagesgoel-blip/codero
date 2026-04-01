@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// writeConfig writes a temporary codero.yaml test fixture and returns its path.
 func writeConfig(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "codero.yaml")
@@ -17,6 +18,7 @@ func writeConfig(t *testing.T, content string) string {
 	return path
 }
 
+// clearLoadOverrideEnv removes every env override that Load and its helpers read.
 func clearLoadOverrideEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
