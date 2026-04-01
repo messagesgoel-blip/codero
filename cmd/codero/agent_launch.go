@@ -282,6 +282,7 @@ func resolveWorktree(repoPath, branch string) string {
 
 	// Check for existing worktree
 	cmd := exec.Command("git", "-C", repoPath, "worktree", "list", "--porcelain")
+	cmd.Env = cleanGitLaunchEnv()
 	out, err := cmd.Output()
 	if err != nil {
 		return repoPath
@@ -304,6 +305,22 @@ func resolveWorktree(repoPath, branch string) string {
 		}
 	}
 	return repoPath
+}
+
+func cleanGitLaunchEnv() []string {
+	env := os.Environ()
+	cleaned := make([]string, 0, len(env))
+	for _, kv := range env {
+		key := kv
+		if i := strings.Index(kv, "="); i >= 0 {
+			key = kv[:i]
+		}
+		if strings.HasPrefix(key, "GIT_") {
+			continue
+		}
+		cleaned = append(cleaned, kv)
+	}
+	return cleaned
 }
 
 // resolveWorktreeForRun returns the worktree path to export for agent execution.
