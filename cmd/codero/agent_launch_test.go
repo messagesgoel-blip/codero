@@ -464,11 +464,28 @@ func mustGit(t *testing.T, dir string, args ...string) string {
 
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
+	cmd.Env = cleanGitTestEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, string(out))
 	}
 	return string(out)
+}
+
+func cleanGitTestEnv() []string {
+	env := os.Environ()
+	cleaned := make([]string, 0, len(env))
+	for _, kv := range env {
+		key := kv
+		if i := strings.Index(kv, "="); i >= 0 {
+			key = kv[:i]
+		}
+		if strings.HasPrefix(key, "GIT_") {
+			continue
+		}
+		cleaned = append(cleaned, kv)
+	}
+	return cleaned
 }
 
 func writeStub(t *testing.T, dir, name, content string) {
