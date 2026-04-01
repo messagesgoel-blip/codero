@@ -2,10 +2,11 @@
 # validate-openclaw-plugins.sh — Codero-local OpenClaw plugin validation
 # Part of TOOL-003 (shadow mode, read-only)
 #
+# KEEP_LOCAL: required for shipped runtime — validates the Codero-local OpenClaw plugin baseline used by the shipped adapter path
 # This script validates that the OpenClaw plugin config matches the approved
 # allowlist for Codero. It does NOT modify any state or configuration.
 
-set -uo pipefail
+set -euo pipefail
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

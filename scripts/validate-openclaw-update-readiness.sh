@@ -2,11 +2,12 @@
 # validate-openclaw-update-readiness.sh — Codero-local update readiness validation
 # Part of TOOL-004 (shadow mode, read-only)
 #
+# KEEP_LOCAL: required for shipped runtime — validates update readiness for the Codero-local OpenClaw baseline shipped with this repo
 # This script validates that the OpenClaw baseline is ready for controlled updates.
 # It checks version metadata, validates no auto-update is enabled, and runs all
 # baseline validators. It does NOT modify any state or configuration.
 
-set -uo pipefail
+set -euo pipefail
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -129,14 +130,11 @@ check_pty_bridge() {
 }
 
 check_validators_exist() {
-    local all_exist=true
-    
     for validator in validate-tooling-baseline.sh validate-openclaw-privileges.sh validate-openclaw-plugins.sh; do
         if [ -x "$SCRIPT_DIR/$validator" ]; then
             log_pass "Validator exists: $validator"
         else
             log_warn "Validator missing: $validator"
-            all_exist=false
         fi
     done
 }

@@ -2,10 +2,11 @@
 # validate-openclaw-privileges.sh — Codero-local OpenClaw privilege validation
 # Part of TOOL-002 (shadow mode, read-only)
 #
+# KEEP_LOCAL: required for shipped runtime — validates the Codero-local OpenClaw privilege baseline used by the shipped adapter path
 # This script validates that the OpenClaw config matches the intended privilege
 # profile for Codero. It does NOT modify any state or configuration.
 
-set -uo pipefail
+set -euo pipefail
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -56,6 +57,8 @@ check_config_exists() {
 }
 
 check_gateway_loopback() {
+    # Shadow-mode heuristic: grep keeps this validator read-only and dependency-light.
+    # If this moves from documentation validation to enforcement, replace with jq parsing.
     if grep -q '"bind": "loopback"' "$OPENCLAW_CONFIG" 2>/dev/null; then
         log_pass "Gateway bind is loopback-only"
     else
@@ -64,6 +67,8 @@ check_gateway_loopback() {
 }
 
 check_gateway_auth() {
+    # Shadow-mode heuristic: grep is acceptable for the current config shape only.
+    # Harden this with jq before using the result as an enforcement signal.
     if grep -q '"mode": "token"' "$OPENCLAW_CONFIG" 2>/dev/null; then
         log_pass "Gateway auth is token-based"
     else

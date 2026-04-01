@@ -2,10 +2,11 @@
 # validate-tooling-baseline.sh — Codero-local baseline validation
 # Part of TOOL-001 (shadow mode, read-only)
 #
+# KEEP_LOCAL: required for shipped runtime — validates the Codero-local shared tooling baseline used by the shipped adapter path
 # This script validates that all shared tooling paths Codero depends on exist.
 # It does NOT modify any state or shared tooling.
 
-set -uo pipefail
+set -euo pipefail
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -82,19 +83,19 @@ echo "========================================="
 echo
 
 echo "--- Shared Env Bootstrap ---"
-check_exists "$SHARED_ENV_BOOTSTRAP" "agent-env.sh" yes
+check_exists "$SHARED_ENV_BOOTSTRAP" "agent-env.sh" yes || true
 echo
 
 echo "--- Shared Tool Directories ---"
-check_exists "$SHARED_TOOL_BIN" "shared tools bin" yes
-check_exists "$SHARED_TOOL_VENVS" "shared venvs" yes
-check_exists "$SHARED_TOOLKIT_BIN" "agent-toolkit bin" yes
+check_exists "$SHARED_TOOL_BIN" "shared tools bin" yes || true
+check_exists "$SHARED_TOOL_VENVS" "shared venvs" yes || true
+check_exists "$SHARED_TOOLKIT_BIN" "agent-toolkit bin" yes || true
 echo
 
 echo "--- Mandatory Shared Binaries ---"
-check_executable "$SHARED_TOOL_BIN/agent-tmux-bridge" "PTY bridge"
-check_executable "$SHARED_TOOLKIT_BIN/gate-heartbeat" "gate-heartbeat"
-check_executable "$SHARED_TOOLKIT_BIN/codero-finish.sh" "codero-finish.sh"
+check_executable "$SHARED_TOOL_BIN/agent-tmux-bridge" "PTY bridge" || true
+check_executable "$SHARED_TOOLKIT_BIN/gate-heartbeat" "gate-heartbeat" || true
+check_executable "$SHARED_TOOLKIT_BIN/codero-finish.sh" "codero-finish.sh" || true
 echo
 
 echo "--- Optional Shared Binaries ---"
@@ -103,25 +104,25 @@ check_executable "$SHARED_TOOLKIT_BIN/ci-watch.sh" "ci-watch.sh" || true
 echo
 
 echo "--- Shared Caches ---"
-check_exists "$SHARED_GO_MOD_CACHE" "Go module cache" yes
-check_exists "$SHARED_PIP_CACHE" "pip cache" no
-check_exists "$SHARED_NPM_CACHE" "npm cache" no
-check_exists "$SHARED_SEMGREP_CACHE" "semgrep cache" no
+check_exists "$SHARED_GO_MOD_CACHE" "Go module cache" yes || true
+check_exists "$SHARED_PIP_CACHE" "pip cache" no || true
+check_exists "$SHARED_NPM_CACHE" "npm cache" no || true
+check_exists "$SHARED_SEMGREP_CACHE" "semgrep cache" no || true
 echo
 
 echo "--- Shared Browsers ---"
-check_exists "$SHARED_PLAYWRIGHT_ROOT" "Playwright browsers" no
+check_exists "$SHARED_PLAYWRIGHT_ROOT" "Playwright browsers" no || true
 echo
 
 echo "--- Shared Memory ---"
-check_exists "$SHARED_MEMORY_ROOT/MEMORY.md" "shared memory" yes
-check_exists "$SHARED_MEMORY_ROOT/OPENCLAW-PTY-NOTES.md" "OpenClaw PTY notes" yes
+check_exists "$SHARED_MEMORY_ROOT/MEMORY.md" "shared memory" yes || true
+check_exists "$SHARED_MEMORY_ROOT/OPENCLAW-PTY-NOTES.md" "OpenClaw PTY notes" yes || true
 echo
 
 echo "--- Shared Venvs ---"
-check_exists "$SHARED_TOOL_VENVS/aider" "aider venv" no
-check_exists "$SHARED_TOOL_VENVS/pr-agent" "pr-agent venv" no
-check_exists "$SHARED_TOOL_VENVS/tooling" "tooling venv" no
+check_exists "$SHARED_TOOL_VENVS/aider" "aider venv" no || true
+check_exists "$SHARED_TOOL_VENVS/pr-agent" "pr-agent venv" no || true
+check_exists "$SHARED_TOOL_VENVS/tooling" "tooling venv" no || true
 echo
 
 echo "========================================="
