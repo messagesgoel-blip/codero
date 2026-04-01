@@ -148,6 +148,9 @@ func TestAgentLaunch_ParityWithShellWrapper(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash unavailable")
 	}
+	if _, err := os.Stat("/srv/storage/shared/agent-toolkit/bin/codero-agent"); err != nil {
+		t.Skip("shared codero-agent wrapper unavailable")
+	}
 
 	const (
 		agentID   = "agent-2"
