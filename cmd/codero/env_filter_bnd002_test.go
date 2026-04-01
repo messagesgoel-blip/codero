@@ -7,6 +7,34 @@ import (
 	"github.com/codero/codero/internal/session"
 )
 
+var bnd002ForbiddenForAgentContract = []string{
+	"CODERO_DB_PATH",
+	"CODERO_REDIS_ADDR",
+	"CODERO_REDIS_PASS",
+	"CODERO_REDIS_MAX_RETRIES",
+	"CODERO_REDIS_RETRY_INTERVAL",
+	"CODERO_REDIS_HEALTH_INTERVAL",
+	"CODERO_API_ADDR",
+	"CODERO_API_READ_TIMEOUT",
+	"CODERO_WEBHOOK_SECRET",
+	"CODERO_WEBHOOK_ENABLED",
+	"GITHUB_TOKEN",
+	"GH_TOKEN",
+	"CODERO_AUTO_MERGE_ENABLED",
+	"CODERO_AUTO_MERGE_METHOD",
+	"CODERO_MERGE_METHOD",
+	"CODERO_PR_AUTO_CREATE",
+	"CODERO_CODERABBIT_AUTO_REVIEW",
+	"CODERO_HEARTBEAT_SECRET",
+	"CODERO_GITHUB_TOKEN",
+	"CODERO_LITELLM_MASTER_KEY",
+	"CODERO_LOG_PATH",
+	"CODERO_REPOS",
+	"CODERO_OBSERVABILITY_HOST",
+	"CODERO_DASHBOARD_URL",
+	"CODERO_CONFIG_PATH",
+}
+
 // TestBND002_EnvFiltering_AgentDoesNotReceiveForbiddenVars verifies that
 // agent processes do not receive Codero control-plane secrets.
 // This is a BND-002 certification test.
@@ -25,13 +53,24 @@ func TestBND002_EnvFiltering_AgentDoesNotReceiveForbiddenVars(t *testing.T) {
 		"CODERO_REDIS_RETRY_INTERVAL=1s",
 		"CODERO_REDIS_HEALTH_INTERVAL=30s",
 		"CODERO_API_ADDR=127.0.0.1:8110",
+		"CODERO_API_READ_TIMEOUT=5s",
 		"CODERO_WEBHOOK_SECRET=whsec_xxx",
+		"CODERO_WEBHOOK_ENABLED=true",
 		"GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx",
 		"GH_TOKEN=ghp_yyyyyyyyyyyyyyyyyyyy",
 		"CODERO_AUTO_MERGE_ENABLED=true",
+		"CODERO_AUTO_MERGE_METHOD=squash",
 		"CODERO_MERGE_METHOD=squash",
 		"CODERO_PR_AUTO_CREATE=true",
 		"CODERO_CODERABBIT_AUTO_REVIEW=true",
+		"CODERO_HEARTBEAT_SECRET=hb_xxx",
+		"CODERO_GITHUB_TOKEN=ghs_internal",
+		"CODERO_LITELLM_MASTER_KEY=master-secret",
+		"CODERO_LOG_PATH=<FAKE:log-path>",
+		"CODERO_REPOS=repo-a,repo-b",
+		"CODERO_OBSERVABILITY_HOST=127.0.0.1",
+		"CODERO_DASHBOARD_URL=http://127.0.0.1:3000",
+		"CODERO_CONFIG_PATH=<FAKE:config-path>",
 		// Vars that SHOULD reach agent
 		"CODERO_SESSION_ID=sess-12345",
 		"CODERO_AGENT_ID=claude",
@@ -53,8 +92,7 @@ func TestBND002_EnvFiltering_AgentDoesNotReceiveForbiddenVars(t *testing.T) {
 	}
 
 	// Assert forbidden vars are absent
-	forbidden := session.ForbiddenForAgent()
-	for _, f := range forbidden {
+	for _, f := range bnd002ForbiddenForAgentContract {
 		if _, exists := filteredMap[f]; exists {
 			t.Errorf("BND-002 VIOLATION: agent env contains forbidden var %s", f)
 		}
@@ -187,16 +225,7 @@ func TestBND002_EnvFiltering_RealEnvironment(t *testing.T) {
 // TestBND002_ForbiddenLists_Completeness ensures all required sensitive vars are in the forbidden lists.
 func TestBND002_ForbiddenLists_Completeness(t *testing.T) {
 	// These must all be forbidden for agent
-	mustBeForbiddenForAgent := []string{
-		"CODERO_DB_PATH",
-		"CODERO_REDIS_ADDR",
-		"CODERO_REDIS_PASS",
-		"GITHUB_TOKEN",
-		"GH_TOKEN",
-		"CODERO_WEBHOOK_SECRET",
-	}
-
-	for _, v := range mustBeForbiddenForAgent {
+	for _, v := range bnd002ForbiddenForAgentContract {
 		if !session.IsForbiddenForAgent(v) {
 			t.Errorf("BND-002: %s must be forbidden for agent but is not", v)
 		}
@@ -247,15 +276,20 @@ func TestBND002_Precedence_ExplicitOverImplicit(t *testing.T) {
 	// The last occurrence should win (Go exec uses last occurrence)
 	// Verify there are now two CODERO_SESSION_ID entries
 	count := 0
+	lastSessionID := ""
 	for _, e := range filtered {
 		if strings.HasPrefix(e, "CODERO_SESSION_ID=") {
 			count++
+			lastSessionID = strings.TrimPrefix(e, "CODERO_SESSION_ID=")
 		}
 	}
 
 	// Both should be present; exec.Cmd uses the last one.
 	if count != 2 {
 		t.Errorf("expected 2 CODERO_SESSION_ID entries, got %d", count)
+	}
+	if lastSessionID != newSessionID {
+		t.Fatalf("expected explicit CODERO_SESSION_ID to win, got %q", lastSessionID)
 	}
 }
 
@@ -265,14 +299,13 @@ func TestBND002_FallbackEnv_PreservesResolvedAgentID(t *testing.T) {
 	t.Setenv("CODERO_AGENT_ID", "stale-agent")
 
 	env := buildFallbackEnv("resolved-agent")
-	found := false
+	lastAgentID := ""
 	for _, e := range env {
-		if e == "CODERO_AGENT_ID=resolved-agent" {
-			found = true
-			break
+		if strings.HasPrefix(e, "CODERO_AGENT_ID=") {
+			lastAgentID = strings.TrimPrefix(e, "CODERO_AGENT_ID=")
 		}
 	}
-	if !found {
+	if lastAgentID != "resolved-agent" {
 		t.Fatalf("fallback env should preserve resolved agent id, got: %v", env)
 	}
 }
