@@ -308,9 +308,18 @@ func heartbeatLoop(ctx context.Context, client *daemongrpc.SessionClient, sessio
 // When stdout is a real TTY (e.g. inside tmux), the child is started inside a PTY so that
 // isatty() checks in the child return true and TUI agents render correctly.
 // Activity is tracked by reading the PTY master output stream.
+//
+// BND-002: Environment is filtered to prevent secret leakage. Agent processes
+// do not receive CODERO_DB_*, CODERO_REDIS_*, GITHUB_TOKEN, or other Codero
+// control-plane credentials.
 func runChild(binaryPath string, args []string, sessionID, agentID, daemonAddr string, tracker *activityTracker, tailFile *os.File) int {
 	child := exec.Command(binaryPath, args...) // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-	env := os.Environ()
+
+	// BND-002: Filter env to prevent control-plane secrets from leaking to agent.
+	// Use denylist filter (allows most env, blocks sensitive Codero/GitHub vars).
+	env := session.FilterEnv(session.LayerAgent)
+
+	// Add user-configured wrapper env vars if present
 	if uc, err := config.LoadUserConfig(); err == nil && uc != nil {
 		if w, ok := uc.Wrappers[agentID]; ok && w.EnvVars != nil {
 			for k, v := range w.EnvVars {

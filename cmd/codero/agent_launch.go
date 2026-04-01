@@ -189,6 +189,9 @@ touch "$WORKTREE/.codero/feedback/pending" 2>/dev/null || true
 	_ = os.WriteFile(filepath.Join(hooksDir, "on-feedback"), []byte(hookScript), 0o755)
 
 	// Step 10: Launch agent inside tmux with session env vars
+	// BND-002: Only export agent-safe vars. The tmux session starts with a clean
+	// shell that does not inherit parent env, so control-plane secrets (DB, Redis,
+	// GitHub) are not exposed to the agent process.
 	envExport := fmt.Sprintf("export CODERO_SESSION_ID='%s' CODERO_AGENT_ID='%s'",
 		shellEscape(sessionID), shellEscape(cfg.AgentID))
 	if cfg.DaemonAddr != "" {
