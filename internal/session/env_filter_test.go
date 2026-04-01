@@ -289,6 +289,43 @@ func TestFilterEnvStrict_EdgeCases(t *testing.T) {
 	}
 }
 
+func TestBuildAgentEnv_RemovesStaleManagedSessionValues(t *testing.T) {
+	t.Setenv("CODERO_SESSION_ID", "stale-session")
+	t.Setenv("CODERO_AGENT_ID", "stale-agent")
+	t.Setenv("CODERO_DAEMON_ADDR", "stale-daemon")
+	t.Setenv("CODERO_WORKTREE", "<FAKE:stale-worktree>")
+	t.Setenv("CODERO_SESSION_MODE", "stale-mode")
+	t.Setenv("CODERO_RUNTIME_SESSION_MD", "<FAKE:stale-session-md>")
+	t.Setenv("CODERO_TMUX_NAME", "stale-tmux")
+	t.Setenv("CODERO_STARTED_AT", "stale-started-at")
+	t.Setenv("CODERO_AGENT_WRITE_SESSION_LOG", "true")
+
+	env := BuildAgentEnv("fresh-session", "fresh-agent", "", "", "", "", "", "", false)
+
+	for _, forbidden := range []string{
+		"CODERO_DAEMON_ADDR=stale-daemon",
+		"CODERO_WORKTREE=<FAKE:stale-worktree>",
+		"CODERO_SESSION_MODE=stale-mode",
+		"CODERO_RUNTIME_SESSION_MD=<FAKE:stale-session-md>",
+		"CODERO_TMUX_NAME=stale-tmux",
+		"CODERO_STARTED_AT=stale-started-at",
+		"CODERO_AGENT_WRITE_SESSION_LOG=true",
+	} {
+		if slices.Contains(env, forbidden) {
+			t.Fatalf("env unexpectedly preserved stale entry %q", forbidden)
+		}
+	}
+	if !slices.Contains(env, "CODERO_SESSION_ID=fresh-session") {
+		t.Fatal("env missing fresh session id")
+	}
+	if !slices.Contains(env, "CODERO_AGENT_ID=fresh-agent") {
+		t.Fatal("env missing fresh agent id")
+	}
+	if !slices.Contains(env, "CODERO_AGENT_WRITE_SESSION_LOG=false") {
+		t.Fatal("env missing fresh log flag")
+	}
+}
+
 func TestForbiddenLists(t *testing.T) {
 	// Ensure lists are non-empty and don't modify originals
 	agentList := ForbiddenForAgent()

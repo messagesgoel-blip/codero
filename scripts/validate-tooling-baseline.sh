@@ -59,18 +59,29 @@ check_exists() {
 check_executable() {
     local path="$1"
     local desc="$2"
+    local mandatory="${3:-yes}"
 
     if [ -x "$path" ]; then
         echo -e "${GREEN}PASS${NC}: $desc is executable ($path)"
         ((PASS++))
         return 0
     elif [ -e "$path" ]; then
-        echo -e "${RED}FAIL${NC}: $desc exists but not executable ($path)"
-        ((FAIL++))
+        if [ "$mandatory" = "yes" ]; then
+            echo -e "${RED}FAIL${NC}: $desc exists but not executable ($path)"
+            ((FAIL++))
+        else
+            echo -e "${YELLOW}WARN${NC}: $desc exists but not executable ($path) [optional]"
+            ((WARN++))
+        fi
         return 1
     else
-        echo -e "${RED}FAIL${NC}: $desc does not exist ($path)"
-        ((FAIL++))
+        if [ "$mandatory" = "yes" ]; then
+            echo -e "${RED}FAIL${NC}: $desc does not exist ($path)"
+            ((FAIL++))
+        else
+            echo -e "${YELLOW}WARN${NC}: $desc does not exist ($path) [optional, missing]"
+            ((WARN++))
+        fi
         return 1
     fi
 }
@@ -99,8 +110,8 @@ check_executable "$SHARED_TOOLKIT_BIN/codero-finish.sh" "codero-finish.sh" || tr
 echo
 
 echo "--- Optional Shared Binaries ---"
-check_executable "$SHARED_TOOLKIT_BIN/install-hooks" "install-hooks" || true
-check_executable "$SHARED_TOOLKIT_BIN/ci-watch.sh" "ci-watch.sh" || true
+check_executable "$SHARED_TOOLKIT_BIN/install-hooks" "install-hooks" no || true
+check_executable "$SHARED_TOOLKIT_BIN/ci-watch.sh" "ci-watch.sh" no || true
 echo
 
 echo "--- Shared Caches ---"

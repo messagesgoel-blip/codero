@@ -17,6 +17,9 @@ func SyncAgentRegistry(ctx context.Context, interval time.Duration) {
 	}
 
 	refresh := func() {
+		config.ConfigMu.Lock()
+		defer config.ConfigMu.Unlock()
+
 		uc, err := config.LoadUserConfig()
 		if err != nil {
 			loglib.Warn("codero: agent registry load failed",

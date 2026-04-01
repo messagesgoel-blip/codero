@@ -53,8 +53,6 @@ The canonical message path is:
 
 ```text
 agent -> openclaw -> codero -> github -> codero -> openclaw -> agent
-```text
-agent -> openclaw -> codero -> github -> codero -> openclaw -> agent
 ```
 
 All validation checks are read-only. They do not modify any state.

@@ -103,6 +103,9 @@ func (c *SessionClient) RegisterWithContext(ctx context.Context, agentID, mode s
 // RegisterWithSession creates a session with a client-provided session ID
 // but no tmux name, returning the heartbeat secret.
 func (c *SessionClient) RegisterWithSession(ctx context.Context, sessionID, agentID, mode string) (string, error) {
+	if sessionID == "" {
+		return "", fmt.Errorf("register session: sessionID is required")
+	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 

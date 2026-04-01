@@ -206,6 +206,8 @@ func TestLoadUserConfigWithFreshRegistry_RefreshesEvenWhenRecent(t *testing.T) {
 }
 
 func TestRefreshAgentRegistry_RemovesRegistryOnlyEntries(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
 	uc := &UserConfig{
 		Version: 1,
 		Registry: AgentRegistry{
@@ -230,6 +232,81 @@ func TestRefreshAgentRegistry_RemovesRegistryOnlyEntries(t *testing.T) {
 	if len(uc.Registry.Agents) != 0 {
 		t.Fatalf("registry agents=%v, want empty", uc.Registry.Agents)
 	}
+}
+
+func TestRegistryStale_EmptyRegistryAfterScanIsFresh(t *testing.T) {
+	now := time.Now().UTC()
+	uc := &UserConfig{
+		Registry: AgentRegistry{
+			LastScan: now,
+			Agents:   map[string]RegisteredAgent{},
+		},
+	}
+
+	if uc.RegistryStale(now.Add(time.Hour), 24*time.Hour) {
+		t.Fatal("RegistryStale should treat a recent empty registry as fresh")
+	}
+}
+
+func TestRefreshAgentRegistry_ClearsRemovedMetadata(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	realBin := filepath.Join(t.TempDir(), "real-custom")
+	if err := os.WriteFile(realBin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write real binary: %v", err)
+	}
+
+	now := time.Now().UTC()
+	uc := &UserConfig{
+		Version: 1,
+		Wrappers: map[string]WrapperConfig{
+			"ghost": {
+				RealBinary:  realBin,
+				Aliases:     []string{},
+				DefaultArgs: []string{},
+				EnvVars:     map[string]string{},
+			},
+		},
+		Registry: AgentRegistry{
+			LastScan: now.Add(-48 * time.Hour),
+			Agents: map[string]RegisteredAgent{
+				"ghost": {
+					AgentID:      "ghost",
+					Aliases:      []string{"ghost", "ghost-old", "old-shim", "oldbin"},
+					ShimName:     "old-shim",
+					ShimNames:    []string{"old-shim"},
+					RealBinary:   "stale/oldbin",
+					DefaultArgs:  []string{"--stale"},
+					EnvVars:      map[string]string{"OLD": "1"},
+					PrimaryAlias: "ghost-old",
+				},
+			},
+		},
+	}
+
+	agents, err := uc.RefreshAgentRegistry(now)
+	if err != nil {
+		t.Fatalf("RefreshAgentRegistry: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("len(agents)=%d, want 1", len(agents))
+	}
+	got := agents[0]
+	if len(got.ShimNames) != 0 {
+		t.Fatalf("ShimNames=%v, want empty", got.ShimNames)
+	}
+	if got.ShimName != "" {
+		t.Fatalf("ShimName=%q, want empty", got.ShimName)
+	}
+	if len(got.DefaultArgs) != 0 {
+		t.Fatalf("DefaultArgs=%v, want empty", got.DefaultArgs)
+	}
+	if len(got.EnvVars) != 0 {
+		t.Fatalf("EnvVars=%v, want empty", got.EnvVars)
+	}
+	assertNoAlias(t, got.Aliases, "ghost-old")
+	assertNoAlias(t, got.Aliases, "old-shim")
+	assertNoAlias(t, got.Aliases, "oldbin")
 }
 
 func TestInferAgentKind(t *testing.T) {
@@ -262,4 +339,13 @@ func assertAlias(t *testing.T, aliases []string, want string) {
 		}
 	}
 	t.Fatalf("aliases=%v, missing %q", aliases, want)
+}
+
+func assertNoAlias(t *testing.T, aliases []string, forbidden string) {
+	t.Helper()
+	for _, alias := range aliases {
+		if alias == forbidden {
+			t.Fatalf("aliases=%v, unexpectedly contain %q", aliases, forbidden)
+		}
+	}
 }
