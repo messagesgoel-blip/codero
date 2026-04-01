@@ -125,7 +125,10 @@ func (RealExecutor) NewSession(ctx context.Context, name, workdir string) error 
 func (RealExecutor) RespawnWindow(ctx context.Context, name string, command []string) error {
 	args := append([]string{"respawn-window", "-k", "-t", name}, command...)
 	cmd := exec.CommandContext(ctx, "tmux", args...)
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("respawn-window: %w", err)
+	}
+	return nil
 }
 func (RealExecutor) SendKeys(ctx context.Context, name, command string) error {
 	return SendKeys(ctx, name, command)

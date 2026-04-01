@@ -237,8 +237,8 @@ func TestAgentLaunch_ParityWithShellWrapper(t *testing.T) {
 	}
 
 	const (
-	agentID   = "agent-2"
-	sessionID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+		agentID   = "agent-2"
+		sessionID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 	)
 	startedAt := time.Date(2026, 3, 26, 13, 0, 0, 0, time.UTC)
 	withDeterministicLaunch(t, sessionID, startedAt)

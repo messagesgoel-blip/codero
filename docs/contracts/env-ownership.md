@@ -245,7 +245,7 @@ Env ownership is not directly visible in the dashboard, but its effects are:
 
 - Actor boundaries: `docs/contracts/actor-boundaries.md`
 - Privilege profile: `docs/runtime/openclaw-privilege-profile.md`
-- Canonical spec: `/srv/storage/local/codero/specication_033126/codero-agent-task-execution-spec.md`
+- Canonical spec: `/srv/storage/local/codero/specification_033126/codero-agent-task-execution-spec.md`
 - BND-002 task: Enforce environment ownership by layer
 
 ## Change Log
