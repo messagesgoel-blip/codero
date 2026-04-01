@@ -4,6 +4,12 @@ Each imported module must pass the intake workflow in roadmap v5.
 
 Hard guardrail: no bulk copy from ghwatcher. Only module-level intake with contract + parity tests.
 
+Classification and source-selection rules live in:
+
+- `AGENTS.md`
+- `docs/borrowed-components.md`
+- `docs/roadmap-intake-map.md`
+
 | Intake ID | Source Module | Target Domain | Status | Contract Doc | Parity Tests | Rollback Plan | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | MI-000 | N/A (pilot) | N/A (template) | stubbed | docs/contracts/mi-000-pilot-intake-stub.md | tests/parity/mi-000-pilot/ | N/A (stub only) | Pilot stub to validate intake template. No runtime impact. |

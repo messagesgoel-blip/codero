@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -15,26 +16,53 @@ import (
 
 func repoRoot(t *testing.T) string {
 	t.Helper()
-
 	if wd, err := os.Getwd(); err == nil {
-		for dir := filepath.Clean(wd); ; dir = filepath.Dir(dir) {
-			if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-				return dir
-			}
-			parent := filepath.Dir(dir)
-			if parent == dir {
-				break
-			}
+		if root, ok := findRepoRoot(wd); ok {
+			return root
 		}
 	}
-
-	t.Fatal("unable to locate repo root from current working directory")
+	_, file, _, ok := runtime.Caller(0)
+	if ok && filepath.IsAbs(file) {
+		if root, ok := findRepoRoot(filepath.Dir(file)); ok {
+			return root
+		}
+	}
+	t.Fatal("unable to resolve repo root")
 	return ""
+}
+
+func findRepoRoot(start string) (string, bool) {
+	dir := start
+	info, err := os.Stat(dir)
+	if err == nil && !info.IsDir() {
+		dir = filepath.Dir(dir)
+	}
+	for {
+		if fileExists(filepath.Join(dir, "go.mod")) && dirExists(filepath.Join(dir, "cmd", "codero")) {
+			return dir, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 func cleanGitEnv() []string {
 	env := os.Environ()
-	cleaned := make([]string, 0, len(env))
+	cleaned := make([]string, 0, len(env)+1)
+	sawGoFlags := false
 	for _, kv := range env {
 		key, _, found := strings.Cut(kv, "=")
 		if !found {
@@ -43,7 +71,23 @@ func cleanGitEnv() []string {
 		if strings.HasPrefix(key, "GIT_") {
 			continue
 		}
+		if key == "GOFLAGS" {
+			sawGoFlags = true
+			value := strings.TrimSpace(strings.TrimPrefix(kv, "GOFLAGS="))
+			if !strings.Contains(" "+value+" ", " -buildvcs=false ") {
+				if value == "" {
+					value = "-buildvcs=false"
+				} else {
+					value = value + " -buildvcs=false"
+				}
+			}
+			cleaned = append(cleaned, "GOFLAGS="+value)
+			continue
+		}
 		cleaned = append(cleaned, kv)
+	}
+	if !sawGoFlags {
+		cleaned = append(cleaned, "GOFLAGS=-buildvcs=false")
 	}
 	return cleaned
 }
@@ -54,6 +98,7 @@ func TestHelpContract(t *testing.T) {
 	root := repoRoot(t)
 	cmd := exec.Command("go", "run", "./cmd/codero", "--help")
 	cmd.Dir = root
+	cmd.Env = cleanGitEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("expected help command to succeed: %v\noutput: %s", err, string(out))
@@ -67,6 +112,7 @@ func TestCommitGateCommandExists(t *testing.T) {
 	root := repoRoot(t)
 	cmd := exec.Command("go", "run", "./cmd/codero", "commit-gate", "--help")
 	cmd.Dir = root
+	cmd.Env = cleanGitEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("expected commit-gate command to exist: %v\noutput: %s", err, string(out))
@@ -80,6 +126,7 @@ func TestRegisterCommandExists(t *testing.T) {
 	root := repoRoot(t)
 	cmd := exec.Command("go", "run", "./cmd/codero", "register", "--help")
 	cmd.Dir = root
+	cmd.Env = cleanGitEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("expected register command to exist: %v\noutput: %s", err, string(out))
@@ -93,6 +140,7 @@ func TestQueueCommandExists(t *testing.T) {
 	root := repoRoot(t)
 	cmd := exec.Command("go", "run", "./cmd/codero", "queue", "--help")
 	cmd.Dir = root
+	cmd.Env = cleanGitEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("expected queue command to exist: %v\noutput: %s", err, string(out))
@@ -106,6 +154,7 @@ func TestBranchCommandExists(t *testing.T) {
 	root := repoRoot(t)
 	cmd := exec.Command("go", "run", "./cmd/codero", "branch", "--help")
 	cmd.Dir = root
+	cmd.Env = cleanGitEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("expected branch command to exist: %v\noutput: %s", err, string(out))
@@ -119,6 +168,7 @@ func TestEventsCommandExists(t *testing.T) {
 	root := repoRoot(t)
 	cmd := exec.Command("go", "run", "./cmd/codero", "events", "--help")
 	cmd.Dir = root
+	cmd.Env = cleanGitEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("expected events command to exist: %v\noutput: %s", err, string(out))
@@ -132,6 +182,7 @@ func TestGateCheckCommandExists(t *testing.T) {
 	root := repoRoot(t)
 	cmd := exec.Command("go", "run", "./cmd/codero", "gate-check", "--help")
 	cmd.Dir = root
+	cmd.Env = cleanGitEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("expected gate-check command to exist: %v\noutput: %s", err, string(out))
@@ -147,6 +198,7 @@ func TestGateCheckJSONFlag(t *testing.T) {
 	// profile=off skips most checks and always returns pass.
 	cmd := exec.Command("go", "run", "./cmd/codero", "gate-check", "--json", "--profile", "off")
 	cmd.Dir = root
+	cmd.Env = cleanGitEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("gate-check --json --profile off failed: %v\noutput: %s", err, string(out))
@@ -165,6 +217,7 @@ func TestGateCheckJSONDisabledChecksPresent(t *testing.T) {
 	// With profile=off, all checks are skipped/disabled — they must still appear in output.
 	cmd := exec.Command("go", "run", "./cmd/codero", "gate-check", "--json", "--profile", "off")
 	cmd.Dir = root
+	cmd.Env = cleanGitEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("gate-check --json --profile off failed: %v\noutput: %s", err, string(out))
@@ -182,6 +235,7 @@ func TestGateCheckFastProfileAlias(t *testing.T) {
 	root := repoRoot(t)
 	cmd := exec.Command("go", "run", "./cmd/codero", "gate-check", "--json", "--profile", "fast")
 	cmd.Dir = root
+	cmd.Env = cleanGitEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("gate-check --json --profile fast failed: %v\noutput: %s", err, string(out))
@@ -198,7 +252,7 @@ func TestGateCheckJSONFailureExitCode(t *testing.T) {
 
 	cmd := exec.Command("go", "run", "./cmd/codero", "gate-check", "--json", "--repo-path", repo)
 	cmd.Dir = root
-	cmd.Env = append(os.Environ(), "CODERO_GATE_CHECK_REPORT_PATH="+reportPath)
+	cmd.Env = append(cleanGitEnv(), "CODERO_GATE_CHECK_REPORT_PATH="+reportPath)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Fatalf("expected gate-check --json to fail for merge-markers fixture\noutput: %s", string(out))
@@ -238,6 +292,7 @@ func TestGateCheckInvalidFlagsExitCode2(t *testing.T) {
 	binPath := filepath.Join(binDir, "codero-test")
 	buildCmd := exec.Command("go", "build", "-buildvcs=false", "-o", binPath, "./cmd/codero")
 	buildCmd.Dir = root
+	buildCmd.Env = cleanGitEnv()
 	if buildOut, err := buildCmd.CombinedOutput(); err != nil {
 		t.Fatalf("build codero binary: %v\n%s", err, string(buildOut))
 	}
@@ -245,6 +300,7 @@ func TestGateCheckInvalidFlagsExitCode2(t *testing.T) {
 	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	cmd := exec.Command(binPath, "gate-check", "--json", "--tui-snapshot") //nolint:gosec
 	cmd.Dir = root
+	cmd.Env = cleanGitEnv()
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Fatalf("expected gate-check --json --tui-snapshot to fail\noutput: %s", string(out))
@@ -265,7 +321,7 @@ func TestGateCheckJSONReportPathEnv(t *testing.T) {
 
 	cmd := exec.Command("go", "run", "./cmd/codero", "gate-check", "--json", "--profile", "off", "--repo-path", repo)
 	cmd.Dir = root
-	cmd.Env = append(os.Environ(), "CODERO_GATE_CHECK_REPORT_PATH="+reportPath)
+	cmd.Env = append(cleanGitEnv(), "CODERO_GATE_CHECK_REPORT_PATH="+reportPath)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("gate-check --json with env report path failed: %v\noutput: %s", err, string(out))
@@ -300,7 +356,7 @@ func TestGateCheckJSONReportPathFlagOverridesEnv(t *testing.T) {
 
 	cmd := exec.Command("go", "run", "./cmd/codero", "gate-check", "--json", "--profile", "off", "--repo-path", repo, "--report-path", flagReportPath)
 	cmd.Dir = root
-	cmd.Env = append(os.Environ(), "CODERO_GATE_CHECK_REPORT_PATH="+envReportPath)
+	cmd.Env = append(cleanGitEnv(), "CODERO_GATE_CHECK_REPORT_PATH="+envReportPath)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("gate-check --json with explicit report-path failed: %v\noutput: %s", err, string(out))

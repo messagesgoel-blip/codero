@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -18,46 +19,24 @@ func writeConfig(t *testing.T, content string) string {
 	return path
 }
 
+// clearConfigEnvOverrides clears every env override that Load and its helpers read.
+func clearConfigEnvOverrides(t *testing.T) {
+	t.Helper()
+	for _, kv := range os.Environ() {
+		key, _, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		if strings.HasPrefix(key, "CODERO_") || key == "GITHUB_TOKEN" {
+			t.Setenv(key, "")
+		}
+	}
+}
+
 // clearLoadOverrideEnv removes every env override that Load and its helpers read.
 func clearLoadOverrideEnv(t *testing.T) {
 	t.Helper()
-	for _, key := range []string{
-		"GITHUB_TOKEN",
-		"CODERO_REPOS",
-		"CODERO_REDIS_ADDR",
-		"CODERO_REDIS_PASS",
-		"CODERO_REDIS_MAX_RETRIES",
-		"CODERO_REDIS_RETRY_INTERVAL",
-		"CODERO_REDIS_HEALTH_INTERVAL",
-		"CODERO_PID_FILE",
-		"CODERO_READY_FILE",
-		"CODERO_LOG_LEVEL",
-		"CODERO_LOG_PATH",
-		"CODERO_DB_PATH",
-		"CODERO_WEBHOOK_ENABLED",
-		"CODERO_WEBHOOK_SECRET",
-		"CODERO_OBSERVABILITY_PORT",
-		"CODERO_OBSERVABILITY_HOST",
-		"CODERO_DASHBOARD_BASE_PATH",
-		"CODERO_DASHBOARD_PUBLIC_BASE_URL",
-		"CODERO_AUTO_MERGE_ENABLED",
-		"CODERO_AUTO_MERGE_METHOD",
-		"CODERO_SWEEPER_INTERVAL",
-		"CODERO_SWEEPER_SESSION_TTL",
-		"CODERO_SESSION_TTL",
-		"CODERO_SWEEPER_BRANCH_HOLD_TTL",
-		"CODERO_BRANCH_HOLD_TTL",
-		"CODERO_SWEEPER_HANDOFF_TTL",
-		"CODERO_HANDOFF_TTL",
-		"CODERO_SWEEPER_ISSUE_POLL_INTERVAL",
-		"CODERO_ISSUE_POLL_INTERVAL",
-		"CODERO_API_ADDR",
-		"CODERO_API_READ_TIMEOUT",
-		"CODERO_API_WRITE_TIMEOUT",
-		"CODERO_API_SHUTDOWN_TIMEOUT",
-	} {
-		t.Setenv(key, "")
-	}
+	clearConfigEnvOverrides(t)
 }
 
 func TestLoadEnv_Defaults(t *testing.T) {
@@ -788,6 +767,8 @@ func TestEnvOverrides_APIServerConfig(t *testing.T) {
 }
 
 func TestLoad_SweeperAndAPIServerDurations(t *testing.T) {
+	clearConfigEnvOverrides(t)
+
 	path := writeConfig(t, `
 github_token: ghp_test
 repos:

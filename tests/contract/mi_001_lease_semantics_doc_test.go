@@ -8,8 +8,7 @@ import (
 )
 
 func TestMI001LeaseContractDocExistsAndPinsStateMachine(t *testing.T) {
-	repoRoot := repoRoot(t)
-	path := filepath.Join(repoRoot, "docs", "contracts", "mi-001-lease-semantics.md")
+	path := filepath.Join(repoRoot(t), "docs", "contracts", "mi-001-lease-semantics.md")
 
 	data, err := os.ReadFile(path)
 	if err != nil {

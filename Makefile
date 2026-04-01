@@ -41,7 +41,7 @@ build:
 		echo "ERROR: VERSION must match vX.Y.Z (optionally with pre-release/build metadata)"; \
 		exit 1; \
 	fi
-	go build -trimpath -ldflags "-X main.version=$(VERSION)" -o codero ./cmd/codero
+	go build -buildvcs=false -trimpath -ldflags "-X main.version=$(VERSION)" -o codero ./cmd/codero
 	@if [ -x "./scripts/sync-live-bin.sh" ]; then \
 		./scripts/sync-live-bin.sh ; \
 	fi

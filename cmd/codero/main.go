@@ -371,6 +371,11 @@ func daemonCmd(configPath *string) *cobra.Command {
 				defer wg.Done()
 				metricsMonitor.Run(ctx)
 			}()
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				daemon.SyncAgentRegistry(ctx, 24*time.Hour)
+			}()
 			if cfg.AutoMerge.Enabled {
 				reconciler.WithAutoMerge(gh, cfg.AutoMerge.Method)
 				loglib.Info("codero: auto-merge enabled",
