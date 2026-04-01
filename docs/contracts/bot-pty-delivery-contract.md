@@ -61,6 +61,15 @@ They may not:
 
 ## Target Operations
 
+These operations describe the future repo-local PTY delivery runtime that
+Codero would own directly.
+
+At capture time, `internal/tmux/tmux.go` intentionally exposes only low-level
+session primitives such as `NewSession`, `SendKeys`, `CapturePane`,
+`ListCoderoSessions`, and `KillSession`. It does not yet provide a repo-local
+high-level `deliver` operation with busy detection, interruption wrapping, or
+post-submit state observation.
+
 The PTY delivery flow is modeled as the following logical operations:
 
 - `start-profile` — launch a managed session for an agent family
@@ -99,8 +108,9 @@ The target `deliver` flow must distinguish the following observable states:
 
 ## Busy-Session Interruption Contract
 
-If the target session appears busy when `deliver` runs, the adapter may send a
-single `Esc` before injecting the new message.
+When Codero ships the repo-local `deliver` operation, and the target session
+appears busy when `deliver` runs, the adapter may send a single `Esc` before
+injecting the new message.
 
 When that happens:
 
@@ -113,6 +123,11 @@ When that happens:
 If the session is already idle, `deliver` must not send an interruption key.
 
 ## Family-Specific Detection Principles
+
+These cues are the normative target for the future repo-local `deliver`
+implementation. At capture time, the family-specific detection logic continues
+to live in shared external tooling rather than in a Codero-owned PTY adapter in
+this repository.
 
 ### Codex
 
@@ -173,7 +188,9 @@ reach a real final answer across all supported managed families.
 
 The current reference helper lives outside this repo in shared tooling. This
 document is a planned Codero contract, not a claim that `internal/tmux` already
-implements the full PTY delivery surface described above.
+implements the full PTY delivery surface described above. The repo-local tmux
+package currently offers raw session lifecycle and key-injection primitives
+only.
 
 Reference implementation and tests at capture time:
 

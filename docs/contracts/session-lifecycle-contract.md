@@ -181,7 +181,8 @@ Default timeout: 5 minutes without heartbeat
 
 - Mark session as `archived` with result `failed`
 - Release any owned branches
-- Delivery lock cleanup is not performed by `ExpireAgentSession`.
-- Worktree lock removal currently happens in delivery-pipeline paths such as
-  `internal/delivery_pipeline/lock.go` callers and stale-lock cleanup, not in
-  the session timeout handler itself.
+- Delivery lock cleanup is not performed by `ExpireAgentSession`; that timeout
+  handler only archives the session and clears branch ownership.
+- Worktree lock removal currently happens in delivery execution cleanup such as
+  the deferred `Unlock(worktree)` path in `internal/delivery_pipeline/pipeline.go`
+  and in stale-lock cleanup, not in the session timeout handler itself.
