@@ -938,9 +938,28 @@ func sessionRegisterCmd(configPath *string) *cobra.Command {
 				}
 				defer client.Close()
 
-				result, err := client.Register(cmd.Context(), agentID, mode)
-				if err != nil {
-					return fmt.Errorf("session register: %w", err)
+				if sessionID == "" {
+					sessionID = resolveSessionIDFromEnv()
+				}
+				if tmuxName == "" {
+					tmuxName = os.Getenv("CODERO_TMUX_NAME")
+				}
+
+				var result *daemongrpc.RegisterResult
+				if tmuxName != "" {
+					if sessionID == "" {
+						sessionID = uuid.New().String()
+					}
+					secret, err := client.RegisterWithTmux(cmd.Context(), sessionID, agentID, mode, tmuxName)
+					if err != nil {
+						return fmt.Errorf("session register: %w", err)
+					}
+					result = &daemongrpc.RegisterResult{SessionID: sessionID, HeartbeatSecret: secret}
+				} else {
+					result, err = client.Register(cmd.Context(), agentID, mode)
+					if err != nil {
+						return fmt.Errorf("session register: %w", err)
+					}
 				}
 				fmt.Printf("session_id: %s\n", result.SessionID)
 				fmt.Printf("heartbeat_secret: %s\n", result.HeartbeatSecret)

@@ -11,8 +11,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/looplab/fsm"
 
+	"github.com/codero/codero/internal/event"
 	"github.com/codero/codero/internal/gatecheck"
 	"github.com/codero/codero/internal/gitops"
 	loglib "github.com/codero/codero/internal/log"
@@ -97,15 +99,22 @@ type Notifier interface {
 	Notify(worktree, notificationType, assignmentID string)
 }
 
+// EventSender delivers structured event envelopes to OpenClaw endpoints.
+// BND-004: Codero emits structured payloads only; OpenClaw owns PTY injection timing.
+type EventSender interface {
+	Send(ctx context.Context, env event.Envelope) error
+}
+
 // PipelineDeps is the dependency set for the delivery pipeline.
 type PipelineDeps struct {
-	StateDB    *state.DB
-	GitOps     GitOps
-	GateRunner GateRunner
-	GitHub     GitHubClient
-	Writer     Writer
-	Notifier   Notifier
-	StateHook  func(state string)
+	StateDB     *state.DB
+	GitOps      GitOps
+	GateRunner  GateRunner
+	GitHub      GitHubClient
+	Writer      Writer
+	Notifier    Notifier
+	EventSender EventSender
+	StateHook   func(state string)
 }
 
 // Pipeline orchestrates the submit-to-merge sequence.
@@ -309,6 +318,30 @@ func (p *Pipeline) Submit(ctx context.Context, assignmentID, worktree string) er
 					"error", writeErr.Error(),
 				)
 			} else {
+				// BND-004: emit structured event envelope for feedback delivery.
+				// Codero emits structured payloads only; OpenClaw owns PTY injection timing.
+				replyTo := p.buildReplyToEndpoint(assignment)
+				payload := event.FeedbackInjectPayload{
+					AssignmentID: assignmentID,
+					SessionID:    assignment.SessionID,
+					Findings:     fbItemsToEventItems(fb.GateFindings),
+					GateFindings: fbItemsToEventItems(fb.GateFindings),
+					ReviewNotes:  fbItemsToEventItems(fb.CodeReview),
+				}
+				env, envErr := event.NewFeedbackInject(uuid.New().String(), replyTo, payload)
+				if envErr != nil {
+					loglib.Warn("delivery pipeline: build feedback envelope failed",
+						loglib.FieldComponent, "delivery_pipeline",
+						"error", envErr.Error(),
+					)
+				} else if p.deps.EventSender != nil {
+					if sendErr := p.deps.EventSender.Send(ctx, env); sendErr != nil {
+						loglib.Warn("delivery pipeline: send feedback envelope failed",
+							loglib.FieldComponent, "delivery_pipeline",
+							"error", sendErr.Error(),
+						)
+					}
+				}
 				p.deps.Notifier.Notify(worktree, "feedback", assignmentID)
 			}
 		}
@@ -931,4 +964,30 @@ type defaultNotifier struct{}
 
 func (defaultNotifier) Notify(worktree, notificationType, assignmentID string) {
 	Notify(worktree, notificationType, assignmentID)
+}
+
+// buildReplyToEndpoint constructs the OpenClaw reply_to endpoint for an assignment.
+// BND-004: reply_to is an OpenClaw endpoint, not a PTY path.
+func (p *Pipeline) buildReplyToEndpoint(assignment *state.AgentAssignment) event.ReplyToEndpoint {
+	ep := event.ReplyToEndpoint{
+		Type:      "openclaw_session",
+		SessionID: assignment.SessionID,
+	}
+	if assignment.Worktree != "" {
+		ep.TmuxName = assignment.Worktree
+	}
+	return ep
+}
+
+// fbItemsToEventItems converts FeedbackItem to event.FeedbackItem.
+func fbItemsToEventItems(items []FeedbackItem) []event.FeedbackItem {
+	out := make([]event.FeedbackItem, 0, len(items))
+	for _, item := range items {
+		out = append(out, event.FeedbackItem{
+			File:    item.File,
+			Line:    item.Line,
+			Message: item.Message,
+		})
+	}
+	return out
 }

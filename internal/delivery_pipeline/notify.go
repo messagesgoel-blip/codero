@@ -23,14 +23,8 @@ func Notify(worktree, notificationType, assignmentID string) {
 	hook := filepath.Join(worktree, coderoDir, "hooks", "on-feedback")
 	if info, err := os.Stat(hook); err == nil && info.Mode()&0o111 != 0 {
 		timeout := notificationTimeout()
-		tmuxName := notificationTmuxName(worktree)
 		// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-		cmd := exec.Command(hook, worktree, notificationType, assignmentID, tmuxName)
-		path := os.Getenv("PATH")
-		if path == "" {
-			path = "/usr/bin:/bin"
-		}
-		cmd.Env = []string{"PATH=" + path}
+		cmd := exec.Command(hook, worktree, notificationType, assignmentID)
 		cmd.Dir = worktree
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		var out bytes.Buffer
@@ -78,21 +72,6 @@ func Notify(worktree, notificationType, assignmentID string) {
 			"path", pending,
 		)
 	}
-}
-
-func notificationTmuxName(worktree string) string {
-	body, err := os.ReadFile(filepath.Join(worktree, coderoDir, "SESSION.md"))
-	if err != nil {
-		return ""
-	}
-	const prefix = "- CODERO_TMUX_NAME="
-	for _, line := range strings.Split(string(body), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, prefix) {
-			return strings.TrimSpace(strings.TrimPrefix(line, prefix))
-		}
-	}
-	return ""
 }
 
 func notificationTimeout() time.Duration {
