@@ -58,7 +58,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.24.2"
+          go-version: "1.25.0"
           cache: true
 
       # Build from source so the version under test is always deterministic.
