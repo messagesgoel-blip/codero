@@ -262,6 +262,33 @@ func TestFilterEnvStrict(t *testing.T) {
 	}
 }
 
+func TestFilterEnvStrict_EdgeCases(t *testing.T) {
+	if filtered := FilterEnvStrict(nil); filtered == nil {
+		t.Fatal("strict filter should return non-nil slice for nil input")
+	}
+
+	environ := []string{
+		"NOEQUALS",
+		"=onlyvalue",
+		"PATH=/usr/bin",
+		"CODERO_SESSION_ID=sess-123",
+	}
+
+	filtered := FilterEnvStrict(environ)
+	if filtered == nil {
+		t.Fatal("strict filter should return non-nil slice for malformed entries")
+	}
+	if slices.Contains(filtered, "NOEQUALS") || slices.Contains(filtered, "=onlyvalue") {
+		t.Fatal("strict filter should ignore malformed entries that are not allowlisted")
+	}
+	if !slices.Contains(filtered, "PATH=/usr/bin") {
+		t.Fatal("strict filter should preserve allowed PATH entry")
+	}
+	if !slices.Contains(filtered, "CODERO_SESSION_ID=sess-123") {
+		t.Fatal("strict filter should preserve allowed session id entry")
+	}
+}
+
 func TestForbiddenLists(t *testing.T) {
 	// Ensure lists are non-empty and don't modify originals
 	agentList := ForbiddenForAgent()

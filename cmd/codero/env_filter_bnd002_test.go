@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"strings"
 	"testing"
 
@@ -223,8 +222,8 @@ func TestBND002_ForbiddenLists_Completeness(t *testing.T) {
 
 // TestBND002_DefaultBehavior_UnsetVar tests that filtering works correctly when vars are unset.
 func TestBND002_DefaultBehavior_UnsetVar(t *testing.T) {
-	// Ensure CODERO_DB_PATH is not set
-	os.Unsetenv("CODERO_DB_PATH")
+	// Clear CODERO_DB_PATH for this test without leaking state to other tests.
+	t.Setenv("CODERO_DB_PATH", "")
 
 	filtered := session.FilterEnv(session.LayerAgent)
 
@@ -254,9 +253,9 @@ func TestBND002_Precedence_ExplicitOverImplicit(t *testing.T) {
 		}
 	}
 
-	// Both should be present; exec.Cmd uses the last one
-	if count < 1 {
-		t.Error("Expected at least one CODERO_SESSION_ID entry")
+	// Both should be present; exec.Cmd uses the last one.
+	if count != 2 {
+		t.Errorf("expected 2 CODERO_SESSION_ID entries, got %d", count)
 	}
 }
 
