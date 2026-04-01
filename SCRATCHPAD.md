@@ -1,4 +1,9 @@
 
+## Handoff — 2026-03-30T17:05:00Z
+Summary: Cleaned the Codero main worktree and stale project metadata. Local failures were fixed by hardening config tests against ambient `CODERO_*` env and making contract tests resolve repo root plus spawned Go commands reliably inside the shared worktree. `go test ./...` now passes on `main` at `8f8d7b7`, and the previously disabled GitHub workflows have been re-enabled.
+Pending: Start the next Codero task from fresh `main`; there are no open PRs to resume.
+Open Questions: Plain `go build ./...` without `-buildvcs=false` still fails in this bare-control/worktree layout, so decide later whether to fix the underlying VCS stamping issue or just keep the build paths standardized on `-buildvcs=false`.
+
 ## Handoff — 2026-03-22T18:40:00Z
 Summary: Agents v3 is merged on `main` via PR `#86` (`c964987`). Task Layer v2 schema alignment is now started on branch `feat/TL-001-task-layer-schema-clean` at commit `c1a2070`. Migration `000011_task_layer_schema` adds the task-layer `agent_assignments` fields plus `codero_github_links` and `task_feedback_cache`, with DB tests covering table creation, defaults, and key constraints. Validation passed: `go test ./internal/state`, `go test ./...`, `scripts/review/two-pass-review.sh`, staged pre-commit, and pre-push `go test ./...`.
 Pending: Open or merge the roadmap branch as needed, then continue TL-001 runtime work on top of `000011`: atomic task acceptance, same-session idempotency/different-session conflict, assignment-versioned emits, and task feedback polling/cache population.

@@ -3,19 +3,12 @@ package contract
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
 
 func TestMI001LeaseContractDocExistsAndPinsStateMachine(t *testing.T) {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("unable to resolve runtime caller")
-	}
-
-	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
-	path := filepath.Join(repoRoot, "docs", "contracts", "mi-001-lease-semantics.md")
+	path := filepath.Join(repoRoot(t), "docs", "contracts", "mi-001-lease-semantics.md")
 
 	data, err := os.ReadFile(path)
 	if err != nil {

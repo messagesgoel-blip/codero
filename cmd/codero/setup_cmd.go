@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/codero/codero/internal/config"
@@ -19,14 +20,6 @@ const (
 exec codero agent run --agent-id %s -- %q "$@"
 `
 )
-
-// knownAgents is the list of agent binaries that setup scans for.
-var knownAgents = []string{
-	"claude",
-	"codex",
-	"aider",
-	"opencode",
-}
 
 func setupCmd() *cobra.Command {
 	var force bool
@@ -104,18 +97,18 @@ func runSetup(force bool) error {
 	}
 
 	found := 0
-	for _, agent := range knownAgents {
-		realBinary := findRealBinary(agent, shimDir)
+	for _, agentKind := range config.SupportedAgentKinds() {
+		realBinary := findRealBinary(agentKind, shimDir)
 		if realBinary == "" {
 			continue
 		}
 		found++
-		result, err := installShim(shimDir, agent, realBinary, uc, force)
+		result, err := installShim(shimDir, agentKind, agentKind, realBinary, uc, force)
 		if err != nil {
-			fmt.Printf("        → %s: ✗ %v\n", agent, err)
+			fmt.Printf("        → %s: ✗ %v\n", agentKind, err)
 			continue
 		}
-		fmt.Printf("        → %s at %s (%s)\n", agent, realBinary, result)
+		fmt.Printf("        → %s at %s (%s)\n", agentKind, realBinary, result)
 	}
 
 	if found == 0 {
@@ -226,8 +219,16 @@ func findRealBinary(agent, shimDir string) string {
 	return ""
 }
 
-func installShim(shimDir, agent, realBinary string, uc *config.UserConfig, force bool) (string, error) {
-	shimPath := filepath.Join(shimDir, agent)
+func installShim(shimDir, agentKind, profileID, realBinary string, uc *config.UserConfig, force bool) (string, error) {
+	profileID = strings.TrimSpace(profileID)
+	if profileID == "" {
+		return "", fmt.Errorf("profile ID is required")
+	}
+	agentKind = config.NormalizeAgentKind(agentKind)
+	if agentKind == "" {
+		agentKind = config.InferAgentKind(profileID, realBinary)
+	}
+	shimPath := filepath.Join(shimDir, profileID)
 
 	// Check existence before writing
 	_, statErr := os.Stat(shimPath)
@@ -235,17 +236,18 @@ func installShim(shimDir, agent, realBinary string, uc *config.UserConfig, force
 
 	// Skip if shim already exists with same real binary
 	if !force && existedBefore {
-		if existing, ok := uc.Wrappers[agent]; ok && existing.RealBinary == realBinary {
+		if existing, ok := uc.Wrappers[profileID]; ok && existing.RealBinary == realBinary && existing.AgentKind == agentKind {
 			return "unchanged", nil
 		}
 	}
 
-	content := fmt.Sprintf(shimTemplate, agent, agent, realBinary)
+	content := fmt.Sprintf(shimTemplate, profileID, profileID, realBinary)
 	if err := os.WriteFile(shimPath, []byte(content), 0o755); err != nil {
 		return "", fmt.Errorf("write shim: %w", err)
 	}
 
-	uc.Wrappers[agent] = config.WrapperConfig{
+	uc.Wrappers[profileID] = config.WrapperConfig{
+		AgentKind:   agentKind,
 		RealBinary:  realBinary,
 		InstalledAt: time.Now().UTC(),
 	}

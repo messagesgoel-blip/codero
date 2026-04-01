@@ -63,16 +63,12 @@ func agentListCmd(_ *string) *cobra.Command {
 			}
 
 			// Discover agents from shims for installed status
-			uc, ucErr := config.LoadUserConfig()
-			if ucErr != nil {
-				fmt.Fprintf(os.Stderr, "warning: could not load user config: %v\n", ucErr)
+			_, registryAgents, regErr := config.LoadUserConfigWithFreshRegistry()
+			if regErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not load agent registry: %v\n", regErr)
 			}
-			discovered, discErr := config.DiscoverAgents(uc)
-			if discErr != nil {
-				fmt.Fprintf(os.Stderr, "warning: could not discover agents: %v\n", discErr)
-			}
-			discoveredMap := make(map[string]config.AgentInfo)
-			for _, d := range discovered {
+			discoveredMap := make(map[string]config.RegisteredAgent)
+			for _, d := range registryAgents {
 				discoveredMap[d.AgentID] = d
 			}
 
