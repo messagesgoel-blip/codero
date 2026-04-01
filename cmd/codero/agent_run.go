@@ -174,13 +174,13 @@ If the daemon is unreachable, runs the binary directly with no tracking.`,
 			// CODERO_TRACKING_<AGENT>=0 disables tracking for one agent,
 			// CODERO_TRACKING=0 disables tracking for all agents.
 			if trackingDisabledFor(agentID) {
-				return execBinary(binaryPath, binaryArgs)
+				return execBinary(binaryPath, binaryArgs, agentID)
 			}
 
 			daemonAddr := resolveDaemonAddr(cmd)
 			if daemonAddr == "" {
 				// No daemon — just exec the binary directly
-				return execBinary(binaryPath, binaryArgs)
+				return execBinary(binaryPath, binaryArgs, agentID)
 			}
 
 			err := runAgentWithTracking(cmd.Context(), agentID, mode, taskID, repo, daemonAddr, binaryPath, binaryArgs)
@@ -207,7 +207,7 @@ func runAgentWithTracking(ctx context.Context, agentID, mode, taskID, repoOverri
 	if err != nil {
 		// Degrade: just run the binary
 		fmt.Fprintf(os.Stderr, "codero: daemon unreachable, running without tracking\n")
-		return execBinary(binaryPath, binaryArgs)
+		return execBinary(binaryPath, binaryArgs, agentID)
 	}
 	defer client.Close()
 
@@ -227,7 +227,7 @@ func runAgentWithTracking(ctx context.Context, agentID, mode, taskID, repoOverri
 	result, err := client.RegisterWithContext(ctx, agentID, mode, initialContext)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "codero: registration failed, running without tracking: %v\n", err)
-		return execBinary(binaryPath, binaryArgs)
+		return execBinary(binaryPath, binaryArgs, agentID)
 	}
 
 	sessionID := result.SessionID
@@ -308,12 +308,23 @@ func heartbeatLoop(ctx context.Context, client *daemongrpc.SessionClient, sessio
 // When stdout is a real TTY (e.g. inside tmux), the child is started inside a PTY so that
 // isatty() checks in the child return true and TUI agents render correctly.
 // Activity is tracked by reading the PTY master output stream.
+//
+// BND-002: Environment is filtered to prevent secret leakage. Agent processes
+// do not receive CODERO_DB_*, CODERO_REDIS_*, GITHUB_TOKEN, or other Codero
+// control-plane credentials.
 func runChild(binaryPath string, args []string, sessionID, agentID, daemonAddr string, tracker *activityTracker, tailFile *os.File) int {
 	child := exec.Command(binaryPath, args...) // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-	env := os.Environ()
+
+	// BND-002: Filter env to prevent control-plane secrets from leaking to agent.
+	// Uses strict allowlist: only system vars + allowed agent vars pass through.
+	env := session.FilterEnv(session.LayerAgent)
+
+	// Add user-configured wrapper env vars if present (also filtered for safety)
 	if uc, err := config.LoadUserConfig(); err == nil && uc != nil {
 		if w, ok := uc.Wrappers[agentID]; ok && w.EnvVars != nil {
-			for k, v := range w.EnvVars {
+			// BND-002: Filter wrapper env vars to prevent config from re-introducing forbidden vars
+			filtered := session.FilterWrapperEnvVars(w.EnvVars, session.LayerAgent)
+			for k, v := range filtered {
 				env = append(env, k+"="+v)
 			}
 		}
@@ -322,6 +333,7 @@ func runChild(binaryPath string, args []string, sessionID, agentID, daemonAddr s
 		"CODERO_SESSION_ID="+sessionID,
 		"CODERO_AGENT_ID="+agentID,
 		"CODERO_DAEMON_ADDR="+daemonAddr,
+		"CODERO_WORKTREE="+resolveFallbackWorktree(),
 	)
 
 	stdoutIsTTY := term.IsTerminal(int(os.Stdout.Fd()))
@@ -432,9 +444,39 @@ func runChildPiped(child *exec.Cmd, tracker *activityTracker, tailFile *os.File)
 }
 
 // execBinary replaces the current process with the binary (no tracking).
-func execBinary(binaryPath string, args []string) error {
+// BND-002: Uses filtered env to prevent secret leakage even in degraded path.
+// The resolved agent identity is appended after filtering so fallback launches
+// do not lose the current agent label.
+func execBinary(binaryPath string, args []string, agentID string) error {
 	argv := append([]string{binaryPath}, args...)
-	return syscall.Exec(binaryPath, argv, os.Environ()) // nosemgrep: go.lang.security.audit.dangerous-syscall-exec.dangerous-syscall-exec
+	env := buildFallbackEnv(agentID)
+	return syscall.Exec(binaryPath, argv, env) // nosemgrep: go.lang.security.audit.dangerous-syscall-exec.dangerous-syscall-exec
+}
+
+// buildFallbackEnv filters the current environment for degraded agent execution
+// and re-applies the resolved agent identity last so it wins over inherited state.
+func buildFallbackEnv(agentID string) []string {
+	env := session.FilterEnv(session.LayerAgent)
+	if agentID != "" {
+		env = append(env, "CODERO_AGENT_ID="+agentID)
+	}
+	if worktree := resolveFallbackWorktree(); worktree != "" {
+		env = append(env, "CODERO_WORKTREE="+worktree)
+	}
+	return env
+}
+
+// resolveFallbackWorktree preserves an existing CODERO_WORKTREE when present.
+// If the environment does not already carry one, fall back to the current
+// process working directory so degraded launches still have a usable worktree.
+func resolveFallbackWorktree() string {
+	if worktree := os.Getenv("CODERO_WORKTREE"); worktree != "" {
+		return worktree
+	}
+	if cwd, err := os.Getwd(); err == nil && cwd != "" {
+		return cwd
+	}
+	return ""
 }
 
 // buildSessionContext collects rich metadata for registration.
