@@ -565,6 +565,31 @@ func AttachAgentAssignment(ctx context.Context, db *DB, assignment *AgentAssignm
 		return ErrAgentSessionNotFound
 	}
 
+	// Check for matching active assignment to make attach idempotent.
+	// If the current active assignment already has the same repo, branch, and task_id,
+	// we skip superseding and creating a new row.
+	var existingRepo, existingBranch, existingTaskID string
+	err = tx.QueryRowContext(ctx, `
+		SELECT repo, branch, task_id
+		FROM agent_assignments
+		WHERE session_id = ? AND ended_at IS NULL
+		ORDER BY started_at DESC
+		LIMIT 1`,
+		assignment.SessionID,
+	).Scan(&existingRepo, &existingBranch, &existingTaskID)
+	
+	// If there's a match, just commit the timestamp update and return success
+	if err == nil && existingRepo == assignment.Repo && existingBranch == assignment.Branch && existingTaskID == assignment.TaskID {
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("attach agent assignment: commit idempotent: %w", err)
+		}
+		return nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("attach agent assignment: check existing: %w", err)
+	}
+
+	// No match or no active assignment - proceed with supersede + insert
 	_, err = tx.ExecContext(ctx, `
 		UPDATE agent_assignments
 		SET ended_at = ?,

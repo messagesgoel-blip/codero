@@ -176,6 +176,47 @@ func (s *Store) ListActiveSessions(ctx context.Context) ([]state.AgentSession, e
 	return state.ListActiveAgentSessions(ctx, s.db)
 }
 
+// SessionInfo holds session state plus active assignment if any.
+type SessionInfo struct {
+	Session    state.AgentSession
+	Assignment *state.AgentAssignment
+}
+
+// Get retrieves a session and its active assignment (if any) in one call.
+// Returns ErrSessionNotFound if the session doesn't exist.
+// Returns ErrSessionMismatch if agentID is non-empty and doesn't match.
+func (s *Store) Get(ctx context.Context, sessionID, agentID string) (*SessionInfo, error) {
+	if sessionID == "" {
+		return nil, ErrMissingSessionID
+	}
+
+	session, err := state.GetAgentSession(ctx, s.db, sessionID)
+	if err != nil {
+		if errors.Is(err, state.ErrAgentSessionNotFound) {
+			return nil, ErrSessionNotFound
+		}
+		return nil, fmt.Errorf("Store.Get: %w", err)
+	}
+
+	if agentID != "" && session.AgentID != agentID {
+		return nil, ErrSessionMismatch
+	}
+
+	assignment, err := state.GetActiveAgentAssignment(ctx, s.db, sessionID)
+	if err != nil && !errors.Is(err, state.ErrAgentAssignmentNotFound) {
+		return nil, fmt.Errorf("Store.Get: get assignment: %w", err)
+	}
+
+	info := &SessionInfo{
+		Session: *session,
+	}
+	if err == nil {
+		info.Assignment = assignment
+	}
+
+	return info, nil
+}
+
 // AttachAssignment fills in repo/branch/worktree/task_id when a task is claimed or assigned.
 // It also updates the branch session tracking fields for dashboard visibility.
 func (s *Store) AttachAssignment(
