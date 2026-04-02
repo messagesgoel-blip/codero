@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -72,16 +73,17 @@ func setupPipelineTest(t *testing.T) (worktree string, db *state.DB, cleanup fun
 // seedPipelineAssignment inserts a session and assignment into the DB.
 func seedPipelineAssignment(t *testing.T, db *state.DB, sessionID, assignmentID, worktree string) {
 	t.Helper()
+	tmuxSessionName := "codero-" + sessionID
 	_, err := db.Unwrap().Exec(
-		`INSERT INTO agent_sessions (session_id, agent_id, mode) VALUES (?, 'test-agent', 'coding')`,
-		sessionID,
+		`INSERT INTO agent_sessions (session_id, agent_id, mode, tmux_session_name) VALUES (?, 'codex-test', 'coding', ?)`,
+		sessionID, tmuxSessionName,
 	)
 	if err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
 	_, err = db.Unwrap().Exec(
 		`INSERT INTO agent_assignments (assignment_id, session_id, agent_id, repo, branch, worktree, task_id)
-		 VALUES (?, ?, 'test-agent', 'acme/api', 'feat/test', ?, 'TASK-001')`,
+		 VALUES (?, ?, 'codex-test', 'acme/api', 'feat/test', ?, 'TASK-001')`,
 		assignmentID, sessionID, worktree,
 	)
 	if err != nil {
@@ -223,10 +225,24 @@ func (m *mockNotifier) Notify(worktree, notificationType, assignmentID string) {
 	m.calls = append(m.calls, notificationType)
 }
 
-type mockEventSender struct{}
+type mockEventSender struct {
+	mu   sync.Mutex
+	sent []event.Envelope
+}
 
 func (m *mockEventSender) Send(ctx context.Context, env event.Envelope) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sent = append(m.sent, env)
 	return nil
+}
+
+func (m *mockEventSender) SentEnvelopes() []event.Envelope {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]event.Envelope, len(m.sent))
+	copy(out, m.sent)
+	return out
 }
 
 // TestMIG037_HappyPath_SubmitGatePassCommitPushPR tests the happy path:
@@ -243,6 +259,7 @@ func TestMIG037_HappyPath_SubmitGatePassCommitPushPR(t *testing.T) {
 	gh := &mockGitHub{created: true, ciPassed: true, approved: true}
 	writer := &mockWriter{}
 	notifier := &mockNotifier{}
+	sender := &mockEventSender{}
 
 	var stateTransitions []string
 	p := deliverypipeline.NewPipeline(deliverypipeline.PipelineDeps{
@@ -252,7 +269,7 @@ func TestMIG037_HappyPath_SubmitGatePassCommitPushPR(t *testing.T) {
 		GitHub:      gh,
 		Writer:      writer,
 		Notifier:    notifier,
-		EventSender: &mockEventSender{},
+		EventSender: sender,
 		StateHook: func(s string) {
 			stateTransitions = append(stateTransitions, s)
 		},
@@ -277,6 +294,9 @@ func TestMIG037_HappyPath_SubmitGatePassCommitPushPR(t *testing.T) {
 	// Verify no feedback was written (success path)
 	if writer.feedbackCalls != 0 {
 		t.Errorf("expected no feedback writes on success, got %d", writer.feedbackCalls)
+	}
+	if got := len(sender.SentEnvelopes()); got != 0 {
+		t.Errorf("expected no feedback envelopes on success, got %d", got)
 	}
 
 	// Verify lock was released
@@ -343,6 +363,7 @@ func TestMIG037_GateFailure_WritesFeedback(t *testing.T) {
 	}
 	writer := &mockWriter{}
 	notifier := &mockNotifier{}
+	sender := &mockEventSender{}
 
 	p := deliverypipeline.NewPipeline(deliverypipeline.PipelineDeps{
 		StateDB:     db,
@@ -350,7 +371,7 @@ func TestMIG037_GateFailure_WritesFeedback(t *testing.T) {
 		GateRunner:  gateRunner,
 		Writer:      writer,
 		Notifier:    notifier,
-		EventSender: &mockEventSender{},
+		EventSender: sender,
 	})
 
 	err := p.Submit(context.Background(), assignmentID, worktree)
@@ -377,6 +398,9 @@ func TestMIG037_GateFailure_WritesFeedback(t *testing.T) {
 	// Verify feedback contains gate findings
 	if len(writer.lastFeedback.GateFindings) == 0 {
 		t.Error("expected GateFindings in feedback")
+	}
+	if len(sender.SentEnvelopes()) == 0 {
+		t.Error("expected feedback envelope to be sent on gate failure")
 	}
 
 	// Verify lock was released
@@ -413,6 +437,7 @@ func TestMIG037_PushFailure_WritesFeedback(t *testing.T) {
 	gateRunner := &mockGateRunner{report: &gatecheck.Report{Result: gatecheck.StatusPass}}
 	writer := &mockWriter{}
 	notifier := &mockNotifier{}
+	sender := &mockEventSender{}
 
 	p := deliverypipeline.NewPipeline(deliverypipeline.PipelineDeps{
 		StateDB:     db,
@@ -420,7 +445,7 @@ func TestMIG037_PushFailure_WritesFeedback(t *testing.T) {
 		GateRunner:  gateRunner,
 		Writer:      writer,
 		Notifier:    notifier,
-		EventSender: &mockEventSender{},
+		EventSender: sender,
 	})
 
 	err := p.Submit(context.Background(), assignmentID, worktree)
@@ -442,6 +467,9 @@ func TestMIG037_PushFailure_WritesFeedback(t *testing.T) {
 	// Verify feedback contains CI failure info
 	if len(writer.lastFeedback.CIFailures) == 0 {
 		t.Error("expected CIFailures in feedback")
+	}
+	if len(sender.SentEnvelopes()) == 0 {
+		t.Error("expected feedback envelope to be sent on push failure")
 	}
 
 	// Verify lock was released
@@ -603,6 +631,7 @@ func TestMIG037_FeedbackSchema(t *testing.T) {
 		},
 	}
 	writer := &mockWriter{}
+	sender := &mockEventSender{}
 
 	p := deliverypipeline.NewPipeline(deliverypipeline.PipelineDeps{
 		StateDB:     db,
@@ -610,7 +639,7 @@ func TestMIG037_FeedbackSchema(t *testing.T) {
 		GateRunner:  gateRunner,
 		Writer:      writer,
 		Notifier:    &mockNotifier{},
-		EventSender: &mockEventSender{},
+		EventSender: sender,
 	})
 
 	_ = p.Submit(context.Background(), assignmentID, worktree)
@@ -648,6 +677,9 @@ func TestMIG037_FeedbackSchema(t *testing.T) {
 	}
 	if !hasFileInfo {
 		t.Error("expected at least one finding with file info")
+	}
+	if len(sender.SentEnvelopes()) == 0 {
+		t.Error("expected feedback envelope to be sent for feedback schema path")
 	}
 }
 

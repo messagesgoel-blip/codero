@@ -386,6 +386,33 @@ func TestPipeline_MonitorFeedback_EventSendErrorPropagates(t *testing.T) {
 	}
 }
 
+func TestPipeline_MonitorFeedback_MissingReplyToRoutingPropagates(t *testing.T) {
+	worktree := t.TempDir()
+	db, assignmentID := setupPipelineDB(t, worktree)
+
+	if _, err := db.Unwrap().Exec(`UPDATE agent_sessions SET agent_id = 'unknown-agent' WHERE session_id = 'sess-1'`); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+
+	p := NewPipeline(PipelineDeps{
+		StateDB:     db,
+		GitOps:      &fakeGitOps{},
+		GateRunner:  &fakeGateRunner{report: &gatecheck.Report{Result: gatecheck.StatusPass}},
+		GitHub:      &fakeGitHub{created: true, prNumber: 42, ciPassed: true, changesRequested: true},
+		Writer:      &fakeWriter{},
+		Notifier:    &fakeNotifier{},
+		EventSender: &fakeEventSender{},
+	})
+
+	err := p.Submit(context.Background(), assignmentID, worktree)
+	if err == nil {
+		t.Fatal("expected reply_to routing error, got nil")
+	}
+	if !strings.Contains(err.Error(), "build reply_to endpoint") || !strings.Contains(err.Error(), "unsupported agent_id") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestPipeline_GateFailure_EventSentWhenWriteFeedbackFails(t *testing.T) {
 	worktree := t.TempDir()
 	db, assignmentID := setupPipelineDB(t, worktree)

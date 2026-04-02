@@ -9,6 +9,9 @@ Supersedes: local draft at `/srv/storage/local/codero/specication_033126/codero-
 
 This is the canonical implementation-sequencing roadmap for Codero.
 
+Use execution roadmap from `docs/roadmaps/agent-task-execution-roadmap.md` for
+task selection and implementation sequencing.
+
 Use this file for:
 
 - next-task selection
@@ -83,15 +86,15 @@ shortest path to an OpenClaw-default runtime.
 
 | Task | Title | Status | Notes |
 |---|---|---|---|
-| `SES-001` | Complete session register, confirm, heartbeat, and finalize parity | `next` |
-| `SES-002` | Implement idempotent observe and attach behavior | `queued` |
+| `SES-001` | Complete session register, confirm, heartbeat, and finalize parity | `next` | |
+| `SES-002` | Implement idempotent observe and attach behavior | `queued` | |
 | `SES-003` | Expose a Codero-owned deliver contract backed by the bridge | `done` | Bridge-backed delivery implemented in `replyToDirectClient` |
-| `SES-004` | Preserve session continuity across adapter restart and phase shift | `queued` |
-| `SUB-001` | Parse `TASK_COMPLETE` and structured summary blocks | `planned` |
-| `SUB-002` | Add Submission Record persistence and lineage | `planned` |
-| `SUB-003` | Reject duplicate or invalid submissions before lock acquisition | `planned` |
-| `SUB-004` | Implement the local gate loop with explicit local attempts | `planned` |
-| `SUB-005` | Commit, push, PR bootstrap, and reviewer request under policy | `planned` |
+| `SES-004` | Preserve session continuity across adapter restart and phase shift | `queued` | |
+| `SUB-001` | Parse `TASK_COMPLETE` and structured summary blocks | `planned` | |
+| `SUB-002` | Add Submission Record persistence and lineage | `planned` | |
+| `SUB-003` | Reject duplicate or invalid submissions before lock acquisition | `planned` | |
+| `SUB-004` | Implement the local gate loop with explicit local attempts | `planned` | |
+| `SUB-005` | Commit, push, PR bootstrap, and reviewer request under policy | `planned` | |
 
 ### Wave 3: Remote Review And Finalization
 
@@ -133,8 +136,7 @@ shortest path to an OpenClaw-default runtime.
 
 1. `SES-001`
 2. `SES-002`
-3. `SES-003`
-4. `SES-004`
+3. `SES-004`
 
 ## Parallelization Rule
 

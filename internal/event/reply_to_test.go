@@ -14,7 +14,9 @@ func TestReplyToDirectClient_Deliver_Bridge(t *testing.T) {
 	defer func() { execPTYBridgeCommand = oldExec }()
 
 	var gotArgs []string
-	execPTYBridgeCommand = func(ctx context.Context, args ...string) ([]byte, error) {
+	var gotInput []byte
+	execPTYBridgeCommand = func(ctx context.Context, input []byte, args ...string) ([]byte, error) {
+		gotInput = append([]byte(nil), input...)
 		gotArgs = append([]string{}, args...)
 		return []byte("ok"), nil
 	}
@@ -55,7 +57,7 @@ func TestReplyToDirectClient_Deliver_Bridge(t *testing.T) {
 		"deliver",
 		"--session codero-agent-1-sess1",
 		"--profile codex",
-		"--message",
+		"--message-stdin",
 	}
 
 	for _, want := range wantArgs {
@@ -64,8 +66,11 @@ func TestReplyToDirectClient_Deliver_Bridge(t *testing.T) {
 		}
 	}
 
-	if !strings.Contains(got, "style issue") {
-		t.Errorf("bridge call missing finding message, got: %q", got)
+	if strings.Contains(got, "style issue") {
+		t.Errorf("bridge args should not contain payload text, got: %q", got)
+	}
+	if !strings.Contains(string(gotInput), "style issue") {
+		t.Errorf("bridge stdin missing finding message, got: %q", string(gotInput))
 	}
 }
 
@@ -73,7 +78,7 @@ func TestReplyToDirectClient_Deliver_BridgeFailure(t *testing.T) {
 	oldExec := execPTYBridgeCommand
 	defer func() { execPTYBridgeCommand = oldExec }()
 
-	execPTYBridgeCommand = func(ctx context.Context, args ...string) ([]byte, error) {
+	execPTYBridgeCommand = func(ctx context.Context, input []byte, args ...string) ([]byte, error) {
 		return []byte("injection failed: terminal busy"), errors.New("exit status 1")
 	}
 

@@ -708,7 +708,15 @@ func (p *Pipeline) sendFeedbackEvent(ctx context.Context, assignment *state.Agen
 
 	// BND-004: emit structured event envelope for feedback delivery.
 	// Codero emits structured payloads only; OpenClaw owns PTY injection timing.
-	replyTo := p.buildReplyToEndpoint(ctx, assignment)
+	replyTo, err := p.buildReplyToEndpoint(ctx, assignment)
+	if err != nil {
+		loglib.Warn("delivery pipeline: build reply_to endpoint failed",
+			loglib.FieldComponent, "delivery_pipeline",
+			"error", err.Error(),
+			"assignment", assignment.ID,
+		)
+		return fmt.Errorf("build reply_to endpoint: %w", err)
+	}
 	findings := fbItemsToEventItems(fb.CIFailures)
 	findings = append(findings, fbItemsToEventItems(fb.GateFindings)...)
 	findings = append(findings, fbItemsToEventItems(fb.CodeReview)...)
@@ -1018,23 +1026,38 @@ func (defaultNotifier) Notify(worktree, notificationType, assignmentID string) {
 
 // buildReplyToEndpoint constructs the OpenClaw reply_to endpoint for an assignment.
 // BND-004: reply_to is an OpenClaw endpoint, not a PTY path.
-func (p *Pipeline) buildReplyToEndpoint(ctx context.Context, assignment *state.AgentAssignment) event.ReplyToEndpoint {
+func (p *Pipeline) buildReplyToEndpoint(ctx context.Context, assignment *state.AgentAssignment) (event.ReplyToEndpoint, error) {
+	if assignment == nil {
+		return event.ReplyToEndpoint{}, fmt.Errorf("assignment is required")
+	}
+	if p.deps.StateDB == nil {
+		return event.ReplyToEndpoint{}, fmt.Errorf("state DB is required for reply_to routing")
+	}
+
 	ep := event.ReplyToEndpoint{
 		Type:      "openclaw_session",
 		SessionID: assignment.SessionID,
 	}
 
-	// Fetch additional routing fields (TmuxName, AgentKind) from the durable session.
-	if p.deps.StateDB != nil {
-		sess, err := state.GetAgentSession(ctx, p.deps.StateDB, assignment.SessionID)
-		if err == nil && sess != nil {
-			ep.TmuxName = sess.TmuxSessionName
-			// agent_id remains the durable profile ID; derive the upstream CLI family from it.
-			ep.AgentKind = config.InferAgentKind(sess.AgentID, "")
-		}
+	sess, err := state.GetAgentSession(ctx, p.deps.StateDB, assignment.SessionID)
+	if err != nil {
+		return event.ReplyToEndpoint{}, fmt.Errorf("load agent session %q: %w", assignment.SessionID, err)
+	}
+	if sess == nil {
+		return event.ReplyToEndpoint{}, fmt.Errorf("load agent session %q: empty result", assignment.SessionID)
+	}
+	ep.TmuxName = strings.TrimSpace(sess.TmuxSessionName)
+	if ep.TmuxName == "" {
+		return event.ReplyToEndpoint{}, fmt.Errorf("session %q missing tmux routing", assignment.SessionID)
+	}
+	// agent_sessions persist the durable agent_id profile, not an explicit agent_kind column.
+	// Resolve the supported bridge family from that durable identifier and fail closed when unknown.
+	ep.AgentKind = config.InferAgentKind(sess.AgentID, "")
+	if ep.AgentKind == "" {
+		return event.ReplyToEndpoint{}, fmt.Errorf("session %q has unsupported agent_id %q for bridge routing", assignment.SessionID, sess.AgentID)
 	}
 
-	return ep
+	return ep, nil
 }
 
 // fbItemsToEventItems converts FeedbackItem to event.FeedbackItem.

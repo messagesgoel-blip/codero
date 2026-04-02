@@ -1,6 +1,7 @@
 package event
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -46,8 +47,11 @@ type replyToDirectClient struct{}
 
 const defaultPTYBridgePath = "/srv/storage/shared/tools/bin/agent-tmux-bridge"
 
-var execPTYBridgeCommand = func(ctx context.Context, args ...string) ([]byte, error) {
+var execPTYBridgeCommand = func(ctx context.Context, input []byte, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, defaultPTYBridgePath, args...)
+	if input != nil {
+		cmd.Stdin = bytes.NewReader(input)
+	}
 	return cmd.CombinedOutput()
 }
 
@@ -94,10 +98,10 @@ func (c *replyToDirectClient) deliverViaBridge(ctx context.Context, env Envelope
 		"deliver",
 		"--session", env.ReplyTo.TmuxName,
 		"--profile", env.ReplyTo.AgentKind,
-		"--message", msg,
+		"--message-stdin",
 	}
 
-	if out, err := execPTYBridgeCommand(ctx, args...); err != nil {
+	if out, err := execPTYBridgeCommand(ctx, []byte(msg), args...); err != nil {
 		return fmt.Errorf("event: bridge delivery failed: %w (output: %s)", err, string(out))
 	}
 

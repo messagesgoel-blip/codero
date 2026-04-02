@@ -44,7 +44,7 @@ func TestMIG039_SubmitToMerge_HappyPath(t *testing.T) {
 	// Setup: seed branch state
 	const (
 		sessionID    = "sess-mig039"
-		agentID      = "agent-mig039"
+		agentID      = "codex-mig039"
 		assignmentID = "assign-mig039"
 		repo         = "acme/mig039-test"
 		branch       = "feat/mig039-test"
@@ -60,8 +60,8 @@ func TestMIG039_SubmitToMerge_HappyPath(t *testing.T) {
 	}
 
 	_, err = db.Unwrap().Exec(
-		`INSERT INTO agent_sessions (session_id, agent_id, mode, started_at, last_seen_at) VALUES (?, ?, 'coding', datetime('now'), datetime('now'))`,
-		sessionID, agentID,
+		`INSERT INTO agent_sessions (session_id, agent_id, mode, tmux_session_name, started_at, last_seen_at) VALUES (?, ?, 'coding', ?, datetime('now'), datetime('now'))`,
+		sessionID, agentID, "codero-"+sessionID,
 	)
 	if err != nil {
 		t.Fatalf("seed session: %v", err)
@@ -180,7 +180,7 @@ func TestMIG039_SubmitToMerge_GateFailurePath(t *testing.T) {
 
 	const (
 		sessionID    = "sess-gatefail"
-		agentID      = "agent-gatefail"
+		agentID      = "codex-gatefail"
 		assignmentID = "assign-gatefail"
 		repo         = "acme/gatefail"
 		branch       = "feat/gatefail"
@@ -196,8 +196,8 @@ func TestMIG039_SubmitToMerge_GateFailurePath(t *testing.T) {
 	}
 
 	_, err = db.Unwrap().Exec(
-		`INSERT INTO agent_sessions (session_id, agent_id, mode, started_at, last_seen_at) VALUES (?, ?, 'coding', datetime('now'), datetime('now'))`,
-		sessionID, agentID,
+		`INSERT INTO agent_sessions (session_id, agent_id, mode, tmux_session_name, started_at, last_seen_at) VALUES (?, ?, 'coding', ?, datetime('now'), datetime('now'))`,
+		sessionID, agentID, "codero-"+sessionID,
 	)
 	if err != nil {
 		t.Fatalf("seed session: %v", err)
