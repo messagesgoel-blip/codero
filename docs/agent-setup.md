@@ -44,7 +44,7 @@ For Claude Code's built-in hook system (PreToolUse / PostToolUse / Notification)
 codero agent hooks --install
 ```
 
-This writes hook entries into `~/.claude/settings.json` so Claude Code calls back to the daemon on tool use events.
+This writes hook entries into `~/.claude/settings.json` so Claude Code calls back to the daemon on tool use events. See [`docs/contracts/prehook-installation.md`](contracts/prehook-installation.md) for the full contract: idempotency guarantees, `--force` behavior, config recording, and failure modes.
 
 ### 3. Configure Claude Code to Use Shim
 
@@ -326,6 +326,8 @@ echo "agents discovered"
 ## See Also
 
 - `AGENTS.md` — Repository-specific agent policy
+- `docs/contracts/alias-registration.md` — SET-001: shim installation contract
+- `docs/contracts/prehook-installation.md` — SET-002: Claude Code heartbeat hook installation contract
 - `docs/roadmap.md` — P1-B task definitions
 - `docs/runtime/repo-onboarding.md` — Shared tooling and OpenClaw baseline onboarding
 - `codero agent --help` — CLI reference
