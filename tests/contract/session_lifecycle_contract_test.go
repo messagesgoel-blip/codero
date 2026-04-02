@@ -2,6 +2,7 @@ package contract
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -535,7 +536,7 @@ func TestMIG038_Finalize_AgentMismatch(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for wrong agentID, got nil")
 	}
-	if err != session.ErrSessionMismatch {
+	if !errors.Is(err, session.ErrSessionMismatch) {
 		t.Errorf("expected ErrSessionMismatch, got %v", err)
 	}
 }
