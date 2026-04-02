@@ -2,7 +2,7 @@
 
 Status: active
 Owner: sanjay
-Updated: 2026-04-01
+Updated: 2026-04-02
 Supersedes: local draft at `/srv/storage/local/codero/specication_033126/codero-agent-task-execution-roadmap.md`
 
 ## Purpose
@@ -30,17 +30,16 @@ not override this file for active implementation order.
 
 ## Current Baseline On Main
 
-- `origin/main` head: `06c3d9143c916afe9269fbd7cea71728853832fc`
+- `origin/main` head: `371f3206020f550653363f8b5cf9f6371936e38a`
 - Merged on `main`:
-  - `TOOL-001` through `TOOL-004`
+  - `TOOL-001` through `TOOL-005`
   - `BND-001` via PR `#147`
   - `BND-002` via PR `#148`
   - `BND-003` and `BND-004` via PR `#149`
 - Next unmerged tasks in canonical order:
-  1. `TOOL-005`
-  2. `SET-001`
-  3. `SET-002`
-  4. `SES-001` through `SES-004`
+  1. `SET-001`
+  2. `SET-002`
+  3. `SES-001` through `SES-004`
 
 ## Critical Path
 
@@ -67,7 +66,7 @@ shortest path to an OpenClaw-default runtime.
 | `TOOL-002` | Define the OpenClaw privilege profile and denylist | `done` | Landed with the tooling-baseline merge set |
 | `TOOL-003` | Pin the OpenClaw plugin allowlist and intended usage | `done` | Landed with the tooling-baseline merge set |
 | `TOOL-004` | Pin OpenClaw update cadence and change-control checks | `done` | Landed with the tooling-baseline merge set |
-| `TOOL-005` | Define a repo onboarding note for shared tooling and OpenClaw | `next` | Earliest incomplete execution task |
+| `TOOL-005` | Define a repo onboarding note for shared tooling and OpenClaw | `done` | PR landed; see `docs/runtime/repo-onboarding.md` |
 
 ### Wave 1: Boundary Freeze And Setup
 
@@ -77,7 +76,7 @@ shortest path to an OpenClaw-default runtime.
 | `BND-002` | Enforce environment ownership by layer | `done` | PR `#148` |
 | `BND-003` | Standardize managed session launch and identity contract | `done` | PR `#149` |
 | `BND-004` | Formalize event envelope and `reply_to` boundary | `done` | PR `#149` |
-| `SET-001` | Formalize one-time alias registration setup | `next` | First setup task after `TOOL-005` |
+| `SET-001` | Formalize one-time alias registration setup | `next` | First setup task after `TOOL-005`; earliest incomplete task |
 | `SET-002` | Formalize one-time prehook installation setup | `queued` | Follows `SET-001` |
 
 ### Wave 2: Session And Local Submit Core
@@ -132,13 +131,12 @@ shortest path to an OpenClaw-default runtime.
 
 ## Suggested Claim Order From Here
 
-1. `TOOL-005`
-2. `SET-001`
-3. `SET-002`
-4. `SES-001`
-5. `SES-002`
-6. `SES-003`
-7. `SES-004`
+1. `SET-001`
+2. `SET-002`
+3. `SES-001`
+4. `SES-002`
+5. `SES-003`
+6. `SES-004`
 
 ## Parallelization Rule
 
@@ -178,6 +176,7 @@ required to make the execution contract viable.
   - `docs/runtime/openclaw-privilege-profile.md`
   - `docs/runtime/openclaw-plugin-policy.md`
   - `docs/runtime/openclaw-update-policy.md`
+  - `docs/runtime/repo-onboarding.md` — repo onboarding note for the shared tooling and OpenClaw baseline (`TOOL-005`)
 - Boundary docs landed for Wave 1:
   - `docs/contracts/actor-boundaries.md`
   - `docs/contracts/env-ownership.md`

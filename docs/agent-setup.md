@@ -290,4 +290,5 @@ echo "agents discovered"
 
 - `AGENTS.md` — Repository-specific agent policy
 - `docs/roadmap.md` — P1-B task definitions
+- `docs/runtime/repo-onboarding.md` — Shared tooling and OpenClaw baseline onboarding
 - `codero agent --help` — CLI reference

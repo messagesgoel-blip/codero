@@ -2,6 +2,11 @@
 
 Use this file as the task-board ledger for spec-driven work.
 
+Status note (2026-04-02 UTC): `TOOL-005` is now complete. Next-task sequencing
+comes from `docs/roadmaps/agent-task-execution-roadmap.md`. `main` now carries
+`TOOL-001` through `TOOL-005` plus `BND-001` through `BND-004`. The next
+unmerged execution tasks are `SET-001` and `SET-002`.
+
 Status note (2026-04-01 UTC): next-task sequencing now comes from
 `docs/roadmaps/agent-task-execution-roadmap.md`. `main` already carries
 `TOOL-001` through `TOOL-004` plus `BND-001` through `BND-004`. The next
