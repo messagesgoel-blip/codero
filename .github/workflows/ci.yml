@@ -2,8 +2,32 @@ name: ci
 
 on:
   push:
-    branches: ["**"]
+    branches: [main]
+    paths:
+      - ".github/workflows/ci.yml"
+      - "Makefile"
+      - "go.mod"
+      - "go.sum"
+      - "cmd/**"
+      - "internal/**"
+      - "tests/**"
+      - "scripts/**"
   pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/ci.yml"
+      - "Makefile"
+      - "go.mod"
+      - "go.sum"
+      - "cmd/**"
+      - "internal/**"
+      - "tests/**"
+      - "scripts/**"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 # CodeRabbit runs as a GitHub Marketplace App (not as a CI workflow job).
 # Required Status Checks (configure in GitHub branch protection settings):
