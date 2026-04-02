@@ -10,8 +10,11 @@ This guide covers setting up AI agent tracking for Codero. Supported agents: Cla
 # Install codero CLI
 go install github.com/codero/codero/cmd/codero@latest
 
-# Set up agent shims
-codero agent hooks --install
+# Run one-time setup: creates shims and writes ~/.codero/config.yaml
+codero setup
+
+# Add shim directory to PATH (add to ~/.bashrc or ~/.zshrc)
+export PATH="$HOME/.codero/bin:$PATH"
 
 # Verify installation
 codero agent list --json
@@ -23,13 +26,27 @@ codero agent list --json
 
 ### 1. Install Shim
 
+Run the one-time setup command to create all supported agent shims:
+
+```bash
+codero setup
+```
+
+This creates a shim at `~/.codero/bin/claude` (and shims for other supported agents) that wraps the real binary.
+
+> **Note:** `codero agent hooks --install` installs Claude Code *heartbeat hooks* into `~/.claude/settings.json`. It does **not** create shims. These are two distinct operations — `codero setup` for shims, `codero agent hooks --install` for heartbeat hooks.
+
+### 2. Install Claude Code Heartbeat Hooks (Claude Code only)
+
+For Claude Code's built-in hook system (PreToolUse / PostToolUse / Notification), run:
+
 ```bash
 codero agent hooks --install
 ```
 
-This creates a shim at `~/.codero/bin/claude` that wraps the real Claude Code binary.
+This writes hook entries into `~/.claude/settings.json` so Claude Code calls back to the daemon on tool use events.
 
-### 2. Configure Claude Code to Use Shim
+### 3. Configure Claude Code to Use Shim
 
 Add to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.):
 
@@ -43,7 +60,7 @@ Or use the full path in your workflow:
 ~/.codero/bin/claude --repo-path /path/to/repo
 ```
 
-### 3. Verify Heartbeat Flow
+### 4. Verify Heartbeat Flow
 
 Start a session and verify heartbeats are recorded:
 
@@ -69,7 +86,7 @@ Expected output:
 ]
 ```
 
-### 4. Dashboard Verification
+### 5. Dashboard Verification
 
 Open the dashboard at `http://127.0.0.1:8110/dashboard`:
 - **Agents tab**: Shows Claude Code as "installed"
@@ -83,7 +100,7 @@ Open the dashboard at `http://127.0.0.1:8110/dashboard`:
 ### 1. Install Shim
 
 ```bash
-codero agent hooks --install --agent-id aider --binary $(which aider)
+codero setup --agent-id aider --binary $(which aider)
 ```
 
 ### 2. Configure Shell
@@ -142,7 +159,7 @@ For any CLI-based agent:
 ### 1. Create Shim
 
 ```bash
-codero agent hooks --install --agent-id myagent --binary /path/to/agent
+codero setup --agent-id myagent --binary /path/to/agent
 ```
 
 ### 2. Verify Shim
@@ -197,7 +214,7 @@ cat ~/.codero/bin/claude
 ls -la /srv/storage/shared/tools/bin/claude
 
 # Reinstall shim
-codero agent hooks --install --force
+codero setup --force
 ```
 
 ### No Heartbeats Received

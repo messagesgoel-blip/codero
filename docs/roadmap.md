@@ -23,10 +23,11 @@ roadmap.
 
 ## Current Execution Baseline
 
-- `origin/main` head is `371f3206020f550653363f8b5cf9f6371936e38a` (PR `#150`)
+- `origin/main` head is `242262b4f6f75970d3ac00e423fa370ff14cb32e` (PR `#151`)
 - Completed on `main`: `TOOL-001` through `TOOL-005`, `BND-001`, `BND-002`,
   `BND-003`, `BND-004`
-- Next unmerged execution tasks: `SET-001`, `SET-002`, then
+- This branch completes `SET-001`.
+- Next unmerged execution tasks: `SET-002`, then
   `SES-001` through `SES-004`
 
 ## Candidate Backlog After The Current Execution Roadmap

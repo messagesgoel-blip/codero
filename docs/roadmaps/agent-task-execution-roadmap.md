@@ -30,16 +30,16 @@ not override this file for active implementation order.
 
 ## Current Baseline On Main
 
-- `origin/main` head: `371f3206020f550653363f8b5cf9f6371936e38a`
+- `origin/main` head: `242262b4f6f75970d3ac00e423fa370ff14cb32e`
 - Merged on `main`:
   - `TOOL-001` through `TOOL-005`
   - `BND-001` via PR `#147`
   - `BND-002` via PR `#148`
   - `BND-003` and `BND-004` via PR `#149`
+- This branch completes `SET-001`.
 - Next unmerged tasks in canonical order:
-  1. `SET-001`
-  2. `SET-002`
-  3. `SES-001` through `SES-004`
+  1. `SET-002`
+  2. `SES-001` through `SES-004`
 
 ## Critical Path
 
@@ -76,8 +76,8 @@ shortest path to an OpenClaw-default runtime.
 | `BND-002` | Enforce environment ownership by layer | `done` | PR `#148` |
 | `BND-003` | Standardize managed session launch and identity contract | `done` | PR `#149` |
 | `BND-004` | Formalize event envelope and `reply_to` boundary | `done` | PR `#149` |
-| `SET-001` | Formalize one-time alias registration setup | `next` | First setup task after `TOOL-005`; earliest incomplete task |
-| `SET-002` | Formalize one-time prehook installation setup | `queued` | Follows `SET-001` |
+| `SET-001` | Formalize one-time alias registration setup | `done` | PR open; follows `TOOL-005` |
+| `SET-002` | Formalize one-time prehook installation setup | `next` | Follows `SET-001` |
 
 ### Wave 2: Session And Local Submit Core
 
@@ -131,12 +131,11 @@ shortest path to an OpenClaw-default runtime.
 
 ## Suggested Claim Order From Here
 
-1. `SET-001`
-2. `SET-002`
-3. `SES-001`
-4. `SES-002`
-5. `SES-003`
-6. `SES-004`
+1. `SET-002`
+2. `SES-001`
+3. `SES-002`
+4. `SES-003`
+5. `SES-004`
 
 ## Parallelization Rule
 
@@ -182,3 +181,5 @@ required to make the execution contract viable.
   - `docs/contracts/env-ownership.md`
   - `docs/contracts/session-lifecycle-contract.md`
   - `docs/contracts/bot-pty-delivery-contract.md`
+- Setup docs landed for Wave 1:
+  - `docs/contracts/alias-registration.md`
