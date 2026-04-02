@@ -5,7 +5,7 @@ services:
       args:
         VERSION: ${CODERO_VERSION:-v1.0.0}
     image: codero:${CODERO_VERSION:-v1.0.0}
-    container_name: codero
+    container_name: codero-dev
     restart: unless-stopped
     env_file: .env
     environment:
@@ -14,6 +14,7 @@ services:
       CODERO_DB_PATH: /data/db/codero.db
       CODERO_PID_FILE: /data/pids/codero.pid
       CODERO_LOG_PATH: /data/logs/codero.log
+      CODERO_COVERAGE_PATH: /data/coverage.out
       CODERO_OBSERVABILITY_PORT: "8080"
     ports:
       - "127.0.0.1:8110:8080"
@@ -26,14 +27,14 @@ services:
     networks:
       default:
       proxy:
-        ipv4_address: 172.25.0.31
+        ipv4_address: 172.25.0.210
     depends_on:
       redis:
         condition: service_healthy
 
   redis:
     image: redis:7-alpine
-    container_name: codero-redis-prod
+    container_name: codero-redis-dev
     restart: unless-stopped
     environment:
       CODERO_REDIS_PASS: ${CODERO_REDIS_PASS:-}
