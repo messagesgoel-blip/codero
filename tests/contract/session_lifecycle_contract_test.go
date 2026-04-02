@@ -2,6 +2,7 @@ package contract
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -585,5 +586,158 @@ func TestMIG038_AttachAssignment_SubstatusStored(t *testing.T) {
 	}
 	if storedSubstatus != substatus {
 		t.Errorf("assignment_substatus = %q, want %q", storedSubstatus, substatus)
+	}
+}
+
+// TestMIG038_Observe_ReturnsSessionState tests that Get returns session + active assignment.
+func TestMIG038_Observe_ReturnsSessionState(t *testing.T) {
+	db := openSessionContractDB(t)
+	ctx := context.Background()
+
+	store := session.NewStore(db)
+
+	const (
+		sessionID = "sess-observe-1"
+		agentID   = "agent-observe"
+		repo      = "acme/observe-repo"
+		branch    = "main"
+		taskID    = "TASK-OBS-001"
+	)
+
+	// Register session
+	_, err := store.Register(ctx, sessionID, agentID, "coding")
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	// Get before assignment
+	info, err := store.Get(ctx, sessionID, agentID)
+	if err != nil {
+		t.Fatalf("Get (before assignment): %v", err)
+	}
+	if info.Session.SessionID != sessionID {
+		t.Errorf("session_id = %q, want %q", info.Session.SessionID, sessionID)
+	}
+	if info.Assignment != nil {
+		t.Errorf("expected nil assignment before attach, got %+v", info.Assignment)
+	}
+
+	// Seed branch state and attach
+	if _, err := db.Unwrap().Exec(
+		`INSERT INTO branch_states (id, repo, branch, state) VALUES (?, ?, ?, ?)`,
+		"branch-observe", repo, branch, "submitted",
+	); err != nil {
+		t.Fatalf("seed branch state: %v", err)
+	}
+
+	if err := store.AttachAssignment(ctx, sessionID, agentID, repo, branch, t.TempDir(), "coding", taskID, "in_progress"); err != nil {
+		t.Fatalf("AttachAssignment: %v", err)
+	}
+
+	// Get after assignment
+	info, err = store.Get(ctx, sessionID, agentID)
+	if err != nil {
+		t.Fatalf("Get (after assignment): %v", err)
+	}
+	if info.Session.SessionID != sessionID {
+		t.Errorf("session_id = %q, want %q", info.Session.SessionID, sessionID)
+	}
+	if info.Assignment == nil {
+		t.Fatal("expected active assignment after attach, got nil")
+	}
+	if info.Assignment.Repo != repo || info.Assignment.Branch != branch || info.Assignment.TaskID != taskID {
+		t.Errorf("assignment = %s/%s task=%s, want %s/%s task=%s", info.Assignment.Repo, info.Assignment.Branch, info.Assignment.TaskID, repo, branch, taskID)
+	}
+}
+
+// TestMIG038_AttachIdempotent_SameParams tests that re-attaching with identical
+// params does not create a new assignment row.
+func TestMIG038_AttachIdempotent_SameParams(t *testing.T) {
+	db := openSessionContractDB(t)
+	ctx := context.Background()
+
+	store := session.NewStore(db)
+
+	const (
+		sessionID = "sess-idempotent-1"
+		agentID   = "agent-idempotent"
+		repo      = "acme/idempotent-repo"
+		branch    = "feature/idempotent"
+		taskID    = "TASK-IMP-001"
+		substatus = "in_progress"
+	)
+
+	// Register session
+	_, err := store.Register(ctx, sessionID, agentID, "coding")
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	// Seed branch state
+	if _, err := db.Unwrap().Exec(
+		`INSERT INTO branch_states (id, repo, branch, state) VALUES (?, ?, ?, ?)`,
+		"branch-idempotent", repo, branch, "submitted",
+	); err != nil {
+		t.Fatalf("seed branch state: %v", err)
+	}
+
+	// First attach
+	if err := store.AttachAssignment(ctx, sessionID, agentID, repo, branch, t.TempDir(), "coding", taskID, substatus); err != nil {
+		t.Fatalf("AttachAssignment (first): %v", err)
+	}
+
+	// Count assignments
+	var count1 int
+	if err := db.Unwrap().QueryRow(`SELECT COUNT(*) FROM agent_assignments WHERE session_id = ?`, sessionID).Scan(&count1); err != nil {
+		t.Fatalf("count assignments (after first): %v", err)
+	}
+	if count1 != 1 {
+		t.Fatalf("expected 1 assignment after first attach, got %d", count1)
+	}
+
+	// Second attach with same params
+	if err := store.AttachAssignment(ctx, sessionID, agentID, repo, branch, t.TempDir(), "coding", taskID, substatus); err != nil {
+		t.Fatalf("AttachAssignment (second): %v", err)
+	}
+
+	// Count assignments again - should still be 1
+	var count2 int
+	if err := db.Unwrap().QueryRow(`SELECT COUNT(*) FROM agent_assignments WHERE session_id = ?`, sessionID).Scan(&count2); err != nil {
+		t.Fatalf("count assignments (after second): %v", err)
+	}
+	if count2 != 1 {
+		t.Errorf("expected 1 assignment after idempotent attach, got %d (should not create duplicate)", count2)
+	}
+
+	// Verify the assignment is still active (not superseded)
+	var endedAt sql.NullTime
+	if err := db.Unwrap().QueryRow(`SELECT ended_at FROM agent_assignments WHERE session_id = ?`, sessionID).Scan(&endedAt); err != nil {
+		t.Fatalf("query ended_at: %v", err)
+	}
+	if endedAt.Valid {
+		t.Errorf("assignment ended_at should be NULL for active assignment, got %v", endedAt.Time)
+	}
+
+	// Now attach with different task_id - should create new row
+	const newTaskID = "TASK-IMP-002"
+	if err := store.AttachAssignment(ctx, sessionID, agentID, repo, branch, t.TempDir(), "coding", newTaskID, substatus); err != nil {
+		t.Fatalf("AttachAssignment (different task): %v", err)
+	}
+
+	var count3 int
+	if err := db.Unwrap().QueryRow(`SELECT COUNT(*) FROM agent_assignments WHERE session_id = ?`, sessionID).Scan(&count3); err != nil {
+		t.Fatalf("count assignments (after different task): %v", err)
+	}
+	if count3 != 2 {
+		t.Errorf("expected 2 assignments after different task attach, got %d", count3)
+	}
+
+	// Verify first assignment was superseded
+	var supersededCount int
+	if err := db.Unwrap().QueryRow(`SELECT COUNT(*) FROM agent_assignments WHERE session_id = ? AND ended_at IS NOT NULL`, sessionID).Scan(&supersededCount); err != nil {
+		t.Fatalf("count superseded: %v", err)
+	}
+	if supersededCount != 1 {
+		t.Errorf("expected 1 superseded assignment, got %d", supersededCount)
 	}
 }

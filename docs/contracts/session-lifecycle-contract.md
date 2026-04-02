@@ -1,6 +1,6 @@
 # Session Lifecycle Contract
 
-**Version:** 1.1
+**Version:** 1.2
 **Last Updated:** 2026-04-02
 **MIG Reference:** MIG-038
 
@@ -60,6 +60,25 @@ err := store.Confirm(ctx, sessionID, agentID)
 - `ErrSessionNotFound` — Session does not exist or already ended
 - `ErrSessionMismatch` — agentID does not match registered agent
 
+### Get
+
+Retrieves session state and active assignment (if any) in a single read-only operation.
+
+```go
+info, err := store.Get(ctx, sessionID, agentID)
+```
+
+- Returns `SessionInfo` containing:
+  - `Session` — The agent session row
+  - `Assignment` — The active assignment (nil if none)
+- `agentID` — Optional. If non-empty, verifies agent_id matches
+
+**Errors**:
+- `ErrSessionNotFound` — Session does not exist
+- `ErrSessionMismatch` — agentID provided and does not match
+
+**Use Case**: CLI `codero session get` command for observing session state without modification.
+
 ### Heartbeat
 
 Updates `last_seen_at` timestamp and validates session ownership.
@@ -99,12 +118,15 @@ err := store.AttachAssignment(ctx, sessionID, agentID, repo, branch, worktree, m
 
 - `substatus` — Initial `assignment_substatus` value for the new row (e.g. `in_progress`)
 
+**Idempotency**: If the session already has an active assignment with matching `repo`, `branch`, and `task_id`, the operation returns success immediately without creating a new assignment row. Only session timestamps are updated. This avoids creating duplicate assignments when re-attaching the same context.
+
 **Preconditions**:
 - Session must exist
 - Branch state row must exist (returns `ErrBranchNotFound` otherwise)
 
 **Postconditions**:
-- Creates `agent_assignments` row
+- If no match: Supersedes any previous active assignment and creates new `agent_assignments` row
+- If match: No new row created, timestamps updated
 - Updates `branch_states.owner_session_id` and `branch_states.owner_agent`
 
 ### Finalize
@@ -234,6 +256,8 @@ Location: `tests/contract/session_lifecycle_contract_test.go`
 | TestMIG038_Finalize_WritesArchiveRow | Finalize atomically creates session_archives row |
 | TestMIG038_Finalize_AgentMismatch | Finalize rejects wrong agentID |
 | TestMIG038_AttachAssignment_SubstatusStored | AttachAssignment stores substatus on the assignment row |
+| TestMIG038_Observe_ReturnsSessionState | Get returns session + active assignment (or nil) |
+| TestMIG038_AttachIdempotent_SameParams | Re-attaching with same params does not create duplicate rows |
 
 ## Invariants
 
