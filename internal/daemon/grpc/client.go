@@ -8,12 +8,15 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	daemonv1 "github.com/codero/codero/internal/daemon/grpc/v1"
 	"github.com/codero/codero/internal/session"
+	"github.com/codero/codero/internal/state"
 )
 
 // Compile-time assertion: SessionClient implements session.SessionBackend.
@@ -202,6 +205,51 @@ func (c *SessionClient) Confirm(ctx context.Context, sessionID, agentID string) 
 	return nil
 }
 
+// Get retrieves the current session summary and active assignment from the daemon.
+func (c *SessionClient) Get(ctx context.Context, sessionID, agentID string) (*session.SessionInfo, error) {
+	if sessionID == "" {
+		return nil, session.ErrMissingSessionID
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	resp, err := c.client.GetSession(ctx, &daemonv1.GetSessionRequest{
+		SessionId: sessionID,
+	})
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return nil, session.ErrSessionNotFound
+		}
+		return nil, fmt.Errorf("get session: %w", err)
+	}
+	if agentID != "" && resp.AgentId != agentID {
+		return nil, session.ErrSessionMismatch
+	}
+
+	info := &session.SessionInfo{
+		Session: state.AgentSession{
+			SessionID:      resp.SessionId,
+			AgentID:        resp.AgentId,
+			Mode:           resp.ClientKind,
+			StartedAt:      timestampAsTime(resp.StartedAt),
+			LastSeenAt:     timestampAsTime(resp.LastSeenAt),
+			InferredStatus: daemonSessionStatusLabel(resp.Status),
+		},
+	}
+	if assignment := resp.GetActiveAssignment(); assignment != nil {
+		info.Assignment = &state.AgentAssignment{
+			ID:     assignment.GetAssignmentId(),
+			TaskID: assignment.GetTaskId(),
+			Repo:   assignment.GetRepo(),
+			Branch: assignment.GetBranch(),
+			State:  assignment.GetState(),
+		}
+	}
+
+	return info, nil
+}
+
 // AttachAssignment attaches a repo/branch to an active session.
 func (c *SessionClient) AttachAssignment(
 	ctx context.Context,
@@ -224,6 +272,28 @@ func (c *SessionClient) AttachAssignment(
 		return fmt.Errorf("attach assignment: %w", err)
 	}
 	return nil
+}
+
+func timestampAsTime(ts *timestamppb.Timestamp) time.Time {
+	if ts == nil {
+		return time.Time{}
+	}
+	return ts.AsTime()
+}
+
+func daemonSessionStatusLabel(status daemonv1.SessionStatus) string {
+	switch status {
+	case daemonv1.SessionStatus_SESSION_STATUS_ACTIVE:
+		return "active"
+	case daemonv1.SessionStatus_SESSION_STATUS_ENDED:
+		return "ended"
+	case daemonv1.SessionStatus_SESSION_STATUS_LOST:
+		return "lost"
+	case daemonv1.SessionStatus_SESSION_STATUS_EXPIRED:
+		return "expired"
+	default:
+		return state.InferredStatusUnknown
+	}
 }
 
 // Finalize marks a session as complete.
