@@ -181,5 +181,5 @@ required to make the execution contract viable.
   - `docs/contracts/env-ownership.md`
   - `docs/contracts/session-lifecycle-contract.md`
   - `docs/contracts/bot-pty-delivery-contract.md`
-- Setup docs landed for Wave 1:
+- Setup docs for Wave 1:
   - `docs/contracts/alias-registration.md`
