@@ -30,16 +30,16 @@ not override this file for active implementation order.
 
 ## Current Baseline On Main
 
-- `origin/main` head: `242262b4f6f75970d3ac00e423fa370ff14cb32e`
+- `origin/main` head: `74bdfe0` (includes TOOL-005 PR #151 and SET-001 PR #152)
 - Merged on `main`:
   - `TOOL-001` through `TOOL-005`
   - `BND-001` via PR `#147`
   - `BND-002` via PR `#148`
   - `BND-003` and `BND-004` via PR `#149`
-- This branch completes `SET-001`.
+  - `SET-001` via PR `#152`
+- This branch completes `SET-002`.
 - Next unmerged tasks in canonical order:
-  1. `SET-002`
-  2. `SES-001` through `SES-004`
+  1. `SES-001` through `SES-004`
 
 ## Critical Path
 
@@ -76,14 +76,14 @@ shortest path to an OpenClaw-default runtime.
 | `BND-002` | Enforce environment ownership by layer | `done` | PR `#148` |
 | `BND-003` | Standardize managed session launch and identity contract | `done` | PR `#149` |
 | `BND-004` | Formalize event envelope and `reply_to` boundary | `done` | PR `#149` |
-| `SET-001` | Formalize one-time alias registration setup | `done` | PR open; follows `TOOL-005` |
-| `SET-002` | Formalize one-time prehook installation setup | `next` | Follows `SET-001` |
+| `SET-001` | Formalize one-time alias registration setup | `done` | PR `#152` |
+| `SET-002` | Formalize one-time prehook installation setup | `done` | Follows `SET-001` |
 
 ### Wave 2: Session And Local Submit Core
 
 | Task | Title | Status |
 |---|---|---|
-| `SES-001` | Complete session register, confirm, heartbeat, and finalize parity | `queued` |
+| `SES-001` | Complete session register, confirm, heartbeat, and finalize parity | `next` |
 | `SES-002` | Implement idempotent observe and attach behavior | `queued` |
 | `SES-003` | Expose a Codero-owned deliver contract backed by the bridge | `queued` |
 | `SES-004` | Preserve session continuity across adapter restart and phase shift | `queued` |
@@ -131,11 +131,10 @@ shortest path to an OpenClaw-default runtime.
 
 ## Suggested Claim Order From Here
 
-1. `SET-002`
-2. `SES-001`
-3. `SES-002`
-4. `SES-003`
-5. `SES-004`
+1. `SES-001`
+2. `SES-002`
+3. `SES-003`
+4. `SES-004`
 
 ## Parallelization Rule
 
@@ -183,3 +182,4 @@ required to make the execution contract viable.
   - `docs/contracts/bot-pty-delivery-contract.md`
 - Setup docs for Wave 1:
   - `docs/contracts/alias-registration.md`
+  - `docs/contracts/prehook-installation.md`

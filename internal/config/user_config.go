@@ -118,6 +118,13 @@ func parseShim(path string) (agentID, realBinary string) {
 	return "", ""
 }
 
+// HooksConfig records one Codero-managed prehook installation. The map key
+// in UserConfig.Hooks is the agent family (e.g. "claude").
+type HooksConfig struct {
+	SettingsPath string    `yaml:"settings_path"`
+	InstalledAt  time.Time `yaml:"installed_at,omitempty"`
+}
+
 // UserConfig is the per-user config at ~/.codero/config.yaml.
 // It is separate from the daemon Config and holds agent-side settings.
 type UserConfig struct {
@@ -125,6 +132,7 @@ type UserConfig struct {
 	DaemonAddr     string                   `yaml:"daemon_addr"`
 	SetupAt        time.Time                `yaml:"setup_at,omitempty"`
 	Wrappers       map[string]WrapperConfig `yaml:"wrappers,omitempty"`
+	Hooks          map[string]HooksConfig   `yaml:"hooks,omitempty"`
 	DisabledAgents []string                 `yaml:"disabled_agents,omitempty"`
 	Registry       AgentRegistry            `yaml:"registry,omitempty"`
 }

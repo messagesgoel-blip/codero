@@ -176,10 +176,13 @@ func writeUserConfig(daemonAddr string, force bool) (string, error) {
 	}
 
 	uc := &config.UserConfig{
-		Version:    1,
-		DaemonAddr: daemonAddr,
-		SetupAt:    time.Now().UTC(),
-		Wrappers:   existing.Wrappers,
+		Version:        1,
+		DaemonAddr:     daemonAddr,
+		SetupAt:        time.Now().UTC(),
+		Wrappers:       existing.Wrappers,
+		Hooks:          existing.Hooks,
+		DisabledAgents: append([]string(nil), existing.DisabledAgents...),
+		Registry:       existing.Registry,
 	}
 	if uc.Wrappers == nil {
 		uc.Wrappers = make(map[string]config.WrapperConfig)

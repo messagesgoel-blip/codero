@@ -3,8 +3,10 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/codero/codero/internal/config"
 )
@@ -204,6 +206,73 @@ func TestInstallShim_ShimTemplate(t *testing.T) {
 	// Must exec through codero agent run.
 	if !strings.Contains(content, "exec codero agent run --agent-id opencode") {
 		t.Error("shim missing canonical exec invocation")
+	}
+}
+
+// TestWriteUserConfig_ForcePreservesExistingMetadata verifies that setup --force
+// keeps non-wrapper user config fields instead of wiping them on rewrite.
+func TestWriteUserConfig_ForcePreservesExistingMetadata(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("CODERO_USER_CONFIG_DIR", configDir)
+
+	hookInstalledAt := time.Date(2026, 4, 2, 0, 0, 0, 0, time.UTC)
+	lastScan := time.Date(2026, 4, 2, 1, 0, 0, 0, time.UTC)
+	hookSettingsPath := filepath.Join(configDir, "fixtures", "claude", "settings.json")
+	existing := &config.UserConfig{
+		Version:    1,
+		DaemonAddr: "127.0.0.1:9000",
+		Wrappers: map[string]config.WrapperConfig{
+			"claude": {RealBinary: "/usr/bin/claude"},
+		},
+		Hooks: map[string]config.HooksConfig{
+			"claude": {
+				SettingsPath: hookSettingsPath,
+				InstalledAt:  hookInstalledAt,
+			},
+		},
+		DisabledAgents: []string{"claude"},
+		Registry: config.AgentRegistry{
+			LastScan: lastScan,
+			Agents: map[string]config.RegisteredAgent{
+				"claude": {
+					AgentID:    "claude",
+					AgentKind:  config.AgentKindClaude,
+					RealBinary: "/usr/bin/claude",
+					Installed:  true,
+				},
+			},
+		},
+	}
+	if err := existing.Save(); err != nil {
+		t.Fatalf("save existing user config: %v", err)
+	}
+
+	result, err := writeUserConfig("127.0.0.1:8110", true)
+	if err != nil {
+		t.Fatalf("writeUserConfig force: %v", err)
+	}
+	if result != "created" {
+		t.Fatalf("expected created result on force rewrite, got %q", result)
+	}
+
+	uc, err := config.LoadUserConfig()
+	if err != nil {
+		t.Fatalf("load rewritten user config: %v", err)
+	}
+	if uc.DaemonAddr != "127.0.0.1:8110" {
+		t.Fatalf("daemon_addr = %q, want %q", uc.DaemonAddr, "127.0.0.1:8110")
+	}
+	if !reflect.DeepEqual(uc.Wrappers, existing.Wrappers) {
+		t.Fatalf("wrappers not preserved: got %#v want %#v", uc.Wrappers, existing.Wrappers)
+	}
+	if !reflect.DeepEqual(uc.Hooks, existing.Hooks) {
+		t.Fatalf("hooks not preserved: got %#v want %#v", uc.Hooks, existing.Hooks)
+	}
+	if !reflect.DeepEqual(uc.DisabledAgents, existing.DisabledAgents) {
+		t.Fatalf("disabled_agents not preserved: got %#v want %#v", uc.DisabledAgents, existing.DisabledAgents)
+	}
+	if !reflect.DeepEqual(uc.Registry, existing.Registry) {
+		t.Fatalf("registry not preserved: got %#v want %#v", uc.Registry, existing.Registry)
 	}
 }
 
