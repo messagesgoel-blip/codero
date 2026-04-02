@@ -40,7 +40,7 @@ agent -> openclaw -> codero -> github -> codero -> openclaw -> agent
 ## References
 
 - Canonical spec: `/srv/storage/local/codero/specication_033126/codero-agent-task-execution-spec.md`
-- Roadmap: `/srv/storage/local/codero/specication_033126/codero-agent-task-execution-roadmap.md`
+- Roadmap: `docs/roadmaps/agent-task-execution-roadmap.md`
 - BND-001 task definition: freeze actor authority and hop boundaries
 
 ## Change Log

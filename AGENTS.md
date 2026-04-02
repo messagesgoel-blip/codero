@@ -11,6 +11,12 @@ If any rule conflicts, global policy wins.
 ## Canonical Path
 `/srv/storage/repo/codero/`
 
+## Roadmap Precedence
+- For next-task selection and implementation sequencing, use `docs/roadmaps/agent-task-execution-roadmap.md`.
+- `docs/roadmap.md` is the roadmap index and strategic/release view; it does not override the execution roadmap for active task claims.
+- `docs/roadmaps/*-backlog.md` files are candidate pools only unless a PR explicitly promotes them into the execution roadmap.
+- Ignore untracked local planning files when choosing the next Codero task. If there is a conflict, the committed execution roadmap wins.
+
 ## Service Ownership
 Codero owns the orchestration control plane: daemon lifecycle, queue/lease/heartbeat coordination, repo/task state transitions, and operator status surfaces (CLI/TUI/API).
 

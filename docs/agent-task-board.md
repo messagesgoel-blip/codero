@@ -2,6 +2,11 @@
 
 Use this file as the task-board ledger for spec-driven work.
 
+Status note (2026-04-01 UTC): next-task sequencing now comes from
+`docs/roadmaps/agent-task-execution-roadmap.md`. `main` already carries
+`TOOL-001` through `TOOL-004` plus `BND-001` through `BND-004`. The next
+unmerged execution tasks are `TOOL-005`, `SET-001`, and `SET-002`.
+
 Status note (2026-03-24 UTC): legacy branch-era rows were retired after PRs `#88`-`#91`
 merged and the Codero spec set under `/srv/storage/Specifications/codero` became the
 authoritative baseline. Under the Certification Baseline v1 Definition of Done, a slice
