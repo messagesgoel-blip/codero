@@ -1300,15 +1300,8 @@ func queryDashboardHealth(ctx context.Context, db *sql.DB) (DashboardHealth, err
 	if repoRoot == "" {
 		repoRoot = "."
 	}
-	// CODERO_COVERAGE_PATH overrides the default coverage.out location.
-	// This allows CI to point to a generated file outside the repo root
-	// without needing filesystem access to the dashboard server.
-	coveragePath := os.Getenv("CODERO_COVERAGE_PATH")
-	if coveragePath == "" {
-		coveragePath = filepath.Join(repoRoot, "coverage.out")
-	}
 	h.SecurityScore = computeSecurityScore(reportPath)
-	h.CoveragePct = parseCoverageFilePath(coveragePath)
+	h.CoveragePct = parseCoverageFilePath(resolveCoveragePath())
 	etaDetail := queryETADetail(ctx, db, "", "")
 	if etaDetail != nil {
 		h.ETAMin = &etaDetail.ETAMin
@@ -1316,6 +1309,20 @@ func queryDashboardHealth(ctx context.Context, db *sql.DB) (DashboardHealth, err
 	}
 
 	return h, nil
+}
+
+// resolveCoveragePath determines the absolute or relative path to the
+// coverage.out file used by the dashboard.
+// Precedence: CODERO_COVERAGE_PATH > {CODERO_REPO_PATH}/coverage.out > ./coverage.out
+func resolveCoveragePath() string {
+	if p := os.Getenv("CODERO_COVERAGE_PATH"); p != "" {
+		return p
+	}
+	repoRoot := os.Getenv("CODERO_REPO_PATH")
+	if repoRoot == "" {
+		repoRoot = "."
+	}
+	return filepath.Join(repoRoot, "coverage.out")
 }
 
 func querySessionMonitoring(ctx context.Context, db *sql.DB) (staleCount, expiredCount int, status string, err error) {

@@ -298,6 +298,16 @@ type UploadResponse struct {
 	Message string `json:"message"`
 }
 
+// CoverageUploadResponse is the response for POST /api/v1/dashboard/coverage-upload.
+type CoverageUploadResponse struct {
+	Path          string    `json:"path"`
+	CoveragePct   *float64  `json:"coverage_pct"`
+	Status        string    `json:"status"`
+	Message       string    `json:"message"`
+	GeneratedAt   time.Time `json:"generated_at"`
+	SchemaVersion string    `json:"schema_version"`
+}
+
 // ErrorResponse is the common error envelope.
 type ErrorResponse struct {
 	Error string `json:"error"`
