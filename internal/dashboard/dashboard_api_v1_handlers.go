@@ -11,7 +11,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/codero/codero/internal/config"
@@ -19,10 +18,6 @@ import (
 	"github.com/codero/codero/internal/session"
 	"github.com/codero/codero/internal/state"
 )
-
-// trackingConfigMu serializes read-modify-write on ~/.codero/config.yaml
-// to prevent lost updates from concurrent PUT requests.
-var trackingConfigMu sync.Mutex
 
 // ─── §3 Session endpoints ────────────────────────────────────────────────
 
@@ -886,8 +881,14 @@ func (h *Handler) handleTrackingConfig(w http.ResponseWriter, r *http.Request) {
 		// from the operator UI immediately after they are removed from disk.
 		uc, agents, err := config.LoadUserConfigWithFreshRegistry()
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "load config: "+err.Error(), "config_error")
-			return
+			loglib.Warn("dashboard: tracking-config: fresh registry load failed",
+				loglib.FieldComponent, "dashboard", "error", err)
+			uc, err = config.LoadUserConfig()
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "load config: "+err.Error(), "config_error")
+				return
+			}
+			agents = uc.RegisteredAgents()
 		}
 		disabled := uc.DisabledAgents
 		if disabled == nil {
@@ -937,10 +938,10 @@ func (h *Handler) handleTrackingConfig(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		// Serialize load→modify→save to prevent lost updates.
-		trackingConfigMu.Lock()
+		config.ConfigMu.Lock()
 		uc, err := config.LoadUserConfig()
 		if err != nil {
-			trackingConfigMu.Unlock()
+			config.ConfigMu.Unlock()
 			writeError(w, http.StatusInternalServerError, "load config: "+err.Error(), "config_error")
 			return
 		}
@@ -956,11 +957,11 @@ func (h *Handler) handleTrackingConfig(w http.ResponseWriter, r *http.Request) {
 			uc.Wrappers[req.AgentID] = wConf
 		}
 		if err := uc.Save(); err != nil {
-			trackingConfigMu.Unlock()
+			config.ConfigMu.Unlock()
 			writeError(w, http.StatusInternalServerError, "save config: "+err.Error(), "config_error")
 			return
 		}
-		trackingConfigMu.Unlock()
+		config.ConfigMu.Unlock()
 		agents := uc.DisabledAgents
 		if agents == nil {
 			agents = []string{}
@@ -996,15 +997,26 @@ func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
 
 	// Intentionally force a fresh scan here so deleted local profiles disappear
 	// from the operator UI immediately after they are removed from disk.
-	_, registryAgents, ucErr := config.LoadUserConfigWithFreshRegistry()
+	uc, registryAgents, ucErr := config.LoadUserConfigWithFreshRegistry()
 	if ucErr != nil {
 		loglib.Warn("dashboard: agents: failed to load user config",
 			loglib.FieldComponent, "dashboard", "error", ucErr)
+		uc, ucErr = config.LoadUserConfig()
+		if ucErr != nil {
+			loglib.Warn("dashboard: agents: failed to load cached user config",
+				loglib.FieldComponent, "dashboard", "error", ucErr)
+		} else {
+			registryAgents = uc.RegisteredAgents()
+		}
 	}
 	registryByID := map[string]config.RegisteredAgent{}
-	if ucErr == nil {
-		for _, agent := range registryAgents {
-			registryByID[agent.AgentID] = agent
+	for _, agent := range registryAgents {
+		registryByID[agent.AgentID] = agent
+	}
+	disabledByID := map[string]bool{}
+	if uc != nil {
+		for _, agentID := range uc.DisabledAgents {
+			disabledByID[agentID] = true
 		}
 	}
 
@@ -1014,6 +1026,8 @@ func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
 		seenIDs[roster[i].AgentID] = true
 		if info, ok := registryByID[roster[i].AgentID]; ok {
 			roster[i].Status = agentStatus(roster[i], info.Disabled)
+		} else if disabledByID[roster[i].AgentID] {
+			roster[i].Status = agentStatus(roster[i], true)
 		}
 	}
 	// Append shim-only agents (discovered but no 30-day history).

@@ -65,9 +65,6 @@ func (uc *UserConfig) RegistryStale(now time.Time, maxAge time.Duration) bool {
 	if uc.Registry.LastScan.IsZero() {
 		return true
 	}
-	if len(uc.Registry.Agents) == 0 {
-		return true
-	}
 	return now.Sub(uc.Registry.LastScan) >= maxAge
 }
 
@@ -114,6 +111,7 @@ func (uc *UserConfig) RefreshAgentRegistry(now time.Time) ([]RegisteredAgent, er
 		if !ok {
 			entry = prev[agentID]
 		}
+		prior := entry
 		if entry.AgentID == "" {
 			entry.AgentID = agentID
 		}
@@ -141,12 +139,12 @@ func (uc *UserConfig) RefreshAgentRegistry(now time.Time) ([]RegisteredAgent, er
 		entry.ConfigStrategy = firstNonEmpty(wrapper.ConfigStrategy, entry.ConfigStrategy)
 		entry.ConfigPath = firstNonEmpty(wrapper.ConfigPath, entry.ConfigPath)
 		entry.PermissionProfile = firstNonEmpty(wrapper.PermissionProfile, entry.PermissionProfile)
-		if len(wrapper.DefaultArgs) > 0 {
+		if wrapper.DefaultArgs != nil {
 			entry.DefaultArgs = copyStringSlice(wrapper.DefaultArgs)
 		}
 		entry.Installed = installed
 		entry.Disabled = uc.IsTrackingDisabled(agentID)
-		if len(wrapper.EnvVars) > 0 {
+		if wrapper.EnvVars != nil {
 			entry.EnvVars = copyEnvVars(wrapper.EnvVars)
 		} else if discoveredEnvVars != nil {
 			entry.EnvVars = copyEnvVars(discoveredEnvVars)
@@ -156,11 +154,17 @@ func (uc *UserConfig) RefreshAgentRegistry(now time.Time) ([]RegisteredAgent, er
 			entry.Source = source
 		}
 
-		entry.ShimNames = uniqueAliases(append(entry.ShimNames, shimNames...))
+		if shimNames != nil {
+			entry.ShimNames = uniqueAliases(shimNames)
+		} else {
+			entry.ShimNames = uniqueAliases(entry.ShimNames)
+		}
 		entry.ShimName = choosePrimaryShimName(agentID, entry.ShimNames)
 
-		combinedAliases := append([]string{}, entry.Aliases...)
-		combinedAliases = append(combinedAliases, wrapper.Aliases...)
+		combinedAliases := storedWrapperAliases(prior, agentID)
+		if wrapper.Aliases != nil {
+			combinedAliases = copyStringSlice(wrapper.Aliases)
+		}
 		combinedAliases = append(combinedAliases, agentID)
 		combinedAliases = append(combinedAliases, entry.ShimNames...)
 		if entry.RealBinary != "" {
@@ -201,13 +205,16 @@ func (uc *UserConfig) RefreshAgentRegistry(now time.Time) ([]RegisteredAgent, er
 	}
 
 	for agentID, wrapper := range uc.Wrappers {
+		if _, ok := discoveredByID[agentID]; ok {
+			continue
+		}
 		installed := false
 		if strings.TrimSpace(wrapper.RealBinary) != "" {
 			if _, err := os.Stat(wrapper.RealBinary); err == nil {
 				installed = true
 			}
 		}
-		merge(agentID, nil, wrapper.RealBinary, "wrapper_config", installed, nil, wrapper)
+		merge(agentID, []string{}, wrapper.RealBinary, "wrapper_config", installed, nil, wrapper)
 	}
 
 	uc.Registry.LastScan = now
@@ -230,9 +237,12 @@ func LoadUserConfigWithFreshRegistry() (*UserConfig, []RegisteredAgent, error) {
 }
 
 func loadUserConfigWithRegistry(maxAge time.Duration, forceRefresh bool) (*UserConfig, []RegisteredAgent, error) {
+	ConfigMu.Lock()
+	defer ConfigMu.Unlock()
+
 	uc, err := LoadUserConfig()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("load user config with registry: %w", err)
 	}
 
 	now := time.Now().UTC()
@@ -243,7 +253,7 @@ func loadUserConfigWithRegistry(maxAge time.Duration, forceRefresh bool) (*UserC
 	agents, refreshErr := uc.RefreshAgentRegistry(now)
 	if refreshErr != nil {
 		cached := uc.RegisteredAgents()
-		if len(cached) > 0 {
+		if !uc.Registry.LastScan.IsZero() {
 			return uc, cached, nil
 		}
 		return nil, nil, refreshErr
@@ -302,6 +312,38 @@ func copyStringSlice(src []string) []string {
 	dst := make([]string, len(src))
 	copy(dst, src)
 	return dst
+}
+
+func storedWrapperAliases(entry RegisteredAgent, agentID string) []string {
+	if len(entry.Aliases) == 0 {
+		return nil
+	}
+
+	skip := make(map[string]struct{}, len(entry.ShimNames)+2)
+	if agentID = strings.TrimSpace(agentID); agentID != "" {
+		skip[agentID] = struct{}{}
+	}
+	for _, shimName := range entry.ShimNames {
+		if shimName = strings.TrimSpace(shimName); shimName != "" {
+			skip[shimName] = struct{}{}
+		}
+	}
+	if base := strings.TrimSpace(filepath.Base(entry.RealBinary)); base != "" && base != "." {
+		skip[base] = struct{}{}
+	}
+
+	aliases := make([]string, 0, len(entry.Aliases))
+	for _, alias := range entry.Aliases {
+		alias = strings.TrimSpace(alias)
+		if alias == "" {
+			continue
+		}
+		if _, ok := skip[alias]; ok {
+			continue
+		}
+		aliases = append(aliases, alias)
+	}
+	return aliases
 }
 
 func uniqueAliases(values []string) []string {

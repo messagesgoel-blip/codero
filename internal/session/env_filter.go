@@ -167,6 +167,18 @@ var systemPassthrough = []string{
 	"PAGER",
 }
 
+var managedSessionKeys = map[string]struct{}{
+	"CODERO_SESSION_ID":              {},
+	"CODERO_AGENT_ID":                {},
+	"CODERO_DAEMON_ADDR":             {},
+	"CODERO_WORKTREE":                {},
+	"CODERO_SESSION_MODE":            {},
+	"CODERO_RUNTIME_SESSION_MD":      {},
+	"CODERO_TMUX_NAME":               {},
+	"CODERO_STARTED_AT":              {},
+	"CODERO_AGENT_WRITE_SESSION_LOG": {},
+}
+
 // FilterEnv filters the current environment for the specified layer.
 // Returns a new env slice with forbidden vars removed.
 func FilterEnv(layer Layer) []string {
@@ -364,7 +376,7 @@ func FilterWrapperEnvVars(vars map[string]string, layer Layer) map[string]string
 // It starts from the current process env filtered for the agent layer, then
 // appends the explicit launch contract values so they override inherited copies.
 func BuildAgentEnv(sessionID, agentID, daemonAddr, worktree, sessionMode, runtimeSessionMD, tmuxName, startedAt string, writeLog bool) []string {
-	env := FilterEnv(LayerAgent)
+	env := removeEnvKeys(FilterEnv(LayerAgent), managedSessionKeys)
 
 	if sessionID != "" {
 		env = append(env, "CODERO_SESSION_ID="+sessionID)
@@ -393,4 +405,19 @@ func BuildAgentEnv(sessionID, agentID, daemonAddr, worktree, sessionMode, runtim
 	env = append(env, "CODERO_AGENT_WRITE_SESSION_LOG="+strconv.FormatBool(writeLog))
 
 	return env
+}
+
+func removeEnvKeys(environ []string, keys map[string]struct{}) []string {
+	if len(environ) == 0 {
+		return []string{}
+	}
+
+	filtered := make([]string, 0, len(environ))
+	for _, entry := range environ {
+		if _, ok := keys[envKey(entry)]; ok {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	return filtered
 }

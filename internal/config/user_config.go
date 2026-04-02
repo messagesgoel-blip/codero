@@ -242,6 +242,7 @@ func (uc *UserConfig) Save() error {
 		return fmt.Errorf("save user config: create temp: %w", err)
 	}
 	tmpPath := tmp.Name()
+	finalMode := userConfigFileMode(path)
 	cleanup := true
 	defer func() {
 		if cleanup {
@@ -249,10 +250,6 @@ func (uc *UserConfig) Save() error {
 		}
 	}()
 
-	if err := tmp.Chmod(0o644); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("save user config: chmod temp: %w", err)
-	}
 	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
 		return fmt.Errorf("save user config: write temp: %w", err)
@@ -260,6 +257,10 @@ func (uc *UserConfig) Save() error {
 	if err := tmp.Sync(); err != nil {
 		_ = tmp.Close()
 		return fmt.Errorf("save user config: sync temp: %w", err)
+	}
+	if err := tmp.Chmod(finalMode); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("save user config: chmod temp: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("save user config: close temp: %w", err)
@@ -269,6 +270,16 @@ func (uc *UserConfig) Save() error {
 	}
 	cleanup = false
 	return nil
+}
+
+func userConfigFileMode(path string) os.FileMode {
+	const ownerOnly = 0o600
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return ownerOnly
+	}
+	return info.Mode().Perm() & ownerOnly
 }
 
 // SupportedAgentKinds returns the Codero-supported agent kinds for managed

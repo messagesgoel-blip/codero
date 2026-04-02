@@ -216,7 +216,7 @@ All validation checks are read-only. They do not modify any state.
 
 ## Update Workflow Summary
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │  1. Trigger: Monthly schedule or immediate security/bug    │
 └──────────────────────────┬──────────────────────────────────┘

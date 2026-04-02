@@ -12,11 +12,20 @@ import (
 // the per-user config. It runs once immediately, then on the configured
 // interval. Errors are logged and do not stop the daemon.
 func SyncAgentRegistry(ctx context.Context, interval time.Duration) {
+	if ctx.Err() != nil {
+		return
+	}
 	if interval <= 0 {
 		interval = config.DefaultAgentRegistryScanInterval
 	}
 
 	refresh := func() {
+		if ctx.Err() != nil {
+			return
+		}
+		config.ConfigMu.Lock()
+		defer config.ConfigMu.Unlock()
+
 		uc, err := config.LoadUserConfig()
 		if err != nil {
 			loglib.Warn("codero: agent registry load failed",
@@ -48,6 +57,9 @@ func SyncAgentRegistry(ctx context.Context, interval time.Duration) {
 	}
 
 	refresh()
+	if ctx.Err() != nil {
+		return
+	}
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()

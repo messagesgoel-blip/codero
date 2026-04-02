@@ -18,7 +18,7 @@ FAIL=0
 WARN=0
 
 STORAGE_SHARED_ROOT="${CODERO_STORAGE_SHARED_ROOT:-/srv/storage/shared}"
-COMMON_SHARED_ROOT="${CODERO_COMMON_SHARED_ROOT:-$(cd "$STORAGE_SHARED_ROOT/../.." && pwd)/shared}"
+COMMON_SHARED_ROOT="${CODERO_COMMON_SHARED_ROOT:-$(dirname "$(dirname "$STORAGE_SHARED_ROOT")")/shared}"
 SHARED_ENV_BOOTSTRAP="${CODERO_SHARED_ENV_BOOTSTRAP:-$COMMON_SHARED_ROOT/agent-env.sh}"
 SHARED_TOOL_BIN="${CODERO_SHARED_TOOL_BIN:-$STORAGE_SHARED_ROOT/tools/bin}"
 SHARED_TOOL_VENVS="${CODERO_SHARED_TOOL_VENVS:-$STORAGE_SHARED_ROOT/tools/venvs}"
@@ -59,18 +59,29 @@ check_exists() {
 check_executable() {
     local path="$1"
     local desc="$2"
+    local mandatory="${3:-yes}"
 
     if [ -x "$path" ]; then
         echo -e "${GREEN}PASS${NC}: $desc is executable ($path)"
         ((PASS++))
         return 0
     elif [ -e "$path" ]; then
-        echo -e "${RED}FAIL${NC}: $desc exists but not executable ($path)"
-        ((FAIL++))
+        if [ "$mandatory" = "yes" ]; then
+            echo -e "${RED}FAIL${NC}: $desc exists but not executable ($path)"
+            ((FAIL++))
+        else
+            echo -e "${YELLOW}WARN${NC}: $desc exists but not executable ($path) [optional]"
+            ((WARN++))
+        fi
         return 1
     else
-        echo -e "${RED}FAIL${NC}: $desc does not exist ($path)"
-        ((FAIL++))
+        if [ "$mandatory" = "yes" ]; then
+            echo -e "${RED}FAIL${NC}: $desc does not exist ($path)"
+            ((FAIL++))
+        else
+            echo -e "${YELLOW}WARN${NC}: $desc does not exist ($path) [optional, missing]"
+            ((WARN++))
+        fi
         return 1
     fi
 }
@@ -99,8 +110,8 @@ check_executable "$SHARED_TOOLKIT_BIN/codero-finish.sh" "codero-finish.sh" || tr
 echo
 
 echo "--- Optional Shared Binaries ---"
-check_executable "$SHARED_TOOLKIT_BIN/install-hooks" "install-hooks" || true
-check_executable "$SHARED_TOOLKIT_BIN/ci-watch.sh" "ci-watch.sh" || true
+check_executable "$SHARED_TOOLKIT_BIN/install-hooks" "install-hooks" no || true
+check_executable "$SHARED_TOOLKIT_BIN/ci-watch.sh" "ci-watch.sh" no || true
 echo
 
 echo "--- Shared Caches ---"
