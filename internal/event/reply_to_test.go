@@ -38,7 +38,7 @@ func TestReplyToDirectClient_Deliver_Bridge(t *testing.T) {
 			Type:      "openclaw_session",
 			SessionID: "sess-1",
 			TmuxName:  "codero-agent-1-sess1",
-			Profile:   "codex",
+			AgentKind: "codex",
 		},
 		Timestamp:     time.Now().UTC(),
 		Payload:       pBody,
@@ -87,7 +87,7 @@ func TestReplyToDirectClient_Deliver_BridgeFailure(t *testing.T) {
 			Type:      "openclaw_session",
 			SessionID: "sess-1",
 			TmuxName:  "codero-agent-1-sess1",
-			Profile:   "codex",
+			AgentKind: "codex",
 		},
 		Payload:       []byte("{}"),
 		SchemaVersion: CurrentSchemaVersion,
@@ -112,7 +112,7 @@ func TestReplyToDirectClient_Deliver_MissingRouting(t *testing.T) {
 		ReplyTo: ReplyToEndpoint{
 			Type:      "openclaw_session",
 			SessionID: "sess-1",
-			// Missing TmuxName/Profile
+			// Missing TmuxName/AgentKind
 		},
 		Payload:       []byte("{}"),
 		SchemaVersion: CurrentSchemaVersion,
@@ -124,5 +124,37 @@ func TestReplyToDirectClient_Deliver_MissingRouting(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "missing routing info") {
 		t.Errorf("expected missing routing info error, got: %v", err)
+	}
+}
+
+func TestFormatPayloadForPTY_OmitsZeroLineNumbers(t *testing.T) {
+	payload := FeedbackInjectPayload{
+		AssignmentID: "assign-1",
+		SessionID:    "sess-1",
+		Findings: []FeedbackItem{
+			{File: "main.go", Message: "style issue"},
+			{Message: "general issue"},
+		},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	msg, err := formatPayloadForPTY(Envelope{
+		Type:    EventTypeFeedbackInject,
+		Payload: body,
+	})
+	if err != nil {
+		t.Fatalf("formatPayloadForPTY: %v", err)
+	}
+	if strings.Contains(msg, "main.go:0") {
+		t.Fatalf("unexpected zero line in message: %q", msg)
+	}
+	if !strings.Contains(msg, "- main.go: style issue") {
+		t.Fatalf("expected file finding without line number, got: %q", msg)
+	}
+	if !strings.Contains(msg, "- general issue") {
+		t.Fatalf("expected message-only finding, got: %q", msg)
 	}
 }

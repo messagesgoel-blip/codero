@@ -14,6 +14,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	deliverypipeline "github.com/codero/codero/internal/delivery_pipeline"
+	"github.com/codero/codero/internal/event"
 	"github.com/codero/codero/internal/gatecheck"
 	"github.com/codero/codero/internal/gitops"
 	"github.com/codero/codero/internal/state"
@@ -222,6 +223,12 @@ func (m *mockNotifier) Notify(worktree, notificationType, assignmentID string) {
 	m.calls = append(m.calls, notificationType)
 }
 
+type mockEventSender struct{}
+
+func (m *mockEventSender) Send(ctx context.Context, env event.Envelope) error {
+	return nil
+}
+
 // TestMIG037_HappyPath_SubmitGatePassCommitPushPR tests the happy path:
 // submit → gate(pass) → commit → push → PR created
 func TestMIG037_HappyPath_SubmitGatePassCommitPushPR(t *testing.T) {
@@ -239,12 +246,13 @@ func TestMIG037_HappyPath_SubmitGatePassCommitPushPR(t *testing.T) {
 
 	var stateTransitions []string
 	p := deliverypipeline.NewPipeline(deliverypipeline.PipelineDeps{
-		StateDB:    db,
-		GitOps:     gitOps,
-		GateRunner: gateRunner,
-		GitHub:     gh,
-		Writer:     writer,
-		Notifier:   notifier,
+		StateDB:     db,
+		GitOps:      gitOps,
+		GateRunner:  gateRunner,
+		GitHub:      gh,
+		Writer:      writer,
+		Notifier:    notifier,
+		EventSender: &mockEventSender{},
 		StateHook: func(s string) {
 			stateTransitions = append(stateTransitions, s)
 		},
@@ -337,11 +345,12 @@ func TestMIG037_GateFailure_WritesFeedback(t *testing.T) {
 	notifier := &mockNotifier{}
 
 	p := deliverypipeline.NewPipeline(deliverypipeline.PipelineDeps{
-		StateDB:    db,
-		GitOps:     gitOps,
-		GateRunner: gateRunner,
-		Writer:     writer,
-		Notifier:   notifier,
+		StateDB:     db,
+		GitOps:      gitOps,
+		GateRunner:  gateRunner,
+		Writer:      writer,
+		Notifier:    notifier,
+		EventSender: &mockEventSender{},
 	})
 
 	err := p.Submit(context.Background(), assignmentID, worktree)
@@ -406,11 +415,12 @@ func TestMIG037_PushFailure_WritesFeedback(t *testing.T) {
 	notifier := &mockNotifier{}
 
 	p := deliverypipeline.NewPipeline(deliverypipeline.PipelineDeps{
-		StateDB:    db,
-		GitOps:     gitOps,
-		GateRunner: gateRunner,
-		Writer:     writer,
-		Notifier:   notifier,
+		StateDB:     db,
+		GitOps:      gitOps,
+		GateRunner:  gateRunner,
+		Writer:      writer,
+		Notifier:    notifier,
+		EventSender: &mockEventSender{},
 	})
 
 	err := p.Submit(context.Background(), assignmentID, worktree)
@@ -458,11 +468,12 @@ func TestMIG037_LockLifecycle(t *testing.T) {
 	gateRunner := &mockGateRunner{report: &gatecheck.Report{Result: gatecheck.StatusPass}}
 
 	p := deliverypipeline.NewPipeline(deliverypipeline.PipelineDeps{
-		StateDB:    db,
-		GitOps:     gitOps,
-		GateRunner: gateRunner,
-		Writer:     &mockWriter{},
-		Notifier:   &mockNotifier{},
+		StateDB:     db,
+		GitOps:      gitOps,
+		GateRunner:  gateRunner,
+		Writer:      &mockWriter{},
+		Notifier:    &mockNotifier{},
+		EventSender: &mockEventSender{},
 	})
 
 	if deliverypipeline.IsLocked(worktree) {
@@ -519,11 +530,12 @@ func TestMIG037_ConcurrentSubmit_409(t *testing.T) {
 	gateRunner := &mockGateRunner{report: &gatecheck.Report{Result: gatecheck.StatusPass}}
 
 	p := deliverypipeline.NewPipeline(deliverypipeline.PipelineDeps{
-		StateDB:    db,
-		GitOps:     gitOps,
-		GateRunner: gateRunner,
-		Writer:     &mockWriter{},
-		Notifier:   &mockNotifier{},
+		StateDB:     db,
+		GitOps:      gitOps,
+		GateRunner:  gateRunner,
+		Writer:      &mockWriter{},
+		Notifier:    &mockNotifier{},
+		EventSender: &mockEventSender{},
 	})
 
 	var firstErr error
@@ -593,11 +605,12 @@ func TestMIG037_FeedbackSchema(t *testing.T) {
 	writer := &mockWriter{}
 
 	p := deliverypipeline.NewPipeline(deliverypipeline.PipelineDeps{
-		StateDB:    db,
-		GitOps:     gitOps,
-		GateRunner: gateRunner,
-		Writer:     writer,
-		Notifier:   &mockNotifier{},
+		StateDB:     db,
+		GitOps:      gitOps,
+		GateRunner:  gateRunner,
+		Writer:      writer,
+		Notifier:    &mockNotifier{},
+		EventSender: &mockEventSender{},
 	})
 
 	_ = p.Submit(context.Background(), assignmentID, worktree)

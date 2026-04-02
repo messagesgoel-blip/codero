@@ -34,8 +34,9 @@ type ReplyToEndpoint struct {
 	SessionID string `json:"session_id"`
 	// TmuxName is the transport identity for tmux-backed sessions.
 	TmuxName string `json:"tmux_name,omitempty"`
-	// Profile is the agent family profile (e.g. "codex", "claude").
-	Profile string `json:"profile,omitempty"`
+	// AgentKind is the upstream CLI family (e.g. "codex", "claude").
+	// The wire tag remains "profile" for BND-004 compatibility.
+	AgentKind string `json:"profile,omitempty"`
 	// DaemonAddr is the gRPC address for daemon-routed sessions.
 	DaemonAddr string `json:"daemon_addr,omitempty"`
 }

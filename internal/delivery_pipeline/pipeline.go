@@ -331,9 +331,15 @@ func (p *Pipeline) Submit(ctx context.Context, assignmentID, worktree string) er
 					loglib.FieldComponent, "delivery_pipeline",
 					"error", writeErr.Error(),
 				)
-			} else {
-				p.sendFeedbackEvent(ctx, assignment, fb)
-				p.deps.Notifier.Notify(worktree, "feedback", assignmentID)
+			}
+			sendErr := p.sendFeedbackEvent(ctx, assignment, fb)
+			p.deps.Notifier.Notify(worktree, "feedback", assignmentID)
+			if sendErr != nil {
+				_ = fsmState.Event(ctx, "fail")
+				_ = p.setDeliveryState(ctx, assignmentID, stateFailed)
+				_ = fsmState.Event(ctx, "recover")
+				_ = p.setDeliveryState(ctx, assignmentID, stateIdle)
+				return fmt.Errorf("pipeline: feedback delivery: %w", sendErr)
 			}
 		}
 	}
@@ -672,24 +678,32 @@ func (p *Pipeline) fail(ctx context.Context, assignmentID, worktree string, fsmS
 			loglib.FieldComponent, "delivery_pipeline",
 			"error", writeErr.Error(),
 		)
-	} else {
-		assignment, loadErr := state.GetAgentAssignmentByID(ctx, p.deps.StateDB, assignmentID)
-		if loadErr == nil {
-			p.sendFeedbackEvent(ctx, assignment, &feedback)
-		}
-		p.deps.Notifier.Notify(worktree, "feedback", assignmentID)
 	}
+	var sendErr error
+	assignment, loadErr := state.GetAgentAssignmentByID(ctx, p.deps.StateDB, assignmentID)
+	if loadErr != nil {
+		sendErr = fmt.Errorf("load assignment for feedback delivery: %w", loadErr)
+	} else {
+		sendErr = p.sendFeedbackEvent(ctx, assignment, &feedback)
+	}
+	p.deps.Notifier.Notify(worktree, "feedback", assignmentID)
 
 	if fsmState != nil {
 		_ = fsmState.Event(ctx, "recover")
 	}
 	_ = p.setDeliveryState(ctx, assignmentID, stateIdle)
+	if sendErr != nil {
+		return fmt.Errorf("pipeline: feedback delivery after %v: %w", err, sendErr)
+	}
 	return nil
 }
 
-func (p *Pipeline) sendFeedbackEvent(ctx context.Context, assignment *state.AgentAssignment, fb *FeedbackPackage) {
+func (p *Pipeline) sendFeedbackEvent(ctx context.Context, assignment *state.AgentAssignment, fb *FeedbackPackage) error {
 	if fb == nil || p.deps.EventSender == nil {
-		return
+		return nil
+	}
+	if assignment == nil {
+		return fmt.Errorf("feedback assignment is required")
 	}
 
 	// BND-004: emit structured event envelope for feedback delivery.
@@ -714,7 +728,7 @@ func (p *Pipeline) sendFeedbackEvent(ctx context.Context, assignment *state.Agen
 			"error", err.Error(),
 			"assignment", assignment.ID,
 		)
-		return
+		return err
 	}
 
 	if err := p.deps.EventSender.Send(ctx, env); err != nil {
@@ -723,7 +737,9 @@ func (p *Pipeline) sendFeedbackEvent(ctx context.Context, assignment *state.Agen
 			"error", err.Error(),
 			"assignment", assignment.ID,
 		)
+		return fmt.Errorf("send feedback envelope: %w", err)
 	}
+	return nil
 }
 
 func (p *Pipeline) acquire(worktree string) bool {
@@ -1008,14 +1024,13 @@ func (p *Pipeline) buildReplyToEndpoint(ctx context.Context, assignment *state.A
 		SessionID: assignment.SessionID,
 	}
 
-	// Fetch additional routing fields (TmuxName, Profile) from the durable session.
+	// Fetch additional routing fields (TmuxName, AgentKind) from the durable session.
 	if p.deps.StateDB != nil {
 		sess, err := state.GetAgentSession(ctx, p.deps.StateDB, assignment.SessionID)
 		if err == nil && sess != nil {
 			ep.TmuxName = sess.TmuxSessionName
-			// BND-004: Infer the PTY family (e.g. "codex", "claude") from the durable agent_id.
-			// The sess.Mode is a client-kind label ("agent", "codex-c") and not the PTY profile.
-			ep.Profile = config.InferAgentKind(sess.AgentID, "")
+			// agent_id remains the durable profile ID; derive the upstream CLI family from it.
+			ep.AgentKind = config.InferAgentKind(sess.AgentID, "")
 		}
 	}
 

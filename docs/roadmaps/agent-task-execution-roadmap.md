@@ -81,8 +81,8 @@ shortest path to an OpenClaw-default runtime.
 
 ### Wave 2: Session And Local Submit Core
 
-| Task | Title | Status |
-|---|---|---|
+| Task | Title | Status | Notes |
+|---|---|---|---|
 | `SES-001` | Complete session register, confirm, heartbeat, and finalize parity | `next` |
 | `SES-002` | Implement idempotent observe and attach behavior | `queued` |
 | `SES-003` | Expose a Codero-owned deliver contract backed by the bridge | `done` | Bridge-backed delivery implemented in `replyToDirectClient` |

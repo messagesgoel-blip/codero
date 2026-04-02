@@ -11,6 +11,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	deliverypipeline "github.com/codero/codero/internal/delivery_pipeline"
+	"github.com/codero/codero/internal/event"
 	"github.com/codero/codero/internal/gatecheck"
 	"github.com/codero/codero/internal/gitops"
 	"github.com/codero/codero/internal/state"
@@ -95,12 +96,13 @@ func TestMIG039_SubmitToMerge_HappyPath(t *testing.T) {
 	notifier := &integrationNotifier{}
 
 	p := deliverypipeline.NewPipeline(deliverypipeline.PipelineDeps{
-		StateDB:    db,
-		GitOps:     gitOps,
-		GateRunner: gateRunner,
-		GitHub:     gh,
-		Writer:     writer,
-		Notifier:   notifier,
+		StateDB:     db,
+		GitOps:      gitOps,
+		GateRunner:  gateRunner,
+		GitHub:      gh,
+		Writer:      writer,
+		Notifier:    notifier,
+		EventSender: &integrationEventSender{},
 	})
 
 	// Execute: run the pipeline
@@ -219,11 +221,12 @@ func TestMIG039_SubmitToMerge_GateFailurePath(t *testing.T) {
 	writer := &integrationWriter{}
 
 	p := deliverypipeline.NewPipeline(deliverypipeline.PipelineDeps{
-		StateDB:    db,
-		GitOps:     gitOps,
-		GateRunner: gateRunner,
-		Writer:     writer,
-		Notifier:   &integrationNotifier{},
+		StateDB:     db,
+		GitOps:      gitOps,
+		GateRunner:  gateRunner,
+		Writer:      writer,
+		Notifier:    &integrationNotifier{},
+		EventSender: &integrationEventSender{},
 	})
 
 	err = p.Submit(ctx, assignmentID, worktree)
@@ -432,4 +435,10 @@ type integrationNotifier struct {
 
 func (n *integrationNotifier) Notify(worktree, notificationType, assignmentID string) {
 	n.calls = append(n.calls, notificationType)
+}
+
+type integrationEventSender struct{}
+
+func (s *integrationEventSender) Send(ctx context.Context, env event.Envelope) error {
+	return nil
 }

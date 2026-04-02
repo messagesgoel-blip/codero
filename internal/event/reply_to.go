@@ -58,9 +58,9 @@ func NewReplyToDirectClient() ReplyToClient {
 }
 
 var (
-	// ErrNoRoutingInfo is returned when an envelope is missing TmuxName or Profile
+	// ErrNoRoutingInfo is returned when an envelope is missing TmuxName or AgentKind
 	// needed for PTY bridge delivery.
-	ErrNoRoutingInfo = errors.New("event: missing routing info (TmuxName/Profile) for bridge delivery")
+	ErrNoRoutingInfo = errors.New("event: missing routing info (TmuxName/AgentKind) for bridge delivery")
 )
 
 func (c *replyToDirectClient) Deliver(ctx context.Context, env Envelope) error {
@@ -70,11 +70,11 @@ func (c *replyToDirectClient) Deliver(ctx context.Context, env Envelope) error {
 
 	// BND-004: Codero emits structured payloads only. If we are using the PTY
 	// bridge, we are acting as the transport layer (OpenClaw).
-	if env.ReplyTo.TmuxName != "" && env.ReplyTo.Profile != "" {
+	if env.ReplyTo.TmuxName != "" && env.ReplyTo.AgentKind != "" {
 		return c.deliverViaBridge(ctx, env)
 	}
 
-	if env.ReplyTo.TmuxName == "" || env.ReplyTo.Profile == "" {
+	if env.ReplyTo.TmuxName == "" || env.ReplyTo.AgentKind == "" {
 		return fmt.Errorf("%w (SessionID=%s)", ErrNoRoutingInfo, env.ReplyTo.SessionID)
 	}
 
@@ -93,7 +93,7 @@ func (c *replyToDirectClient) deliverViaBridge(ctx context.Context, env Envelope
 	args := []string{
 		"deliver",
 		"--session", env.ReplyTo.TmuxName,
-		"--profile", env.ReplyTo.Profile,
+		"--profile", env.ReplyTo.AgentKind,
 		"--message", msg,
 	}
 
@@ -120,8 +120,14 @@ func formatPayloadForPTY(env Envelope) (string, error) {
 			sb.WriteString("\nFindings:\n")
 			for _, f := range p.Findings {
 				if f.File != "" {
-					fmt.Fprintf(&sb, "- %s:%d: %s\n", f.File, f.Line, f.Message)
-				} else {
+					if f.Line > 0 {
+						fmt.Fprintf(&sb, "- %s:%d: %s\n", f.File, f.Line, f.Message)
+						continue
+					}
+					fmt.Fprintf(&sb, "- %s: %s\n", f.File, f.Message)
+					continue
+				}
+				if f.Message != "" {
 					fmt.Fprintf(&sb, "- %s\n", f.Message)
 				}
 			}
