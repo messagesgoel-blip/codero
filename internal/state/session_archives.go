@@ -88,7 +88,7 @@ func ArchiveSession(ctx context.Context, db *DB, sessionID, result, mergeSHA str
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err := archiveSessionTx(ctx, tx, sessionID, result, mergeSHA, time.Now().UTC()); err != nil {
+	if err := archiveSessionTx(ctx, tx, sessionID, result, mergeSHA, "", time.Now().UTC()); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -97,7 +97,7 @@ func ArchiveSession(ctx context.Context, db *DB, sessionID, result, mergeSHA str
 	return nil
 }
 
-func archiveSessionTx(ctx context.Context, tx *sql.Tx, sessionID, result, mergeSHA string, now time.Time) error {
+func archiveSessionTx(ctx context.Context, tx *sql.Tx, sessionID, result, mergeSHA, fallbackTaskID string, now time.Time) error {
 	var session AgentSession
 	var endedAt sql.NullTime
 
@@ -150,6 +150,9 @@ func archiveSessionTx(ctx context.Context, tx *sql.Tx, sessionID, result, mergeS
 		archive.TaskID = assignment.TaskID
 		archive.Repo = assignment.Repo
 		archive.Branch = assignment.Branch
+	}
+	if archive.TaskID == "" {
+		archive.TaskID = fallbackTaskID
 	}
 
 	if err := writeSessionArchiveTx(ctx, tx, archive); err != nil {

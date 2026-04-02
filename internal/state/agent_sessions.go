@@ -512,7 +512,7 @@ func ExpireAgentSession(ctx context.Context, db *DB, sessionID, reason string) e
 	}
 
 	// SL-1/SL-3: Write session_archives row atomically in the same transaction.
-	if err := archiveSessionTx(ctx, tx, sessionID, reason, "", now); err != nil {
+	if err := archiveSessionTx(ctx, tx, sessionID, reason, "", "", now); err != nil {
 		return fmt.Errorf("expire agent session: write archive: %w", err)
 	}
 
@@ -577,7 +577,7 @@ func AttachAgentAssignment(ctx context.Context, db *DB, assignment *AgentAssignm
 		LIMIT 1`,
 		assignment.SessionID,
 	).Scan(&existingRepo, &existingBranch, &existingTaskID)
-	
+
 	// If there's a match, just commit the timestamp update and return success
 	if err == nil && existingRepo == assignment.Repo && existingBranch == assignment.Branch && existingTaskID == assignment.TaskID {
 		if err := tx.Commit(); err != nil {
@@ -994,7 +994,7 @@ func FinalizeAgentSession(ctx context.Context, db *DB, sessionID, agentID string
 	}
 
 	// SL-1/SL-3: Write session_archives row atomically in the same transaction.
-	if err := archiveSessionTx(ctx, tx, sessionID, completion.Status, "", finishedAt); err != nil {
+	if err := archiveSessionTx(ctx, tx, sessionID, completion.Status, "", completion.TaskID, finishedAt); err != nil {
 		return fmt.Errorf("finalize agent session: write archive: %w", err)
 	}
 
