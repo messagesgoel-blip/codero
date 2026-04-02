@@ -2,6 +2,7 @@ package contract
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -366,5 +367,223 @@ func TestMIG038_RegisterIdempotent(t *testing.T) {
 	}
 	if mode != "review" {
 		t.Errorf("mode = %q, want review", mode)
+	}
+}
+
+// TestMIG038_HeartbeatWithStatus_UpdatesInferredStatus tests that HeartbeatWithStatus
+// persists inferred_status to the agent_sessions row.
+func TestMIG038_HeartbeatWithStatus_UpdatesInferredStatus(t *testing.T) {
+	db := openSessionContractDB(t)
+	ctx := context.Background()
+
+	store := session.NewStore(db)
+
+	const (
+		sessionID = "sess-inferred-status-1"
+		agentID   = "agent-inferred"
+	)
+
+	secret, err := store.Register(ctx, sessionID, agentID, "coding")
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	// Initial inferred_status should be 'unknown'
+	var initialStatus string
+	if err := db.Unwrap().QueryRow(
+		`SELECT inferred_status FROM agent_sessions WHERE session_id = ?`, sessionID,
+	).Scan(&initialStatus); err != nil {
+		t.Fatalf("query initial inferred_status: %v", err)
+	}
+	if initialStatus != "unknown" {
+		t.Errorf("initial inferred_status = %q, want unknown", initialStatus)
+	}
+
+	err = store.HeartbeatWithStatus(ctx, sessionID, secret, false, "working")
+	if err != nil {
+		t.Fatalf("HeartbeatWithStatus: %v", err)
+	}
+
+	var storedStatus string
+	if err := db.Unwrap().QueryRow(
+		`SELECT inferred_status FROM agent_sessions WHERE session_id = ?`, sessionID,
+	).Scan(&storedStatus); err != nil {
+		t.Fatalf("query inferred_status after heartbeat: %v", err)
+	}
+	if storedStatus != "working" {
+		t.Errorf("inferred_status = %q, want working", storedStatus)
+	}
+}
+
+// TestMIG038_Heartbeat_StatusAliasNormalization tests that status aliases are
+// normalized to canonical values (pretooluse → working, waiting → waiting_for_input).
+func TestMIG038_Heartbeat_StatusAliasNormalization(t *testing.T) {
+	db := openSessionContractDB(t)
+	ctx := context.Background()
+
+	store := session.NewStore(db)
+
+	cases := []struct {
+		alias    string
+		expected string
+	}{
+		{"pretooluse", "working"},
+		{"posttooluse", "working"},
+		{"waiting", "waiting_for_input"},
+		{"notification", "waiting_for_input"},
+		{"idle", "idle"},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.alias, func(t *testing.T) {
+			sessionID := "sess-alias-" + tc.alias //nolint:gosec // nosemgrep: go.lang.security.audit.database.string-formatted-query.string-formatted-query -- test data only, not user input
+			secret, err := store.Register(ctx, sessionID, "agent-alias", "coding")
+			if err != nil {
+				t.Fatalf("Register: %v", err)
+			}
+			if err := store.HeartbeatWithStatus(ctx, sessionID, secret, false, tc.alias); err != nil {
+				t.Fatalf("HeartbeatWithStatus(%q): %v", tc.alias, err)
+			}
+			var stored string
+			if err := db.Unwrap().QueryRow(
+				`SELECT inferred_status FROM agent_sessions WHERE session_id = ?`, sessionID,
+			).Scan(&stored); err != nil {
+				t.Fatalf("query inferred_status: %v", err)
+			}
+			if stored != tc.expected {
+				t.Errorf("alias %q: inferred_status = %q, want %q", tc.alias, stored, tc.expected)
+			}
+		})
+	}
+}
+
+// TestMIG038_Finalize_WritesArchiveRow tests that Finalize atomically creates a
+// session_archives row with the correct result and agent_id.
+func TestMIG038_Finalize_WritesArchiveRow(t *testing.T) {
+	db := openSessionContractDB(t)
+	ctx := context.Background()
+
+	store := session.NewStore(db)
+
+	const (
+		sessionID = "sess-finalize-archive"
+		agentID   = "agent-finalize"
+	)
+
+	_, err := store.Register(ctx, sessionID, agentID, "coding")
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	completion := session.Completion{
+		Status:    "merged",
+		Substatus: "terminal_finished",
+		Summary:   "task complete",
+	}
+	if err := store.Finalize(ctx, sessionID, agentID, completion); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+
+	// Verify session_archives row was written
+	archive, err := state.GetSessionArchive(ctx, db, sessionID)
+	if err != nil {
+		t.Fatalf("GetSessionArchive: %v", err)
+	}
+	if archive.SessionID != sessionID {
+		t.Errorf("archive.SessionID = %q, want %q", archive.SessionID, sessionID)
+	}
+	if archive.AgentID != agentID {
+		t.Errorf("archive.AgentID = %q, want %q", archive.AgentID, agentID)
+	}
+	if archive.Result != "merged" {
+		t.Errorf("archive.Result = %q, want merged", archive.Result)
+	}
+
+	// Verify agent_sessions.ended_at is set
+	var endedAt *string
+	if err := db.Unwrap().QueryRow(
+		`SELECT ended_at FROM agent_sessions WHERE session_id = ?`, sessionID,
+	).Scan(&endedAt); err != nil {
+		t.Fatalf("query ended_at: %v", err)
+	}
+	if endedAt == nil {
+		t.Error("ended_at is NULL after Finalize, want non-null")
+	}
+}
+
+// TestMIG038_Finalize_AgentMismatch tests that Finalize rejects a wrong agentID.
+func TestMIG038_Finalize_AgentMismatch(t *testing.T) {
+	db := openSessionContractDB(t)
+	ctx := context.Background()
+
+	store := session.NewStore(db)
+
+	const (
+		sessionID = "sess-finalize-mismatch"
+		agentID   = "agent-finalize-real"
+	)
+
+	_, err := store.Register(ctx, sessionID, agentID, "coding")
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	completion := session.Completion{
+		Status: "merged",
+	}
+	err = store.Finalize(ctx, sessionID, "wrong-agent", completion)
+	if err == nil {
+		t.Fatal("expected error for wrong agentID, got nil")
+	}
+	if !errors.Is(err, session.ErrSessionMismatch) {
+		t.Errorf("expected ErrSessionMismatch, got %v", err)
+	}
+}
+
+// TestMIG038_AttachAssignment_SubstatusStored tests that the substatus parameter
+// is persisted to agent_assignments.assignment_substatus.
+func TestMIG038_AttachAssignment_SubstatusStored(t *testing.T) {
+	db := openSessionContractDB(t)
+	ctx := context.Background()
+
+	store := session.NewStore(db)
+
+	const (
+		sessionID = "sess-substatus-1"
+		agentID   = "agent-substatus"
+		repo      = "acme/substatus-repo"
+		branch    = "feature/substatus-branch"
+		taskID    = "TASK-SUB-001"
+		substatus = "in_progress"
+	)
+
+	_, err := store.Register(ctx, sessionID, agentID, "coding")
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	// Seed branch state
+	if _, err := db.Unwrap().Exec(
+		`INSERT INTO branch_states (id, repo, branch, state) VALUES (?, ?, ?, ?)`,
+		"branch-substatus", repo, branch, "submitted",
+	); err != nil {
+		t.Fatalf("seed branch state: %v", err)
+	}
+
+	err = store.AttachAssignment(ctx, sessionID, agentID, repo, branch, t.TempDir(), "coding", taskID, substatus)
+	if err != nil {
+		t.Fatalf("AttachAssignment: %v", err)
+	}
+
+	var storedSubstatus string
+	if err := db.Unwrap().QueryRow(
+		`SELECT assignment_substatus FROM agent_assignments WHERE session_id = ? AND ended_at IS NULL`,
+		sessionID,
+	).Scan(&storedSubstatus); err != nil {
+		t.Fatalf("query assignment_substatus: %v", err)
+	}
+	if storedSubstatus != substatus {
+		t.Errorf("assignment_substatus = %q, want %q", storedSubstatus, substatus)
 	}
 }
