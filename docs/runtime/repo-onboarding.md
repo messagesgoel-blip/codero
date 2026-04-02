@@ -217,7 +217,7 @@ The workspace must be isolated under the OpenClaw state root, not shared
 with the Codero persistence directories (`CODERO_DB_PATH`, Redis). Use a
 path that includes the repo name to avoid collision with other workspaces:
 
-```
+```text
 $HOME/.openclaw-<repo-name>-smoke/workspace
 ```
 
@@ -238,7 +238,7 @@ that are not on this list. For the full rationale, see
 
 Model requests route through the local LiteLLM proxy:
 
-```
+```text
 http://localhost:4000
 ```
 
@@ -292,7 +292,7 @@ codero agent list --json
 The shared PTY bridge is the **only approved path** for launching and
 communicating with managed agent sessions. Its binary is at:
 
-```
+```text
 /srv/storage/shared/tools/bin/agent-tmux-bridge
 ```
 
@@ -444,8 +444,11 @@ scripts/validate-openclaw-plugins.sh
 scripts/validate-openclaw-update-readiness.sh
 ```
 
-All three must pass with zero failures before the repo is considered
-onboarded for the OpenClaw baseline.
+All three Phase 2 validators must complete with zero `FAIL` results before the
+repo is considered onboarded for the OpenClaw baseline. Phase 2 validators may
+also emit heuristic `WARN` results; those warnings are recorded for attention
+and should be reviewed and resolved, but they do not count as failures and do
+not block the onboarding pass criteria.
 
 ### Phase 3: Wrapper and Session Path
 
