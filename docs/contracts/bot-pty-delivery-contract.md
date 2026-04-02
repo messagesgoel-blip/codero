@@ -1,8 +1,8 @@
 # Bot PTY Delivery Contract
 
 **Version:** 1.0
-**Last Updated:** 2026-03-30
-**Status:** planned
+**Last Updated:** 2026-04-02
+**Status:** active
 
 ## Purpose
 
@@ -10,10 +10,10 @@ This contract defines how external bot shells deliver messages into a live
 agent terminal session while Codero remains the source of truth for policy,
 auth, review state, and GitHub mutation.
 
-At capture time, Codero does not yet ship a repo-local PTY delivery runtime for
-this contract. The currently proven implementation lives in shared tooling
-outside this repository; this document records the target behavior that a
-future Codero-owned implementation must satisfy.
+Codero provides a repo-local PTY delivery runtime for this contract backed by
+shared tooling. The implementation uses a structured event envelope boundary
+where Codero emits the intent and the transport layer (OpenClaw or a bridge)
+owns the timing and PTY injection.
 
 It formalizes the PTY-first runtime direction for human-attached sessions:
 
@@ -61,14 +61,12 @@ They may not:
 
 ## Target Operations
 
-These operations describe the future repo-local PTY delivery runtime that
-Codero would own directly.
+These operations describe the repo-local PTY delivery runtime.
 
-At capture time, `internal/tmux/tmux.go` intentionally exposes only low-level
-session primitives such as `NewSession`, `SendKeys`, `CapturePane`,
-`ListCoderoSessions`, and `KillSession`. It does not yet provide a repo-local
-high-level `deliver` operation with busy detection, interruption wrapping, or
-post-submit state observation.
+Codero provides a high-level `Deliver` operation through its `ReplyToClient`
+interface, which is backed by a shared PTY bridge. While `internal/tmux/tmux.go`
+exposes low-level session primitives, the `delivery_pipeline` package uses
+the higher-level bridge for busy detection and family-specific injection.
 
 The PTY delivery flow is modeled as the following logical operations:
 
@@ -81,8 +79,8 @@ The PTY delivery flow is modeled as the following logical operations:
 - `stop` — terminate a managed session
 
 Low-level raw text injection may exist as an implementation detail, but
-`deliver` is the target high-level operation for bot-to-session messaging once
-Codero owns this runtime directly.
+`deliver` is the high-level operation for bot-to-session messaging in the
+active Codero-owned runtime.
 
 ## Delivery State Model
 
@@ -108,9 +106,8 @@ The target `deliver` flow must distinguish the following observable states:
 
 ## Busy-Session Interruption Contract
 
-When Codero ships the repo-local `deliver` operation, and the target session
-appears busy when `deliver` runs, the adapter may send a single `Esc` before
-injecting the new message.
+When the repo-local `deliver` operation sees that the target session appears
+busy, the adapter may send a single `Esc` before injecting the new message.
 
 When that happens:
 
@@ -124,10 +121,9 @@ If the session is already idle, `deliver` must not send an interruption key.
 
 ## Family-Specific Detection Principles
 
-These cues are the normative target for the future repo-local `deliver`
-implementation. At capture time, the family-specific detection logic continues
-to live in shared external tooling rather than in a Codero-owned PTY adapter in
-this repository.
+These cues are the normative target for the repo-local `deliver`
+implementation. The family-specific detection logic is currently provided by
+the shared bridge tool (`agent-tmux-bridge`) used by the Codero PTY adapter.
 
 ### Codex
 
@@ -186,14 +182,14 @@ reach a real final answer across all supported managed families.
 
 ## Implementation Notes
 
-The current reference helper lives outside this repo in shared tooling. This
-document is a planned Codero contract, not a claim that `internal/tmux` already
-implements the full PTY delivery surface described above. The repo-local tmux
-package currently offers raw session lifecycle and key-injection primitives
-only.
+Codero implements the PTY delivery surface in `internal/event/reply_to.go`
+by wrapping the shared reference helper. The repo-local tmux package
+continues to offer raw session lifecycle and key-injection primitives, while
+the higher-level delivery logic is delegated to the bridge.
 
-Reference implementation and tests at capture time:
+Reference implementation and tests:
 
+- `internal/event/reply_to.go`
 - `/srv/storage/shared/tools/bin/agent-tmux-bridge`
 - `/srv/storage/shared/tools/tests/agent-tmux-bridge.sh`
 

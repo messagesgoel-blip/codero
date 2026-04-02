@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/codero/codero/internal/event"
 	"github.com/codero/codero/internal/gatecheck"
 	"github.com/codero/codero/internal/gitops"
 	"github.com/codero/codero/internal/state"
@@ -170,6 +171,15 @@ func (f *fakeNotifier) Notify(worktree, notificationType, assignmentID string) {
 	f.calls = append(f.calls, notificationType)
 }
 
+type fakeEventSender struct {
+	sent []event.Envelope
+}
+
+func (f *fakeEventSender) Send(ctx context.Context, env event.Envelope) error {
+	f.sent = append(f.sent, env)
+	return nil
+}
+
 func setupPipelineDB(t *testing.T, worktree string) (*state.DB, string) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "pipeline.db")
@@ -181,16 +191,14 @@ func setupPipelineDB(t *testing.T, worktree string) (*state.DB, string) {
 
 	assignmentID := "assign-1"
 	_, err = db.Unwrap().Exec(`
-		INSERT INTO agent_sessions (session_id, agent_id, mode)
-		VALUES ('sess-1', 'agent-1', 'coding')`)
+		INSERT INTO agent_sessions (session_id, agent_id, mode, tmux_session_name)
+		VALUES ('sess-1', 'codex-123', 'agent', 'codero-agent-1-sess1')`)
 	if err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
 	_, err = db.Unwrap().Exec(`
 		INSERT INTO agent_assignments (assignment_id, session_id, agent_id, repo, branch, worktree, task_id)
-		VALUES (?, 'sess-1', 'agent-1', 'acme/api', 'feat/test', ?, 'TASK-1')`,
-		assignmentID, worktree,
-	)
+		VALUES ('assign-1', 'sess-1', 'codex-123', 'owner/repo', 'feat/x', ?, 'COD-1')`, worktree)
 	if err != nil {
 		t.Fatalf("seed assignment: %v", err)
 	}
@@ -283,12 +291,14 @@ func TestPipeline_GateFailureWritesFeedback(t *testing.T) {
 		},
 	}}
 	writer := &fakeWriter{}
+	sender := &fakeEventSender{}
 	p := NewPipeline(PipelineDeps{
-		StateDB:    db,
-		GitOps:     &fakeGitOps{},
-		GateRunner: gate,
-		Writer:     writer,
-		Notifier:   &fakeNotifier{},
+		StateDB:     db,
+		GitOps:      &fakeGitOps{},
+		GateRunner:  gate,
+		Writer:      writer,
+		Notifier:    &fakeNotifier{},
+		EventSender: sender,
 	})
 
 	if err := p.Submit(context.Background(), assignmentID, worktree); err != nil {
@@ -299,6 +309,19 @@ func TestPipeline_GateFailureWritesFeedback(t *testing.T) {
 	}
 	if IsLocked(worktree) {
 		t.Fatalf("expected lock removed after failure")
+	}
+	if len(sender.sent) == 0 {
+		t.Fatalf("expected feedback envelope to be sent via EventSender")
+	}
+	env := sender.sent[0]
+	if env.Type != event.EventTypeFeedbackInject {
+		t.Fatalf("got event type %q, want %q", env.Type, event.EventTypeFeedbackInject)
+	}
+	if env.ReplyTo.TmuxName != "codero-agent-1-sess1" {
+		t.Fatalf("got TmuxName %q, want %q", env.ReplyTo.TmuxName, "codero-agent-1-sess1")
+	}
+	if env.ReplyTo.Profile != "codex" {
+		t.Fatalf("got Profile %q, want %q", env.ReplyTo.Profile, "codex")
 	}
 }
 
