@@ -2,9 +2,46 @@
 
 Status: active
 Owner: sanjay
-Updated: 2026-03-30
+Updated: 2026-04-01
 
 ---
+
+## Roadmap Precedence
+
+This file is the roadmap index and strategic release view.
+
+Use `docs/roadmaps/agent-task-execution-roadmap.md` for:
+
+- next-task selection
+- implementation sequencing
+- shared continuity / orchestrator updates
+- determining the earliest incomplete execution slice
+
+Do not use `docs/roadmaps/*-backlog.md` or untracked local planning files as the
+next-task source unless a PR explicitly promotes them into the execution
+roadmap.
+
+## Current Execution Baseline
+
+- `origin/main` head is `06c3d9143c916afe9269fbd7cea71728853832fc` (PR `#149`)
+- Completed on `main`: `TOOL-001` through `TOOL-004`, `BND-001`, `BND-002`,
+  `BND-003`, `BND-004`
+- Next unmerged execution tasks: `TOOL-005`, `SET-001`, `SET-002`, then
+  `SES-001` through `SES-004`
+
+## Candidate Backlog After The Current Execution Roadmap
+
+The latest proposed post-cutover backlog items are retained here so they are no
+longer hidden in local-only planning files. They are not the current next-task
+source.
+
+- Operator UX: `UX-004` Kanban board view, `UX-005` attention routing,
+  `UX-006` diff-first assignment review, `UX-007` live session terminal
+  drilldown, `UX-008` read-only Git inspector
+- Control-plane hardening: `COD-064` feedback precedence contract, `COD-065`
+  extended timeout escalation, `COD-066` durable task dependency links,
+  `COD-067` successor auto-start
+- Cleanup: `UI-004` TUI dead shortcuts and view contract cleanup
 
 ## Current State
 

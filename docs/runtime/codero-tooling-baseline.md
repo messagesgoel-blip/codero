@@ -229,6 +229,6 @@ All validation checks are read-only. They do not modify any state.
 ## Related Documents
 
 - Policy: `/srv/storage/local/codero/specication_033126/codero-shared-tooling-and-openclaw-policy.md`
-- Roadmap: `/srv/storage/local/codero/specication_033126/codero-agent-task-execution-roadmap.md`
+- Roadmap: `docs/roadmaps/agent-task-execution-roadmap.md`
 - Shared memory: `/srv/storage/shared/memory/MEMORY.md`
 - OpenClaw PTY notes: `/srv/storage/shared/memory/OPENCLAW-PTY-NOTES.md`
