@@ -478,6 +478,7 @@ func TestMIG038_Finalize_WritesArchiveRow(t *testing.T) {
 	}
 
 	completion := session.Completion{
+		TaskID:    "TASK-FINALIZE-ARCHIVE",
 		Status:    "merged",
 		Substatus: "terminal_finished",
 		Summary:   "task complete",
@@ -496,6 +497,9 @@ func TestMIG038_Finalize_WritesArchiveRow(t *testing.T) {
 	}
 	if archive.AgentID != agentID {
 		t.Errorf("archive.AgentID = %q, want %q", archive.AgentID, agentID)
+	}
+	if archive.TaskID != "TASK-FINALIZE-ARCHIVE" {
+		t.Errorf("archive.TaskID = %q, want TASK-FINALIZE-ARCHIVE", archive.TaskID)
 	}
 	if archive.Result != "merged" {
 		t.Errorf("archive.Result = %q, want merged", archive.Result)

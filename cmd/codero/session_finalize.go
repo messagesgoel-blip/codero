@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	daemongrpc "github.com/codero/codero/internal/daemon/grpc"
 	"github.com/codero/codero/internal/session"
 	"github.com/spf13/cobra"
 )
@@ -53,6 +54,45 @@ func sessionFinalizeCmd(configPath *string) *cobra.Command {
 		Use:   "finalize",
 		Short: "Finalize a session from SESSION.md completion data",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if daemonAddr := resolveDaemonAddr(cmd); daemonAddr != "" {
+				client, err := daemongrpc.NewSessionClient(daemonAddr)
+				if err != nil {
+					return fmt.Errorf("session finalize: %w", err)
+				}
+				defer client.Close()
+
+				if sessionMDPath == "" {
+					return fmt.Errorf("from-session-md is required")
+				}
+				note, err := parseSessionNote(sessionMDPath)
+				if err != nil {
+					return err
+				}
+				finishedAt, err := time.Parse(time.RFC3339, note.Completion.FinishedAt)
+				if err != nil {
+					return fmt.Errorf("parse completion finished_at: %w", err)
+				}
+				if note.Completion.TaskID == "" {
+					note.Completion.TaskID = note.TaskID
+				}
+				if err := client.Finalize(cmd.Context(), note.SessionID, note.AgentID, session.Completion{
+					TaskID:     note.Completion.TaskID,
+					Status:     note.Completion.Status,
+					Substatus:  note.Completion.Substatus,
+					Summary:    note.Completion.Summary,
+					Tests:      note.Completion.Tests,
+					FinishedAt: finishedAt,
+				}); err != nil {
+					return err
+				}
+				archivedPath, err := archiveSessionNote(sessionMDPath, note, archiveDir)
+				if err != nil {
+					return err
+				}
+				fmt.Printf("session %s finalized\narchived: %s\n", note.SessionID, archivedPath)
+				return nil
+			}
+
 			store, cleanup, err := openSessionStore(*configPathForCmd(cmd))
 			if err != nil {
 				return err
