@@ -425,6 +425,16 @@ func daemonCmd(configPath *string) *cobra.Command {
 				Version:      version,
 			})
 
+			// Recover active sessions that were in progress before daemon restart
+			if err := grpcSrv.RecoverSessionsAfterRestart(ctx); err != nil {
+				loglib.Warn("codero: session recovery failed during startup",
+					loglib.FieldEventType, loglib.EventStartup,
+					loglib.FieldComponent, "daemon",
+					"error", err,
+				)
+				// Don't fail startup for recovery issues - continue with normal operation
+			}
+
 			// Serve gRPC + HTTP on the same port via h2c multiplexing.
 			obs := daemon.NewObservabilityServerWithGRPC(client, queue, slotCounter, db.Unwrap(),
 				cfg.APIServer.Addr, cfg.APIServer.ReadTimeout, cfg.APIServer.WriteTimeout,

@@ -380,6 +380,22 @@ falls back to the compiled-in default path when the variable is unset.
   "stale_session_count": 1,
   "expired_session_count": 0,
   "reconciliation_status": "stale",
+  "security_score": {
+    "score": 8,
+    "pct": 85.0,
+    "critical": 0,
+    "high": 2,
+    "total": 13
+  },
+  "coverage_pct": 72.5,
+  "eta_min": 5,
+  "eta_detail": {
+    "avg_min": 12,
+    "p50_min": 10,
+    "p90_min": 25,
+    "elapsed_min": 5,
+    "eta_min": 5
+  },
   "generated_at": "2026-03-18T14:40:34Z"
 }
 ```
@@ -403,8 +419,40 @@ falls back to the compiled-in default path when the variable is unset.
 - `expired_session_count` counts sessions with last heartbeat older than
   `SessionHeartbeatTTL`.
 - `reconciliation_status` values: `ok`, `stale`, `attention`, `unavailable`.
+- `security_score`, `coverage_pct`, `eta_min`, and `eta_detail` are optional
+  best-effort metrics derived from local files (`coverage.out`, gate report) and
+  DB history.
 - The response MUST NOT expose secrets, tokens, raw prompts, or file contents.
 - This endpoint is read-only and idempotent.
+
+---
+
+## POST /api/v1/dashboard/coverage-upload
+
+Accepts a `coverage.out` file upload, persists it to the configured coverage path,
+and returns the parsed coverage percentage.
+
+### Request
+
+`Content-Type: multipart/form-data`
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `file` | yes | Go coverage file (`coverage.out` style) |
+
+**Max size:** 10 MiB
+
+### Response `200 OK`
+
+```json
+{
+  "path": "/srv/storage/repo/codero/coverage.out",
+  "coverage_pct": 72.5,
+  "status": "success",
+  "message": "coverage file uploaded and parsed successfully",
+  "generated_at": "2026-03-18T14:40:34Z"
+}
+```
 
 ---
 

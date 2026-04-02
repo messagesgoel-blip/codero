@@ -10,6 +10,7 @@ package grpc
 import (
 	"context"
 	"database/sql"
+	"log/slog"
 	"net"
 	"sync/atomic"
 	"time"
@@ -36,6 +37,9 @@ type Server struct {
 	githubHealth GitHubHealthSource
 	rawDB        *sql.DB
 	sessionStore *session.Store
+	
+	// Session recovery service for continuity across restarts
+	sessionRecovery *SessionRecoveryService
 }
 
 // GitHubHealthSource reports the latest reconciler GitHub probe state.
@@ -64,6 +68,9 @@ func NewServer(cfg ServerConfig) *Server {
 		sessionStore: cfg.SessionStore,
 	}
 
+	// Initialize session recovery service
+	s.sessionRecovery = NewSessionRecoveryService(cfg.RawDB, slog.Default())
+
 	s.grpcServer = ggrpc.NewServer(
 		ggrpc.UnaryInterceptor(s.readinessInterceptor),
 	)
@@ -77,6 +84,16 @@ func NewServer(cfg ServerConfig) *Server {
 	daemonv1.RegisterHealthServiceServer(s.grpcServer, &healthService{server: s})
 
 	return s
+}
+
+// RecoverSessionsAfterRestart performs session continuity recovery after daemon restart
+func (s *Server) RecoverSessionsAfterRestart(ctx context.Context) error {
+	return s.sessionRecovery.RecoverActiveSessions(ctx)
+}
+
+// IsSessionRecoverable checks if a session can be recovered after restart
+func (s *Server) IsSessionRecoverable(ctx context.Context, sessionID, agentID string) (bool, error) {
+	return s.sessionRecovery.IsSessionRecoverable(ctx, sessionID, agentID)
 }
 
 // Serve starts the gRPC server on the given listener. Blocks until stopped.

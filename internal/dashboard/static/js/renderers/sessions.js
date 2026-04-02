@@ -216,6 +216,11 @@ function _renderSessionsTable(sessions, assignments) {
       },
     },
     {
+      key: 'mode',
+      label: 'Mode',
+      render: r => r.mode ? `<span class="mode-badge">${esc(r.mode)}</span>` : '<span style="color:var(--fg-muted)">—</span>',
+    },
+    {
       key: 'inferredStatus',
       label: 'Status',
       render: r => {

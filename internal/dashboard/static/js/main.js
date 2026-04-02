@@ -63,15 +63,15 @@ store.subscribe('ui', (ui) => {
   if (chatBtn) chatBtn.style.display = ui.activeTab === 'chat' ? 'none' : '';
 });
 
-// --- Health bar (DB / Redis / GitHub status dots) ---
+// --- Health bar (DB / Feed status dots) ---
 function updateHealthBar() {
   const h = store.select('health');
   if (!h) return;
 
   const dotMap = {
-    'hb-db-dot': h.db_status || h.db,
-    'hb-redis-dot': h.redis_status || h.redis,
-    'hb-gh-dot': h.github_status || h.github,
+    'hb-db-dot': h.database?.status,
+    'hb-sessions-dot': h.feeds?.active_sessions?.status,
+    'hb-gate-dot': h.feeds?.gate_checks?.status,
   };
 
   for (const [id, status] of Object.entries(dotMap)) {
@@ -80,12 +80,26 @@ function updateHealthBar() {
     el.classList.remove('dot-ok', 'dot-warn', 'dot-fail', 'dot-unknown');
     if (status === 'ok' || status === 'connected') {
       el.classList.add('dot-ok');
-    } else if (status === 'fail' || status === 'error' || status === 'disconnected') {
+    } else if (status === 'fail' || status === 'error' || status === 'disconnected' || status === 'down' || status === 'unavailable') {
       el.classList.add('dot-fail');
-    } else if (status === 'degraded' || status === 'slow' || status === 'warn') {
+    } else if (status === 'degraded' || status === 'slow' || status === 'warn' || status === 'stale') {
       el.classList.add('dot-warn');
     } else {
       el.classList.add('dot-unknown');
+    }
+  }
+
+  setText('hb-agents', `${h.active_agent_count || 0} agents`);
+
+  const staleEl = $('hb-stale');
+  if (staleEl) {
+    const count = (h.stale_session_count || 0) + (h.expired_session_count || 0);
+    if (count > 0) {
+      setText('hb-stale', `${count} issues`);
+      staleEl.style.display = 'inline';
+      staleEl.style.color = 'var(--warning)';
+    } else {
+      staleEl.style.display = 'none';
     }
   }
 }

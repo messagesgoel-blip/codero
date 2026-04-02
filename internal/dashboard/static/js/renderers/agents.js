@@ -63,9 +63,11 @@ function _renderOpenAgents(sessions) {
     { key: 'repo', label: 'Repo / Branch', render: r => {
         const repo = esc(r.repo || '—');
         const branch = esc(r.branch || '');
-        return branch ? `${repo} / <code>${branch}</code>` : repo;
+        const pr = r.prNumber ? ` <a href="https://github.com/${repo}/pull/${r.prNumber}" target="_blank" class="pr-link">#${r.prNumber}</a>` : '';
+        return branch ? `${repo} / <code>${branch}</code>${pr}` : repo;
       }
     },
+    { key: 'mode', label: 'Mode', render: r => r.mode ? `<span class="mode-badge">${esc(r.mode)}</span>` : '—' },
     { key: 'context', label: 'Context', render: r => {
         const p = r.contextPressure || 'normal';
         const col = p === 'critical' ? 'var(--destructive)' : p === 'warning' ? 'var(--warning)' : 'var(--fg-muted)';
@@ -84,6 +86,8 @@ function _renderOpenAgents(sessions) {
     agentId: s.agentId || s.ownerAgent,
     repo: s.repo,
     branch: s.branch,
+    prNumber: s.prNumber || s.pr_number,
+    mode: s.mode,
     contextPressure: s.contextPressure || s.context_pressure,
     outputMb: s.outputMb || s.output_mb || 0,
     workingDurationSec: s.workingDurationSec || s.working_duration_sec || 0,

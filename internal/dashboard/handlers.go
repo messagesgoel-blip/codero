@@ -119,6 +119,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/dashboard/agents/", h.handleAgentSessions)
 	mux.HandleFunc("/api/v1/dashboard/scorecard", h.handleScorecard)
 	mux.HandleFunc("/api/v1/dashboard/tasks", h.handleTasks)
+	mux.HandleFunc("/api/v1/dashboard/coverage-upload", h.handleCoverageUpload)
 
 	// §3.1 Session tail
 	mux.HandleFunc("/api/v1/dashboard/sessions/", h.handleSessionTailRouter)
@@ -651,6 +652,77 @@ func (h *Handler) handleUpload(w http.ResponseWriter, r *http.Request) {
 		Branch:  branch,
 		Status:  "pending",
 		Message: fmt.Sprintf("manual review queued for %s", header.Filename),
+	})
+}
+
+// handleCoverageUpload serves POST /api/v1/dashboard/coverage-upload.
+// It accepts a coverage.out multipart upload and persists it to the
+// resolved coverage path, returning the newly parsed coverage percentage.
+func (h *Handler) handleCoverageUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "")
+		return
+	}
+	setCORSHeaders(w)
+
+	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+		writeError(w, http.StatusBadRequest, "failed to parse multipart form", "parse_error")
+		return
+	}
+
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "missing 'file' in multipart form", "missing_file")
+		return
+	}
+	defer file.Close()
+
+	dest := resolveCoveragePath()
+	// Ensure parent directory exists.
+	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+		loglib.Error("dashboard: failed to create coverage dir",
+			loglib.FieldComponent, "dashboard", "path", filepath.Dir(dest), "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to prepare destination", "fs_error")
+		return
+	}
+
+	// Persist the file safely.
+	f, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		loglib.Error("dashboard: failed to open coverage file for writing",
+			loglib.FieldComponent, "dashboard", "path", dest, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to write coverage file", "fs_error")
+		return
+	}
+	defer f.Close()
+
+	if _, err := io.Copy(f, file); err != nil {
+		loglib.Error("dashboard: failed to save coverage upload",
+			loglib.FieldComponent, "dashboard", "path", dest, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to save coverage upload", "fs_error")
+		return
+	}
+
+	// Flush and close before parsing.
+	f.Close()
+
+	// Parse the newly written file.
+	pct := parseCoverageFilePath(dest)
+
+	loglib.Info("dashboard: coverage upload successful",
+		loglib.FieldEventType, "coverage_upload_success",
+		loglib.FieldComponent, "dashboard",
+		"path", dest,
+		"coverage_pct", pct,
+	)
+
+	writeJSON(w, http.StatusOK, CoverageUploadResponse{
+		Path:          dest,
+		CoveragePct:   pct,
+		Status:        "success",
+		Message:       "coverage file uploaded and parsed successfully",
+		GeneratedAt:   time.Now().UTC(),
+		SchemaVersion: SchemaVersionV1,
 	})
 }
 

@@ -33,16 +33,21 @@ not override this file for active implementation order.
 
 ## Current Baseline On Main
 
-- `origin/main` head: `74bdfe0` (includes TOOL-005 PR #151 and SET-001 PR #152)
-- Merged on `main`:
+- `origin/main` head: `db3c716` (includes SES-003 PR `#157`, SES-002 PR
+  `#156`, and SES-001 PR `#154`)
+- This branch closes the remaining agent/setup + session-core gap by landing
+  `SES-004`.
+- Completed on the current `main` branch:
   - `TOOL-001` through `TOOL-005`
-  - `BND-001` via PR `#147`
-  - `BND-002` via PR `#148`
-  - `BND-003` and `BND-004` via PR `#149`
-  - `SET-001` via PR `#152`
-- This branch completes `SET-002`.
+  - `BND-001` through `BND-004`
+  - `SET-001` and `SET-002`
+  - `SES-001`, `SES-002`, `SES-003`, and `SES-004`
+- Agent/setup set is complete.
+- Session set is complete.
 - Next unmerged tasks in canonical order:
-  1. `SES-001` through `SES-004`
+  1. `SUB-001` through `SUB-005`
+  2. `REV-001` through `REV-005`
+  3. `FIN-001`
 
 ## Critical Path
 
@@ -86,10 +91,10 @@ shortest path to an OpenClaw-default runtime.
 
 | Task | Title | Status | Notes |
 |---|---|---|---|
-| `SES-001` | Complete session register, confirm, heartbeat, and finalize parity | `next` | |
-| `SES-002` | Implement idempotent observe and attach behavior | `queued` | |
+| `SES-001` | Complete session register, confirm, heartbeat, and finalize parity | `done` | Landed with PR #154 |
+| `SES-002` | Implement idempotent observe and attach behavior | `done` | Landed with PR #156 |
 | `SES-003` | Expose a Codero-owned deliver contract backed by the bridge | `done` | Bridge-backed delivery implemented in `replyToDirectClient` |
-| `SES-004` | Preserve session continuity across adapter restart and phase shift | `queued` | |
+| `SES-004` | Preserve session continuity across adapter restart and phase shift | `done` | Implemented session recovery service in `internal/daemon/grpc/sessions_recovery.go` |
 | `SUB-001` | Parse `TASK_COMPLETE` and structured summary blocks | `planned` | |
 | `SUB-002` | Add Submission Record persistence and lineage | `planned` | |
 | `SUB-003` | Reject duplicate or invalid submissions before lock acquisition | `planned` | |
@@ -134,9 +139,9 @@ shortest path to an OpenClaw-default runtime.
 
 ## Suggested Claim Order From Here
 
-1. `SES-001`
-2. `SES-002`
-3. `SES-004`
+1. `SUB-001`
+2. `SUB-002`
+3. `SUB-003`
 
 ## Parallelization Rule
 

@@ -697,6 +697,117 @@ func TestUpload_WrongMethod(t *testing.T) {
 	}
 }
 
+/* ══════════════════════ COVERAGE UPLOAD ═════════════════════ */
+
+func TestCoverageUpload_Success(t *testing.T) {
+	h, _ := newTestHandler(t)
+	dir := t.TempDir()
+	covPath := filepath.Join(dir, "coverage.out")
+	t.Setenv("CODERO_COVERAGE_PATH", covPath)
+
+	content := "mode: set\ngithub.com/codero/codero/file.go:1.1,2.2 2 1\n"
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, _ := mw.CreateFormFile("file", "coverage.out")
+	io.WriteString(fw, content)
+	mw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/dashboard/coverage-upload", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.CoverageUploadResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.CoveragePct == nil || *resp.CoveragePct != 100.0 {
+		t.Errorf("want 100%% coverage, got %v", resp.CoveragePct)
+	}
+	if resp.Path != covPath {
+		t.Errorf("path = %q, want %q", resp.Path, covPath)
+	}
+
+	// Verify it persists on disk.
+	saved, _ := os.ReadFile(covPath)
+	if string(saved) != content {
+		t.Errorf("saved content mismatch")
+	}
+
+	// Verify health endpoint reflects it.
+	healthRec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/health", nil)
+	var health dashboard.DashboardHealth
+	json.Unmarshal(healthRec.Body.Bytes(), &health)
+	if health.CoveragePct == nil || *health.CoveragePct != 100.0 {
+		t.Errorf("health coverage_pct = %v, want 100", health.CoveragePct)
+	}
+}
+
+func TestCoverageUpload_InvalidMethod(t *testing.T) {
+	h, _ := newTestHandler(t)
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/coverage-upload", nil)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("want 405, got %d", rec.Code)
+	}
+}
+
+func TestCoverageUpload_MissingFile(t *testing.T) {
+	h, _ := newTestHandler(t)
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	mw.WriteField("foo", "bar")
+	mw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/dashboard/coverage-upload", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("want 400, got %d", rec.Code)
+	}
+}
+
+func TestCoverageUpload_MalformedContent(t *testing.T) {
+	h, _ := newTestHandler(t)
+	dir := t.TempDir()
+	covPath := filepath.Join(dir, "coverage.out")
+	t.Setenv("CODERO_COVERAGE_PATH", covPath)
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, _ := mw.CreateFormFile("file", "coverage.out")
+	io.WriteString(fw, "not a coverage file")
+	mw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/dashboard/coverage-upload", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d", rec.Code)
+	}
+	var resp dashboard.CoverageUploadResponse
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp.CoveragePct != nil {
+		t.Errorf("want nil coverage_pct for malformed file, got %v", resp.CoveragePct)
+	}
+}
+
 /* ══════════════════════ STATIC EMBED ═══════════════════════ */
 
 func TestStaticEmbedHasIndexHTML(t *testing.T) {

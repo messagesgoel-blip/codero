@@ -4,10 +4,12 @@ go 1.25.0
 
 require (
 	github.com/alicebob/miniredis/v2 v2.37.0
+	github.com/creack/pty v1.1.24
 	github.com/go-git/go-git/v5 v5.17.0
 	github.com/golang-migrate/migrate/v4 v4.17.0
 	github.com/google/go-github/v69 v69.2.0
 	github.com/google/uuid v1.6.0
+	github.com/lib/pq v1.12.0
 	github.com/looplab/fsm v1.0.3
 	github.com/mattn/go-sqlite3 v1.14.34
 	github.com/openai/openai-go v1.12.0
@@ -29,7 +31,6 @@ require (
 	github.com/bradleyfalzon/ghinstallation/v2 v2.17.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cloudflare/circl v1.6.1 // indirect
-	github.com/creack/pty v1.1.24 // indirect
 	github.com/cyphar/filepath-securejoin v0.4.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
@@ -52,7 +53,6 @@ require (
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
-	github.com/lib/pq v1.12.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect

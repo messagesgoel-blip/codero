@@ -46,6 +46,41 @@ func tableExists(ctx context.Context, db *sql.DB, table string) (bool, error) {
 	return true, nil
 }
 
+func scanTimeValue(value any) (time.Time, bool, error) {
+	switch v := value.(type) {
+	case nil:
+		return time.Time{}, false, nil
+	case time.Time:
+		return v, true, nil
+	case string:
+		return parseTimeString(v)
+	case []byte:
+		return parseTimeString(string(v))
+	default:
+		return time.Time{}, false, fmt.Errorf("unsupported time value type %T", value)
+	}
+}
+
+func parseTimeString(value string) (time.Time, bool, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, false, nil
+	}
+	layouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05.999999999-07:00",
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05",
+	}
+	for _, layout := range layouts {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed.UTC(), true, nil
+		}
+	}
+	return time.Time{}, false, fmt.Errorf("unsupported time format %q", value)
+}
+
 // queryOverview returns today's aggregate run stats.
 func queryOverview(ctx context.Context, db *sql.DB) (runsToday, passedToday int, blockedCount int, avgGateSec float64, err error) {
 	// runs today + passed today
@@ -1265,15 +1300,8 @@ func queryDashboardHealth(ctx context.Context, db *sql.DB) (DashboardHealth, err
 	if repoRoot == "" {
 		repoRoot = "."
 	}
-	// CODERO_COVERAGE_PATH overrides the default coverage.out location.
-	// This allows CI to point to a generated file outside the repo root
-	// without needing filesystem access to the dashboard server.
-	coveragePath := os.Getenv("CODERO_COVERAGE_PATH")
-	if coveragePath == "" {
-		coveragePath = filepath.Join(repoRoot, "coverage.out")
-	}
 	h.SecurityScore = computeSecurityScore(reportPath)
-	h.CoveragePct = parseCoverageFilePath(coveragePath)
+	h.CoveragePct = parseCoverageFilePath(resolveCoveragePath())
 	etaDetail := queryETADetail(ctx, db, "", "")
 	if etaDetail != nil {
 		h.ETAMin = &etaDetail.ETAMin
@@ -1281,6 +1309,20 @@ func queryDashboardHealth(ctx context.Context, db *sql.DB) (DashboardHealth, err
 	}
 
 	return h, nil
+}
+
+// resolveCoveragePath determines the absolute or relative path to the
+// coverage.out file used by the dashboard.
+// Precedence: CODERO_COVERAGE_PATH > {CODERO_REPO_PATH}/coverage.out > ./coverage.out
+func resolveCoveragePath() string {
+	if p := os.Getenv("CODERO_COVERAGE_PATH"); p != "" {
+		return p
+	}
+	repoRoot := os.Getenv("CODERO_REPO_PATH")
+	if repoRoot == "" {
+		repoRoot = "."
+	}
+	return filepath.Join(repoRoot, "coverage.out")
 }
 
 func querySessionMonitoring(ctx context.Context, db *sql.DB) (staleCount, expiredCount int, status string, err error) {
@@ -1584,17 +1626,19 @@ func queryAgentRoster(ctx context.Context, db *sql.DB) ([]AgentRosterRow, error)
 	var out []AgentRosterRow
 	for rows.Next() {
 		var r AgentRosterRow
-		var lastSeen sql.NullTime
+		var lastSeenRaw any
 		var avgElapsed sql.NullFloat64
 		var activePressure sql.NullString
 		if err := rows.Scan(
 			&r.AgentID, &r.TotalSessions, &r.ActiveSessions,
-			&lastSeen, &avgElapsed, &r.TotalTokens, &activePressure,
+			&lastSeenRaw, &avgElapsed, &r.TotalTokens, &activePressure,
 		); err != nil {
 			return nil, fmt.Errorf("queryAgentRoster: scan: %w", err)
 		}
-		if lastSeen.Valid {
-			r.LastSeen = lastSeen.Time
+		if parsed, ok, err := scanTimeValue(lastSeenRaw); err != nil {
+			return nil, fmt.Errorf("queryAgentRoster: parse last_seen: %w", err)
+		} else if ok {
+			r.LastSeen = parsed
 		}
 		if avgElapsed.Valid {
 			r.AvgElapsedSec = avgElapsed.Float64
@@ -1614,7 +1658,7 @@ func queryAgentRoster(ctx context.Context, db *sql.DB) ([]AgentRosterRow, error)
 		// Here we only set the DB-derived status.
 		if r.ActiveSessions > 0 {
 			r.Status = "active"
-		} else if lastSeen.Valid && lastSeen.Time.Before(offlineThreshold) {
+		} else if !r.LastSeen.IsZero() && r.LastSeen.Before(offlineThreshold) {
 			r.Status = "offline"
 		} else {
 			r.Status = "idle"

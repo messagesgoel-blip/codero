@@ -18,3 +18,4 @@ coverage.out
 # Env
 .env
 .aider*
+.tmp-dashboard-test/

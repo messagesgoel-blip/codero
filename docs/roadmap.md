@@ -23,11 +23,16 @@ roadmap.
 
 ## Current Execution Baseline
 
-- `origin/main` head is `74bdfe0` (includes TOOL-005 PR #151 and SET-001 PR #152)
-- Completed on `main`: `TOOL-001` through `TOOL-005`, `BND-001`, `BND-002`,
-  `BND-003`, `BND-004`, `SET-001`
-- This branch completes `SET-002`.
-- Next unmerged execution tasks: `SES-001` through `SES-004`
+- `origin/main` head is `db3c716` (includes SES-003 PR `#157`, SES-002 PR
+  `#156`, and SES-001 PR `#154`)
+- The current `main` branch completes `SES-004` and closes the remaining
+  session-core slice.
+- Completed on the current `main` branch: `TOOL-001` through `TOOL-005`,
+  `BND-001` through `BND-004`, `SET-001`, `SET-002`, `SES-001`, `SES-002`,
+  `SES-003`, and `SES-004`
+- Agent/setup set is complete.
+- Session set is complete.
+- Next unmerged execution tasks: `SUB-001` through `SUB-005`
 
 ## Candidate Backlog After The Current Execution Roadmap
 
