@@ -82,9 +82,10 @@
 
     <div class="health-bar" id="health-bar">
       <span title="Database connection status"><span class="health-dot unknown" id="hb-db-dot"></span> DB</span>
-      <span title="Redis cache connection status"><span class="health-dot unknown" id="hb-redis-dot"></span> Redis</span>
-      <span title="GitHub API connection status"><span class="health-dot unknown" id="hb-gh-dot"></span> GitHub</span>
+      <span title="Sessions Feed freshness"><span class="health-dot unknown" id="hb-sessions-dot"></span> Sessions</span>
+      <span title="Gate Checks Feed freshness"><span class="health-dot unknown" id="hb-gate-dot"></span> Gates</span>
       <span id="hb-agents">0 agents</span>
+      <span id="hb-stale" style="margin-left: 12px; display: none;">0 issues</span>
       <span id="hb-time" style="margin-left:auto"></span>
       <span id="hb-sse-status"></span>
     </div>

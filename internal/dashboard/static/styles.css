@@ -533,6 +533,12 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.85em; }
 .status-idle { color: var(--fg-muted); }
 .status-unknown { color: var(--fg-muted); }
 .stale-badge { font-size: 0.65rem; color: var(--destructive); margin-left: 4px; }
+.mode-badge {
+  display: inline-block; padding: 1px 6px; border-radius: 4px;
+  background: var(--bg-surface-3); color: var(--fg-secondary);
+  font-size: 0.65rem; font-weight: 600; text-transform: uppercase;
+  border: 1px solid var(--border);
+}
 
 /* ========== STATUS FILTER STRIP ========== */
 .status-filter-strip { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
@@ -604,6 +610,8 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.85em; }
 .metrics-link-row { margin-top: auto; }
 .drilldown-link { font-size: 0.72rem; color: var(--accent-warm); text-decoration: none; font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; }
 .drilldown-link:hover { text-decoration: underline; }
+.pr-link { font-size: 0.7rem; color: var(--accent); text-decoration: none; font-weight: 500; }
+.pr-link:hover { text-decoration: underline; }
 
 .session-actions-container {
   display: flex;

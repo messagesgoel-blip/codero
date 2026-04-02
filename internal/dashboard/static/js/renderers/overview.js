@@ -4,7 +4,7 @@
 import store from '../store.js';
 import { loadOverview, loadRepos, loadHealth, loadGateHealth, loadEvents } from '../api.js';
 import { formatPct, formatDuration, relativeTime, esc, html, setHtml, $, statusChip, truncId } from '../utils.js';
-import { metricCard, dataTable, glassCard, skeleton, toast } from '../components.js';
+import { metricCard, dataTable, glassCard, detailGrid, skeleton, toast } from '../components.js';
 
 // --- Internal state ---
 let _initialized = false;
@@ -20,6 +20,7 @@ export function initOverview() {
   _unsubs.push(store.subscribe('repos', () => renderOverview()));
   _unsubs.push(store.subscribe('gateHealth', () => renderOverview()));
   _unsubs.push(store.subscribe('events', () => renderOverview()));
+  _unsubs.push(store.subscribe('health', () => renderOverview()));
 }
 
 export async function refreshOverview() {
@@ -44,6 +45,7 @@ export function renderOverview() {
   const repos = store.select('repos');
   const gateHealth = store.select('gateHealth');
   const events = store.select('events') || [];
+  const health = store.select('health');
 
   // Show skeleton while data loads
   if (!ov) {
@@ -55,6 +57,11 @@ export function renderOverview() {
 
   // ---- Metric strip (4 glass cards) ----
   parts.push(_renderMetricStrip(ov));
+
+  // ---- System Health section ----
+  if (health) {
+    parts.push(_renderSystemHealth(health));
+  }
 
   // ---- Live Activity Feed (SSE-driven) ----
   parts.push(_renderActivityFeed(events));
@@ -92,6 +99,32 @@ function _renderActivityFeed(events) {
   }).join('');
 
   return glassCard('Live Activity', `<div style="padding:4px 16px 8px">${rows}</div>`, { class: 'card-activity' });
+}
+
+function _renderSystemHealth(h) {
+  const items = [
+    { label: 'Active Agents', value: esc(String(h.active_agent_count || 0)) },
+    { label: 'Stale Sessions', value: h.stale_session_count > 0 ? `<span style="color:var(--warning)">${h.stale_session_count}</span>` : '0' },
+    { label: 'Expired Sessions', value: h.expired_session_count > 0 ? `<span style="color:var(--destructive)">${h.expired_session_count}</span>` : '0' },
+    { label: 'Reconciliation', value: statusChip(h.reconciliation_status || 'unknown') },
+  ];
+
+  if (h.security_score) {
+    const s = h.security_score;
+    items.push({ label: 'Security Score', value: `<span title="${s.critical} critical, ${s.high} high issues">${s.score}/10 (${s.pct.toFixed(1)}%)</span>` });
+  }
+  if (h.coverage_pct != null) {
+    items.push({ label: 'Statement Coverage', value: formatPct(h.coverage_pct) });
+  }
+  if (h.eta_detail) {
+    const e = h.eta_detail;
+    items.push({ label: 'Calibrated ETA', value: `${e.eta_min} min remaining <span style="font-size:0.75rem;color:var(--fg-muted)">(p50: ${e.p50_min}m, p90: ${e.p90_min}m)</span>` });
+  } else if (h.eta_min != null) {
+    items.push({ label: 'ETA', value: `${h.eta_min} min` });
+  }
+
+  const grid = detailGrid(items);
+  return glassCard('System Health', grid, { class: 'card-health' });
 }
 
 function _renderMetricStrip(ov) {
