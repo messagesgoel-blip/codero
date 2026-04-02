@@ -40,7 +40,8 @@ not override this file for active implementation order.
   - `BND-002` via PR `#148`
   - `BND-003` and `BND-004` via PR `#149`
   - `SET-001` via PR `#152`
-- This branch completes `SET-002`.
+  - `SET-002` via PR `#153`
+- Agent/setup set is complete: `SET-001` and `SET-002` both done.
 - Next unmerged tasks in canonical order:
   1. `SES-001` through `SES-004`
 
@@ -86,10 +87,10 @@ shortest path to an OpenClaw-default runtime.
 
 | Task | Title | Status | Notes |
 |---|---|---|---|
-| `SES-001` | Complete session register, confirm, heartbeat, and finalize parity | `next` | |
-| `SES-002` | Implement idempotent observe and attach behavior | `queued` | |
+| `SES-001` | Complete session register, confirm, heartbeat, and finalize parity | `done` | Landed with PR #154 |
+| `SES-002` | Implement idempotent observe and attach behavior | `done` | Landed with PR #156 |
 | `SES-003` | Expose a Codero-owned deliver contract backed by the bridge | `done` | Bridge-backed delivery implemented in `replyToDirectClient` |
-| `SES-004` | Preserve session continuity across adapter restart and phase shift | `queued` | |
+| `SES-004` | Preserve session continuity across adapter restart and phase shift | `done` | Implemented session recovery service in `internal/daemon/grpc/sessions_recovery.go` |
 | `SUB-001` | Parse `TASK_COMPLETE` and structured summary blocks | `planned` | |
 | `SUB-002` | Add Submission Record persistence and lineage | `planned` | |
 | `SUB-003` | Reject duplicate or invalid submissions before lock acquisition | `planned` | |
