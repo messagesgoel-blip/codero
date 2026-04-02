@@ -33,17 +33,21 @@ not override this file for active implementation order.
 
 ## Current Baseline On Main
 
-- `origin/main` head: `74bdfe0` (includes TOOL-005 PR #151 and SET-001 PR #152)
-- Merged on `main`:
+- `origin/main` head: `db3c716` (includes SES-003 PR `#157`, SES-002 PR
+  `#156`, and SES-001 PR `#154`)
+- This branch closes the remaining agent/setup + session-core gap by landing
+  `SES-004`.
+- Completed on the current `main` branch:
   - `TOOL-001` through `TOOL-005`
-  - `BND-001` via PR `#147`
-  - `BND-002` via PR `#148`
-  - `BND-003` and `BND-004` via PR `#149`
-  - `SET-001` via PR `#152`
-  - `SET-002` via PR `#153`
-- Agent/setup set is complete: `SET-001` and `SET-002` both done.
+  - `BND-001` through `BND-004`
+  - `SET-001` and `SET-002`
+  - `SES-001`, `SES-002`, `SES-003`, and `SES-004`
+- Agent/setup set is complete.
+- Session set is complete.
 - Next unmerged tasks in canonical order:
-  1. `SES-001` through `SES-004`
+  1. `SUB-001` through `SUB-005`
+  2. `REV-001` through `REV-005`
+  3. `FIN-001`
 
 ## Critical Path
 
@@ -135,9 +139,9 @@ shortest path to an OpenClaw-default runtime.
 
 ## Suggested Claim Order From Here
 
-1. `SES-001`
-2. `SES-002`
-3. `SES-004`
+1. `SUB-001`
+2. `SUB-002`
+3. `SUB-003`
 
 ## Parallelization Rule
 

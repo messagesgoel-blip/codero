@@ -28,7 +28,9 @@ func NewSessionRecoveryService(db *sql.DB, logger *slog.Logger) *SessionRecovery
 // This method identifies sessions that were active before the restart and
 // ensures they can be properly reconnected by agents
 func (s *SessionRecoveryService) RecoverActiveSessions(ctx context.Context) error {
-	s.logger.Info("starting session recovery after daemon restart")
+	if s.logger != nil {
+		s.logger.Info("starting session recovery after daemon restart")
+	}
 
 	// Find all sessions that were active (not ended) before the restart
 	activeSessions, err := s.getActiveSessions(ctx)
@@ -39,18 +41,22 @@ func (s *SessionRecoveryService) RecoverActiveSessions(ctx context.Context) erro
 	recoveredCount := 0
 	for _, session := range activeSessions {
 		if err := s.recoverSession(ctx, session); err != nil {
-			s.logger.Error("failed to recover session",
-				"session_id", session.SessionID,
-				"agent_id", session.AgentID,
-				"error", err)
+			if s.logger != nil {
+				s.logger.Error("failed to recover session",
+					"session_id", session.SessionID,
+					"agent_id", session.AgentID,
+					"error", err)
+			}
 			continue
 		}
 		recoveredCount++
 	}
 
-	s.logger.Info("session recovery completed",
-		"total_active", len(activeSessions),
-		"recovered", recoveredCount)
+	if s.logger != nil {
+		s.logger.Info("session recovery completed",
+			"total_active", len(activeSessions),
+			"recovered", recoveredCount)
+	}
 
 	return nil
 }
@@ -136,9 +142,11 @@ func (s *SessionRecoveryService) recoverSession(ctx context.Context, session *st
 	if session.TmuxSessionName != "" {
 		// For now, we just log that we found a tmux session - actual verification would
 		// require calling tmux commands which is handled by the expiry checker
-		s.logger.Debug("found session with tmux name during recovery",
-			"session_id", session.SessionID,
-			"tmux_session_name", session.TmuxSessionName)
+		if s.logger != nil {
+			s.logger.Debug("found session with tmux name during recovery",
+				"session_id", session.SessionID,
+				"tmux_session_name", session.TmuxSessionName)
+		}
 	}
 
 	// Update last seen time to current time to indicate the session is being recovered
@@ -151,11 +159,13 @@ func (s *SessionRecoveryService) recoverSession(ctx context.Context, session *st
 		return fmt.Errorf("update last seen time: %w", err)
 	}
 
-	s.logger.Info("session recovered successfully",
-		"session_id", session.SessionID,
-		"agent_id", session.AgentID,
-		"mode", session.Mode,
-		"tmux_session", session.TmuxSessionName)
+	if s.logger != nil {
+		s.logger.Info("session recovered successfully",
+			"session_id", session.SessionID,
+			"agent_id", session.AgentID,
+			"mode", session.Mode,
+			"tmux_session", session.TmuxSessionName)
+	}
 
 	return nil
 }
