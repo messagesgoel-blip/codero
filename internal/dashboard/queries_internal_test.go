@@ -116,6 +116,27 @@ func TestActiveSessions_AssignmentSubstatusDrivesActivityState(t *testing.T) {
 	}
 }
 
+func TestQueryAgentRoster_ScansSQLiteTimestampAggregate(t *testing.T) {
+	db := openDashboardQueryTestDB(t)
+	now := time.Now().UTC().Truncate(time.Second)
+
+	seedAgentSessionForQueryTest(t, db, "sess-roster-1", "agent-roster", now, now.Add(-20*time.Minute))
+
+	roster, err := queryAgentRoster(context.Background(), db)
+	if err != nil {
+		t.Fatalf("queryAgentRoster: %v", err)
+	}
+	if len(roster) != 1 {
+		t.Fatalf("len(roster) = %d, want 1", len(roster))
+	}
+	if roster[0].AgentID != "agent-roster" {
+		t.Fatalf("agent_id = %q, want agent-roster", roster[0].AgentID)
+	}
+	if roster[0].LastSeen.IsZero() {
+		t.Fatal("last_seen should be populated")
+	}
+}
+
 func TestAssignmentStateFromSubstatus_WaitingForMergeApprovalBlocked(t *testing.T) {
 	if got := assignmentStateFromSubstatus("waiting_for_merge_approval"); got != "blocked" {
 		t.Fatalf("assignmentStateFromSubstatus(waiting_for_merge_approval) = %q, want blocked", got)
