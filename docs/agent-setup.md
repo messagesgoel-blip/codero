@@ -100,8 +100,18 @@ Open the dashboard at `http://127.0.0.1:8110/dashboard`:
 ### 1. Install Shim
 
 ```bash
-codero setup --agent-id aider --binary $(which aider)
+codero setup
 ```
+
+`codero setup` auto-discovers supported agent binaries on `PATH` and installs
+Codero-managed shims for the supported families it finds (`claude`, `codex`,
+`opencode`, `copilot`, `gemini`). It does not accept `--agent-id` or
+`--binary`, and it does not auto-register `aider`.
+
+To track Aider, follow the manual shim workflow in
+[`docs/contracts/alias-registration.md`](contracts/alias-registration.md#manual-registration):
+create `~/.codero/bin/aider`, point it at the real Aider binary, and add the
+matching `wrappers.aider` entry in `~/.codero/config.yaml`.
 
 ### 2. Configure Shell
 
@@ -154,13 +164,23 @@ wrappers:
 
 ## Generic CLI Agent Setup
 
-For any CLI-based agent:
+For arbitrary CLI agents, `codero setup` does not accept `--agent-id` or
+`--binary` flags. Run the base setup first if you want Codero to write
+`~/.codero/config.yaml` and install shims for any supported agent binaries it
+finds on `PATH`:
 
 ### 1. Create Shim
 
 ```bash
-codero setup --agent-id myagent --binary /path/to/agent
+codero setup
 ```
+
+Then follow the manual shim workflow in
+[`docs/contracts/alias-registration.md`](contracts/alias-registration.md#manual-registration):
+
+- create `~/.codero/bin/<profile-id>` with `exec codero agent run --agent-id <profile-id> -- "/full/path/to/binary" "$@"`
+- make the shim executable with `chmod 0755`
+- add the matching `wrappers.<profile-id>` entry in `~/.codero/config.yaml`
 
 ### 2. Verify Shim
 
