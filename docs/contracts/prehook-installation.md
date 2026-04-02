@@ -175,6 +175,9 @@ cat ~/.codero/config.yaml | grep -A3 'hooks:'
 
 # 3. Print the canonical hook JSON for comparison
 codero agent hooks --print
+
+# 4. Verify repo hook/tool wiring end to end
+(cd /srv/storage/repo/codero && /srv/storage/shared/agent-toolkit/bin/install-hooks --verify)
 ```
 
 Expected `~/.codero/config.yaml` excerpt after install:
@@ -241,4 +244,4 @@ tracking.
 - `docs/contracts/alias-registration.md` — SET-001: shim installation contract
 - `docs/agent-setup.md` — user-facing quickstart and per-agent setup guides
 - `docs/contracts/agent-handling-contract.md` — session launch and shim runtime contract
-- SET-003 and beyond: session runtime improvements (SES-001 track)
+- SES-001 and beyond: session runtime improvements

@@ -44,7 +44,7 @@ For Claude Code's built-in hook system (PreToolUse / PostToolUse / Notification)
 codero agent hooks --install
 ```
 
-This writes hook entries into `~/.claude/settings.json` so Claude Code calls back to the daemon on tool use events. See [`docs/contracts/prehook-installation.md`](contracts/prehook-installation.md) for the full contract: idempotency guarantees, `--force` behavior, config recording, and failure modes.
+This writes hook entries into `~/.claude/settings.json` so Claude Code calls back to the daemon on tool-use events and notification hooks (used for `waiting_for_input`). See [`docs/contracts/prehook-installation.md`](contracts/prehook-installation.md) for the full contract: idempotency guarantees, `--force` behavior, config recording, and failure modes.
 
 ### 3. Configure Claude Code to Use Shim
 

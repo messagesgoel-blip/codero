@@ -2,9 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/codero/codero/internal/config"
 )
 
 // TestInstallClaudeHooks_Create verifies fresh install into a non-existent
@@ -168,4 +173,127 @@ func TestGenerateClaudeHooks_Structure(t *testing.T) {
 			t.Errorf("hooks missing required key %q", required)
 		}
 	}
+}
+
+// TestAgentHooksCmd_PersistsHookMetadata verifies the CLI contract for
+// created/unchanged/updated installs and ~/.codero/config.yaml recording.
+func TestAgentHooksCmd_PersistsHookMetadata(t *testing.T) {
+	homeDir := t.TempDir()
+	configDir := filepath.Join(homeDir, ".codero")
+	t.Setenv("HOME", homeDir)
+	t.Setenv("CODERO_USER_CONFIG_DIR", configDir)
+
+	settingsPath := filepath.Join(homeDir, ".claude", "settings.json")
+	configPath := filepath.Join(configDir, "config.yaml")
+
+	cmd := agentHooksCmd(nil)
+	cmd.SetArgs([]string{"--install"})
+	stderr, err := captureStderr(t, cmd.Execute)
+	if err != nil {
+		t.Fatalf("first agent hooks install: %v", err)
+	}
+	if !strings.Contains(stderr, "Hooks created to "+settingsPath) {
+		t.Fatalf("expected created status in stderr, got %q", stderr)
+	}
+
+	uc, err := config.LoadUserConfig()
+	if err != nil {
+		t.Fatalf("load user config after create: %v", err)
+	}
+	hookCfg, ok := uc.Hooks["claude"]
+	if !ok {
+		t.Fatal("expected hooks.claude entry in user config")
+	}
+	if hookCfg.SettingsPath != settingsPath {
+		t.Fatalf("settings path = %q, want %q", hookCfg.SettingsPath, settingsPath)
+	}
+	if hookCfg.InstalledAt.IsZero() {
+		t.Fatal("expected non-zero installed_at after create")
+	}
+	firstInstalledAt := hookCfg.InstalledAt
+	firstMtime := fileModTime(t, configPath)
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config after create: %v", err)
+	}
+	if !strings.Contains(string(configData), "hooks:") || !strings.Contains(string(configData), "settings_path:") {
+		t.Fatalf("config missing expected hooks section:\n%s", string(configData))
+	}
+
+	cmd = agentHooksCmd(nil)
+	cmd.SetArgs([]string{"--install"})
+	stderr, err = captureStderr(t, cmd.Execute)
+	if err != nil {
+		t.Fatalf("second agent hooks install: %v", err)
+	}
+	if !strings.Contains(stderr, "Hooks unchanged to "+settingsPath) {
+		t.Fatalf("expected unchanged status in stderr, got %q", stderr)
+	}
+	if got := fileModTime(t, configPath); !got.Equal(firstMtime) {
+		t.Fatal("config file mtime changed on unchanged install")
+	}
+	uc, err = config.LoadUserConfig()
+	if err != nil {
+		t.Fatalf("load user config after unchanged install: %v", err)
+	}
+	if !uc.Hooks["claude"].InstalledAt.Equal(firstInstalledAt) {
+		t.Fatal("installed_at changed on unchanged install")
+	}
+
+	time.Sleep(1100 * time.Millisecond)
+	cmd = agentHooksCmd(nil)
+	cmd.SetArgs([]string{"--install", "--force"})
+	stderr, err = captureStderr(t, cmd.Execute)
+	if err != nil {
+		t.Fatalf("force agent hooks install: %v", err)
+	}
+	if !strings.Contains(stderr, "Hooks updated to "+settingsPath) {
+		t.Fatalf("expected updated status in stderr, got %q", stderr)
+	}
+	if got := fileModTime(t, configPath); !got.After(firstMtime) {
+		t.Fatal("config file mtime did not change on force install")
+	}
+	uc, err = config.LoadUserConfig()
+	if err != nil {
+		t.Fatalf("load user config after force install: %v", err)
+	}
+	if !uc.Hooks["claude"].InstalledAt.After(firstInstalledAt) {
+		t.Fatal("installed_at did not advance on force install")
+	}
+}
+
+func captureStderr(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+
+	oldStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe stderr: %v", err)
+	}
+	os.Stderr = w
+	defer func() {
+		os.Stderr = oldStderr
+	}()
+
+	runErr := fn()
+	if err := w.Close(); err != nil {
+		t.Fatalf("close stderr writer: %v", err)
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read stderr: %v", err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatalf("close stderr reader: %v", err)
+	}
+	return string(data), runErr
+}
+
+func fileModTime(t *testing.T, path string) time.Time {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	return info.ModTime()
 }

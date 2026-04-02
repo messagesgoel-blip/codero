@@ -39,7 +39,11 @@ func agentHooksCmd(_ *string) *cobra.Command {
 			}
 
 			// Install: merge into ~/.claude/settings.json
-			settingsPath := filepath.Join(os.Getenv("HOME"), ".claude", "settings.json")
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("resolve home dir: %w", err)
+			}
+			settingsPath := filepath.Join(homeDir, ".claude", "settings.json")
 			status, err := installClaudeHooks(settingsPath, hooks, force)
 			if err != nil {
 				return err
@@ -129,10 +133,6 @@ func installClaudeHooks(path string, hooks map[string]interface{}, force bool) (
 
 	// Idempotency check: compare new hooks JSON with what is already stored.
 	if !force && fileExisted {
-		newHooksJSON, err := json.Marshal(hooks)
-		if err != nil {
-			return "", fmt.Errorf("marshal new hooks: %w", err)
-		}
 		// Build the would-be merged map for comparison.
 		merged := shallowCopy(existing)
 		for k, v := range hooks {
@@ -146,7 +146,6 @@ func installClaudeHooks(path string, hooks map[string]interface{}, force bool) (
 		if err != nil {
 			return "", fmt.Errorf("marshal existing settings: %w", err)
 		}
-		_ = newHooksJSON // used indirectly via merged comparison
 		if string(mergedJSON) == string(existingJSON) {
 			return "unchanged", nil
 		}
