@@ -79,6 +79,7 @@ func TestInstallShim_Idempotent(t *testing.T) {
 		t.Fatalf("first installShim: %v", err)
 	}
 	firstMtime := shimMtime(t, filepath.Join(shimDir, "claude"))
+	firstWrapper := uc.Wrappers["claude"]
 
 	// Second install (same binary, no force).
 	result, err := installShim(shimDir, "claude", "claude", realBin, uc, false)
@@ -92,6 +93,10 @@ func TestInstallShim_Idempotent(t *testing.T) {
 	// Shim file should not have been rewritten.
 	if got := shimMtime(t, filepath.Join(shimDir, "claude")); got != firstMtime {
 		t.Error("shim was rewritten on idempotent call (mtime changed)")
+	}
+	secondWrapper := uc.Wrappers["claude"]
+	if !secondWrapper.InstalledAt.Equal(firstWrapper.InstalledAt) {
+		t.Error("wrapper metadata changed on idempotent call")
 	}
 }
 
