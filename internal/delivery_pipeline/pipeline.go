@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/looplab/fsm"
 
+	"github.com/codero/codero/internal/config"
 	"github.com/codero/codero/internal/event"
 	"github.com/codero/codero/internal/gatecheck"
 	"github.com/codero/codero/internal/gitops"
@@ -138,10 +139,23 @@ func NewPipeline(deps PipelineDeps) *Pipeline {
 	if deps.Notifier == nil {
 		deps.Notifier = defaultNotifier{}
 	}
+	if deps.EventSender == nil {
+		deps.EventSender = &defaultEventSender{
+			replyTo: event.NewReplyToDirectClient(),
+		}
+	}
 	return &Pipeline{
 		deps:     deps,
 		inFlight: make(map[string]struct{}),
 	}
+}
+
+type defaultEventSender struct {
+	replyTo event.ReplyToClient
+}
+
+func (s *defaultEventSender) Send(ctx context.Context, env event.Envelope) error {
+	return s.replyTo.Deliver(ctx, env)
 }
 
 // Submit runs the full delivery pipeline for an assignment/worktree.
@@ -317,35 +331,15 @@ func (p *Pipeline) Submit(ctx context.Context, assignmentID, worktree string) er
 					loglib.FieldComponent, "delivery_pipeline",
 					"error", writeErr.Error(),
 				)
-			} else {
-				// BND-004: emit structured event envelope for feedback delivery.
-				// Codero emits structured payloads only; OpenClaw owns PTY injection timing.
-				replyTo := p.buildReplyToEndpoint(assignment)
-				findings := fbItemsToEventItems(fb.CIFailures)
-				findings = append(findings, fbItemsToEventItems(fb.GateFindings)...)
-				findings = append(findings, fbItemsToEventItems(fb.CodeReview)...)
-				payload := event.FeedbackInjectPayload{
-					AssignmentID: assignmentID,
-					SessionID:    assignment.SessionID,
-					Findings:     findings,
-					GateFindings: fbItemsToEventItems(fb.GateFindings),
-					ReviewNotes:  fbItemsToEventItems(fb.CodeReview),
-				}
-				env, envErr := event.NewFeedbackInject(uuid.New().String(), replyTo, payload)
-				if envErr != nil {
-					loglib.Warn("delivery pipeline: build feedback envelope failed",
-						loglib.FieldComponent, "delivery_pipeline",
-						"error", envErr.Error(),
-					)
-				} else if p.deps.EventSender != nil {
-					if sendErr := p.deps.EventSender.Send(ctx, env); sendErr != nil {
-						loglib.Warn("delivery pipeline: send feedback envelope failed",
-							loglib.FieldComponent, "delivery_pipeline",
-							"error", sendErr.Error(),
-						)
-					}
-				}
-				p.deps.Notifier.Notify(worktree, "feedback", assignmentID)
+			}
+			sendErr := p.sendFeedbackEvent(ctx, assignment, fb)
+			p.deps.Notifier.Notify(worktree, "feedback", assignmentID)
+			if sendErr != nil {
+				_ = fsmState.Event(ctx, "fail")
+				_ = p.setDeliveryState(ctx, assignmentID, stateFailed)
+				_ = fsmState.Event(ctx, "recover")
+				_ = p.setDeliveryState(ctx, assignmentID, stateIdle)
+				return fmt.Errorf("pipeline: feedback delivery: %w", sendErr)
 			}
 		}
 	}
@@ -684,14 +678,75 @@ func (p *Pipeline) fail(ctx context.Context, assignmentID, worktree string, fsmS
 			loglib.FieldComponent, "delivery_pipeline",
 			"error", writeErr.Error(),
 		)
-	} else {
-		p.deps.Notifier.Notify(worktree, "feedback", assignmentID)
 	}
+	var sendErr error
+	assignment, loadErr := state.GetAgentAssignmentByID(ctx, p.deps.StateDB, assignmentID)
+	if loadErr != nil {
+		sendErr = fmt.Errorf("load assignment for feedback delivery: %w", loadErr)
+	} else {
+		sendErr = p.sendFeedbackEvent(ctx, assignment, &feedback)
+	}
+	p.deps.Notifier.Notify(worktree, "feedback", assignmentID)
 
 	if fsmState != nil {
 		_ = fsmState.Event(ctx, "recover")
 	}
 	_ = p.setDeliveryState(ctx, assignmentID, stateIdle)
+	if sendErr != nil {
+		return fmt.Errorf("pipeline: feedback delivery after %v: %w", err, sendErr)
+	}
+	return nil
+}
+
+func (p *Pipeline) sendFeedbackEvent(ctx context.Context, assignment *state.AgentAssignment, fb *FeedbackPackage) error {
+	if fb == nil || p.deps.EventSender == nil {
+		return nil
+	}
+	if assignment == nil {
+		return fmt.Errorf("feedback assignment is required")
+	}
+
+	// BND-004: emit structured event envelope for feedback delivery.
+	// Codero emits structured payloads only; OpenClaw owns PTY injection timing.
+	replyTo, err := p.buildReplyToEndpoint(ctx, assignment)
+	if err != nil {
+		loglib.Warn("delivery pipeline: build reply_to endpoint failed",
+			loglib.FieldComponent, "delivery_pipeline",
+			"error", err.Error(),
+			"assignment", assignment.ID,
+		)
+		return fmt.Errorf("build reply_to endpoint: %w", err)
+	}
+	findings := fbItemsToEventItems(fb.CIFailures)
+	findings = append(findings, fbItemsToEventItems(fb.GateFindings)...)
+	findings = append(findings, fbItemsToEventItems(fb.CodeReview)...)
+
+	payload := event.FeedbackInjectPayload{
+		AssignmentID: assignment.ID,
+		SessionID:    assignment.SessionID,
+		Findings:     findings,
+		GateFindings: fbItemsToEventItems(fb.GateFindings),
+		ReviewNotes:  fbItemsToEventItems(fb.CodeReview),
+	}
+
+	env, err := event.NewFeedbackInject(uuid.New().String(), replyTo, payload)
+	if err != nil {
+		loglib.Warn("delivery pipeline: build feedback envelope failed",
+			loglib.FieldComponent, "delivery_pipeline",
+			"error", err.Error(),
+			"assignment", assignment.ID,
+		)
+		return err
+	}
+
+	if err := p.deps.EventSender.Send(ctx, env); err != nil {
+		loglib.Warn("delivery pipeline: send feedback envelope failed",
+			loglib.FieldComponent, "delivery_pipeline",
+			"error", err.Error(),
+			"assignment", assignment.ID,
+		)
+		return fmt.Errorf("send feedback envelope: %w", err)
+	}
 	return nil
 }
 
@@ -971,13 +1026,38 @@ func (defaultNotifier) Notify(worktree, notificationType, assignmentID string) {
 
 // buildReplyToEndpoint constructs the OpenClaw reply_to endpoint for an assignment.
 // BND-004: reply_to is an OpenClaw endpoint, not a PTY path.
-// TmuxName is intentionally left empty — it is populated by the launch wrapper
-// when the real tmux session name is known.
-func (p *Pipeline) buildReplyToEndpoint(assignment *state.AgentAssignment) event.ReplyToEndpoint {
-	return event.ReplyToEndpoint{
+func (p *Pipeline) buildReplyToEndpoint(ctx context.Context, assignment *state.AgentAssignment) (event.ReplyToEndpoint, error) {
+	if assignment == nil {
+		return event.ReplyToEndpoint{}, fmt.Errorf("assignment is required")
+	}
+	if p.deps.StateDB == nil {
+		return event.ReplyToEndpoint{}, fmt.Errorf("state DB is required for reply_to routing")
+	}
+
+	ep := event.ReplyToEndpoint{
 		Type:      "openclaw_session",
 		SessionID: assignment.SessionID,
 	}
+
+	sess, err := state.GetAgentSession(ctx, p.deps.StateDB, assignment.SessionID)
+	if err != nil {
+		return event.ReplyToEndpoint{}, fmt.Errorf("load agent session %q: %w", assignment.SessionID, err)
+	}
+	if sess == nil {
+		return event.ReplyToEndpoint{}, fmt.Errorf("load agent session %q: empty result", assignment.SessionID)
+	}
+	ep.TmuxName = strings.TrimSpace(sess.TmuxSessionName)
+	if ep.TmuxName == "" {
+		return event.ReplyToEndpoint{}, fmt.Errorf("session %q missing tmux routing", assignment.SessionID)
+	}
+	// agent_sessions persist the durable agent_id profile, not an explicit agent_kind column.
+	// Resolve the supported bridge family from that durable identifier and fail closed when unknown.
+	ep.AgentKind = config.InferAgentKind(sess.AgentID, "")
+	if ep.AgentKind == "" {
+		return event.ReplyToEndpoint{}, fmt.Errorf("session %q has unsupported agent_id %q for bridge routing", assignment.SessionID, sess.AgentID)
+	}
+
+	return ep, nil
 }
 
 // fbItemsToEventItems converts FeedbackItem to event.FeedbackItem.

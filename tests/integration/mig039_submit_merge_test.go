@@ -11,6 +11,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	deliverypipeline "github.com/codero/codero/internal/delivery_pipeline"
+	"github.com/codero/codero/internal/event"
 	"github.com/codero/codero/internal/gatecheck"
 	"github.com/codero/codero/internal/gitops"
 	"github.com/codero/codero/internal/state"
@@ -43,7 +44,7 @@ func TestMIG039_SubmitToMerge_HappyPath(t *testing.T) {
 	// Setup: seed branch state
 	const (
 		sessionID    = "sess-mig039"
-		agentID      = "agent-mig039"
+		agentID      = "codex-mig039"
 		assignmentID = "assign-mig039"
 		repo         = "acme/mig039-test"
 		branch       = "feat/mig039-test"
@@ -59,8 +60,8 @@ func TestMIG039_SubmitToMerge_HappyPath(t *testing.T) {
 	}
 
 	_, err = db.Unwrap().Exec(
-		`INSERT INTO agent_sessions (session_id, agent_id, mode, started_at, last_seen_at) VALUES (?, ?, 'coding', datetime('now'), datetime('now'))`,
-		sessionID, agentID,
+		`INSERT INTO agent_sessions (session_id, agent_id, mode, tmux_session_name, started_at, last_seen_at) VALUES (?, ?, 'coding', ?, datetime('now'), datetime('now'))`,
+		sessionID, agentID, "codero-"+sessionID,
 	)
 	if err != nil {
 		t.Fatalf("seed session: %v", err)
@@ -95,12 +96,13 @@ func TestMIG039_SubmitToMerge_HappyPath(t *testing.T) {
 	notifier := &integrationNotifier{}
 
 	p := deliverypipeline.NewPipeline(deliverypipeline.PipelineDeps{
-		StateDB:    db,
-		GitOps:     gitOps,
-		GateRunner: gateRunner,
-		GitHub:     gh,
-		Writer:     writer,
-		Notifier:   notifier,
+		StateDB:     db,
+		GitOps:      gitOps,
+		GateRunner:  gateRunner,
+		GitHub:      gh,
+		Writer:      writer,
+		Notifier:    notifier,
+		EventSender: &integrationEventSender{},
 	})
 
 	// Execute: run the pipeline
@@ -178,7 +180,7 @@ func TestMIG039_SubmitToMerge_GateFailurePath(t *testing.T) {
 
 	const (
 		sessionID    = "sess-gatefail"
-		agentID      = "agent-gatefail"
+		agentID      = "codex-gatefail"
 		assignmentID = "assign-gatefail"
 		repo         = "acme/gatefail"
 		branch       = "feat/gatefail"
@@ -194,8 +196,8 @@ func TestMIG039_SubmitToMerge_GateFailurePath(t *testing.T) {
 	}
 
 	_, err = db.Unwrap().Exec(
-		`INSERT INTO agent_sessions (session_id, agent_id, mode, started_at, last_seen_at) VALUES (?, ?, 'coding', datetime('now'), datetime('now'))`,
-		sessionID, agentID,
+		`INSERT INTO agent_sessions (session_id, agent_id, mode, tmux_session_name, started_at, last_seen_at) VALUES (?, ?, 'coding', ?, datetime('now'), datetime('now'))`,
+		sessionID, agentID, "codero-"+sessionID,
 	)
 	if err != nil {
 		t.Fatalf("seed session: %v", err)
@@ -219,11 +221,12 @@ func TestMIG039_SubmitToMerge_GateFailurePath(t *testing.T) {
 	writer := &integrationWriter{}
 
 	p := deliverypipeline.NewPipeline(deliverypipeline.PipelineDeps{
-		StateDB:    db,
-		GitOps:     gitOps,
-		GateRunner: gateRunner,
-		Writer:     writer,
-		Notifier:   &integrationNotifier{},
+		StateDB:     db,
+		GitOps:      gitOps,
+		GateRunner:  gateRunner,
+		Writer:      writer,
+		Notifier:    &integrationNotifier{},
+		EventSender: &integrationEventSender{},
 	})
 
 	err = p.Submit(ctx, assignmentID, worktree)
@@ -432,4 +435,10 @@ type integrationNotifier struct {
 
 func (n *integrationNotifier) Notify(worktree, notificationType, assignmentID string) {
 	n.calls = append(n.calls, notificationType)
+}
+
+type integrationEventSender struct{}
+
+func (s *integrationEventSender) Send(ctx context.Context, env event.Envelope) error {
+	return nil
 }

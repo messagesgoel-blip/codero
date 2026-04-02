@@ -8,10 +8,12 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/codero/codero/internal/event"
 	"github.com/codero/codero/internal/gatecheck"
 	"github.com/codero/codero/internal/gitops"
 	"github.com/codero/codero/internal/state"
@@ -152,6 +154,7 @@ func (f *fakeGitHub) MergePR(ctx context.Context, repo string, prNumber int, sha
 type fakeWriter struct {
 	last  FeedbackPackage
 	calls int
+	err   error
 }
 
 func (f *fakeWriter) WriteTASK(worktree string, task Task) error { return nil }
@@ -159,7 +162,7 @@ func (f *fakeWriter) ClearFEEDBACK(worktree string) error        { return nil }
 func (f *fakeWriter) WriteFEEDBACK(worktree string, feedback FeedbackPackage) error {
 	f.calls++
 	f.last = feedback
-	return nil
+	return f.err
 }
 
 type fakeNotifier struct {
@@ -168,6 +171,16 @@ type fakeNotifier struct {
 
 func (f *fakeNotifier) Notify(worktree, notificationType, assignmentID string) {
 	f.calls = append(f.calls, notificationType)
+}
+
+type fakeEventSender struct {
+	sent []event.Envelope
+	err  error
+}
+
+func (f *fakeEventSender) Send(ctx context.Context, env event.Envelope) error {
+	f.sent = append(f.sent, env)
+	return f.err
 }
 
 func setupPipelineDB(t *testing.T, worktree string) (*state.DB, string) {
@@ -181,16 +194,14 @@ func setupPipelineDB(t *testing.T, worktree string) (*state.DB, string) {
 
 	assignmentID := "assign-1"
 	_, err = db.Unwrap().Exec(`
-		INSERT INTO agent_sessions (session_id, agent_id, mode)
-		VALUES ('sess-1', 'agent-1', 'coding')`)
+		INSERT INTO agent_sessions (session_id, agent_id, mode, tmux_session_name)
+		VALUES ('sess-1', 'codex-123', 'agent', 'codero-agent-1-sess1')`)
 	if err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
 	_, err = db.Unwrap().Exec(`
 		INSERT INTO agent_assignments (assignment_id, session_id, agent_id, repo, branch, worktree, task_id)
-		VALUES (?, 'sess-1', 'agent-1', 'acme/api', 'feat/test', ?, 'TASK-1')`,
-		assignmentID, worktree,
-	)
+		VALUES ('assign-1', 'sess-1', 'codex-123', 'owner/repo', 'feat/x', ?, 'COD-1')`, worktree)
 	if err != nil {
 		t.Fatalf("seed assignment: %v", err)
 	}
@@ -283,12 +294,14 @@ func TestPipeline_GateFailureWritesFeedback(t *testing.T) {
 		},
 	}}
 	writer := &fakeWriter{}
+	sender := &fakeEventSender{}
 	p := NewPipeline(PipelineDeps{
-		StateDB:    db,
-		GitOps:     &fakeGitOps{},
-		GateRunner: gate,
-		Writer:     writer,
-		Notifier:   &fakeNotifier{},
+		StateDB:     db,
+		GitOps:      &fakeGitOps{},
+		GateRunner:  gate,
+		Writer:      writer,
+		Notifier:    &fakeNotifier{},
+		EventSender: sender,
 	})
 
 	if err := p.Submit(context.Background(), assignmentID, worktree); err != nil {
@@ -300,6 +313,160 @@ func TestPipeline_GateFailureWritesFeedback(t *testing.T) {
 	if IsLocked(worktree) {
 		t.Fatalf("expected lock removed after failure")
 	}
+	if len(sender.sent) == 0 {
+		t.Fatalf("expected feedback envelope to be sent via EventSender")
+	}
+	env := sender.sent[0]
+	if env.Type != event.EventTypeFeedbackInject {
+		t.Fatalf("got event type %q, want %q", env.Type, event.EventTypeFeedbackInject)
+	}
+	if env.ReplyTo.TmuxName != "codero-agent-1-sess1" {
+		t.Fatalf("got TmuxName %q, want %q", env.ReplyTo.TmuxName, "codero-agent-1-sess1")
+	}
+	if env.ReplyTo.AgentKind != "codex" {
+		t.Fatalf("got AgentKind %q, want %q", env.ReplyTo.AgentKind, "codex")
+	}
+}
+
+func TestPipeline_MonitorFeedback_EventSentWhenWriteFeedbackFails(t *testing.T) {
+	worktree := t.TempDir()
+	db, assignmentID := setupPipelineDB(t, worktree)
+
+	writer := &fakeWriter{err: errors.New("disk full")}
+	notifier := &fakeNotifier{}
+	sender := &fakeEventSender{}
+	p := NewPipeline(PipelineDeps{
+		StateDB:     db,
+		GitOps:      &fakeGitOps{},
+		GateRunner:  &fakeGateRunner{report: &gatecheck.Report{Result: gatecheck.StatusPass}},
+		GitHub:      &fakeGitHub{created: true, prNumber: 42, ciPassed: true, changesRequested: true},
+		Writer:      writer,
+		Notifier:    notifier,
+		EventSender: sender,
+	})
+
+	if err := p.Submit(context.Background(), assignmentID, worktree); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if writer.calls == 0 {
+		t.Fatalf("expected feedback write attempt")
+	}
+	if len(sender.sent) == 0 {
+		t.Fatalf("expected feedback envelope to be sent despite write failure")
+	}
+	if !reflect.DeepEqual(notifier.calls, []string{"task", "feedback"}) {
+		t.Fatalf("notifier calls=%v, want %v", notifier.calls, []string{"task", "feedback"})
+	}
+}
+
+func TestPipeline_MonitorFeedback_EventSendErrorPropagates(t *testing.T) {
+	worktree := t.TempDir()
+	db, assignmentID := setupPipelineDB(t, worktree)
+
+	notifier := &fakeNotifier{}
+	p := NewPipeline(PipelineDeps{
+		StateDB:     db,
+		GitOps:      &fakeGitOps{},
+		GateRunner:  &fakeGateRunner{report: &gatecheck.Report{Result: gatecheck.StatusPass}},
+		GitHub:      &fakeGitHub{created: true, prNumber: 42, ciPassed: true, changesRequested: true},
+		Writer:      &fakeWriter{},
+		Notifier:    notifier,
+		EventSender: &fakeEventSender{err: errors.New("bridge down")},
+	})
+
+	err := p.Submit(context.Background(), assignmentID, worktree)
+	if err == nil {
+		t.Fatal("expected feedback delivery error, got nil")
+	}
+	if !strings.Contains(err.Error(), "feedback delivery") || !strings.Contains(err.Error(), "bridge down") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !reflect.DeepEqual(notifier.calls, []string{"task", "feedback"}) {
+		t.Fatalf("notifier calls=%v, want %v", notifier.calls, []string{"task", "feedback"})
+	}
+}
+
+func TestPipeline_MonitorFeedback_MissingReplyToRoutingPropagates(t *testing.T) {
+	worktree := t.TempDir()
+	db, assignmentID := setupPipelineDB(t, worktree)
+
+	if _, err := db.Unwrap().Exec(`UPDATE agent_sessions SET agent_id = 'unknown-agent' WHERE session_id = 'sess-1'`); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+
+	p := NewPipeline(PipelineDeps{
+		StateDB:     db,
+		GitOps:      &fakeGitOps{},
+		GateRunner:  &fakeGateRunner{report: &gatecheck.Report{Result: gatecheck.StatusPass}},
+		GitHub:      &fakeGitHub{created: true, prNumber: 42, ciPassed: true, changesRequested: true},
+		Writer:      &fakeWriter{},
+		Notifier:    &fakeNotifier{},
+		EventSender: &fakeEventSender{},
+	})
+
+	err := p.Submit(context.Background(), assignmentID, worktree)
+	if err == nil {
+		t.Fatal("expected reply_to routing error, got nil")
+	}
+	if !strings.Contains(err.Error(), "build reply_to endpoint") || !strings.Contains(err.Error(), "unsupported agent_id") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestPipeline_GateFailure_EventSentWhenWriteFeedbackFails(t *testing.T) {
+	worktree := t.TempDir()
+	db, assignmentID := setupPipelineDB(t, worktree)
+
+	writer := &fakeWriter{err: errors.New("disk full")}
+	notifier := &fakeNotifier{}
+	sender := &fakeEventSender{}
+	p := NewPipeline(PipelineDeps{
+		StateDB:     db,
+		GitOps:      &fakeGitOps{},
+		GateRunner:  &fakeGateRunner{report: &gatecheck.Report{Result: gatecheck.StatusFail}},
+		Writer:      writer,
+		Notifier:    notifier,
+		EventSender: sender,
+	})
+
+	if err := p.Submit(context.Background(), assignmentID, worktree); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if writer.calls == 0 {
+		t.Fatalf("expected feedback write attempt")
+	}
+	if len(sender.sent) == 0 {
+		t.Fatalf("expected feedback envelope to be sent despite write failure")
+	}
+	if !reflect.DeepEqual(notifier.calls, []string{"task", "feedback"}) {
+		t.Fatalf("notifier calls=%v, want %v", notifier.calls, []string{"task", "feedback"})
+	}
+}
+
+func TestPipeline_GateFailure_EventSendErrorPropagates(t *testing.T) {
+	worktree := t.TempDir()
+	db, assignmentID := setupPipelineDB(t, worktree)
+
+	notifier := &fakeNotifier{}
+	p := NewPipeline(PipelineDeps{
+		StateDB:     db,
+		GitOps:      &fakeGitOps{},
+		GateRunner:  &fakeGateRunner{report: &gatecheck.Report{Result: gatecheck.StatusFail}},
+		Writer:      &fakeWriter{},
+		Notifier:    notifier,
+		EventSender: &fakeEventSender{err: errors.New("bridge down")},
+	})
+
+	err := p.Submit(context.Background(), assignmentID, worktree)
+	if err == nil {
+		t.Fatal("expected feedback delivery error, got nil")
+	}
+	if !strings.Contains(err.Error(), "feedback delivery") || !strings.Contains(err.Error(), "bridge down") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !reflect.DeepEqual(notifier.calls, []string{"task", "feedback"}) {
+		t.Fatalf("notifier calls=%v, want %v", notifier.calls, []string{"task", "feedback"})
+	}
 }
 
 func TestPipeline_PushFailureWritesFeedback(t *testing.T) {
@@ -308,11 +475,12 @@ func TestPipeline_PushFailureWritesFeedback(t *testing.T) {
 
 	gitops := &fakeGitOps{pushErr: errors.New("push failed")}
 	p := NewPipeline(PipelineDeps{
-		StateDB:    db,
-		GitOps:     gitops,
-		GateRunner: &fakeGateRunner{report: &gatecheck.Report{Result: gatecheck.StatusPass}},
-		Writer:     &fakeWriter{},
-		Notifier:   &fakeNotifier{},
+		StateDB:     db,
+		GitOps:      gitops,
+		GateRunner:  &fakeGateRunner{report: &gatecheck.Report{Result: gatecheck.StatusPass}},
+		Writer:      &fakeWriter{},
+		Notifier:    &fakeNotifier{},
+		EventSender: &fakeEventSender{},
 	})
 
 	if err := p.Submit(context.Background(), assignmentID, worktree); err != nil {
@@ -345,11 +513,12 @@ func TestPipeline_ConcurrentSubmit(t *testing.T) {
 	}
 
 	p := NewPipeline(PipelineDeps{
-		StateDB:    db,
-		GitOps:     gitops,
-		GateRunner: gate,
-		Writer:     &fakeWriter{},
-		Notifier:   &fakeNotifier{},
+		StateDB:     db,
+		GitOps:      gitops,
+		GateRunner:  gate,
+		Writer:      &fakeWriter{},
+		Notifier:    &fakeNotifier{},
+		EventSender: &fakeEventSender{},
 	})
 
 	var firstErr error
