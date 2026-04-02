@@ -45,13 +45,16 @@ func runSetup(force bool) error {
 	fmt.Println("  codero agent orchestrator — setup (v1)")
 	fmt.Println()
 
-	// Step 1: Check Docker
+	// Step 1: Check Docker (advisory — shim installation does not require Docker)
 	fmt.Print("  [1/4] Checking Docker... ")
 	if err := checkDocker(); err != nil {
-		fmt.Println("✗")
-		return fmt.Errorf("Docker is required: %w", err)
+		fmt.Println("not running")
+		fmt.Println("        → Docker not found or not running.")
+		fmt.Println("        → Shim installation will continue — start Docker before using the daemon.")
+		fmt.Println()
+	} else {
+		fmt.Println("✓ running")
 	}
-	fmt.Println("✓ running")
 
 	// Step 2: Check/start daemon
 	fmt.Print("  [2/4] Checking daemon... ")
