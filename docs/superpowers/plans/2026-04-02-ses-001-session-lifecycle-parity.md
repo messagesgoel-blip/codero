@@ -17,7 +17,7 @@
 All 8 existing `TestMIG038_*` tests pass. The build is clean (`go build -buildvcs=false ./...`). Pre-existing failures in `internal/dashboard` are unrelated to this slice and must not be touched.
 
 Run full test suite before starting and keep a mental baseline:
-```
+```bash
 cd /srv/storage/repo/codero/.worktrees/ses-001
 go test ./tests/contract/... -v -run TestMIG038
 ```
@@ -137,7 +137,7 @@ Key differences: `archive_id` is the PK (not `session_id`), multiple rows per se
 
 The contract doc says `isClosing bool` which implies graceful shutdown semantics. The actual parameter is `markProgress bool` with progress-tracking semantics. Update the signature and description:
 
-```
+```text
 -- OLD
 err := store.Heartbeat(ctx, sessionID, secret, isClosing)
 - `isClosing=true` signals graceful shutdown
@@ -172,7 +172,7 @@ err := store.HeartbeatWithStatus(ctx, sessionID, secret, markProgress, inferredS
 
 The contract shows `store.Finalize(ctx, sessionID, result, mergeSHA)`. The actual signature takes `agentID` and a `Completion` struct:
 
-```
+```text
 -- OLD
 err := store.Finalize(ctx, sessionID, result, mergeSHA)
 - `result` — One of: merged, abandoned, failed, cancelled
@@ -221,7 +221,7 @@ err := store.Finalize(ctx, sessionID, agentID, session.Completion{
 
 The contract shows `parentSessionID` as the last parameter. The actual last parameter is `substatus string`:
 
-```
+```text
 -- OLD
 err := store.AttachAssignment(ctx, sessionID, agentID, repo, branch, worktree, mode, taskID, parentSessionID)
 
@@ -252,7 +252,7 @@ Also add a note to the Session States table that `inferred_status` is an orthogo
 
 Contract says "Re-registering generates a new secret." Actual behavior: the existing secret is preserved on re-register (the `heartbeat_secret` is kept via `COALESCE(NULLIF(agent_sessions.heartbeat_secret, ''), excluded.heartbeat_secret)`). Fix:
 
-```
+```text
 -- OLD
 **Idempotency**: Re-registering with the same session_id updates the existing session (mode change, new secret).
 
@@ -264,7 +264,7 @@ Contract says "Re-registering generates a new secret." Actual behavior: the exis
 
 The contract implies `Confirm` writes a `confirmed_at` timestamp. It does not — it is a pure read-validate call. Fix the description:
 
-```
+```text
 -- OLD (implied write)
 Confirm verifies that Codero has the same live session identity...
 
@@ -279,13 +279,13 @@ Confirm verifies that a live session exists and its registered agent_id matches.
 - [ ] **Step 1.11: Update the version/date header and contract tests table**
 
 Update header:
-```
+```text
 Version: 1.1
 Last Updated: 2026-04-02
 ```
 
 Add the 5 new tests to the Contract Tests table (from Task 2):
-```
+```text
 | TestMIG038_HeartbeatWithStatus_UpdatesInferredStatus | HeartbeatWithStatus persists inferred_status |
 | TestMIG038_Heartbeat_StatusAliasNormalization | Status aliases map to canonical values |
 | TestMIG038_Finalize_WritesArchiveRow | Finalize atomically creates session_archives row |
