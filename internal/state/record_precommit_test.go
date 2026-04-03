@@ -29,8 +29,8 @@ func TestRecordPrecommitResult_Pass(t *testing.T) {
 	if pcProvider != "precommit" {
 		t.Errorf("precommit_reviews.provider: want precommit, got %q", pcProvider)
 	}
-	if pcError != "gitleaks,govet,ai-gate" {
-		t.Errorf("precommit_reviews.error: want checks list, got %q", pcError)
+	if pcError != "" {
+		t.Errorf("precommit_reviews.error: want empty on pass, got %q", pcError)
 	}
 
 	// Verify review_runs row.
@@ -50,8 +50,8 @@ func TestRecordPrecommitResult_Pass(t *testing.T) {
 	if rrHeadHash != "abc123" {
 		t.Errorf("review_runs.head_hash: want abc123, got %q", rrHeadHash)
 	}
-	if rrError != "gitleaks,govet,ai-gate" {
-		t.Errorf("review_runs.error: want checks list, got %q", rrError)
+	if rrError != "" {
+		t.Errorf("review_runs.error: want empty on pass, got %q", rrError)
 	}
 	if !startedAt.Before(finishedAt) {
 		t.Errorf("review_runs: startedAt (%v) should be before finishedAt (%v) when durationMS>0", startedAt, finishedAt)
@@ -77,8 +77,8 @@ func TestRecordPrecommitResult_Fail(t *testing.T) {
 	if pcStatus != "failed" {
 		t.Errorf("precommit_reviews.status: want failed, got %q", pcStatus)
 	}
-	if pcError != "failed checks: gitleaks,ruff" {
-		t.Errorf("precommit_reviews.error: want 'failed checks: gitleaks,ruff', got %q", pcError)
+	if pcError != "checks: gitleaks,ruff" {
+		t.Errorf("precommit_reviews.error: want 'checks: gitleaks,ruff', got %q", pcError)
 	}
 
 	var rrStatus string

@@ -35,15 +35,14 @@ func RecordPrecommitResult(ctx context.Context, db *DB, repo, branch, headHash, 
 		return fmt.Errorf("record precommit: invalid result %q (expected pass or fail)", result)
 	}
 
-	// Populate error field: on pass store the checks list as metadata;
-	// on fail prefix with "failed checks:" for visibility.
+	// Populate error field only on failures; leave empty for successful runs.
+	// Use "checks:" (not "failed checks:") because the checks param lists all checks
+	// that ran — not specifically which individual checks failed.
 	errMsg := ""
 	if result == "fail" && checks != "" {
-		errMsg = "failed checks: " + checks
+		errMsg = "checks: " + checks
 	} else if result == "fail" {
 		errMsg = "gate failed"
-	} else if checks != "" {
-		errMsg = checks
 	}
 
 	// Compute started_at from duration if provided.
