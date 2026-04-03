@@ -121,6 +121,11 @@ func TestWIRE001_SessionBinding(t *testing.T) {
 		t.Fatalf("session register failed: %v\nOutput: %s", err, out)
 	}
 	t.Logf("Registered session: %s", sessionID)
+	t.Cleanup(func() {
+		if _, err := codero("session", "end", "--session-id="+sessionID, "--agent-id="+agentID); err != nil {
+			t.Logf("cleanup: session end failed (non-fatal): %v", err)
+		}
+	})
 
 	// Extract heartbeat secret from output.
 	var heartbeatSecret string

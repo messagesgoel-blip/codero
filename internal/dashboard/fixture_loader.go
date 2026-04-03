@@ -193,11 +193,17 @@ func SeedFixtureSessions(ctx context.Context, db *sql.DB, entries []FixtureSessi
 			if err != nil {
 				return fmt.Errorf("fixture_loader: marshal assignment event %q: %w", assignmentID, err)
 			}
+			if e.OutputMB < 0 {
+				return fmt.Errorf("fixture_loader: sessions[%d]: output_mb cannot be negative", i)
+			}
+			if e.CompactCount < 0 {
+				return fmt.Errorf("fixture_loader: sessions[%d]: compact_count cannot be negative", i)
+			}
 			tx, err := db.BeginTx(ctx, nil)
 			if err != nil {
 				return fmt.Errorf("fixture_loader: begin tx for session %q: %w", e.SessionID, err)
 			}
-			_, err = tx.Exec(`
+			_, err = tx.ExecContext(ctx, `
 				INSERT OR REPLACE INTO agent_sessions
 					(session_id, agent_id, mode, started_at, last_seen_at, last_progress_at, last_io_at,
 					 context_pressure, compact_count, inferred_status, inferred_status_updated_at,
@@ -211,7 +217,7 @@ func SeedFixtureSessions(ctx context.Context, db *sql.DB, entries []FixtureSessi
 				_ = tx.Rollback()
 				return fmt.Errorf("fixture_loader: insert agent session %q: %w", e.SessionID, err)
 			}
-			_, err = tx.Exec(`
+			_, err = tx.ExecContext(ctx, `
 				INSERT INTO agent_events (session_id, agent_id, event_type, payload)
 				VALUES (?, ?, 'session_registered', ?)`,
 				e.SessionID, agentID, string(sessionPayload),
@@ -227,7 +233,7 @@ func SeedFixtureSessions(ctx context.Context, db *sql.DB, entries []FixtureSessi
 				}
 				continue
 			}
-			_, err = tx.Exec(`
+			_, err = tx.ExecContext(ctx, `
 				INSERT OR REPLACE INTO agent_assignments
 					(assignment_id, session_id, agent_id, repo, branch, worktree, task_id, started_at, ended_at, end_reason, superseded_by)
 				VALUES (?,?,?,?,?,?,?,?,NULL,'',NULL)`,
@@ -237,7 +243,7 @@ func SeedFixtureSessions(ctx context.Context, db *sql.DB, entries []FixtureSessi
 				_ = tx.Rollback()
 				return fmt.Errorf("fixture_loader: insert agent assignment %q: %w", assignmentID, err)
 			}
-			_, err = tx.Exec(`
+			_, err = tx.ExecContext(ctx, `
 				INSERT INTO agent_events (session_id, agent_id, event_type, payload)
 				VALUES (?, ?, 'assignment_attached', ?)`,
 				e.SessionID, agentID,
@@ -251,8 +257,10 @@ func SeedFixtureSessions(ctx context.Context, db *sql.DB, entries []FixtureSessi
 				_ = tx.Rollback()
 				return fmt.Errorf("fixture_loader: commit session+assignment %q: %w", e.SessionID, err)
 			}
+			// Tail-log seeding is best-effort: the session rows are already durable
+			// after Commit, so a tail-log failure must not abort subsequent fixtures.
 			if err := seedFixtureTailLog(e.SessionID, e.OutputMB); err != nil {
-				return fmt.Errorf("fixture_loader: seed tail log for %q: %w", e.SessionID, err)
+				fmt.Fprintf(os.Stderr, "fixture_loader: seed tail log for %q: %v (skipping)\n", e.SessionID, err)
 			}
 			continue
 		}
@@ -346,19 +354,20 @@ func seedFixtureTailLog(sessionID string, outputMB float64) error {
 		return fmt.Errorf("invalid sessionID for tail log: %q (must not contain path separators)", sessionID)
 	}
 	if err := os.MkdirAll(tailDir, 0o755); err != nil {
-		return err
+		return fmt.Errorf("mkdir %s: %w", tailDir, err)
 	}
 	sizeBytes := int64(outputMB * 1024 * 1024)
 	if sizeBytes <= 0 {
 		sizeBytes = 1
 	}
-	f, err := os.Create(filepath.Join(tailDir, clean+".log"))
+	logPath := filepath.Join(tailDir, clean+".log")
+	f, err := os.Create(logPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("create %s: %w", logPath, err)
 	}
 	if err := f.Truncate(sizeBytes); err != nil {
 		_ = f.Close()
-		return err
+		return fmt.Errorf("truncate %s: %w", logPath, err)
 	}
 	return f.Close()
 }

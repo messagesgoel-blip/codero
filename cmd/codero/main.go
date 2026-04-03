@@ -1114,6 +1114,10 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 				}
 			}
 
+			if outputBytes < 0 {
+				return fmt.Errorf("--output-bytes cannot be negative")
+			}
+
 			hasContext := repo != "" || branch != "" || normalizedStatus != "" || outputBytes > 0 || contextPressure != "" || compactIncr
 
 			if daemonAddr := resolveDaemonAddr(cmd); daemonAddr != "" {
