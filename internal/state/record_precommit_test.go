@@ -91,8 +91,8 @@ func TestRecordPrecommitResult_Fail(t *testing.T) {
 	if rrStatus != "failed" {
 		t.Errorf("review_runs.status: want failed, got %q", rrStatus)
 	}
-	if rrError != "failed checks: gitleaks,ruff" {
-		t.Errorf("review_runs.error: want 'failed checks: gitleaks,ruff', got %q", rrError)
+	if rrError != "checks: gitleaks,ruff" {
+		t.Errorf("review_runs.error: want 'checks: gitleaks,ruff', got %q", rrError)
 	}
 }
 
