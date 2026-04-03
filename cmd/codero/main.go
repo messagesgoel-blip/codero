@@ -1118,7 +1118,20 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 				return fmt.Errorf("--output-bytes cannot be negative")
 			}
 
-			hasContext := repo != "" || branch != "" || normalizedStatus != "" || outputBytes > 0 || contextPressure != "" || compactIncr
+			// Normalize and validate context-pressure before transport selection
+			// so typos fail fast on both gRPC and direct-DB paths.
+			normalizedPressure := ""
+			if contextPressure != "" {
+				level := state.ContextPressureLevel(strings.ToLower(strings.TrimSpace(contextPressure)))
+				switch level {
+				case state.ContextPressureNormal, state.ContextPressureWarning, state.ContextPressureCritical:
+					normalizedPressure = string(level)
+				default:
+					return fmt.Errorf("invalid --context-pressure value %q: accepted values are normal, warning, critical", contextPressure)
+				}
+			}
+
+			hasContext := repo != "" || branch != "" || normalizedStatus != "" || outputBytes > 0 || normalizedPressure != "" || compactIncr
 
 			if daemonAddr := resolveDaemonAddr(cmd); daemonAddr != "" {
 				client, err := daemongrpc.NewSessionClient(daemonAddr)
@@ -1132,7 +1145,7 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 						Repo:            repo,
 						Branch:          branch,
 						OutputBytes:     outputBytes,
-						ContextPressure: contextPressure,
+						ContextPressure: normalizedPressure,
 						CompactIncr:     compactIncr,
 					}
 					if err := client.HeartbeatWithContext(cmd.Context(), sessionID, heartbeatSecret, markProgress, hctx); err != nil {
@@ -1177,15 +1190,9 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 					loglib.Warn("heartbeat: activity sample failed", "error", err)
 				}
 			}
-			if contextPressure != "" {
-				level := state.ContextPressureLevel(contextPressure)
-				switch level {
-				case state.ContextPressureNormal, state.ContextPressureWarning, state.ContextPressureCritical:
-					if err := state.SetContextPressure(cmd.Context(), store.DB(), sessionID, level); err != nil {
-						loglib.Warn("heartbeat: context pressure update failed", "error", err)
-					}
-				default:
-					loglib.Warn("heartbeat: invalid context-pressure value, skipping", "value", contextPressure)
+			if normalizedPressure != "" {
+				if err := state.SetContextPressure(cmd.Context(), store.DB(), sessionID, state.ContextPressureLevel(normalizedPressure)); err != nil {
+					loglib.Warn("heartbeat: context pressure update failed", "error", err)
 				}
 			}
 			if compactIncr {
