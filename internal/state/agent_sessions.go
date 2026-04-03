@@ -161,7 +161,7 @@ func UpdateSessionOutputBytes(ctx context.Context, db *DB, sessionID string, out
 	}
 	_, err := db.sql.ExecContext(ctx, `
 		UPDATE agent_sessions
-		SET output_bytes = GREATEST(COALESCE(output_bytes, 0), ?)
+		SET output_bytes = MAX(COALESCE(output_bytes, 0), ?)
 		WHERE session_id = ?
 		  AND ended_at IS NULL`,
 		outputBytes, sessionID)
@@ -180,7 +180,7 @@ func RecordActivitySample(ctx context.Context, db *DB, sessionID string, outputB
 	_, err := db.sql.ExecContext(ctx, `
 		INSERT INTO session_activity (session_id, bucket, output_bytes)
 		VALUES (?, ?, ?)
-		ON CONFLICT(session_id, bucket) DO UPDATE SET output_bytes = GREATEST(COALESCE(session_activity.output_bytes, 0), excluded.output_bytes)`,
+		ON CONFLICT(session_id, bucket) DO UPDATE SET output_bytes = MAX(COALESCE(session_activity.output_bytes, 0), excluded.output_bytes)`,
 		sessionID, bucket, outputBytes)
 	if err != nil {
 		return fmt.Errorf("record activity sample: %w", err)
@@ -215,7 +215,10 @@ func GetActivitySamples(ctx context.Context, db *DB, sessionID string, minutes i
 		}
 		samples = append(samples, s)
 	}
-	return samples, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("get activity samples: iterate: %w", err)
+	}
+	return samples, nil
 }
 
 // AgentAssignment is a row from agent_assignments.

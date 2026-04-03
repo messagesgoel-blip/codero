@@ -12,10 +12,12 @@
 package e2e
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -38,11 +40,11 @@ func waitForCondition(t *testing.T, timeout time.Duration, condition func() bool
 type activeSessionsResponse struct {
 	ActiveCount int `json:"active_count"`
 	Sessions    []struct {
-		SessionID  string `json:"session_id"`
-		AgentID    string `json:"agent_id"`
-		Repo       string `json:"repo"`
-		Branch     string `json:"branch"`
-		Mode       string `json:"mode"`
+		SessionID string `json:"session_id"`
+		AgentID   string `json:"agent_id"`
+		Repo      string `json:"repo"`
+		Branch    string `json:"branch"`
+		Mode      string `json:"mode"`
 	} `json:"sessions"`
 }
 
@@ -54,20 +56,32 @@ func testAPIURL() string {
 }
 
 func getenv(key string) string {
-	// Thin wrapper to avoid importing os in the build-tagged file.
-	out, _ := exec.Command("printenv", key).Output()
-	return strings.TrimSpace(string(out))
+	return os.Getenv(key)
+}
+
+func testDaemonAddr() string {
+	if v := getenv("CODERO_TEST_DAEMON_ADDR"); v != "" {
+		return v
+	}
+	return "127.0.0.1:50051"
 }
 
 func codero(args ...string) (string, error) {
 	cmd := exec.Command("codero", args...)
+	cmd.Env = append(cmd.Environ(), "CODERO_DAEMON_ADDR="+testDaemonAddr())
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err
 }
 
 func fetchActiveSessions(t *testing.T) activeSessionsResponse {
 	t.Helper()
-	resp, err := http.Get(testAPIURL() + "/api/v1/dashboard/active-sessions")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, testAPIURL()+"/api/v1/dashboard/active-sessions", nil)
+	if err != nil {
+		t.Fatalf("create request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("fetch active-sessions: %v", err)
 	}

@@ -447,11 +447,6 @@ func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]Ac
 		if hasAssignment {
 			activityState = assignmentActivityStateFromSubstatus(assignment.Substatus)
 		}
-		task := resolveTaskFromAssignment(assignment.TaskID, assignment.Branch)
-		if task != nil && task.Phase == "" {
-			task.Phase = activityState
-		}
-
 		startedAt := startedAtForSession(
 			sql.NullTime{Time: s.StartedAt, Valid: !s.StartedAt.IsZero()},
 			sql.NullTime{},
@@ -462,9 +457,25 @@ func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]Ac
 			elapsed = 0
 		}
 
+		// WIRE-001: fall back to session-level repo/branch when assignment is empty.
+		sessionRepo := assignment.Repo
+		sessionBranch := assignment.Branch
+		if sessionRepo == "" {
+			sessionRepo = s.SessionRepo
+		}
+		if sessionBranch == "" {
+			sessionBranch = s.SessionBranch
+		}
+
+		// Derive task and PR from the consolidated repo/branch (after fallback).
+		task := resolveTaskFromAssignment(assignment.TaskID, sessionBranch)
+		if task != nil && task.Phase == "" {
+			task.Phase = activityState
+		}
+
 		prNumber := 0
-		if assignment.Repo != "" && assignment.Branch != "" {
-			prNumber = lookupPRNumber(ctx, db, assignment.Repo, assignment.Branch)
+		if sessionRepo != "" && sessionBranch != "" {
+			prNumber = lookupPRNumber(ctx, db, sessionRepo, sessionBranch)
 		}
 
 		// Detect stalled agents: heartbeat is fresh but no recent progress.
@@ -515,23 +526,20 @@ func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]Ac
 		if s.OutputBytes > 0 {
 			outputMB = float64(s.OutputBytes) / (1024 * 1024)
 		} else {
-			tailPath := filepath.Join(os.TempDir(), "codero-tails", s.SessionID+".log")
-			if d := os.Getenv("CODERO_TAIL_DIR"); d != "" {
-				tailPath = filepath.Join(d, s.SessionID+".log")
+			// Sanitize session ID to prevent path traversal.
+			safeID := filepath.Base(s.SessionID)
+			if safeID != s.SessionID || safeID == "." || safeID == ".." || strings.ContainsAny(safeID, `/\`) {
+				safeID = "" // reject suspicious values
 			}
-			if stat, err := os.Stat(tailPath); err == nil && !stat.IsDir() {
-				outputMB = float64(stat.Size()) / (1024 * 1024)
+			if safeID != "" {
+				tailPath := filepath.Join(os.TempDir(), "codero-tails", safeID+".log")
+				if d := os.Getenv("CODERO_TAIL_DIR"); d != "" {
+					tailPath = filepath.Join(d, safeID+".log")
+				}
+				if stat, err := os.Stat(tailPath); err == nil && !stat.IsDir() {
+					outputMB = float64(stat.Size()) / (1024 * 1024)
+				}
 			}
-		}
-
-		// WIRE-001: fall back to session-level repo/branch when assignment is empty.
-		sessionRepo := assignment.Repo
-		sessionBranch := assignment.Branch
-		if sessionRepo == "" {
-			sessionRepo = s.SessionRepo
-		}
-		if sessionBranch == "" {
-			sessionBranch = s.SessionBranch
 		}
 
 		out = append(out, ActiveSession{

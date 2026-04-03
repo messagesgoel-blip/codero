@@ -1314,9 +1314,10 @@ func (h *Handler) handleSessionMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Compute output deltas from cumulative samples for the sparkline.
-	var activityDeltas []map[string]interface{}
+	// First bucket uses delta=0 since we lack a prior baseline sample.
+	activityDeltas := make([]map[string]interface{}, 0, len(activitySamples))
 	for i, s := range activitySamples {
-		delta := s.OutputBytes
+		var delta int64
 		if i > 0 {
 			delta = s.OutputBytes - activitySamples[i-1].OutputBytes
 		}

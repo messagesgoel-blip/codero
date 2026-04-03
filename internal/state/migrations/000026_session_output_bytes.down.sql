@@ -1,2 +1,3 @@
--- SQLite 3.35+ supports ALTER TABLE DROP COLUMN.
--- For older versions this is a no-op (column remains with default 0).
+-- Rollback: remove output_bytes from agent_sessions.
+-- Uses ALTER TABLE DROP COLUMN (SQLite 3.35+).
+ALTER TABLE agent_sessions DROP COLUMN output_bytes;

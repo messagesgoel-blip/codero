@@ -1148,7 +1148,18 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 			}
 			defer cleanup()
 
-			// Direct-DB path: update extended fields.
+			// Direct-DB path: validate heartbeat first, then update extended fields.
+			var hbErr error
+			if normalizedStatus != "" {
+				hbErr = store.HeartbeatWithStatus(cmd.Context(), sessionID, heartbeatSecret, markProgress, normalizedStatus)
+			} else {
+				hbErr = store.Heartbeat(cmd.Context(), sessionID, heartbeatSecret, markProgress)
+			}
+			if hbErr != nil {
+				return hbErr
+			}
+
+			// Metadata writes — only after successful heartbeat authentication.
 			if repo != "" || branch != "" {
 				if err := state.UpdateSessionRepoBranch(cmd.Context(), store.DB(), sessionID, repo, branch); err != nil {
 					loglib.Warn("heartbeat: repo/branch update failed", "error", err)
@@ -1178,11 +1189,7 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 					loglib.Warn("heartbeat: compact count update failed", "error", err)
 				}
 			}
-
-			if normalizedStatus != "" {
-				return store.HeartbeatWithStatus(cmd.Context(), sessionID, heartbeatSecret, markProgress, normalizedStatus)
-			}
-			return store.Heartbeat(cmd.Context(), sessionID, heartbeatSecret, markProgress)
+			return nil
 		},
 	}
 

@@ -200,10 +200,12 @@ func SeedFixtureSessions(ctx context.Context, db *sql.DB, entries []FixtureSessi
 			_, err = tx.Exec(`
 				INSERT OR REPLACE INTO agent_sessions
 					(session_id, agent_id, mode, started_at, last_seen_at, last_progress_at, last_io_at,
-					 context_pressure, compact_count, inferred_status, inferred_status_updated_at, ended_at, end_reason)
-				VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL,'')`,
+					 context_pressure, compact_count, inferred_status, inferred_status_updated_at,
+					 repo, branch, output_bytes, ended_at, end_reason)
+				VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,'')`,
 				e.SessionID, agentID, e.Mode, startedAt, lastSeenAt, nullTimeValue(lastProgressAt), nullTimeValue(lastIOAt),
 				contextPressure, e.CompactCount, inferredStatus, nullTimeValue(inferredStatusUpdatedAt),
+				e.Repo, e.Branch, int64(e.OutputMB*1024*1024),
 			)
 			if err != nil {
 				_ = tx.Rollback()
