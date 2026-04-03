@@ -45,6 +45,10 @@ func RecordPrecommitResult(ctx context.Context, db *DB, repo, branch, headHash, 
 		errMsg = "gate failed"
 	}
 
+	if durationMS < 0 {
+		return fmt.Errorf("record precommit: durationMS cannot be negative")
+	}
+
 	// Compute started_at from duration if provided.
 	startedAt := now
 	if durationMS > 0 {

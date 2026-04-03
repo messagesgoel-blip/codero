@@ -536,6 +536,9 @@ Legacy mode: use --provider and --status to write only precommit_reviews.
 
 			// WIRE-002 path: --result writes both tables.
 			if result != "" {
+				if provider != "" || status != "" {
+					return fmt.Errorf("--result and --provider/--status are mutually exclusive")
+				}
 				if result != "pass" && result != "fail" {
 					return fmt.Errorf("--result must be pass or fail, got %q", result)
 				}

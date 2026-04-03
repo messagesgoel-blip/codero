@@ -122,6 +122,27 @@ func TestRecordPrecommitResult_InvalidResult(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid result, got nil")
 	}
+	// No rows should have been written.
+	var pcCount, rrCount int
+	db.sql.QueryRow(`SELECT COUNT(*) FROM precommit_reviews WHERE repo='codero' AND branch='main'`).Scan(&pcCount)
+	db.sql.QueryRow(`SELECT COUNT(*) FROM review_runs WHERE repo='codero' AND branch='main'`).Scan(&rrCount)
+	if pcCount != 0 {
+		t.Errorf("expected no precommit_reviews rows on invalid result, got %d", pcCount)
+	}
+	if rrCount != 0 {
+		t.Errorf("expected no review_runs rows on invalid result, got %d", rrCount)
+	}
+}
+
+func TestRecordPrecommitResult_NegativeDuration(t *testing.T) {
+	db, cleanup := setupTestProvingDB(t)
+	defer cleanup()
+
+	err := RecordPrecommitResult(context.Background(), db,
+		"codero", "main", "", "pass", -1, "")
+	if err == nil {
+		t.Fatal("expected error for negative durationMS, got nil")
+	}
 }
 
 func TestRecordPrecommitResult_ZeroDuration(t *testing.T) {
