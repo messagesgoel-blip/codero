@@ -154,7 +154,7 @@ async function sendMessage(inputEl) {
   inputEl.style.height = 'auto';
 
   try {
-    const resp = await apiFetch('chat', {
+    const resp = await apiFetch('/api/v1/openclaw/query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -178,7 +178,7 @@ async function sendMessage(inputEl) {
       // Standard JSON response
       const data = await resp.json();
       const convId = data.conversation_id || chat.conversationId;
-      const assistantMsg = { role: 'assistant', content: data.reply || data.message || '', ts: Date.now() };
+      const assistantMsg = { role: 'assistant', content: data.response || data.reply || data.message || '', ts: Date.now() };
       const current = store.state.chat;
       store.set({
         chat: {
@@ -189,7 +189,8 @@ async function sendMessage(inputEl) {
       });
     }
   } catch (err) {
-    const errMsg = { role: 'assistant', content: `Error: ${err.message}`, ts: Date.now() };
+    const msg = err.message.includes('502') ? 'OpenClaw unavailable — try again later' : err.message;
+    const errMsg = { role: 'assistant', content: `Error: ${msg}`, ts: Date.now() };
     const current = store.state.chat;
     store.set({
       chat: {
