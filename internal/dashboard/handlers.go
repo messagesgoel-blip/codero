@@ -123,6 +123,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 	// §3.1 Session tail
 	mux.HandleFunc("/api/v1/dashboard/sessions/", h.handleSessionTailRouter)
+
+	// OCL-010: OpenClaw structured state query
+	mux.HandleFunc("/api/v1/openclaw/state", h.handleOpenClawState)
 }
 
 // handleOverview serves GET /api/v1/dashboard/overview.
