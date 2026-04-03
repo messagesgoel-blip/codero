@@ -30,6 +30,7 @@ type RepoSummary struct {
 	Branch        string     `json:"branch"`
 	State         string     `json:"state"`
 	HeadHash      string     `json:"head_hash"`
+	PRNumber      int        `json:"pr_number"`
 	LastRunStatus string     `json:"last_run_status"` // "completed","failed","running","" if none
 	LastRunAt     *time.Time `json:"last_run_at,omitempty"`
 	UpdatedAt     time.Time  `json:"updated_at"`

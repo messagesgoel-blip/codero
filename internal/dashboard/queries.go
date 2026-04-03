@@ -155,7 +155,7 @@ func querySparkline7d(ctx context.Context, db *sql.DB) ([]DayStats, error) {
 func queryRepos(ctx context.Context, db *sql.DB) ([]RepoSummary, error) {
 	// Latest branch record per repo (by updated_at).
 	rows, err := db.QueryContext(ctx, `
-		SELECT b.repo, b.branch, b.state, b.head_hash, b.updated_at
+		SELECT b.repo, b.branch, b.state, b.head_hash, b.updated_at, COALESCE(b.pr_number, 0)
 		FROM branch_states b
 		INNER JOIN (
 			SELECT repo, MAX(updated_at) AS max_upd
@@ -171,7 +171,7 @@ func queryRepos(ctx context.Context, db *sql.DB) ([]RepoSummary, error) {
 	var out []RepoSummary
 	for rows.Next() {
 		var s RepoSummary
-		if err := rows.Scan(&s.Repo, &s.Branch, &s.State, &s.HeadHash, &s.UpdatedAt); err != nil {
+		if err := rows.Scan(&s.Repo, &s.Branch, &s.State, &s.HeadHash, &s.UpdatedAt, &s.PRNumber); err != nil {
 			return nil, err
 		}
 		out = append(out, s)

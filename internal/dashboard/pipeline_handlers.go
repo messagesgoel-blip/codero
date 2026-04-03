@@ -15,6 +15,7 @@ type PipelineCard struct {
 	AgentID      string    `json:"agent_id"`
 	Repo         string    `json:"repo"`
 	Branch       string    `json:"branch"`
+	PRNumber     int       `json:"pr_number"`
 	State        string    `json:"state,omitempty"`
 	Substatus    string    `json:"substatus,omitempty"`
 	Checkpoint   string    `json:"checkpoint"`
