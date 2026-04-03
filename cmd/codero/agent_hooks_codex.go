@@ -19,6 +19,9 @@ func handleCodexHooks(print, install, force bool) error {
 		fmt.Println(string(hooksJSON))
 		return nil
 	}
+	if !install {
+		return nil
+	}
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
