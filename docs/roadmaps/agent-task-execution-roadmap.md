@@ -1,23 +1,22 @@
 # Codero Agent Task Execution Roadmap
 
-Status: active
+Status: **superseded**
 Owner: sanjay
-Updated: 2026-04-02
-Supersedes: local draft at `/srv/storage/local/codero/specication_033126/codero-agent-task-execution-roadmap.md`
+Updated: 2026-04-03
+Superseded by: `docs/roadmaps/dogfood-execution-roadmap.md` (2026-04-03)
 
-## Purpose
+> **This document is retained for historical reference only.** The active
+> execution sequence is defined in the dogfood execution roadmap, beginning
+> with WIRE-001. Tasks SUB-001 through FIN-001 below are replaced by
+> WIRE-001 through PRV-011 in the new roadmap.
 
-This is the canonical implementation-sequencing roadmap for Codero.
+## Purpose (Historical)
 
-Use execution roadmap from `docs/roadmaps/agent-task-execution-roadmap.md` for
-task selection and implementation sequencing.
+This was the canonical implementation-sequencing roadmap for Codero.
 
-Use this file for:
-
-- next-task selection
-- PR sequencing
-- shared continuity handoffs
-- determining the earliest incomplete execution slice
+This file is retained for historical reference. Use
+`docs/roadmaps/dogfood-execution-roadmap.md` for active task selection and
+implementation sequencing.
 
 `docs/roadmap.md` remains the roadmap index and strategic/release view. It does
 not override this file for active implementation order.

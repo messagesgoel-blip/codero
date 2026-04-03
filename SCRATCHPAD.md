@@ -1,4 +1,9 @@
 
+## Handoff — 2026-04-03T10:30:00Z
+Summary: Gap analysis completed against execution spec and current implementation. Dogfood-first execution roadmap created and made canonical (`docs/roadmaps/dogfood-execution-roadmap.md`). Previous execution roadmap (`agent-task-execution-roadmap.md`) marked superseded. All routing files updated: `AGENTS.md`, `docs/roadmap.md`, `docs/roadmaps/README.md`, `docs/agent-task-board.md`, `SCRATCHPAD.md`. OpenClaw authority boundary documented in AGENTS.md. OpenClaw adapter will live at `services/openclaw-adapter/` (Go, Docker sidecar).
+Pending: Commit cleanup changes to feature branch. Claim WIRE-001 (bind sessions to repo/branch).
+Open Questions: None — roadmap approved, all precedence conflicts resolved.
+
 ## Handoff — 2026-03-30T17:05:00Z
 Summary: Cleaned the Codero main worktree and stale project metadata. Local failures were fixed by hardening config tests against ambient `CODERO_*` env and making contract tests resolve repo root plus spawned Go commands reliably inside the shared worktree. `go test ./...` now passes on `main` at `8f8d7b7`, and the previously disabled GitHub workflows have been re-enabled.
 Pending: Start the next Codero task from fresh `main`; there are no open PRs to resume.

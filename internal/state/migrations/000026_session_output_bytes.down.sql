@@ -1,0 +1,2 @@
+-- SQLite 3.35+ supports ALTER TABLE DROP COLUMN.
+-- For older versions this is a no-op (column remains with default 0).

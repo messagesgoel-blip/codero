@@ -54,9 +54,26 @@ func TestLoadFixtureDir_WithReportJSON(t *testing.T) {
 func TestLoadFixtureDir_WithSessions(t *testing.T) {
 	db := openTestDB(t)
 	dir := t.TempDir()
+	t.Setenv("CODERO_TAIL_DIR", filepath.Join(t.TempDir(), "tails"))
 	sessions := []dashboard.FixtureSessionEntry{
-		{SessionID: "sess-1", AgentID: "copilot", Repo: "acme/api", Branch: "feat/auth", State: "submitted"},
-		{SessionID: "sess-2", AgentID: "opencode", Repo: "acme/api", Branch: "feat/db", State: "waiting"},
+		{
+			SessionID:               "sess-1",
+			AgentID:                 "copilot",
+			Repo:                    "acme/api",
+			Branch:                  "feat/auth",
+			Worktree:                "worktrees/acme-api-auth",
+			Mode:                    "mock-coding",
+			State:                   "submitted",
+			PRNumber:                42,
+			ContextPressure:         "warning",
+			CompactCount:            2,
+			InferredStatus:          "working",
+			InferredStatusUpdatedAt: "2026-04-03T00:00:00Z",
+			LastProgressAt:          "2026-04-03T00:00:05Z",
+			LastIOAt:                "2026-04-03T00:00:06Z",
+			OutputMB:                1.25,
+		},
+		{SessionID: "sess-2", AgentID: "opencode", Repo: "acme/api", Branch: "feat/db", State: "waiting", OutputMB: 0.5},
 	}
 	writeJSON(t, filepath.Join(dir, "sessions.json"), sessions)
 
@@ -80,6 +97,27 @@ func TestLoadFixtureDir_WithSessions(t *testing.T) {
 	found := map[string]bool{}
 	for _, s := range resp.Sessions {
 		found[s.SessionID] = true
+		if s.SessionID != "sess-1" {
+			continue
+		}
+		if s.Repo != "acme/api" || s.Branch != "feat/auth" {
+			t.Fatalf("unexpected repo/branch for sess-1: %#v", s)
+		}
+		if s.Worktree != "worktrees/acme-api-auth" {
+			t.Fatalf("unexpected worktree for sess-1: %q", s.Worktree)
+		}
+		if s.ContextPressure != "warning" {
+			t.Fatalf("unexpected context pressure: %q", s.ContextPressure)
+		}
+		if s.CompactCount != 2 {
+			t.Fatalf("unexpected compact count: %d", s.CompactCount)
+		}
+		if s.InferredStatus != "working" {
+			t.Fatalf("unexpected inferred status: %q", s.InferredStatus)
+		}
+		if s.OutputMB < 1.2 || s.OutputMB > 1.3 {
+			t.Fatalf("unexpected output_mb: %.2f", s.OutputMB)
+		}
 	}
 	for _, id := range []string{"sess-1", "sess-2"} {
 		if !found[id] {

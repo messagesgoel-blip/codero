@@ -1,18 +1,40 @@
 [
   {
     "session_id": "sess-codero-agent-1",
+    "agent_id": "copilot",
     "repo": "acme/api",
     "branch": "feat/auth-refactor",
+    "worktree": "/srv/storage/repo/codero/.worktrees/mock-auth-refactor",
+    "task_id": "SES-004",
+    "mode": "mock-coding",
     "state": "coding",
     "pr_number": 42,
-    "owner_agent": "copilot"
+    "owner_agent": "copilot",
+    "context_pressure": "warning",
+    "compact_count": 1,
+    "inferred_status": "working",
+    "inferred_status_updated_at": "2026-04-03T00:00:00Z",
+    "last_progress_at": "2026-04-03T00:00:05Z",
+    "last_io_at": "2026-04-03T00:00:06Z",
+    "output_mb": 1.7
   },
   {
     "session_id": "sess-codero-agent-2",
+    "agent_id": "opencode",
     "repo": "acme/api",
     "branch": "feat/db-migration",
+    "worktree": "/srv/storage/repo/codero/.worktrees/mock-db-migration",
+    "task_id": "SUB-001",
+    "mode": "mock-review",
     "state": "local_review",
     "pr_number": 43,
-    "owner_agent": "opencode"
+    "owner_agent": "opencode",
+    "context_pressure": "critical",
+    "compact_count": 3,
+    "inferred_status": "waiting_for_input",
+    "inferred_status_updated_at": "2026-04-03T00:00:10Z",
+    "last_progress_at": "2026-04-03T00:00:12Z",
+    "last_io_at": "2026-04-03T00:00:12Z",
+    "output_mb": 0.8
   }
 ]

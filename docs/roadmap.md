@@ -10,12 +10,16 @@ Updated: 2026-04-02
 
 This file is the roadmap index and strategic release view.
 
-Use `docs/roadmaps/agent-task-execution-roadmap.md` for:
+Use `docs/roadmaps/dogfood-execution-roadmap.md` for:
 
 - next-task selection
 - implementation sequencing
 - shared continuity / orchestrator updates
 - determining the earliest incomplete execution slice
+
+The previous execution roadmap (`docs/roadmaps/agent-task-execution-roadmap.md`)
+is superseded as of 2026-04-03. Its task IDs (SUB-001 through FIN-001) are
+replaced by the dogfood roadmap's WIRE/OCL/SUB/REV/MRG/PRV tasks.
 
 Do not use `docs/roadmaps/*-backlog.md` or untracked local planning files as the
 next-task source unless a PR explicitly promotes them into the execution
@@ -23,16 +27,20 @@ roadmap.
 
 ## Current Execution Baseline
 
-- `origin/main` head is `db3c716` (includes SES-003 PR `#157`, SES-002 PR
-  `#156`, and SES-001 PR `#154`)
-- The current `main` branch completes `SES-004` and closes the remaining
-  session-core slice.
-- Completed on the current `main` branch: `TOOL-001` through `TOOL-005`,
-  `BND-001` through `BND-004`, `SET-001`, `SET-002`, `SES-001`, `SES-002`,
-  `SES-003`, and `SES-004`
-- Agent/setup set is complete.
-- Session set is complete.
-- Next unmerged execution tasks: `SUB-001` through `SUB-005`
+- `origin/main` head is `9350203` (PR closeout 2026-04-02).
+- Completed on `main`: `TOOL-001` through `TOOL-005`, `BND-001` through
+  `BND-004`, `SET-001`, `SET-002`, `SES-001` through `SES-004`.
+- Agent/setup set is complete. Session set is complete.
+- **Dogfood-first initiative active (2026-04-03).** The system is running but
+  not in any critical path — sessions register with empty repo/branch, zero
+  gate runs are recorded, scorecard is blank.
+- Next execution tasks (from dogfood roadmap):
+  - Wave A: `WIRE-001` (session binding), `WIRE-002` (gate reporting),
+    `WIRE-003` (PR tracking)
+  - Then Waves B–G: OpenClaw adapter, findings delivery, submit pipeline,
+    remote review, merge, proving period.
+- See `docs/roadmaps/dogfood-execution-roadmap.md` for the full 20-task
+  sequence.
 
 ## Candidate Backlog After The Current Execution Roadmap
 

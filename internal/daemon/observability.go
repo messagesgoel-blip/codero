@@ -161,9 +161,13 @@ func NewObservabilityServerWithGRPC(redisClient *redis.Client, queue *scheduler.
 			loglib.FieldComponent, "daemon", "error", err)
 	} else {
 		fileServer := http.FileServer(http.FS(staticFS))
-		// Wrap with short cache headers so Cloudflare doesn't serve stale assets.
+		// During development, prevent caching of JS/CSS so changes are visible immediately.
 		cachedFileServer := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Cache-Control", "public, max-age=60")
+			if strings.HasSuffix(r.URL.Path, ".js") || strings.HasSuffix(r.URL.Path, ".css") {
+				w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+			} else {
+				w.Header().Set("Cache-Control", "public, max-age=60")
+			}
 			fileServer.ServeHTTP(w, r)
 		})
 		// Strip the base path before serving static files so that the embedded

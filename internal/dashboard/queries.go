@@ -381,7 +381,10 @@ func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]Ac
 		       COALESCE(context_pressure, 'normal') AS context_pressure,
 		       COALESCE(compact_count, 0) AS compact_count,
 		       COALESCE(inferred_status, 'unknown') AS inferred_status,
-		       inferred_status_updated_at
+		       inferred_status_updated_at,
+		       COALESCE(repo, '') AS session_repo,
+		       COALESCE(branch, '') AS session_branch,
+		       COALESCE(output_bytes, 0) AS output_bytes
 		FROM agent_sessions
 		WHERE ended_at IS NULL
 		ORDER BY last_seen_at DESC`)
@@ -402,6 +405,9 @@ func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]Ac
 		CompactCount            int
 		InferredStatus          string
 		InferredStatusUpdatedAt sql.NullTime
+		SessionRepo             string
+		SessionBranch           string
+		OutputBytes             int64
 	}
 
 	var sessions []sessionRow
@@ -409,7 +415,8 @@ func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]Ac
 	for rows.Next() {
 		var s sessionRow
 		if err := rows.Scan(&s.SessionID, &s.AgentID, &s.Mode, &s.StartedAt, &s.LastSeenAt, &s.LastProgressAt, &s.LastIOAt,
-			&s.ContextPressure, &s.CompactCount, &s.InferredStatus, &s.InferredStatusUpdatedAt); err != nil {
+			&s.ContextPressure, &s.CompactCount, &s.InferredStatus, &s.InferredStatusUpdatedAt,
+			&s.SessionRepo, &s.SessionBranch, &s.OutputBytes); err != nil {
 			return nil, fmt.Errorf("queryActiveSessions: agent_sessions scan row: %w", err)
 		}
 		if s.SessionID == "" {
@@ -503,21 +510,35 @@ func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]Ac
 			workingSec = 0
 		}
 
-		// Compute OutputMB
+		// Compute OutputMB: prefer DB-tracked output_bytes, fall back to tail file.
 		var outputMB float64
-		tailPath := filepath.Join(os.TempDir(), "codero-tails", s.SessionID+".log")
-		if d := os.Getenv("CODERO_TAIL_DIR"); d != "" {
-			tailPath = filepath.Join(d, s.SessionID+".log")
+		if s.OutputBytes > 0 {
+			outputMB = float64(s.OutputBytes) / (1024 * 1024)
+		} else {
+			tailPath := filepath.Join(os.TempDir(), "codero-tails", s.SessionID+".log")
+			if d := os.Getenv("CODERO_TAIL_DIR"); d != "" {
+				tailPath = filepath.Join(d, s.SessionID+".log")
+			}
+			if stat, err := os.Stat(tailPath); err == nil && !stat.IsDir() {
+				outputMB = float64(stat.Size()) / (1024 * 1024)
+			}
 		}
-		if stat, err := os.Stat(tailPath); err == nil && !stat.IsDir() {
-			outputMB = float64(stat.Size()) / (1024 * 1024)
+
+		// WIRE-001: fall back to session-level repo/branch when assignment is empty.
+		sessionRepo := assignment.Repo
+		sessionBranch := assignment.Branch
+		if sessionRepo == "" {
+			sessionRepo = s.SessionRepo
+		}
+		if sessionBranch == "" {
+			sessionBranch = s.SessionBranch
 		}
 
 		out = append(out, ActiveSession{
 			SessionID:               s.SessionID,
 			AgentID:                 agentID,
-			Repo:                    assignment.Repo,
-			Branch:                  assignment.Branch,
+			Repo:                    sessionRepo,
+			Branch:                  sessionBranch,
 			Worktree:                assignment.Worktree,
 			PRNumber:                prNumber,
 			OwnerAgent:              agentID,

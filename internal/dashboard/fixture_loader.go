@@ -18,16 +18,25 @@ import (
 // Fields mirror the branch_states columns used by queryActiveSessions.
 // State must be one of the active-session states accepted by the dashboard API.
 type FixtureSessionEntry struct {
-	SessionID  string `json:"session_id"`
-	AgentID    string `json:"agent_id"` // optional; falls back to owner_agent for legacy fixtures
-	Repo       string `json:"repo"`
-	Branch     string `json:"branch"`
-	Worktree   string `json:"worktree,omitempty"`
-	TaskID     string `json:"task_id,omitempty"`
-	Mode       string `json:"mode,omitempty"`
-	State      string `json:"state"`       // branch_states status (e.g. "submitted")
-	PRNumber   int    `json:"pr_number"`   // optional; 0 = no PR (legacy branch_states only)
-	OwnerAgent string `json:"owner_agent"` // optional display label (legacy)
+	SessionID               string  `json:"session_id"`
+	AgentID                 string  `json:"agent_id"` // optional; falls back to owner_agent for legacy fixtures
+	Repo                    string  `json:"repo"`
+	Branch                  string  `json:"branch"`
+	Worktree                string  `json:"worktree,omitempty"`
+	TaskID                  string  `json:"task_id,omitempty"`
+	Mode                    string  `json:"mode,omitempty"`
+	State                   string  `json:"state"`       // branch_states status (e.g. "submitted")
+	PRNumber                int     `json:"pr_number"`   // optional; 0 = no PR (legacy branch_states only)
+	OwnerAgent              string  `json:"owner_agent"` // optional display label (legacy)
+	StartedAt               string  `json:"started_at,omitempty"`
+	LastSeenAt              string  `json:"last_seen_at,omitempty"`
+	LastProgressAt          string  `json:"last_progress_at,omitempty"`
+	LastIOAt                string  `json:"last_io_at,omitempty"`
+	ContextPressure         string  `json:"context_pressure,omitempty"`
+	CompactCount            int     `json:"compact_count,omitempty"`
+	InferredStatus          string  `json:"inferred_status,omitempty"`
+	InferredStatusUpdatedAt string  `json:"inferred_status_updated_at,omitempty"`
+	OutputMB                float64 `json:"output_mb,omitempty"`
 }
 
 // FixtureActivityEntry describes one seeded delivery event for fixture mode.
@@ -137,8 +146,38 @@ func SeedFixtureSessions(ctx context.Context, db *sql.DB, entries []FixtureSessi
 			agentID = e.SessionID
 		}
 		if useAgentSessions {
+			startedAt, err := fixtureTimestampOrDefault(e.StartedAt, now)
+			if err != nil {
+				return fmt.Errorf("fixture_loader: sessions[%d]: parse started_at: %w", i, err)
+			}
+			lastSeenAt, err := fixtureTimestampOrDefault(e.LastSeenAt, now)
+			if err != nil {
+				return fmt.Errorf("fixture_loader: sessions[%d]: parse last_seen_at: %w", i, err)
+			}
+			lastProgressAt, err := fixtureOptionalTimestamp(e.LastProgressAt)
+			if err != nil {
+				return fmt.Errorf("fixture_loader: sessions[%d]: parse last_progress_at: %w", i, err)
+			}
+			lastIOAt, err := fixtureOptionalTimestamp(e.LastIOAt)
+			if err != nil {
+				return fmt.Errorf("fixture_loader: sessions[%d]: parse last_io_at: %w", i, err)
+			}
+			inferredStatusUpdatedAt, err := fixtureOptionalTimestamp(e.InferredStatusUpdatedAt)
+			if err != nil {
+				return fmt.Errorf("fixture_loader: sessions[%d]: parse inferred_status_updated_at: %w", i, err)
+			}
+			contextPressure := strings.TrimSpace(e.ContextPressure)
+			if contextPressure == "" {
+				contextPressure = "normal"
+			}
+			inferredStatus := strings.TrimSpace(e.InferredStatus)
+			if inferredStatus == "" {
+				inferredStatus = "unknown"
+			}
 			sessionPayload, err := json.Marshal(map[string]string{
-				"mode": e.Mode,
+				"mode":             e.Mode,
+				"inferred_status":  inferredStatus,
+				"context_pressure": contextPressure,
 			})
 			if err != nil {
 				return fmt.Errorf("fixture_loader: marshal session event for %q: %w", e.SessionID, err)
@@ -160,9 +199,11 @@ func SeedFixtureSessions(ctx context.Context, db *sql.DB, entries []FixtureSessi
 			}
 			_, err = tx.Exec(`
 				INSERT OR REPLACE INTO agent_sessions
-					(session_id, agent_id, mode, started_at, last_seen_at, ended_at, end_reason)
-				VALUES (?,?,?,?,?,NULL,'')`,
-				e.SessionID, agentID, e.Mode, now, now,
+					(session_id, agent_id, mode, started_at, last_seen_at, last_progress_at, last_io_at,
+					 context_pressure, compact_count, inferred_status, inferred_status_updated_at, ended_at, end_reason)
+				VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL,'')`,
+				e.SessionID, agentID, e.Mode, startedAt, lastSeenAt, nullTimeValue(lastProgressAt), nullTimeValue(lastIOAt),
+				contextPressure, e.CompactCount, inferredStatus, nullTimeValue(inferredStatusUpdatedAt),
 			)
 			if err != nil {
 				_ = tx.Rollback()
@@ -208,6 +249,9 @@ func SeedFixtureSessions(ctx context.Context, db *sql.DB, entries []FixtureSessi
 				_ = tx.Rollback()
 				return fmt.Errorf("fixture_loader: commit session+assignment %q: %w", e.SessionID, err)
 			}
+			if err := seedFixtureTailLog(e.SessionID, e.OutputMB); err != nil {
+				return fmt.Errorf("fixture_loader: seed tail log for %q: %w", e.SessionID, err)
+			}
 			continue
 		}
 
@@ -252,6 +296,68 @@ func fixtureBranchStateID(repo, branch string) string {
 func fixtureAssignmentID(sessionID, repo, branch, taskID string) string {
 	sum := sha256.Sum256([]byte(sessionID + ":" + repo + ":" + branch + ":" + taskID))
 	return "fixture-asg-" + hex.EncodeToString(sum[:8])
+}
+
+func fixtureTimestampOrDefault(raw string, fallback time.Time) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return fallback, nil
+	}
+	ts, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return ts.UTC(), nil
+}
+
+func fixtureOptionalTimestamp(raw string) (sql.NullTime, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return sql.NullTime{}, nil
+	}
+	ts, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return sql.NullTime{}, err
+	}
+	return sql.NullTime{Time: ts.UTC(), Valid: true}, nil
+}
+
+func nullTimeValue(ts sql.NullTime) any {
+	if !ts.Valid {
+		return nil
+	}
+	return ts.Time
+}
+
+func seedFixtureTailLog(sessionID string, outputMB float64) error {
+	if outputMB <= 0 {
+		return nil
+	}
+	tailDir := strings.TrimSpace(os.Getenv("CODERO_TAIL_DIR"))
+	if tailDir == "" {
+		return nil
+	}
+	// Sanitize sessionID to prevent path traversal
+	clean := filepath.Base(sessionID)
+	if clean == "" || clean != sessionID {
+		return fmt.Errorf("invalid sessionID for tail log: %q (must not contain path separators)", sessionID)
+	}
+	if err := os.MkdirAll(tailDir, 0o755); err != nil {
+		return err
+	}
+	sizeBytes := int64(outputMB * 1024 * 1024)
+	if sizeBytes <= 0 {
+		sizeBytes = 1
+	}
+	f, err := os.Create(filepath.Join(tailDir, clean+".log"))
+	if err != nil {
+		return err
+	}
+	if err := f.Truncate(sizeBytes); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // SeedFixtureActivity inserts delivery_event rows for each activity entry.

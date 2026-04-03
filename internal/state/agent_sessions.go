@@ -131,6 +131,93 @@ func UpdateInferredStatus(ctx context.Context, db *DB, sessionID, newStatus stri
 	return nil
 }
 
+// UpdateSessionRepoBranch sets the repo and branch columns on agent_sessions.
+// Called on heartbeat when the agent reports which repo/branch it is working in.
+// Only updates if the session is still active (ended_at IS NULL) and the values
+// are non-empty.
+func UpdateSessionRepoBranch(ctx context.Context, db *DB, sessionID, repo, branch string) error {
+	if repo == "" && branch == "" {
+		return nil
+	}
+	_, err := db.sql.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET repo = CASE WHEN ? != '' THEN ? ELSE repo END,
+		    branch = CASE WHEN ? != '' THEN ? ELSE branch END
+		WHERE session_id = ?
+		  AND ended_at IS NULL`,
+		repo, repo, branch, branch, sessionID)
+	if err != nil {
+		return fmt.Errorf("update session repo/branch: %w", err)
+	}
+	return nil
+}
+
+// UpdateSessionOutputBytes sets the cumulative output_bytes on a session.
+// The value is a running total reported by the agent wrapper on each heartbeat.
+// Uses GREATEST to ensure the value is monotonic (no regressions on out-of-order updates).
+func UpdateSessionOutputBytes(ctx context.Context, db *DB, sessionID string, outputBytes int64) error {
+	if outputBytes <= 0 {
+		return nil
+	}
+	_, err := db.sql.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET output_bytes = GREATEST(COALESCE(output_bytes, 0), ?)
+		WHERE session_id = ?
+		  AND ended_at IS NULL`,
+		outputBytes, sessionID)
+	if err != nil {
+		return fmt.Errorf("update session output bytes: %w", err)
+	}
+	return nil
+}
+
+// RecordActivitySample upserts an output_bytes sample for the current minute bucket.
+// Called on each heartbeat that carries output_bytes. Samples are keyed by session+minute
+// so multiple heartbeats in the same minute just update the value. Uses GREATEST to ensure
+// monotonic progress (no regressions on out-of-order updates).
+func RecordActivitySample(ctx context.Context, db *DB, sessionID string, outputBytes int64) error {
+	bucket := time.Now().UTC().Format("2006-01-02T15:04")
+	_, err := db.sql.ExecContext(ctx, `
+		INSERT INTO session_activity (session_id, bucket, output_bytes)
+		VALUES (?, ?, ?)
+		ON CONFLICT(session_id, bucket) DO UPDATE SET output_bytes = GREATEST(COALESCE(session_activity.output_bytes, 0), excluded.output_bytes)`,
+		sessionID, bucket, outputBytes)
+	if err != nil {
+		return fmt.Errorf("record activity sample: %w", err)
+	}
+	return nil
+}
+
+// ActivitySample is a single data point in the output activity timeline.
+type ActivitySample struct {
+	Bucket      string `json:"bucket"`
+	OutputBytes int64  `json:"output_bytes"`
+}
+
+// GetActivitySamples returns the last N minutes of output_bytes samples for a session.
+func GetActivitySamples(ctx context.Context, db *DB, sessionID string, minutes int) ([]ActivitySample, error) {
+	cutoff := time.Now().UTC().Add(-time.Duration(minutes) * time.Minute).Format("2006-01-02T15:04")
+	rows, err := db.sql.QueryContext(ctx, `
+		SELECT bucket, output_bytes
+		FROM session_activity
+		WHERE session_id = ? AND bucket >= ?
+		ORDER BY bucket ASC`, sessionID, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("get activity samples: %w", err)
+	}
+	defer rows.Close()
+
+	var samples []ActivitySample
+	for rows.Next() {
+		var s ActivitySample
+		if err := rows.Scan(&s.Bucket, &s.OutputBytes); err != nil {
+			return nil, fmt.Errorf("scan activity sample: %w", err)
+		}
+		samples = append(samples, s)
+	}
+	return samples, rows.Err()
+}
+
 // AgentAssignment is a row from agent_assignments.
 type AgentAssignment struct {
 	ID            string

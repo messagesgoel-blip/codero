@@ -5,6 +5,7 @@ package grpc
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"google.golang.org/grpc"
@@ -186,6 +187,51 @@ func (c *SessionClient) HeartbeatWithStatus(ctx context.Context, sessionID, hear
 	})
 	if err != nil {
 		return fmt.Errorf("heartbeat with status: %w", err)
+	}
+	return nil
+}
+
+// HeartbeatContext holds optional metadata for a heartbeat call.
+type HeartbeatContext struct {
+	InferredStatus  string
+	Repo            string
+	Branch          string
+	OutputBytes     int64
+	ContextPressure string // "normal", "warning", "critical"
+	CompactIncr     bool   // if true, increments compact_count by 1
+}
+
+// HeartbeatWithContext sends a heartbeat with optional metadata fields.
+// All optional fields are passed via gRPC metadata to avoid proto changes.
+func (c *SessionClient) HeartbeatWithContext(ctx context.Context, sessionID, heartbeatSecret string, markProgress bool, hctx HeartbeatContext) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	ctx = metadata.AppendToOutgoingContext(ctx, "x-heartbeat-secret", heartbeatSecret)
+	if hctx.InferredStatus != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-inferred-status", hctx.InferredStatus)
+	}
+	if hctx.Repo != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-repo", hctx.Repo)
+	}
+	if hctx.Branch != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-branch", hctx.Branch)
+	}
+	if hctx.OutputBytes > 0 {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-output-bytes", strconv.FormatInt(hctx.OutputBytes, 10))
+	}
+	if hctx.ContextPressure != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-context-pressure", hctx.ContextPressure)
+	}
+	if hctx.CompactIncr {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-compact-increment", "1")
+	}
+	_, err := c.client.Heartbeat(ctx, &daemonv1.HeartbeatRequest{
+		SessionId:    sessionID,
+		MarkProgress: markProgress,
+	})
+	if err != nil {
+		return fmt.Errorf("heartbeat with context: %w", err)
 	}
 	return nil
 }
