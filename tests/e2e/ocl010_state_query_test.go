@@ -97,10 +97,11 @@ func TestOCL010_StateQueryEndpoint(t *testing.T) {
 	})
 
 	// Extract heartbeat secret.
+	const hbPrefix = "heartbeat_secret: "
 	var secret string
 	for _, line := range splitLines(out) {
-		if len(line) > 19 && line[:19] == "heartbeat_secret: " {
-			secret = line[19:]
+		if len(line) > len(hbPrefix) && line[:len(hbPrefix)] == hbPrefix {
+			secret = line[len(hbPrefix):]
 		}
 	}
 	if secret == "" {

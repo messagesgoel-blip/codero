@@ -191,11 +191,12 @@ func intToStr(n int) string {
 }
 
 func floatToStr(f float64) string {
-	// Simple format: integer part + 1 decimal place.
+	sign := ""
+	if f < 0 {
+		sign = "-"
+		f = -f
+	}
 	intPart := int(f)
 	frac := int((f - float64(intPart)) * 10)
-	if frac < 0 {
-		frac = -frac
-	}
-	return intToStr(intPart) + "." + intToStr(frac)
+	return sign + intToStr(intPart) + "." + intToStr(frac)
 }
