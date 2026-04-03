@@ -2,6 +2,7 @@ package state
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -81,14 +82,17 @@ func TestRecordPrecommitResult_Fail(t *testing.T) {
 		t.Errorf("precommit_reviews.error: want 'checks: gitleaks,ruff', got %q", pcError)
 	}
 
-	var rrStatus string
+	var rrStatus, rrError string
 	if err := db.sql.QueryRow(
-		`SELECT status FROM review_runs WHERE repo='codero' AND branch='feat/x'`,
-	).Scan(&rrStatus); err != nil {
+		`SELECT status, error FROM review_runs WHERE repo='codero' AND branch='feat/x'`,
+	).Scan(&rrStatus, &rrError); err != nil {
 		t.Fatalf("query review_runs: %v", err)
 	}
 	if rrStatus != "failed" {
 		t.Errorf("review_runs.status: want failed, got %q", rrStatus)
+	}
+	if rrError != "failed checks: gitleaks,ruff" {
+		t.Errorf("review_runs.error: want 'failed checks: gitleaks,ruff', got %q", rrError)
 	}
 }
 
@@ -111,6 +115,16 @@ func TestRecordPrecommitResult_FailNoChecks(t *testing.T) {
 	if pcError != "gate failed" {
 		t.Errorf("precommit_reviews.error: want 'gate failed', got %q", pcError)
 	}
+
+	var rrError string
+	if err := db.sql.QueryRow(
+		`SELECT error FROM review_runs WHERE repo='codero' AND branch='feat/y'`,
+	).Scan(&rrError); err != nil {
+		t.Fatalf("query review_runs: %v", err)
+	}
+	if rrError != "gate failed" {
+		t.Errorf("review_runs.error: want 'gate failed', got %q", rrError)
+	}
 }
 
 func TestRecordPrecommitResult_InvalidResult(t *testing.T) {
@@ -121,6 +135,9 @@ func TestRecordPrecommitResult_InvalidResult(t *testing.T) {
 		"codero", "main", "", "unknown", 0, "")
 	if err == nil {
 		t.Fatal("expected error for invalid result, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid result") {
+		t.Errorf("error should mention 'invalid result', got %q", err.Error())
 	}
 	// No rows should have been written.
 	var pcCount, rrCount int

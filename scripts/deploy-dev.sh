@@ -51,7 +51,10 @@ build_cli() {
     dim "Building CLI binary..."
     (cd "$REPO_ROOT" && go build -buildvcs=false -o ./bin/codero ./cmd/codero) \
         || die "go build failed"
+    green "CLI binary compiled"
+}
 
+install_cli() {
     # Update shared tools binary (fail if copy fails)
     install -D -m 0755 "$REPO_ROOT/bin/codero" "$SHARED_DEST" \
         || die "failed to update shared tools binary at $SHARED_DEST"
@@ -64,7 +67,7 @@ build_cli() {
     else
         install -m 0755 "$REPO_ROOT/bin/codero" "$CLI_DEST"
     fi
-    green "CLI binary updated"
+    green "CLI binary installed"
 }
 
 build_containers() {
@@ -102,6 +105,7 @@ case "${1:-}" in
         build_cli
         build_containers
         restart_containers
+        install_cli
         echo ""
         green "All done. Dev :8110 | Live :8111 | CLI: $("$SHARED_DEST" version 2>/dev/null || echo 'updated')"
         ;;
@@ -110,6 +114,7 @@ case "${1:-}" in
         ;;
     --cli)
         build_cli
+        install_cli
         ;;
     *)
         die "unknown argument: ${1}. Usage: $0 [--build|--cli]"
