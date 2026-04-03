@@ -339,9 +339,10 @@ func seedFixtureTailLog(sessionID string, outputMB float64) error {
 	if tailDir == "" {
 		return nil
 	}
-	// Sanitize sessionID to prevent path traversal
+	// Sanitize sessionID to prevent path traversal.
+	// Mirrors the reader-side rules in queries.go.
 	clean := filepath.Base(sessionID)
-	if clean == "" || clean != sessionID {
+	if clean == "" || clean == "." || clean == ".." || clean != sessionID {
 		return fmt.Errorf("invalid sessionID for tail log: %q (must not contain path separators)", sessionID)
 	}
 	if err := os.MkdirAll(tailDir, 0o755); err != nil {

@@ -49,18 +49,14 @@ type activeSessionsResponse struct {
 }
 
 func testAPIURL() string {
-	if v := getenv("CODERO_TEST_API_URL"); v != "" {
+	if v := os.Getenv("CODERO_TEST_API_URL"); v != "" {
 		return v
 	}
 	return "http://127.0.0.1:8110"
 }
 
-func getenv(key string) string {
-	return os.Getenv(key)
-}
-
 func testDaemonAddr() string {
-	if v := getenv("CODERO_TEST_DAEMON_ADDR"); v != "" {
+	if v := os.Getenv("CODERO_TEST_DAEMON_ADDR"); v != "" {
 		return v
 	}
 	return "127.0.0.1:50051"
