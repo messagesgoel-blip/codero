@@ -2,6 +2,7 @@ package state
 
 import (
 	"context"
+	"sync"
 	"testing"
 )
 
@@ -43,6 +44,39 @@ func TestUpsertPRTracking_Idempotent(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("expected 1 row, got %d", count)
+	}
+}
+
+func TestUpsertPRTracking_ConcurrentIdempotent(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	const workers = 8
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	errs := make(chan error, workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			if err := UpsertPRTracking(ctx, db, "codero", "feat/concurrent", 42); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		t.Fatalf("concurrent upsert error: %v", err)
+	}
+
+	var count int
+	if err := db.sql.QueryRow(`SELECT COUNT(*) FROM branch_states WHERE repo=? AND branch=?`,
+		"codero", "feat/concurrent").Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 row, got %d", count)
 	}
 }
 

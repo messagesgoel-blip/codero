@@ -20,16 +20,6 @@ import (
 	"time"
 )
 
-type pipelineResponse struct {
-	Pipeline []struct {
-		SessionID string `json:"session_id"`
-		Repo      string `json:"repo"`
-		Branch    string `json:"branch"`
-		PRNumber  int    `json:"pr_number"`
-	} `json:"pipeline"`
-	Total int `json:"total"`
-}
-
 type reposResponse struct {
 	Repos []struct {
 		Repo     string `json:"repo"`

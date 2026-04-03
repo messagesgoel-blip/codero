@@ -20,33 +20,17 @@ func UpsertPRTracking(ctx context.Context, db *DB, repo, branch string, prNumber
 		return fmt.Errorf("pr tracking: pr number must be positive, got %d", prNumber)
 	}
 
-	// Try UPDATE first — this is the common path when the branch already exists
-	// (e.g. from a session heartbeat or a prior submit).
-	res, err := db.sql.ExecContext(ctx,
-		`UPDATE branch_states SET pr_number = ?, updated_at = datetime('now') WHERE repo = ? AND branch = ?`,
-		prNumber, repo, branch,
-	)
-	if err != nil {
-		return fmt.Errorf("pr tracking: update: %w", err)
-	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("pr tracking: rows affected: %w", err)
-	}
-	if affected > 0 {
-		return nil
-	}
-
-	// No existing row — insert a new branch_states entry in the "active" state
-	// so the pipeline and repos endpoints can surface this branch immediately.
 	id := uuid.New().String()
-	_, err = db.sql.ExecContext(ctx, `
+	_, err := db.sql.ExecContext(ctx, `
 		INSERT INTO branch_states (id, repo, branch, state, pr_number, created_at, updated_at)
-		VALUES (?, ?, ?, 'active', ?, datetime('now'), datetime('now'))`,
+		VALUES (?, ?, ?, 'active', ?, datetime('now'), datetime('now'))
+		ON CONFLICT(repo, branch) DO UPDATE SET
+			pr_number  = excluded.pr_number,
+			updated_at = datetime('now')`,
 		id, repo, branch, prNumber,
 	)
 	if err != nil {
-		return fmt.Errorf("pr tracking: insert: %w", err)
+		return fmt.Errorf("pr tracking: upsert: %w", err)
 	}
 	return nil
 }
