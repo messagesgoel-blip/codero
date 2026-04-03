@@ -163,7 +163,9 @@ func NewObservabilityServerWithGRPC(redisClient *redis.Client, queue *scheduler.
 		fileServer := http.FileServer(http.FS(staticFS))
 		// During development, prevent caching of JS/CSS so changes are visible immediately.
 		cachedFileServer := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if strings.HasSuffix(r.URL.Path, ".js") || strings.HasSuffix(r.URL.Path, ".css") {
+			p := r.URL.Path
+			isHTML := strings.HasSuffix(p, "/") || strings.HasSuffix(p, ".html") || strings.HasSuffix(p, "index.html")
+			if isHTML || strings.HasSuffix(p, ".js") || strings.HasSuffix(p, ".css") {
 				w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 			} else {
 				w.Header().Set("Cache-Control", "public, max-age=60")

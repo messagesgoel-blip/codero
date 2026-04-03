@@ -4,7 +4,7 @@ Status: **active**
 Owner: sanjay
 Updated: 2026-04-03
 Supersedes: `agent-task-execution-roadmap.md` (SUB-001 through FIN-001)
-Next task: WIRE-001
+Next task: OCL-010
 
 ## Context
 
@@ -86,7 +86,7 @@ sessions show real context instead of `repo: ""`.
 - Unit test: heartbeat updates repo/branch on change
 
 **E2E Test** (`tests/e2e/wire001_session_binding_test.go`):
-```
+```text
 1. Call `codero session register --agent-id=e2e-test --repo=codero --branch=main`
 2. Assert: API `GET /api/v1/dashboard/active-sessions` returns session with repo=codero, branch=main
 3. Call `codero session heartbeat --session-id=<id> --repo=whimsy --branch=feat/test`
@@ -124,7 +124,7 @@ so the dashboard gate health and scorecard reflect real data.
 - Unit test: record-precommit writes to DB correctly
 
 **E2E Test** (`tests/e2e/wire002_precommit_recording_test.go`):
-```
+```text
 1. Call `codero record-precommit --repo=codero --branch=main --result=pass --duration-ms=1200 --checks=gitleaks,ruff,govet`
 2. Assert: `GET /api/v1/dashboard/gate-health` includes provider "precommit" with passes=1
 3. Assert: `GET /api/v1/dashboard/scorecard` shows precommit_runs > 0
@@ -160,7 +160,7 @@ shows real PR state.
 - Unit test: pr track creates/updates branch state correctly
 
 **E2E Test** (`tests/e2e/wire003_pr_tracking_test.go`):
-```
+```text
 1. Call `codero pr track --repo=codero --branch=feat/e2e-test --pr=9999`
 2. Assert: `GET /api/v1/dashboard/pipeline` includes entry with pr_number=9999, branch=feat/e2e-test
 3. Assert: `GET /api/v1/dashboard/repos` includes branch feat/e2e-test with pr_number=9999
@@ -206,7 +206,7 @@ designed for OpenClaw consumption (replacing the internal `assembleChatContextMa
 - Contract test: response shape matches documented schema
 
 **E2E Test** (`tests/e2e/ocl010_state_query_test.go`):
-```
+```text
 1. Seed: register a session with repo/branch (WIRE-001), record a precommit (WIRE-002), track a PR (WIRE-003)
 2. Call `GET /api/v1/openclaw/state`
 3. Assert: response is valid JSON with sections: sessions, pipeline, activity, gate_health, scorecard
@@ -250,7 +250,7 @@ via LiteLLM.
 - Integration test: send query, verify response includes real session data
 
 **E2E Test** (`tests/e2e/ocl011_adapter_query_test.go`):
-```
+```text
 1. Seed: register session, record precommit, track PR (reuse seed helpers)
 2. POST to adapter `POST /query` with {"prompt": "What sessions are active?"}
 3. Assert: response contains text mentioning the seeded session's agent_id and repo
@@ -293,7 +293,7 @@ to the OpenClaw adapter.
 - Size reduction: ~52KB of Go removed
 
 **E2E Test** (`tests/e2e/ocl012_chat_removal_test.go`):
-```
+```text
 1. Build: `go build -buildvcs=false ./...` succeeds
 2. Assert: no Go file in internal/dashboard/ imports "openai" package
 3. Assert: `grep -r CODERO_CHAT internal/ cmd/` returns zero matches
@@ -330,7 +330,7 @@ retrieved later.
 - Audit log survives adapter restart (file-backed)
 
 **E2E Test** (`tests/e2e/ocl013_audit_log_test.go`):
-```
+```text
 1. POST 3 queries to adapter: "status", "queue", "health"
 2. GET /api/v1/openclaw/audit?limit=10
 3. Assert: 3 entries returned, each with: timestamp, prompt, response_summary, conversation_id
@@ -375,7 +375,7 @@ ready for agent consumption.
 - Contract test: response shape is stable
 
 **E2E Test** (`tests/e2e/ocl020_findings_endpoint_test.go`):
-```
+```text
 1. Seed: insert 3 findings into findings table for repo=codero, branch=feat/e2e-test
    (severity=error, file=main.go, line=10; severity=warning, file=config.go, line=5; severity=info)
 2. Seed: track PR via codero pr track --repo=codero --branch=feat/e2e-test --pr=9999
@@ -418,7 +418,7 @@ session using the proven `agent-tmux-bridge`.
 - Integration test: deliver to a test tmux session, capture output, verify message content
 
 **E2E Test** (`tests/e2e/ocl021_pty_delivery_test.go`):
-```
+```text
 1. Start a test tmux session: tmux new-session -d -s e2e-deliver-test "cat"
 2. Seed: register session in Codero with tmux_name=e2e-deliver-test, agent_kind=claude
 3. POST /api/v1/openclaw/deliver with {session_id, findings: [{file:"main.go", line:10, message:"unused var", severity:"warning"}]}
@@ -463,7 +463,7 @@ normalizes them and signals OpenClaw to deliver to the agent.
 - Integration test: mock webhook → findings stored → delivery triggered
 
 **E2E Test** (`tests/e2e/ocl022_webhook_delivery_test.go`):
-```
+```text
 1. Seed: register session with repo=codero, branch=feat/e2e-webhook, tmux_name=e2e-wh-test
 2. Seed: track PR --repo=codero --branch=feat/e2e-webhook --pr=9999
 3. Start test tmux session: tmux new-session -d -s e2e-wh-test "cat"
@@ -521,7 +521,7 @@ yet, just the mechanical flow.
 - Integration test: submit updates assignment state
 
 **E2E Test** (`tests/e2e/sub010_submit_test.go`):
-```
+```text
 1. Setup: create test branch, write a test file, git add
 2. Call `codero submit --repo=codero --branch=feat/e2e-submit --title="e2e test" --body="automated"`
 3. Assert: `gh pr list --head feat/e2e-submit --json number` returns a PR
@@ -564,7 +564,7 @@ simplified version of SUB-002 — fewer fields than the spec, enough for dedup a
 - Unit test: submission record persists all required fields
 
 **E2E Test** (`tests/e2e/sub011_submission_record_test.go`):
-```
+```text
 1. Setup: create branch, stage a file
 2. Call `codero submit --repo=codero --branch=feat/e2e-subrec --title="test" --body="test"`
 3. Assert: DB query on submissions table returns 1 row with:
@@ -611,7 +611,7 @@ the structured summary block, and calls `codero submit` with the extracted metad
 - Integration test: full flow from TASK_COMPLETE → PR creation
 
 **E2E Test** (`tests/e2e/sub012_task_complete_test.go`):
-```
+```text
 1. Start test tmux session: tmux new-session -d -s e2e-tc-test "bash"
 2. Seed: register session with tmux_name=e2e-tc-test, repo=codero, branch=feat/e2e-tc
 3. Start OpenClaw adapter observer (pointed at e2e-tc-test session)
@@ -662,7 +662,7 @@ notified of PR state changes.
 - Dedup works (same delivery ID not processed twice)
 
 **E2E Test** (`tests/e2e/rev010_webhook_registration_test.go`):
-```
+```text
 1. Assert: GitHub webhook configured for messagesgoel-blip/codero (via gh api)
 2. Create a test PR on Codero repo
 3. Wait up to 30s for webhook delivery
@@ -700,7 +700,7 @@ merge readiness. Results are visible on the dashboard.
 - Dashboard updates within 30 seconds of webhook receipt
 
 **E2E Test** (`tests/e2e/rev011_merge_readiness_test.go`):
-```
+```text
 1. Create test PR via codero submit (reuse sub010 helpers)
 2. Wait for webhook (CI started/completed)
 3. Assert: `GET /api/v1/dashboard/pipeline` entry shows ci_passed field (true or false)
@@ -738,7 +738,7 @@ unresolved threads), Codero produces structured findings and signals OpenClaw to
 - Audit log records the delivery
 
 **E2E Test** (`tests/e2e/rev012_remote_findings_delivery_test.go`):
-```
+```text
 1. Seed: register session with tmux_name=e2e-rev-test, repo=codero, branch=feat/e2e-rev
 2. Seed: create submission record for this branch
 3. Start test tmux session
@@ -786,7 +786,7 @@ via GitHub API.
 - Scorecard `mergeRate` shows real data
 
 **E2E Test** (`tests/e2e/mrg010_auto_merge_test.go`):
-```
+```text
 1. Create branch with a trivial safe change (e.g., add comment to a test file)
 2. Submit via `codero submit`
 3. Wait for CI to pass (up to 5 min timeout)
@@ -833,7 +833,7 @@ locks, and archives the session.
 - If operator closes via dashboard action button, assignment is cancelled and archived
 
 **E2E Test** (`tests/e2e/mrg011_finalization_test.go`):
-```
+```text
 1. Complete a full submit → merge cycle (reuse mrg010 helpers)
 2. Assert: assignment ended_at is populated
 3. Assert: assignment result = "merged"
@@ -871,7 +871,7 @@ locks, and archives the session.
 - Dashboard has a "Proving Period" section showing days elapsed, gates status
 
 **E2E Test** (`tests/e2e/prv010_proving_metrics_test.go`):
-```
+```text
 1. Assert: `GET /api/v1/dashboard/scorecard` returns non-dash values for:
    gatePassRate, avgCycleTime, mergeRate
 2. Assert: scorecard summary includes real counts:
@@ -902,7 +902,7 @@ locks, and archives the session.
 - Runbook exists with dated pass/fail for each drill
 
 **E2E Test** (`tests/e2e/prv011_recovery_drills_test.go`):
-```
+```text
 For each drill:
 1. Record pre-drill state: active sessions, pipeline entries, queue items
 2. Execute the drill action (Redis kill, Docker restart, SIGKILL, webhook replay)
@@ -917,7 +917,7 @@ For each drill:
 
 ## Dependency Graph
 
-```
+```text
 WIRE-001 (session binding)
     ↓
 WIRE-002 (gate reporting)       WIRE-003 (PR tracking)

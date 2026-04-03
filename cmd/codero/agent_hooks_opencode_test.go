@@ -1,0 +1,105 @@
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestGenerateOpenCodePlugin_ContainsHeartbeat(t *testing.T) {
+	plugin := generateOpenCodePlugin()
+	if !strings.Contains(plugin, "codero session heartbeat") {
+		t.Error("plugin does not contain 'codero session heartbeat'")
+	}
+}
+
+func TestGenerateOpenCodePlugin_ContainsEvents(t *testing.T) {
+	plugin := generateOpenCodePlugin()
+	for _, event := range []string{"tool.execute.before", "tool.execute.after", "session.idle"} {
+		if !strings.Contains(plugin, event) {
+			t.Errorf("plugin missing event %q", event)
+		}
+	}
+}
+
+func TestGenerateOpenCodePlugin_ContainsImport(t *testing.T) {
+	plugin := generateOpenCodePlugin()
+	if !strings.Contains(plugin, `import { exec } from "node:child_process"`) {
+		t.Error("plugin missing child_process import")
+	}
+}
+
+func TestGenerateOpenCodePlugin_ContainsManagedComment(t *testing.T) {
+	plugin := generateOpenCodePlugin()
+	if !strings.Contains(plugin, "managed by codero") {
+		t.Error("plugin missing managed-by comment")
+	}
+}
+
+func TestInstallOpenCodePlugin_Create(t *testing.T) {
+	dir := t.TempDir()
+	pluginPath := filepath.Join(dir, ".config", "opencode", "plugin", "codero-heartbeat.js")
+
+	plugin := generateOpenCodePlugin()
+	status, err := installTextFile(pluginPath, plugin, false)
+	if err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if status != "created" {
+		t.Errorf("expected 'created', got %q", status)
+	}
+
+	data, err := os.ReadFile(pluginPath)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !strings.Contains(string(data), "codero session heartbeat") {
+		t.Error("written file missing heartbeat command")
+	}
+}
+
+func TestInstallOpenCodePlugin_Idempotent(t *testing.T) {
+	dir := t.TempDir()
+	pluginPath := filepath.Join(dir, ".config", "opencode", "plugin", "codero-heartbeat.js")
+
+	plugin := generateOpenCodePlugin()
+	if _, err := installTextFile(pluginPath, plugin, false); err != nil {
+		t.Fatalf("first install: %v", err)
+	}
+
+	status, err := installTextFile(pluginPath, plugin, false)
+	if err != nil {
+		t.Fatalf("second install: %v", err)
+	}
+	if status != "unchanged" {
+		t.Errorf("expected 'unchanged', got %q", status)
+	}
+}
+
+func TestInstallOpenCodePlugin_Force(t *testing.T) {
+	dir := t.TempDir()
+	pluginPath := filepath.Join(dir, ".config", "opencode", "plugin", "codero-heartbeat.js")
+
+	plugin := generateOpenCodePlugin()
+	if _, err := installTextFile(pluginPath, plugin, false); err != nil {
+		t.Fatalf("first install: %v", err)
+	}
+
+	status, err := installTextFile(pluginPath, plugin, true)
+	if err != nil {
+		t.Fatalf("force install: %v", err)
+	}
+	if status != "updated" {
+		t.Errorf("expected 'updated' with --force, got %q", status)
+	}
+}
+
+func TestOpenCodePluginPath(t *testing.T) {
+	dir := t.TempDir()
+	got := openCodePluginPath(dir)
+	want := filepath.Join(dir, ".config", "opencode", "plugin", "codero-heartbeat.js")
+	if got != want {
+		t.Errorf("openCodePluginPath: got %q, want %q", got, want)
+	}
+}

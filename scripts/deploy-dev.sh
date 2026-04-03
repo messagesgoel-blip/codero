@@ -41,7 +41,7 @@ wait_healthy() {
             return 0
         fi
         sleep 1
-        (( elapsed++ ))
+        (( ++elapsed ))
     done
     red "  $name failed to become healthy within ${timeout}s"
     return 1
@@ -51,19 +51,23 @@ build_cli() {
     dim "Building CLI binary..."
     (cd "$REPO_ROOT" && go build -buildvcs=false -o ./bin/codero ./cmd/codero) \
         || die "go build failed"
+    green "CLI binary compiled"
+}
 
+install_cli() {
     # Update shared tools binary (fail if copy fails)
     install -D -m 0755 "$REPO_ROOT/bin/codero" "$SHARED_DEST" \
         || die "failed to update shared tools binary at $SHARED_DEST"
 
     # Update user binary (atomic rename to handle "text file busy")
+    install -d "$(dirname "$CLI_DEST")"
     if [ -f "$CLI_DEST" ]; then
         cp "$REPO_ROOT/bin/codero" "${CLI_DEST}.new"
         mv "${CLI_DEST}.new" "$CLI_DEST"
     else
-        cp "$REPO_ROOT/bin/codero" "$CLI_DEST"
+        install -m 0755 "$REPO_ROOT/bin/codero" "$CLI_DEST"
     fi
-    green "CLI binary updated"
+    green "CLI binary installed"
 }
 
 build_containers() {
@@ -95,19 +99,24 @@ restart_containers() {
 # --- Main ---
 
 case "${1:-}" in
-    --build)
-        build_containers
-        ;;
-    --cli)
-        build_cli
-        ;;
-    *)
+    "")
         echo "Codero dev deploy — syncing worktree to all surfaces"
         echo ""
         build_cli
         build_containers
         restart_containers
+        install_cli
         echo ""
-        green "All done. Dev :8110 | Live :8111 | CLI: $(codero version 2>/dev/null || echo 'updated')"
+        green "All done. Dev :8110 | Live :8111 | CLI: $("$SHARED_DEST" version 2>/dev/null || echo 'updated')"
+        ;;
+    --build)
+        build_containers
+        ;;
+    --cli)
+        build_cli
+        install_cli
+        ;;
+    *)
+        die "unknown argument: ${1}. Usage: $0 [--build|--cli]"
         ;;
 esac

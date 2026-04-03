@@ -262,6 +262,46 @@ func TestAgentHooksCmd_PersistsHookMetadata(t *testing.T) {
 	}
 }
 
+// TestBuildHeartbeatFragments verifies the shared fragments are non-empty.
+func TestBuildHeartbeatFragments(t *testing.T) {
+	f := buildHeartbeatFragments()
+	if f.RepoDetect == "" {
+		t.Error("RepoDetect is empty")
+	}
+	if f.OutputTrack == "" {
+		t.Error("OutputTrack is empty")
+	}
+	if f.PostToolAccum == "" {
+		t.Error("PostToolAccum is empty")
+	}
+	if f.AutoRecover == "" {
+		t.Error("AutoRecover is empty")
+	}
+}
+
+// TestAssembleHeartbeat verifies the composed command contains expected parts.
+func TestAssembleHeartbeat(t *testing.T) {
+	f := buildHeartbeatFragments()
+
+	working := assembleHeartbeat(f, "working", false)
+	if !strings.Contains(working, "--status=working") {
+		t.Error("working heartbeat missing --status=working")
+	}
+	if strings.Contains(working, "wc -c") {
+		t.Error("non-accum heartbeat should not contain wc -c")
+	}
+
+	workingPost := assembleHeartbeat(f, "working", true)
+	if !strings.Contains(workingPost, "wc -c") {
+		t.Error("accum heartbeat should contain wc -c for byte counting")
+	}
+
+	waiting := assembleHeartbeat(f, "waiting_for_input", false)
+	if !strings.Contains(waiting, "--status=waiting_for_input") {
+		t.Error("waiting heartbeat missing --status=waiting_for_input")
+	}
+}
+
 func captureStderr(t *testing.T, fn func() error) (string, error) {
 	t.Helper()
 
