@@ -358,7 +358,7 @@ func seedFixtureTailLog(sessionID string, outputMB float64) error {
 	if clean == "" || clean == "." || clean == ".." || clean != sessionID {
 		return fmt.Errorf("invalid sessionID for tail log: %q (must not contain path separators)", sessionID)
 	}
-	if err := os.MkdirAll(tailDir, 0o755); err != nil {
+	if err := os.MkdirAll(tailDir, 0o700); err != nil {
 		return fmt.Errorf("mkdir %s: %w", tailDir, err)
 	}
 	sizeBytes := int64(outputMB * 1024 * 1024)
@@ -366,7 +366,7 @@ func seedFixtureTailLog(sessionID string, outputMB float64) error {
 		sizeBytes = 1
 	}
 	logPath := filepath.Join(tailDir, clean+".log")
-	f, err := os.Create(logPath)
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return fmt.Errorf("create %s: %w", logPath, err)
 	}
