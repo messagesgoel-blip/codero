@@ -539,6 +539,9 @@ Legacy mode: use --provider and --status to write only precommit_reviews.
 				if result != "pass" && result != "fail" {
 					return fmt.Errorf("--result must be pass or fail, got %q", result)
 				}
+				if durationMS < 0 {
+					return fmt.Errorf("--duration-ms cannot be negative")
+				}
 				if err := state.RecordPrecommitResult(cmd.Context(), db, repo, branch, headHash, result, durationMS, checks); err != nil {
 					return fmt.Errorf("record precommit: %w", err)
 				}
