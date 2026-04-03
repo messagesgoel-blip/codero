@@ -57,11 +57,12 @@ build_cli() {
         || die "failed to update shared tools binary at $SHARED_DEST"
 
     # Update user binary (atomic rename to handle "text file busy")
+    install -d "$(dirname "$CLI_DEST")"
     if [ -f "$CLI_DEST" ]; then
         cp "$REPO_ROOT/bin/codero" "${CLI_DEST}.new"
         mv "${CLI_DEST}.new" "$CLI_DEST"
     else
-        cp "$REPO_ROOT/bin/codero" "$CLI_DEST"
+        install -m 0755 "$REPO_ROOT/bin/codero" "$CLI_DEST"
     fi
     green "CLI binary updated"
 }
@@ -95,6 +96,15 @@ restart_containers() {
 # --- Main ---
 
 case "${1:-}" in
+    "")
+        echo "Codero dev deploy — syncing worktree to all surfaces"
+        echo ""
+        build_cli
+        build_containers
+        restart_containers
+        echo ""
+        green "All done. Dev :8110 | Live :8111 | CLI: $("$SHARED_DEST" version 2>/dev/null || echo 'updated')"
+        ;;
     --build)
         build_containers
         ;;
@@ -102,12 +112,6 @@ case "${1:-}" in
         build_cli
         ;;
     *)
-        echo "Codero dev deploy — syncing worktree to all surfaces"
-        echo ""
-        build_cli
-        build_containers
-        restart_containers
-        echo ""
-        green "All done. Dev :8110 | Live :8111 | CLI: $(codero version 2>/dev/null || echo 'updated')"
+        die "unknown argument: ${1}. Usage: $0 [--build|--cli]"
         ;;
 esac

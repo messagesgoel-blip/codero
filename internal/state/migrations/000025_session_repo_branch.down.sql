@@ -3,7 +3,7 @@
 -- preserving all columns added through migration 000024 with constraints.
 CREATE TABLE agent_sessions_backup (
     session_id TEXT PRIMARY KEY,
-    agent_id TEXT NOT NULL DEFAULT '',
+    agent_id TEXT NOT NULL,
     mode TEXT NOT NULL DEFAULT '',
     started_at DATETIME NOT NULL DEFAULT (datetime('now')),
     last_seen_at DATETIME NOT NULL DEFAULT (datetime('now')),

@@ -48,7 +48,10 @@ func generateOpenCodePlugin() string {
 	// The shell fragments use single quotes for awk, so we need to handle them.
 	escapeForJS := func(s string) string {
 		// Replace backticks with \` for JS template literal safety.
-		return strings.ReplaceAll(s, "`", "\\`")
+		// Escape ${ to prevent template literal interpolation of shell ${VAR} references.
+		s = strings.ReplaceAll(s, "`", "\\`")
+		s = strings.ReplaceAll(s, "${", "\\${")
+		return s
 	}
 
 	return fmt.Sprintf(`// codero-heartbeat.js — managed by codero (do not edit)

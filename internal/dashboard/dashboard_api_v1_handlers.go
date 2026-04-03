@@ -1303,8 +1303,9 @@ func (h *Handler) handleSessionMetrics(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 
-	// Fetch output activity samples for sparkline (last 30 minutes).
-	activitySamples, err := state.GetActivitySamples(r.Context(), state.NewDB(h.db), sessionID, 30)
+	// Fetch output activity samples for sparkline (last 30 visible minutes + 1 pre-window baseline).
+	const visibleBuckets = 30
+	activitySamples, err := state.GetActivitySamples(r.Context(), state.NewDB(h.db), sessionID, visibleBuckets+1)
 	if err != nil {
 		loglib.Warn("dashboard: activity samples query failed",
 			loglib.FieldComponent, "dashboard",
@@ -1314,9 +1315,15 @@ func (h *Handler) handleSessionMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Compute output deltas from cumulative samples for the sparkline.
-	// First bucket uses delta=0 since we lack a prior baseline sample.
-	activityDeltas := make([]map[string]interface{}, 0, len(activitySamples))
-	for i, s := range activitySamples {
+	// When we have more than visibleBuckets, the first sample is a pre-window baseline
+	// used only for diffing — it is not included in the response.
+	start := 0
+	if len(activitySamples) > visibleBuckets {
+		start = 1
+	}
+	activityDeltas := make([]map[string]interface{}, 0, len(activitySamples)-start)
+	for i := start; i < len(activitySamples); i++ {
+		s := activitySamples[i]
 		var delta int64
 		if i > 0 {
 			delta = s.OutputBytes - activitySamples[i-1].OutputBytes

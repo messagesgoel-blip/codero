@@ -4,7 +4,7 @@ Status: **active**
 Owner: sanjay
 Updated: 2026-04-03
 Supersedes: `agent-task-execution-roadmap.md` (SUB-001 through FIN-001)
-Next task: WIRE-001
+Next task: WIRE-004
 
 ## Context
 

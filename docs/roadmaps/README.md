@@ -5,7 +5,7 @@
 1. `dogfood-execution-roadmap.md`
    Active execution roadmap (2026-04-03). Dogfood-first approach with
    expanded OpenClaw advisory role. 20 tasks across 7 waves (WIRE → OCL →
-   SUB → REV → MRG → PRV). Next task: WIRE-003.
+   SUB → REV → MRG → PRV). Next task: WIRE-004.
 2. `../roadmap.md`
    Roadmap index plus strategic/release context. Useful for phases, proving
    work, and deferred scopes, but not the next-task ledger.
