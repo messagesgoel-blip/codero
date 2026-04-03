@@ -161,9 +161,9 @@ func TestRecordPrecommitResult_ZeroDuration(t *testing.T) {
 	).Scan(&startedAt, &finishedAt); err != nil {
 		t.Fatalf("query review_runs: %v", err)
 	}
-	// When durationMS==0, started_at and finished_at are the same.
+	// When durationMS==0, started_at and finished_at must be equal.
 	diff := finishedAt.Sub(startedAt)
-	if diff < 0 {
-		t.Errorf("started_at should not be after finished_at, diff=%v", diff)
+	if diff != 0 {
+		t.Errorf("started_at and finished_at should be equal when durationMS==0, diff=%v", diff)
 	}
 }

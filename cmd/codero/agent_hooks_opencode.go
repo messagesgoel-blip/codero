@@ -8,7 +8,9 @@ import (
 )
 
 // handleOpenCodeHooks generates or installs an OpenCode JS plugin.
-func handleOpenCodeHooks(print, install, force bool) error {
+// install is accepted for API parity with handleClaudeHooks/handleCodexHooks;
+// when print is false the plugin is always written (install is implied).
+func handleOpenCodeHooks(print, install, force bool) error { //nolint:unparam // install kept for parity
 	plugin := generateOpenCodePlugin()
 
 	if print {
@@ -44,11 +46,10 @@ func generateOpenCodePlugin() string {
 	workingPost := assembleHeartbeat(f, "working", true)
 	waiting := assembleHeartbeat(f, "waiting_for_input", false)
 
-	// Escape single quotes for embedding in JS template literals.
-	// The shell fragments use single quotes for awk, so we need to handle them.
+	// escapeForJS escapes characters that are special in JS template literals.
+	// Backticks close the literal; \${ prevents ${VAR} from being interpreted as
+	// a JS template expression. Single-quote handling is done in jsShellCall.
 	escapeForJS := func(s string) string {
-		// Replace backticks with \` for JS template literal safety.
-		// Escape ${ to prevent template literal interpolation of shell ${VAR} references.
 		s = strings.ReplaceAll(s, "`", "\\`")
 		s = strings.ReplaceAll(s, "${", "\\${")
 		return s
@@ -76,6 +77,7 @@ export default async () => ({
 }
 
 // jsShellCall wraps a shell command in a JS template literal bash invocation.
+// Single-quote escaping for shell quoting is handled here (not in escapeForJS).
 func jsShellCall(shellCmd string) string {
 	return "`bash -c '" + strings.ReplaceAll(shellCmd, "'", `'"'"'`) + "'`"
 }

@@ -41,7 +41,7 @@ wait_healthy() {
             return 0
         fi
         sleep 1
-        (( elapsed++ ))
+        (( ++elapsed ))
     done
     red "  $name failed to become healthy within ${timeout}s"
     return 1
