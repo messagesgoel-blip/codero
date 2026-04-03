@@ -584,7 +584,7 @@ Legacy mode: use --provider and --status to write only precommit_reviews.
 	cmd.Flags().Int64Var(&durationMS, "duration-ms", 0, "wall-clock gate run duration in milliseconds")
 	cmd.Flags().StringVar(&checks, "checks", "", "comma-separated list of checks that ran (e.g. gitleaks,ruff,govet)")
 	cmd.Flags().StringVar(&headHash, "head-hash", "", "git HEAD SHA at time of gate run")
-	cmd.Flags().StringVar(&provider, "provider", "", "review provider: copilot, litellm, coderabbit (legacy mode)")
+	cmd.Flags().StringVar(&provider, "provider", "", "review provider: copilot, litellm, coderabbit, precommit (legacy mode)")
 	cmd.Flags().StringVar(&status, "status", "", "review result: passed, failed, or error (legacy mode)")
 
 	return cmd

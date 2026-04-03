@@ -15,6 +15,7 @@ import (
 // checks is a comma-separated list of checks that ran (e.g. "gitleaks,ruff,govet").
 // headHash is the current git HEAD SHA; empty string is accepted.
 //
+// Both inserts happen in a single transaction to avoid partial writes.
 // The call is best-effort — callers should not rely on the returned error to block commits.
 func RecordPrecommitResult(ctx context.Context, db *DB, repo, branch, headHash, result string, durationMS int64, checks string) error {
 	now := time.Now().UTC()
@@ -34,24 +35,15 @@ func RecordPrecommitResult(ctx context.Context, db *DB, repo, branch, headHash, 
 		return fmt.Errorf("record precommit: invalid result %q (expected pass or fail)", result)
 	}
 
-	// Populate error field with metadata on failures, or as a compact summary always.
+	// Populate error field: on pass store the checks list as metadata;
+	// on fail prefix with "failed checks:" for visibility.
 	errMsg := ""
-	if checks != "" {
-		errMsg = checks
-	}
 	if result == "fail" && checks != "" {
 		errMsg = "failed checks: " + checks
 	} else if result == "fail" {
 		errMsg = "gate failed"
-	}
-
-	// Write to precommit_reviews (feeds proving scorecard PrecommitReviews7Days).
-	_, err := db.sql.ExecContext(ctx, `
-		INSERT INTO precommit_reviews (id, repo, branch, provider, status, error, created_at)
-		VALUES (?, ?, ?, 'precommit', ?, ?, ?)`,
-		id, repo, branch, precommitStatus, errMsg, now)
-	if err != nil {
-		return fmt.Errorf("record precommit: insert precommit_reviews: %w", err)
+	} else if checks != "" {
+		errMsg = checks
 	}
 
 	// Compute started_at from duration if provided.
@@ -60,8 +52,23 @@ func RecordPrecommitResult(ctx context.Context, db *DB, repo, branch, headHash, 
 		startedAt = now.Add(-time.Duration(durationMS) * time.Millisecond)
 	}
 
+	tx, err := db.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("record precommit: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // rollback is a no-op after commit
+
+	// Write to precommit_reviews (feeds proving scorecard PrecommitReviews7Days).
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO precommit_reviews (id, repo, branch, provider, status, error, created_at)
+		VALUES (?, ?, ?, 'precommit', ?, ?, ?)`,
+		id, repo, branch, precommitStatus, errMsg, now)
+	if err != nil {
+		return fmt.Errorf("record precommit: insert precommit_reviews: %w", err)
+	}
+
 	// Write to review_runs (feeds queryGateHealth provider breakdown).
-	_, err = db.sql.ExecContext(ctx, `
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO review_runs (id, repo, branch, head_hash, provider, status, started_at, finished_at, error, created_at)
 		VALUES (?, ?, ?, ?, 'precommit', ?, ?, ?, ?, ?)`,
 		uuid.New().String(), repo, branch, headHash, runStatus, startedAt, now, errMsg, now)
@@ -69,5 +76,8 @@ func RecordPrecommitResult(ctx context.Context, db *DB, repo, branch, headHash, 
 		return fmt.Errorf("record precommit: insert review_runs: %w", err)
 	}
 
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("record precommit: commit: %w", err)
+	}
 	return nil
 }
