@@ -166,9 +166,14 @@ func SeedFixtureSessions(ctx context.Context, db *sql.DB, entries []FixtureSessi
 			if err != nil {
 				return fmt.Errorf("fixture_loader: sessions[%d]: parse inferred_status_updated_at: %w", i, err)
 			}
-			contextPressure := strings.TrimSpace(e.ContextPressure)
-			if contextPressure == "" {
+			contextPressure := strings.TrimSpace(strings.ToLower(e.ContextPressure))
+			switch contextPressure {
+			case "normal", "warning", "critical":
+				// valid
+			case "":
 				contextPressure = "normal"
+			default:
+				return fmt.Errorf("fixture_loader: sessions[%d]: invalid context_pressure %q (expected normal, warning, critical)", i, e.ContextPressure)
 			}
 			inferredStatus := strings.TrimSpace(e.InferredStatus)
 			if inferredStatus == "" {
@@ -369,7 +374,10 @@ func seedFixtureTailLog(sessionID string, outputMB float64) error {
 		_ = f.Close()
 		return fmt.Errorf("truncate %s: %w", logPath, err)
 	}
-	return f.Close()
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close %s: %w", logPath, err)
+	}
+	return nil
 }
 
 // SeedFixtureActivity inserts delivery_event rows for each activity entry.
