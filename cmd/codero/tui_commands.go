@@ -484,36 +484,43 @@ These events are tracked for Phase 1F exit gate compliance.`,
 }
 
 // recordPrecommitCmd records a pre-commit review for proving period tracking.
+//
+// WIRE-002 mode: provide --result=pass|fail (with optional --duration-ms, --checks,
+// --head-hash) to write both precommit_reviews and review_runs so the scorecard and
+// gate health dashboard both reflect real data.
+//
+// Legacy mode: provide --provider and --status to write only precommit_reviews (kept
+// for backward compatibility with existing callers).
 func recordPrecommitCmd(configPath *string) *cobra.Command {
 	var (
-		repo     string
-		branch   string
-		provider string
-		status   string
+		repo       string
+		branch     string
+		provider   string
+		status     string
+		result     string
+		durationMS int64
+		checks     string
+		headHash   string
 	)
 
 	cmd := &cobra.Command{
 		Use:   "record-precommit",
 		Short: "Record a pre-commit review result",
-		Long: `Records a pre-commit review result for Phase 1F proving period tracking.
+		Long: `Records a pre-commit review result for proving period tracking.
 
-This command records the outcome of a pre-commit review (LiteLLM or CodeRabbit)
-so the precommit_reviews_7_days metric can track pre-commit enforcement activity.
+WIRE-002 mode (preferred): use --result=pass|fail to write both precommit_reviews
+(scorecard) and review_runs (gate health dashboard).
 
-Provider: "litellm" or "coderabbit"
-Status: "passed", "failed", or "error"`,
+  codero record-precommit --repo=myrepo --branch=main --result=pass \
+    --duration-ms=4200 --checks=gitleaks,ruff,govet
+
+Legacy mode: use --provider and --status to write only precommit_reviews.
+
+  codero record-precommit --repo=myrepo --branch=main \
+    --provider=coderabbit --status=passed`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if repo == "" || branch == "" || provider == "" || status == "" {
-				return fmt.Errorf("--repo, --branch, --provider, and --status are required")
-			}
-
-			validProviders := map[string]bool{"litellm": true, "coderabbit": true, "copilot": true}
-			validStatuses := map[string]bool{"passed": true, "failed": true, "error": true}
-			if !validProviders[provider] {
-				return fmt.Errorf("invalid provider: %s (valid: copilot, litellm, coderabbit)", provider)
-			}
-			if !validStatuses[status] {
-				return fmt.Errorf("invalid status: %s (valid: passed, failed, error)", status)
+			if repo == "" || branch == "" {
+				return fmt.Errorf("--repo and --branch are required")
 			}
 
 			cfg, err := loadConfig(*configPath)
@@ -526,6 +533,32 @@ Status: "passed", "failed", or "error"`,
 				return fmt.Errorf("open state store: %w", err)
 			}
 			defer db.Close()
+
+			// WIRE-002 path: --result writes both tables.
+			if result != "" {
+				if result != "pass" && result != "fail" {
+					return fmt.Errorf("--result must be pass or fail, got %q", result)
+				}
+				if err := state.RecordPrecommitResult(cmd.Context(), db, repo, branch, headHash, result, durationMS, checks); err != nil {
+					return fmt.Errorf("record precommit: %w", err)
+				}
+				fmt.Printf("Recorded precommit result: repo=%s branch=%s result=%s duration_ms=%d\n",
+					repo, branch, result, durationMS)
+				return nil
+			}
+
+			// Legacy path: --provider + --status writes only precommit_reviews.
+			if provider == "" || status == "" {
+				return fmt.Errorf("either --result or (--provider and --status) are required")
+			}
+			validProviders := map[string]bool{"litellm": true, "coderabbit": true, "copilot": true, "precommit": true}
+			validStatuses := map[string]bool{"passed": true, "failed": true, "error": true}
+			if !validProviders[provider] {
+				return fmt.Errorf("invalid provider: %s (valid: copilot, litellm, coderabbit, precommit)", provider)
+			}
+			if !validStatuses[status] {
+				return fmt.Errorf("invalid status: %s (valid: passed, failed, error)", status)
+			}
 
 			review := &state.PrecommitReview{
 				ID:       generatePrecommitID(),
@@ -545,10 +578,14 @@ Status: "passed", "failed", or "error"`,
 		},
 	}
 
-	cmd.Flags().StringVarP(&repo, "repo", "R", "", "repository (owner/repo) (required)")
+	cmd.Flags().StringVarP(&repo, "repo", "R", "", "repository name (required)")
 	cmd.Flags().StringVarP(&branch, "branch", "b", "", "branch name (required)")
-	cmd.Flags().StringVar(&provider, "provider", "", "review provider: copilot, litellm, or coderabbit (required)")
-	cmd.Flags().StringVar(&status, "status", "", "review result: passed, failed, or error (required)")
+	cmd.Flags().StringVar(&result, "result", "", "gate result: pass or fail (WIRE-002 mode)")
+	cmd.Flags().Int64Var(&durationMS, "duration-ms", 0, "wall-clock gate run duration in milliseconds")
+	cmd.Flags().StringVar(&checks, "checks", "", "comma-separated list of checks that ran (e.g. gitleaks,ruff,govet)")
+	cmd.Flags().StringVar(&headHash, "head-hash", "", "git HEAD SHA at time of gate run")
+	cmd.Flags().StringVar(&provider, "provider", "", "review provider: copilot, litellm, coderabbit (legacy mode)")
+	cmd.Flags().StringVar(&status, "status", "", "review result: passed, failed, or error (legacy mode)")
 
 	return cmd
 }
