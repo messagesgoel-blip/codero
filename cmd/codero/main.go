@@ -76,6 +76,7 @@ func main() {
 		submitCmd(&configPath),
 		setupCmd(),
 		tailCmd(),
+		prCmd(&configPath),
 	)
 
 	if err := root.Execute(); err != nil {
