@@ -595,7 +595,7 @@ The individual docs remain the source of truth for their respective areas.
 
 ## Related Documents
 
-- Execution roadmap: `docs/roadmaps/agent-task-execution-roadmap.md`
+- Execution roadmap: `docs/roadmaps/dogfood-execution-roadmap.md`
 - Strategic roadmap: `docs/roadmap.md`
 - Tooling baseline: `docs/runtime/codero-tooling-baseline.md`
 - Privilege profile: `docs/runtime/openclaw-privilege-profile.md`

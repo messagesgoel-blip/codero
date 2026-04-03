@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -155,8 +156,70 @@ func (s *sessionService) Heartbeat(ctx context.Context, req *daemonv1.HeartbeatR
 		return nil, status.Errorf(codes.Internal, "heartbeat: %v", err)
 	}
 
-	// Extract optional inferred_status from gRPC metadata.
+	// Extract optional metadata from gRPC headers.
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		// WIRE-001: persist repo/branch from heartbeat metadata.
+		repo := firstMD(md, "x-repo")
+		branch := firstMD(md, "x-branch")
+		if repo != "" || branch != "" {
+			if err := state.UpdateSessionRepoBranch(ctx, s.server.db, req.SessionId, repo, branch); err != nil {
+				loglib.Warn("grpc: session repo/branch update failed",
+					loglib.FieldComponent, "grpc",
+					"session_id", req.SessionId,
+					"repo", repo,
+					"branch", branch,
+					"error", err,
+				)
+			}
+		}
+
+		// Output bytes tracking + activity sample.
+		if v := firstMD(md, "x-output-bytes"); v != "" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+				if err := state.UpdateSessionOutputBytes(ctx, s.server.db, req.SessionId, n); err != nil {
+					loglib.Warn("grpc: output bytes update failed",
+						loglib.FieldComponent, "grpc",
+						"session_id", req.SessionId,
+						"error", err,
+					)
+				}
+				// Record activity sample for sparkline (1-min bucket).
+				if err := state.RecordActivitySample(ctx, s.server.db, req.SessionId, n); err != nil {
+					loglib.Warn("grpc: activity sample failed",
+						loglib.FieldComponent, "grpc",
+						"session_id", req.SessionId,
+						"error", err,
+					)
+				}
+			}
+		}
+
+		// Context pressure override.
+		if v := firstMD(md, "x-context-pressure"); v != "" {
+			level := state.ContextPressureLevel(v)
+			if level == state.ContextPressureNormal || level == state.ContextPressureWarning || level == state.ContextPressureCritical {
+				if err := state.SetContextPressure(ctx, s.server.db, req.SessionId, level); err != nil {
+					loglib.Warn("grpc: context pressure update failed",
+						loglib.FieldComponent, "grpc",
+						"session_id", req.SessionId,
+						"error", err,
+					)
+				}
+			}
+		}
+
+		// Compact count increment.
+		if v := firstMD(md, "x-compact-increment"); v == "1" {
+			if err := state.RecordCompact(ctx, s.server.db, req.SessionId); err != nil {
+				loglib.Warn("grpc: compact count update failed",
+					loglib.FieldComponent, "grpc",
+					"session_id", req.SessionId,
+					"error", err,
+				)
+			}
+		}
+
+		// Inferred status update.
 		if vals := md.Get("x-inferred-status"); len(vals) > 0 {
 			normalized := state.NormalizeStatus(vals[0])
 			if normalized != "" {
@@ -344,4 +407,12 @@ func (s *sessionService) GetSession(ctx context.Context, req *daemonv1.GetSessio
 	}
 
 	return resp, nil
+}
+
+// firstMD returns the first value for key in md, or "" if absent.
+func firstMD(md metadata.MD, key string) string {
+	if vals := md.Get(key); len(vals) > 0 {
+		return vals[0]
+	}
+	return ""
 }

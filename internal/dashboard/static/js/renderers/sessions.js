@@ -93,6 +93,7 @@ export function renderSessions() {
 
   _bindTabBar();
   _bindExpandToggles();
+  _loadActivityBars();
 }
 
 // --- Tab bar ---
@@ -245,7 +246,7 @@ function _renderSessionsTable(sessions, assignments) {
       key: 'activity',
       label: 'Activity',
       class: 'col-sparkline',
-      render: r => `<div class="sparkline-row-placeholder" data-sparkline-for="${esc(r.id)}"></div>`,
+      render: r => `<div class="activity-bar-placeholder" data-activity-for="${esc(r.id)}" style="width:120px;height:20px"></div>`,
     },
     {
       key: 'context',
@@ -402,6 +403,80 @@ function _loadSparkline(sessionId) {
       console.warn('Sparkline load failed:', err);
     }
   });
+}
+
+// Render output activity bars for all visible sessions.
+// Each bar shows output byte deltas over the last 30 minutes in 1-min buckets.
+// Active minutes are colored, idle/rate-limited minutes are grey gaps.
+function _loadActivityBars() {
+  const placeholders = document.querySelectorAll('[data-activity-for]:not([data-loaded])');
+  for (const p of placeholders) {
+    const sessionId = p.dataset.activityFor;
+    if (!sessionId) continue;
+    p.dataset.loaded = '1';
+
+    const safeId = encodeURIComponent(sessionId);
+    apiFetch(`/api/v1/dashboard/sessions/metrics/${safeId}`).then(data => {
+      const activity = data?.activity;
+      if (!Array.isArray(activity) || activity.length === 0) {
+        setHtml(p, _activityBarEmpty());
+        return;
+      }
+      setHtml(p, _activityBarSVG(activity));
+    }).catch(() => {
+      setHtml(p, _activityBarEmpty());
+    });
+  }
+}
+
+function _activityBarEmpty() {
+  return `<svg width="120" height="20" viewBox="0 0 120 20" class="activity-bar">
+    <rect x="0" y="8" width="120" height="4" rx="2" fill="var(--bg-muted)" opacity="0.3"/>
+  </svg>`;
+}
+
+function _activityBarSVG(activity) {
+  // activity: [{bucket, delta_bytes}, ...]
+  // Render as a bar chart: 30 slots (last 30 minutes), each 4px wide with 0px gap.
+  const w = 120, h = 20, slots = 30;
+  const barW = w / slots;
+
+  // Build a map of minute buckets to delta values.
+  const bucketMap = {};
+  let maxDelta = 1;
+  for (const a of activity) {
+    const d = Number(a.delta_bytes) || 0;
+    bucketMap[a.bucket] = d;
+    if (d > maxDelta) maxDelta = d;
+  }
+
+  // Generate 30 minute buckets ending at current minute.
+  const now = new Date();
+  const bars = [];
+  for (let i = slots - 1; i >= 0; i--) {
+    const t = new Date(now.getTime() - i * 60000);
+    const key = t.toISOString().slice(0, 16); // "2026-04-03T10:05"
+    const val = bucketMap[key] || 0;
+    bars.push(val);
+  }
+
+  // Render SVG bars.
+  let svg = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" class="activity-bar">`;
+  // Background track.
+  svg += `<rect x="0" y="0" width="${w}" height="${h}" rx="2" fill="var(--bg-muted)" opacity="0.15"/>`;
+
+  for (let i = 0; i < bars.length; i++) {
+    const val = bars[i];
+    const x = i * barW;
+    if (val > 0) {
+      const barH = Math.max(2, (val / maxDelta) * (h - 2));
+      const y = h - barH;
+      const color = val > maxDelta * 0.7 ? 'var(--success)' : 'var(--accent)';
+      svg += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${(barW - 0.5).toFixed(1)}" height="${barH.toFixed(1)}" rx="1" fill="${color}" opacity="0.8"/>`;
+    }
+  }
+  svg += '</svg>';
+  return svg;
 }
 
 async function _loadTail(sessionId) {

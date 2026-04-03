@@ -303,12 +303,19 @@ func runDashboardFixture(bindHost string, bindPort int, basePath, repoPath, repo
 		return fmt.Errorf("create fixture dir: %w", err)
 	}
 	defer os.RemoveAll(fixtureDir)
+	tailDir := filepath.Join(fixtureDir, "tails")
+	if err := os.MkdirAll(tailDir, 0o755); err != nil {
+		return fmt.Errorf("create fixture tail dir: %w", err)
+	}
 
 	db, err := state.Open(filepath.Join(fixtureDir, "fixture.db"))
 	if err != nil {
 		return fmt.Errorf("open fixture db: %w", err)
 	}
 	defer db.Close()
+
+	restoreTailDir := withEnv("CODERO_TAIL_DIR", tailDir)
+	defer restoreTailDir()
 
 	// Seed fixture data (sessions, activity) from --fixture-dir when provided.
 	if resolvedFixtureDir != "" {

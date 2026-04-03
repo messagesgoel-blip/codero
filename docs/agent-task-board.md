@@ -2,10 +2,17 @@
 
 Use this file as the task-board ledger for spec-driven work.
 
+Status note (2026-04-03 UTC): Dogfood-first execution roadmap is now active.
+Next-task sequencing comes from `docs/roadmaps/dogfood-execution-roadmap.md`.
+Previous execution roadmap (`agent-task-execution-roadmap.md`) is superseded.
+Next tasks: WIRE-001 (session binding), WIRE-002 (gate reporting), WIRE-003
+(PR tracking). All prior spec/setup/session tasks are complete. See the
+dogfood roadmap for the full 20-task sequence across 7 waves.
+
 Status note (2026-04-02 UTC): `TOOL-005` is now complete. Next-task sequencing
-comes from `docs/roadmaps/agent-task-execution-roadmap.md`. `main` now carries
-`TOOL-001` through `TOOL-005` plus `BND-001` through `BND-004`. The next
-unmerged execution tasks are `SET-001` and `SET-002`.
+came from `docs/roadmaps/agent-task-execution-roadmap.md` (now superseded).
+`main` now carries `TOOL-001` through `TOOL-005` plus `BND-001` through
+`BND-004`, `SET-001`, `SET-002`, `SES-001` through `SES-004`.
 
 Status note (2026-04-01 UTC): next-task sequencing now comes from
 `docs/roadmaps/agent-task-execution-roadmap.md`. `main` already carries

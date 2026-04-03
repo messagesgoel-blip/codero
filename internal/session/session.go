@@ -74,6 +74,11 @@ func NewStore(db *state.DB) *Store {
 	return &Store{db: db}
 }
 
+// DB returns the underlying state DB for direct queries.
+func (s *Store) DB() *state.DB {
+	return s.db
+}
+
 // Register records a session with session_id + agent_id only.
 // If the session already exists, it refreshes agent_id, mode, and last_seen.
 func (s *Store) Register(ctx context.Context, sessionID, agentID, mode string) (string, error) {

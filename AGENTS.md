@@ -12,10 +12,22 @@ If any rule conflicts, global policy wins.
 `/srv/storage/repo/codero/`
 
 ## Roadmap Precedence
-- For next-task selection and implementation sequencing, use `docs/roadmaps/agent-task-execution-roadmap.md`.
+- For next-task selection and implementation sequencing, use `docs/roadmaps/dogfood-execution-roadmap.md`.
+- The previous execution roadmap (`agent-task-execution-roadmap.md`) is superseded as of 2026-04-03.
 - `docs/roadmap.md` is the roadmap index and strategic/release view; it does not override the execution roadmap for active task claims.
 - `docs/roadmaps/*-backlog.md` files are candidate pools only unless a PR explicitly promotes them into the execution roadmap.
 - Ignore untracked local planning files when choosing the next Codero task. If there is a conflict, the committed execution roadmap wins.
+
+## OpenClaw Authority Boundary
+- OpenClaw is the **advisory and delivery layer**. It may observe agent output, deliver findings to PTY, answer operator queries, and log audit events.
+- OpenClaw **must not** decide merge readiness, execute merges, write to Codero's durable state, or call the GitHub API directly.
+- Codero owns the state machine, merge predicates, PR creation, gate pipeline, and GitHub interactions.
+- The OpenClaw adapter lives at `services/openclaw-adapter/` and runs as a Docker sidecar.
+- PTY delivery uses the shared bridge at `/srv/storage/shared/tools/bin/agent-tmux-bridge`.
+
+## Next Task
+- **WIRE-001**: Bind sessions to repo and branch (Wave A — make dashboard show real data).
+- See `docs/roadmaps/dogfood-execution-roadmap.md` for the full 20-task, 7-wave sequence.
 
 ## Service Ownership
 Codero owns the orchestration control plane: daemon lifecycle, queue/lease/heartbeat coordination, repo/task state transitions, and operator status surfaces (CLI/TUI/API).

@@ -1303,6 +1303,33 @@ func (h *Handler) handleSessionMetrics(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 
+	// Fetch output activity samples for sparkline (last 30 minutes).
+	activitySamples, err := state.GetActivitySamples(r.Context(), state.NewDB(h.db), sessionID, 30)
+	if err != nil {
+		loglib.Warn("dashboard: activity samples query failed",
+			loglib.FieldComponent, "dashboard",
+			"session_id", sessionID,
+			"error", err,
+		)
+	}
+
+	// Compute output deltas from cumulative samples for the sparkline.
+	// First bucket uses delta=0 since we lack a prior baseline sample.
+	activityDeltas := make([]map[string]interface{}, 0, len(activitySamples))
+	for i, s := range activitySamples {
+		var delta int64
+		if i > 0 {
+			delta = s.OutputBytes - activitySamples[i-1].OutputBytes
+		}
+		if delta < 0 {
+			delta = 0
+		}
+		activityDeltas = append(activityDeltas, map[string]interface{}{
+			"bucket":      s.Bucket,
+			"delta_bytes": delta,
+		})
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"session_id":       sessionID,
 		"total_requests":   len(requests),
@@ -1312,6 +1339,7 @@ func (h *Handler) handleSessionMetrics(w http.ResponseWriter, r *http.Request) {
 		"context_pressure": pressure,
 		"compact_count":    compactCount,
 		"requests":         requests,
+		"activity":         activityDeltas,
 		"generated_at":     time.Now().UTC(),
 	})
 }

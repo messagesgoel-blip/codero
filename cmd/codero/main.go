@@ -1084,6 +1084,11 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 		heartbeatSecret string
 		markProgress    bool
 		inferredStatus  string
+		repo            string
+		branch          string
+		outputBytes     int64
+		contextPressure string
+		compactIncr     bool
 	)
 
 	cmd := &cobra.Command{
@@ -1109,14 +1114,28 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 				}
 			}
 
+			if outputBytes < 0 {
+				return fmt.Errorf("--output-bytes cannot be negative")
+			}
+
+			hasContext := repo != "" || branch != "" || normalizedStatus != "" || outputBytes > 0 || contextPressure != "" || compactIncr
+
 			if daemonAddr := resolveDaemonAddr(cmd); daemonAddr != "" {
 				client, err := daemongrpc.NewSessionClient(daemonAddr)
 				if err != nil {
 					return fmt.Errorf("session heartbeat: %w", err)
 				}
 				defer client.Close()
-				if normalizedStatus != "" {
-					if err := client.HeartbeatWithStatus(cmd.Context(), sessionID, heartbeatSecret, markProgress, normalizedStatus); err != nil {
+				if hasContext {
+					hctx := daemongrpc.HeartbeatContext{
+						InferredStatus:  normalizedStatus,
+						Repo:            repo,
+						Branch:          branch,
+						OutputBytes:     outputBytes,
+						ContextPressure: contextPressure,
+						CompactIncr:     compactIncr,
+					}
+					if err := client.HeartbeatWithContext(cmd.Context(), sessionID, heartbeatSecret, markProgress, hctx); err != nil {
 						return fmt.Errorf("session heartbeat: %w", err)
 					}
 				} else {
@@ -1133,10 +1152,48 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 			}
 			defer cleanup()
 
+			// Direct-DB path: validate heartbeat first, then update extended fields.
+			var hbErr error
 			if normalizedStatus != "" {
-				return store.HeartbeatWithStatus(cmd.Context(), sessionID, heartbeatSecret, markProgress, normalizedStatus)
+				hbErr = store.HeartbeatWithStatus(cmd.Context(), sessionID, heartbeatSecret, markProgress, normalizedStatus)
+			} else {
+				hbErr = store.Heartbeat(cmd.Context(), sessionID, heartbeatSecret, markProgress)
 			}
-			return store.Heartbeat(cmd.Context(), sessionID, heartbeatSecret, markProgress)
+			if hbErr != nil {
+				return hbErr
+			}
+
+			// Metadata writes — only after successful heartbeat authentication.
+			if repo != "" || branch != "" {
+				if err := state.UpdateSessionRepoBranch(cmd.Context(), store.DB(), sessionID, repo, branch); err != nil {
+					loglib.Warn("heartbeat: repo/branch update failed", "error", err)
+				}
+			}
+			if outputBytes > 0 {
+				if err := state.UpdateSessionOutputBytes(cmd.Context(), store.DB(), sessionID, outputBytes); err != nil {
+					loglib.Warn("heartbeat: output bytes update failed", "error", err)
+				}
+				if err := state.RecordActivitySample(cmd.Context(), store.DB(), sessionID, outputBytes); err != nil {
+					loglib.Warn("heartbeat: activity sample failed", "error", err)
+				}
+			}
+			if contextPressure != "" {
+				level := state.ContextPressureLevel(contextPressure)
+				switch level {
+				case state.ContextPressureNormal, state.ContextPressureWarning, state.ContextPressureCritical:
+					if err := state.SetContextPressure(cmd.Context(), store.DB(), sessionID, level); err != nil {
+						loglib.Warn("heartbeat: context pressure update failed", "error", err)
+					}
+				default:
+					loglib.Warn("heartbeat: invalid context-pressure value, skipping", "value", contextPressure)
+				}
+			}
+			if compactIncr {
+				if err := state.RecordCompact(cmd.Context(), store.DB(), sessionID); err != nil {
+					loglib.Warn("heartbeat: compact count update failed", "error", err)
+				}
+			}
+			return nil
 		},
 	}
 
@@ -1144,6 +1201,11 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&heartbeatSecret, "heartbeat-secret", "", "heartbeat secret (defaults to CODERO_HEARTBEAT_SECRET)")
 	cmd.Flags().BoolVar(&markProgress, "progress", false, "also refresh session progress_at for active work")
 	cmd.Flags().StringVar(&inferredStatus, "status", "", "agent status: working, waiting_for_input, idle, unknown")
+	cmd.Flags().StringVar(&repo, "repo", "", "repository name the agent is working in")
+	cmd.Flags().StringVar(&branch, "branch", "", "branch name the agent is working on")
+	cmd.Flags().Int64Var(&outputBytes, "output-bytes", 0, "cumulative output bytes for the session")
+	cmd.Flags().StringVar(&contextPressure, "context-pressure", "", "context pressure level: normal, warning, critical")
+	cmd.Flags().BoolVar(&compactIncr, "compact", false, "increment compact count by 1 (context was compacted)")
 
 	return cmd
 }
