@@ -9,20 +9,22 @@ import (
 
 // PipelineCard is one row in the dashboard pipeline view.
 type PipelineCard struct {
-	SessionID    string    `json:"session_id"`
-	AssignmentID string    `json:"assignment_id,omitempty"`
-	TaskID       string    `json:"task_id,omitempty"`
-	AgentID      string    `json:"agent_id"`
-	Repo         string    `json:"repo"`
-	Branch       string    `json:"branch"`
-	PRNumber     int       `json:"pr_number"`
-	State        string    `json:"state,omitempty"`
-	Substatus    string    `json:"substatus,omitempty"`
-	Checkpoint   string    `json:"checkpoint"`
-	Version      int       `json:"version"`
-	StartedAt    time.Time `json:"started_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
-	StageSec     int64     `json:"stage_sec"`
+	SessionID        string    `json:"session_id"`
+	AssignmentID     string    `json:"assignment_id,omitempty"`
+	TaskID           string    `json:"task_id,omitempty"`
+	AgentID          string    `json:"agent_id"`
+	Repo             string    `json:"repo"`
+	Branch           string    `json:"branch"`
+	PRNumber         int       `json:"pr_number"`
+	State            string    `json:"state,omitempty"`
+	Substatus        string    `json:"substatus,omitempty"`
+	Checkpoint       string    `json:"checkpoint"`
+	Version          int       `json:"version"`
+	StartedAt        time.Time `json:"started_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+	StageSec         int64     `json:"stage_sec"`
+	SubmissionCount  int       `json:"submission_count"`
+	LastSubmissionID string    `json:"last_submission_id,omitempty"`
 }
 
 // PipelineResponse is the response for GET /api/v1/dashboard/pipeline.

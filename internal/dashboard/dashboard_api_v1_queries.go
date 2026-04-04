@@ -609,19 +609,54 @@ func queryPipeline(ctx context.Context, db *sql.DB) ([]PipelineCard, error) {
 		return []PipelineCard{}, nil
 	}
 
-	rows, err := db.QueryContext(ctx, `
+	// Check if submissions table exists for the new fields
+	hasSubmissions, err := tableExists(ctx, db, "submissions")
+	if err != nil {
+		return nil, fmt.Errorf("queryPipeline: check submissions table: %w", err)
+	}
+
+	var query string
+	if hasSubmissions {
+		query = `
 		SELECT s.session_id, s.agent_id, COALESCE(a.assignment_id, ''), COALESCE(a.task_id, ''),
 		       COALESCE(a.repo, ''), COALESCE(a.branch, ''), COALESCE(a.state, ''),
 		       COALESCE(a.assignment_substatus, ''), COALESCE(a.assignment_version, 0), a.started_at, s.last_seen_at,
-		       COALESCE(bs.pr_number, 0)
+		       COALESCE(bs.pr_number, 0),
+		       COALESCE(sub_count.cnt, 0), COALESCE(sub_latest.submission_id, '')
+		FROM agent_sessions s
+		LEFT JOIN agent_assignments a ON a.session_id = s.session_id AND a.ended_at IS NULL
+		LEFT JOIN branch_states bs ON bs.repo = COALESCE(a.repo, '') AND bs.branch = COALESCE(a.branch, '')
+		LEFT JOIN (
+			SELECT repo, branch, COUNT(*) as cnt
+			FROM submissions
+			GROUP BY repo, branch
+		) sub_count ON sub_count.repo = COALESCE(a.repo, '') AND sub_count.branch = COALESCE(a.branch, '')
+		LEFT JOIN (
+			SELECT repo, branch, submission_id,
+			       ROW_NUMBER() OVER (PARTITION BY repo, branch ORDER BY created_at DESC, submission_id DESC) as rn
+			FROM submissions
+		) sub_latest ON sub_latest.repo = COALESCE(a.repo, '') AND sub_latest.branch = COALESCE(a.branch, '') AND sub_latest.rn = 1
+		WHERE s.ended_at IS NULL
+		ORDER BY s.started_at DESC
+		LIMIT 20`
+	} else {
+		query = `
+		SELECT s.session_id, s.agent_id, COALESCE(a.assignment_id, ''), COALESCE(a.task_id, ''),
+		       COALESCE(a.repo, ''), COALESCE(a.branch, ''), COALESCE(a.state, ''),
+		       COALESCE(a.assignment_substatus, ''), COALESCE(a.assignment_version, 0), a.started_at, s.last_seen_at,
+		       COALESCE(bs.pr_number, 0),
+		       0, ''
 		FROM agent_sessions s
 		LEFT JOIN agent_assignments a ON a.session_id = s.session_id AND a.ended_at IS NULL
 		LEFT JOIN branch_states bs ON bs.repo = COALESCE(a.repo, '') AND bs.branch = COALESCE(a.branch, '')
 		WHERE s.ended_at IS NULL
 		ORDER BY s.started_at DESC
-		LIMIT 20`)
+		LIMIT 20`
+	}
+
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("queryPipeline: query: %w", err)
 	}
 	defer rows.Close()
 
@@ -630,8 +665,8 @@ func queryPipeline(ctx context.Context, db *sql.DB) ([]PipelineCard, error) {
 		var card PipelineCard
 		var startedAt, updatedAt sql.NullTime
 		var version int
-		if err := rows.Scan(&card.SessionID, &card.AgentID, &card.AssignmentID, &card.TaskID, &card.Repo, &card.Branch, &card.State, &card.Substatus, &version, &startedAt, &updatedAt, &card.PRNumber); err != nil {
-			return nil, err
+		if err := rows.Scan(&card.SessionID, &card.AgentID, &card.AssignmentID, &card.TaskID, &card.Repo, &card.Branch, &card.State, &card.Substatus, &version, &startedAt, &updatedAt, &card.PRNumber, &card.SubmissionCount, &card.LastSubmissionID); err != nil {
+			return nil, fmt.Errorf("queryPipeline: scan: %w", err)
 		}
 		card.Checkpoint = pipelineCardStageLabel(card.Substatus, card.State)
 		card.Version = version
