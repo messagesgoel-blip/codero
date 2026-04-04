@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -25,8 +26,8 @@ type GitHubSubmitter interface {
 type GitOps interface {
 	Commit(worktreePath string, opts gitops.CommitOpts) (string, error)
 	Push(worktreePath, remote, branch string) error
-	DiffHash(worktreePath string) (string, error)
-	HeadSHA(worktreePath string) (string, error)
+	DiffHash(ctx context.Context, worktreePath string) (string, error)
+	HeadSHA(ctx context.Context, worktreePath string) (string, error)
 }
 
 // realGitOps implements GitOps using real git operations.
@@ -40,12 +41,12 @@ func (g realGitOps) Push(worktreePath, remote, branch string) error {
 	return gitops.Push(worktreePath, remote, branch)
 }
 
-func (g realGitOps) DiffHash(worktreePath string) (string, error) {
-	return gitops.DiffHash(worktreePath)
+func (g realGitOps) DiffHash(ctx context.Context, worktreePath string) (string, error) {
+	return gitops.DiffHash(ctx, worktreePath)
 }
 
-func (g realGitOps) HeadSHA(worktreePath string) (string, error) {
-	return gitops.HeadSHA(worktreePath)
+func (g realGitOps) HeadSHA(ctx context.Context, worktreePath string) (string, error) {
+	return gitops.HeadSHA(ctx, worktreePath)
 }
 
 // submitCmd returns the "codero submit" command that performs the full git+PR flow:
@@ -150,8 +151,8 @@ func runSubmit(ctx context.Context, cmd *cobra.Command, configPath string, opts 
 		git = realGitOps{}
 	}
 
-	// Compute diff hash before commit — if empty, worktree is clean
-	diffHash, err := git.DiffHash(opts.worktree)
+	// Compute diff hash before commit — if empty, worktree is clean.
+	diffHash, err := git.DiffHash(ctx, opts.worktree)
 	if err != nil {
 		return fmt.Errorf("compute diff hash: %w", err)
 	}
@@ -159,42 +160,36 @@ func runSubmit(ctx context.Context, cmd *cobra.Command, configPath string, opts 
 		return fmt.Errorf("no changes to submit: worktree is clean")
 	}
 
-	// Get HEAD SHA before the new commit
-	headSHA, err := git.HeadSHA(opts.worktree)
+	// Get HEAD SHA before the new commit.
+	headSHA, err := git.HeadSHA(ctx, opts.worktree)
 	if err != nil {
 		return fmt.Errorf("get HEAD SHA: %w", err)
 	}
 
-	// Resolve assignment ID and session ID for dedup record
+	// Resolve assignment ID and session ID for dedup record.
 	sessionID := resolveSessionIDFromEnv()
 	var assignmentID string
 	if sessionID != "" {
 		row := db.Unwrap().QueryRowContext(ctx,
 			`SELECT assignment_id FROM agent_assignments WHERE session_id = ? AND ended_at IS NULL LIMIT 1`,
 			sessionID)
-		_ = row.Scan(&assignmentID) // ignore error — empty string means no assignment
+		if err := row.Scan(&assignmentID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			// Real DB error — warn but don't block the submission.
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to resolve assignment: %v\n", err)
+		}
 	}
 
-	// Create submission record before committing (dedup check)
-	submissionID := uuid.New().String()
-	rec := state.SubmissionRecord{
-		SubmissionID: submissionID,
-		AssignmentID: assignmentID,
-		SessionID:    sessionID,
-		Repo:         opts.repo,
-		Branch:       opts.branch,
-		HeadSHA:      headSHA,
-		DiffHash:     diffHash,
-		State:        "submitted",
-	}
-	if err := state.CreateSubmission(ctx, db, rec); err != nil {
-		if errors.Is(err, state.ErrDuplicateSubmission) {
+	// Pre-check dedup before committing to avoid dangling records on commit failure.
+	if assignmentID != "" {
+		var existing int
+		if err := db.Unwrap().QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM submissions WHERE assignment_id = ? AND diff_hash = ? AND head_sha = ?`,
+			assignmentID, diffHash, headSHA).Scan(&existing); err == nil && existing > 0 {
 			return fmt.Errorf("duplicate submission: this exact diff has already been submitted — make new changes first")
 		}
-		return fmt.Errorf("create submission record: %w", err)
 	}
 
-	// Commit staged changes
+	// Commit staged changes.
 	commitMsg := gitops.FormatMessage("submit", 1, opts.title)
 	sha, err := git.Commit(opts.worktree, gitops.CommitOpts{
 		Message:        commitMsg,
@@ -210,6 +205,22 @@ func runSubmit(ctx context.Context, cmd *cobra.Command, configPath string, opts 
 		return fmt.Errorf("commit: %w", err)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Committed: %s\n", sha[:8])
+
+	// Record submission after a successful commit so retries work on commit failure.
+	submissionID := uuid.New().String()
+	rec := state.SubmissionRecord{
+		SubmissionID: submissionID,
+		AssignmentID: assignmentID,
+		SessionID:    sessionID,
+		Repo:         opts.repo,
+		Branch:       opts.branch,
+		HeadSHA:      headSHA,
+		DiffHash:     diffHash,
+		State:        "submitted",
+	}
+	if err := state.CreateSubmission(ctx, db, rec); err != nil && !errors.Is(err, state.ErrDuplicateSubmission) {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to record submission: %v\n", err)
+	}
 
 	// Push to origin
 	if err := git.Push(opts.worktree, "origin", opts.branch); err != nil {

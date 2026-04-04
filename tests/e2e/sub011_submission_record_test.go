@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -70,7 +71,7 @@ api_server:
 		"--title", "E2E SUB-011 Test",
 		"--body", "Automated E2E test",
 	)
-	cmd.Dir = filepath.Join(os.Getenv("PWD"), "cmd/codero")
+	cmd.Dir = cmdDir(t)
 	cmd.Env = append(os.Environ(),
 		"GITHUB_TOKEN=", // Deliberately empty to skip GitHub operations
 	)
@@ -127,7 +128,7 @@ api_server:
 		"--branch", "feat/e2e-sub011-test",
 		"--title", "E2E SUB-011 Test (no changes)",
 	)
-	cmd.Dir = filepath.Join(os.Getenv("PWD"), "cmd/codero")
+	cmd.Dir = cmdDir(t)
 	cmd.Env = append(os.Environ(), "GITHUB_TOKEN=")
 	out, err = cmd.CombinedOutput()
 	if err == nil {
@@ -151,7 +152,7 @@ api_server:
 		"--branch", "feat/e2e-sub011-test",
 		"--title", "E2E SUB-011 Test (second submit)",
 	)
-	cmd.Dir = filepath.Join(os.Getenv("PWD"), "cmd/codero")
+	cmd.Dir = cmdDir(t)
 	cmd.Env = append(os.Environ(), "GITHUB_TOKEN=")
 	out, _ = cmd.CombinedOutput()
 	t.Logf("Second submit output: %s", out)
@@ -198,15 +199,21 @@ func runGitE2E(t *testing.T, dir string, args ...string) {
 
 func containsAny(s string, substrs ...string) bool {
 	for _, sub := range substrs {
-		if len(sub) > 0 {
-			for i := 0; i <= len(s)-len(sub); i++ {
-				if s[i:i+len(sub)] == sub {
-					return true
-				}
-			}
+		if sub != "" && strings.Contains(s, sub) {
+			return true
 		}
 	}
 	return false
+}
+
+// cmdDir returns the absolute path to cmd/codero relative to the test's working directory.
+func cmdDir(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd: %v", err)
+	}
+	return filepath.Join(wd, "..", "..", "cmd", "codero")
 }
 
 // TestSUB011_PipelineIncludesSubmissionCount verifies the dashboard pipeline
@@ -227,12 +234,9 @@ func TestSUB011_PipelineIncludesSubmissionCount(t *testing.T) {
 		t.Skipf("Daemon not running or not reachable: %v", err)
 	}
 
-	// Just verify the response contains the new fields
+	// Verify the response contains the new fields.
 	response := string(out)
 	if !containsAny(response, "submission_count", "last_submission_id") {
-		t.Log("Pipeline response doesn't include submission_count/last_submission_id yet")
-		t.Log("This is expected if running against an older version")
-	} else {
-		t.Log("Pipeline response includes submission_count and last_submission_id")
+		t.Errorf("pipeline response missing submission_count and last_submission_id; got: %s", response)
 	}
 }

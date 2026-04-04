@@ -633,7 +633,7 @@ func queryPipeline(ctx context.Context, db *sql.DB) ([]PipelineCard, error) {
 		) sub_count ON sub_count.repo = COALESCE(a.repo, '') AND sub_count.branch = COALESCE(a.branch, '')
 		LEFT JOIN (
 			SELECT repo, branch, submission_id,
-			       ROW_NUMBER() OVER (PARTITION BY repo, branch ORDER BY created_at DESC) as rn
+			       ROW_NUMBER() OVER (PARTITION BY repo, branch ORDER BY created_at DESC, submission_id DESC) as rn
 			FROM submissions
 		) sub_latest ON sub_latest.repo = COALESCE(a.repo, '') AND sub_latest.branch = COALESCE(a.branch, '') AND sub_latest.rn = 1
 		WHERE s.ended_at IS NULL

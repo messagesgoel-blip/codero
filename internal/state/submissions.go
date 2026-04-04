@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -45,7 +46,7 @@ func CreateSubmission(ctx context.Context, db *DB, rec SubmissionRecord) error {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 			return ErrDuplicateSubmission
 		}
-		return err
+		return fmt.Errorf("insert submission: %w", err)
 	}
 	return nil
 }
@@ -61,7 +62,7 @@ func GetSubmissionsByBranch(ctx context.Context, db *DB, repo, branch string) ([
 		ORDER BY created_at DESC
 	`, repo, branch)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("query submissions by branch: %w", err)
 	}
 	defer rows.Close()
 
@@ -73,11 +74,14 @@ func GetSubmissionsByBranch(ctx context.Context, db *DB, repo, branch string) ([
 			&rec.HeadSHA, &rec.DiffHash, &rec.AttemptLocal, &rec.AttemptRemote, &rec.State, &rec.Result,
 			&rec.CreatedAt, &rec.UpdatedAt,
 		); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("scan submission row: %w", err)
 		}
 		out = append(out, rec)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate submissions: %w", err)
+	}
+	return out, nil
 }
 
 // GetSubmissionByID retrieves a single submission by its ID.
@@ -105,13 +109,24 @@ func GetSubmissionByID(ctx context.Context, db *DB, submissionID string) (*Submi
 }
 
 // UpdateSubmissionState updates the state and result fields.
+// Returns an error if the submission is not found.
 func UpdateSubmissionState(ctx context.Context, db *DB, submissionID, state, result string) error {
-	_, err := db.Unwrap().ExecContext(ctx, `
+	res, err := db.Unwrap().ExecContext(ctx, `
 		UPDATE submissions
 		SET state = ?, result = ?, updated_at = datetime('now')
 		WHERE submission_id = ?
 	`, state, result, submissionID)
-	return err
+	if err != nil {
+		return fmt.Errorf("update submission state: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("submission %s not found", submissionID)
+	}
+	return nil
 }
 
 // SubmissionCountForBranch returns the number of submissions for a repo/branch.

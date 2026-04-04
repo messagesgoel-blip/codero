@@ -50,8 +50,8 @@ func (m *mockGitHubClient) RequestReviewers(ctx context.Context, repo string, pr
 type mockGitOps struct {
 	commitFunc   func(worktreePath string, opts gitops.CommitOpts) (string, error)
 	pushFunc     func(worktreePath, remote, branch string) error
-	diffHashFunc func(worktreePath string) (string, error)
-	headSHAFunc  func(worktreePath string) (string, error)
+	diffHashFunc func(ctx context.Context, worktreePath string) (string, error)
+	headSHAFunc  func(ctx context.Context, worktreePath string) (string, error)
 }
 
 func (m *mockGitOps) Commit(worktreePath string, opts gitops.CommitOpts) (string, error) {
@@ -68,16 +68,16 @@ func (m *mockGitOps) Push(worktreePath, remote, branch string) error {
 	return nil
 }
 
-func (m *mockGitOps) DiffHash(worktreePath string) (string, error) {
+func (m *mockGitOps) DiffHash(ctx context.Context, worktreePath string) (string, error) {
 	if m.diffHashFunc != nil {
-		return m.diffHashFunc(worktreePath)
+		return m.diffHashFunc(ctx, worktreePath)
 	}
 	return "mock-diff-hash-abc123", nil
 }
 
-func (m *mockGitOps) HeadSHA(worktreePath string) (string, error) {
+func (m *mockGitOps) HeadSHA(ctx context.Context, worktreePath string) (string, error) {
 	if m.headSHAFunc != nil {
-		return m.headSHAFunc(worktreePath)
+		return m.headSHAFunc(ctx, worktreePath)
 	}
 	return "abc12345678901234567890123456789012345678", nil
 }
@@ -188,7 +188,7 @@ func TestSubmitCmd_CleanWorktreeError(t *testing.T) {
 
 	// Mock gitOps that returns empty diff hash (no staged changes)
 	gitMock := &mockGitOps{
-		diffHashFunc: func(worktreePath string) (string, error) {
+		diffHashFunc: func(ctx context.Context, worktreePath string) (string, error) {
 			return "", nil // empty = no staged changes
 		},
 	}
@@ -420,10 +420,10 @@ func TestSubmitCmd_RecordsSubmission(t *testing.T) {
 	}
 
 	gitMock := &mockGitOps{
-		diffHashFunc: func(worktreePath string) (string, error) {
+		diffHashFunc: func(ctx context.Context, worktreePath string) (string, error) {
 			return "test-diff-hash-xyz789", nil
 		},
-		headSHAFunc: func(worktreePath string) (string, error) {
+		headSHAFunc: func(ctx context.Context, worktreePath string) (string, error) {
 			return "test-head-sha-abc123", nil
 		},
 	}
@@ -505,10 +505,10 @@ func TestSubmitCmd_DuplicateRejected(t *testing.T) {
 	const sameHeadSHA = "same-head-sha-for-dedup-test"
 
 	gitMock := &mockGitOps{
-		diffHashFunc: func(worktreePath string) (string, error) {
+		diffHashFunc: func(ctx context.Context, worktreePath string) (string, error) {
 			return sameDiffHash, nil
 		},
-		headSHAFunc: func(worktreePath string) (string, error) {
+		headSHAFunc: func(ctx context.Context, worktreePath string) (string, error) {
 			return sameHeadSHA, nil
 		},
 	}
@@ -524,9 +524,15 @@ func TestSubmitCmd_DuplicateRejected(t *testing.T) {
 	testBranch := "feat/dedup-" + uuid.New().String()[:8]
 
 	// Pre-create an assignment so we have a non-empty assignment_id (triggers dedup)
-	cfg, _ := loadConfig(configPath)
-	db, _ := state.Open(cfg.DBPath)
-	_, err := db.Unwrap().Exec(`INSERT INTO agent_sessions (session_id, agent_id, started_at) VALUES (?, 'agent1', datetime('now'))`, sessionID)
+	cfg, err := loadConfig(configPath)
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	db, err := state.Open(cfg.DBPath)
+	if err != nil {
+		t.Fatalf("state.Open: %v", err)
+	}
+	_, err = db.Unwrap().Exec(`INSERT INTO agent_sessions (session_id, agent_id, started_at) VALUES (?, 'agent1', datetime('now'))`, sessionID)
 	if err != nil {
 		t.Fatalf("insert session: %v", err)
 	}

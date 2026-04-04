@@ -1,6 +1,7 @@
 package gitops
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,59 +9,49 @@ import (
 )
 
 func TestDiffHash_StagedChanges(t *testing.T) {
-	// Create temp dir for git repo
 	dir := t.TempDir()
 
-	// Initialize git repo
-	runGitCmd(t, dir, "init")
+	runGitCmd(t, dir, "init", "--object-format=sha1")
 	runGitCmd(t, dir, "config", "user.email", "test@test.com")
 	runGitCmd(t, dir, "config", "user.name", "Test User")
 
-	// Create and commit an initial file
 	if err := os.WriteFile(filepath.Join(dir, "initial.txt"), []byte("initial"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	runGitCmd(t, dir, "add", "initial.txt")
 	runGitCmd(t, dir, "commit", "-m", "initial commit")
 
-	// Create a new file and stage it
 	if err := os.WriteFile(filepath.Join(dir, "test.txt"), []byte("hello world\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	runGitCmd(t, dir, "add", "test.txt")
 
-	// DiffHash should return non-empty hash
-	hash, err := DiffHash(dir)
+	hash, err := DiffHash(context.Background(), dir)
 	if err != nil {
 		t.Fatalf("DiffHash failed: %v", err)
 	}
 	if hash == "" {
 		t.Error("expected non-empty hash for staged changes")
 	}
-	// SHA-256 produces 64 hex characters
 	if len(hash) != 64 {
 		t.Errorf("expected 64 char hash, got %d chars: %s", len(hash), hash)
 	}
 }
 
 func TestDiffHash_Clean(t *testing.T) {
-	// Create temp dir for git repo
 	dir := t.TempDir()
 
-	// Initialize git repo
-	runGitCmd(t, dir, "init")
+	runGitCmd(t, dir, "init", "--object-format=sha1")
 	runGitCmd(t, dir, "config", "user.email", "test@test.com")
 	runGitCmd(t, dir, "config", "user.name", "Test User")
 
-	// Create and commit a file
 	if err := os.WriteFile(filepath.Join(dir, "test.txt"), []byte("hello"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	runGitCmd(t, dir, "add", "test.txt")
 	runGitCmd(t, dir, "commit", "-m", "initial commit")
 
-	// No staged changes
-	hash, err := DiffHash(dir)
+	hash, err := DiffHash(context.Background(), dir)
 	if err != nil {
 		t.Fatalf("DiffHash failed: %v", err)
 	}
@@ -70,33 +61,28 @@ func TestDiffHash_Clean(t *testing.T) {
 }
 
 func TestDiffHash_Deterministic(t *testing.T) {
-	// Create temp dir for git repo
 	dir := t.TempDir()
 
-	// Initialize git repo
-	runGitCmd(t, dir, "init")
+	runGitCmd(t, dir, "init", "--object-format=sha1")
 	runGitCmd(t, dir, "config", "user.email", "test@test.com")
 	runGitCmd(t, dir, "config", "user.name", "Test User")
 
-	// Create and commit initial file
 	if err := os.WriteFile(filepath.Join(dir, "initial.txt"), []byte("initial"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	runGitCmd(t, dir, "add", "initial.txt")
 	runGitCmd(t, dir, "commit", "-m", "initial commit")
 
-	// Stage a change
 	if err := os.WriteFile(filepath.Join(dir, "test.txt"), []byte("content\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	runGitCmd(t, dir, "add", "test.txt")
 
-	// Multiple calls should return the same hash
-	hash1, err := DiffHash(dir)
+	hash1, err := DiffHash(context.Background(), dir)
 	if err != nil {
 		t.Fatalf("DiffHash 1 failed: %v", err)
 	}
-	hash2, err := DiffHash(dir)
+	hash2, err := DiffHash(context.Background(), dir)
 	if err != nil {
 		t.Fatalf("DiffHash 2 failed: %v", err)
 	}
@@ -106,48 +92,56 @@ func TestDiffHash_Deterministic(t *testing.T) {
 }
 
 func TestHeadSHA(t *testing.T) {
-	// Create temp dir for git repo
 	dir := t.TempDir()
 
-	// Initialize git repo
-	runGitCmd(t, dir, "init")
+	// Use --object-format=sha1 so HEAD is always a 40-char hex string.
+	runGitCmd(t, dir, "init", "--object-format=sha1")
 	runGitCmd(t, dir, "config", "user.email", "test@test.com")
 	runGitCmd(t, dir, "config", "user.name", "Test User")
 
-	// Create and commit a file
 	if err := os.WriteFile(filepath.Join(dir, "test.txt"), []byte("hello"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	runGitCmd(t, dir, "add", "test.txt")
 	runGitCmd(t, dir, "commit", "-m", "initial commit")
 
-	sha, err := HeadSHA(dir)
+	sha, err := HeadSHA(context.Background(), dir)
 	if err != nil {
 		t.Fatalf("HeadSHA failed: %v", err)
 	}
-	// SHA-1 produces 40 hex characters
 	if len(sha) != 40 {
 		t.Errorf("expected 40 char SHA, got %d chars: %s", len(sha), sha)
+	}
+}
+
+func TestHeadSHA_UnbornHead(t *testing.T) {
+	dir := t.TempDir()
+
+	runGitCmd(t, dir, "init", "--object-format=sha1")
+
+	sha, err := HeadSHA(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("HeadSHA on unborn HEAD should not error: %v", err)
+	}
+	if sha != "" {
+		t.Errorf("expected empty string for unborn HEAD, got %q", sha)
 	}
 }
 
 func TestHasStagedChanges(t *testing.T) {
 	dir := t.TempDir()
 
-	// Initialize git repo
-	runGitCmd(t, dir, "init")
+	runGitCmd(t, dir, "init", "--object-format=sha1")
 	runGitCmd(t, dir, "config", "user.email", "test@test.com")
 	runGitCmd(t, dir, "config", "user.name", "Test User")
 
-	// Create and commit initial file
 	if err := os.WriteFile(filepath.Join(dir, "initial.txt"), []byte("initial"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	runGitCmd(t, dir, "add", "initial.txt")
 	runGitCmd(t, dir, "commit", "-m", "initial commit")
 
-	// No staged changes
-	has, err := HasStagedChanges(dir)
+	has, err := HasStagedChanges(context.Background(), dir)
 	if err != nil {
 		t.Fatalf("HasStagedChanges failed: %v", err)
 	}
@@ -155,13 +149,12 @@ func TestHasStagedChanges(t *testing.T) {
 		t.Error("expected no staged changes")
 	}
 
-	// Stage a new file
 	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("new"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	runGitCmd(t, dir, "add", "new.txt")
 
-	has, err = HasStagedChanges(dir)
+	has, err = HasStagedChanges(context.Background(), dir)
 	if err != nil {
 		t.Fatalf("HasStagedChanges failed: %v", err)
 	}
