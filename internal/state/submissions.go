@@ -43,7 +43,9 @@ func CreateSubmission(ctx context.Context, db *DB, rec SubmissionRecord) error {
 		rec.HeadSHA, rec.DiffHash, rec.AttemptLocal, rec.AttemptRemote, rec.State, rec.Result,
 	)
 	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+		// Map only the dedup-key constraint violation to ErrDuplicateSubmission.
+		// Primary key violations (submission_id) are a different UNIQUE failure.
+		if strings.Contains(err.Error(), "UNIQUE constraint failed: submissions.assignment_id") {
 			return ErrDuplicateSubmission
 		}
 		return fmt.Errorf("insert submission: %w", err)
@@ -103,7 +105,7 @@ func GetSubmissionByID(ctx context.Context, db *DB, submissionID string) (*Submi
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
-		return nil, err
+		return nil, fmt.Errorf("GetSubmissionByID: scan submission: %w", err)
 	}
 	return &rec, nil
 }
@@ -132,10 +134,12 @@ func UpdateSubmissionState(ctx context.Context, db *DB, submissionID, state, res
 // SubmissionCountForBranch returns the number of submissions for a repo/branch.
 func SubmissionCountForBranch(ctx context.Context, db *DB, repo, branch string) (int, error) {
 	var count int
-	err := db.Unwrap().QueryRowContext(ctx, `
+	if err := db.Unwrap().QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM submissions WHERE repo = ? AND branch = ?
-	`, repo, branch).Scan(&count)
-	return count, err
+	`, repo, branch).Scan(&count); err != nil {
+		return 0, fmt.Errorf("submission count for repo %s branch %s: %w", repo, branch, err)
+	}
+	return count, nil
 }
 
 // LatestSubmissionForBranch returns the most recent submission_id for a repo/branch, or "" if none.
@@ -144,13 +148,13 @@ func LatestSubmissionForBranch(ctx context.Context, db *DB, repo, branch string)
 	err := db.Unwrap().QueryRowContext(ctx, `
 		SELECT submission_id FROM submissions
 		WHERE repo = ? AND branch = ?
-		ORDER BY created_at DESC LIMIT 1
+		ORDER BY created_at DESC, submission_id DESC LIMIT 1
 	`, repo, branch).Scan(&submissionID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("latest submission for repo %s branch %s: %w", repo, branch, err)
 	}
 	if submissionID.Valid {
 		return submissionID.String, nil

@@ -612,7 +612,7 @@ func queryPipeline(ctx context.Context, db *sql.DB) ([]PipelineCard, error) {
 	// Check if submissions table exists for the new fields
 	hasSubmissions, err := tableExists(ctx, db, "submissions")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("queryPipeline: check submissions table: %w", err)
 	}
 
 	var query string
@@ -656,7 +656,7 @@ func queryPipeline(ctx context.Context, db *sql.DB) ([]PipelineCard, error) {
 
 	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("queryPipeline: query: %w", err)
 	}
 	defer rows.Close()
 
@@ -666,7 +666,7 @@ func queryPipeline(ctx context.Context, db *sql.DB) ([]PipelineCard, error) {
 		var startedAt, updatedAt sql.NullTime
 		var version int
 		if err := rows.Scan(&card.SessionID, &card.AgentID, &card.AssignmentID, &card.TaskID, &card.Repo, &card.Branch, &card.State, &card.Substatus, &version, &startedAt, &updatedAt, &card.PRNumber, &card.SubmissionCount, &card.LastSubmissionID); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("queryPipeline: scan: %w", err)
 		}
 		card.Checkpoint = pipelineCardStageLabel(card.Substatus, card.State)
 		card.Version = version
