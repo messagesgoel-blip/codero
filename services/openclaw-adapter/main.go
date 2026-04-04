@@ -15,6 +15,8 @@ import (
 type adapterConfig struct {
 	Addr         string // listen address, default ":8112"
 	StateURL     string // codero state endpoint
+	BaseURL      string // codero base URL (for session lookup)
+	BridgePath   string // path to agent-tmux-bridge binary
 	LiteLLMURL   string // LiteLLM base URL
 	LiteLLMModel string // model name
 	LiteLLMKey   string // API key
@@ -25,6 +27,8 @@ func loadConfig() adapterConfig {
 	return adapterConfig{
 		Addr:         envOr("OPENCLAW_ADDR", ":8112"),
 		StateURL:     envOr("CODERO_STATE_URL", "http://localhost:8080/api/v1/openclaw/state"),
+		BaseURL:      envOr("CODERO_BASE_URL", "http://localhost:8080"),
+		BridgePath:   envOr("BRIDGE_PATH", "/srv/storage/shared/tools/bin/agent-tmux-bridge"),
 		LiteLLMURL:   envOr("LITELLM_URL", "http://localhost:4000"),
 		LiteLLMModel: envOr("LITELLM_MODEL", "qwen3-coder-plus"),
 		LiteLLMKey:   envOr("LITELLM_API_KEY", ""),
@@ -49,6 +53,7 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 	mux.HandleFunc("/query", h.handleQuery)
+	mux.HandleFunc("/deliver", h.handleDeliver)
 	mux.HandleFunc("/audit", h.handleAudit)
 
 	srv := &http.Server{
