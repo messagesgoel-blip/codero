@@ -38,19 +38,14 @@ var allowedUploadExts = map[string]bool{
 type Handler struct {
 	db       *sql.DB
 	settings *SettingsStore
-	convos   *ConversationStore
-	chatCfg  ChatConfig
 	cfg      *config.Config
 }
 
 // NewHandler creates a dashboard Handler backed by db and the given settings store.
 func NewHandler(db *sql.DB, settings *SettingsStore, cfg *config.Config) *Handler {
-	chatCfg := LoadChatConfig()
 	return &Handler{
 		db:       db,
 		settings: settings,
-		convos:   NewConversationStore(chatCfg.MaxHistory, chatCfg.ConversationTTL),
-		chatCfg:  chatCfg,
 		cfg:      cfg,
 	}
 }
@@ -74,11 +69,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/dashboard/settings", h.handleSettings)
 	mux.HandleFunc("/api/v1/dashboard/settings/gate-config", h.handleGateConfig)
 	mux.HandleFunc("/api/v1/dashboard/settings/gate-config/", h.handleGateConfigVar)
-	mux.HandleFunc("/api/v1/dashboard/chat", h.handleChat)
-	mux.HandleFunc("/api/v1/dashboard/comments", h.handleChat)
-	mux.HandleFunc("/api/v1/chat/ask", h.handleChat)
-	mux.HandleFunc("/api/v1/chat/history", h.handleChatHistory)
-	mux.HandleFunc("/api/v1/chat/history/", h.handleChatHistoryByID)
+	mux.HandleFunc("/api/v1/dashboard/chat", h.handleChatProxy)
+	mux.HandleFunc("/api/v1/dashboard/comments", h.handleChatProxy)
+	mux.HandleFunc("/api/v1/chat/ask", h.handleChatProxy)
 	mux.HandleFunc("/api/v1/dashboard/manual-review-upload", h.handleUpload)
 	mux.HandleFunc("/api/v1/dashboard/events", h.handleSSE)
 	mux.HandleFunc("/api/v1/dashboard/pipeline", h.handlePipeline)
