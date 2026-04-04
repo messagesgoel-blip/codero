@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,8 +96,7 @@ api_server:
 }
 
 func TestSubmitCmd_CreatesPR(t *testing.T) {
-	configPath, db := setupTestDBAndConfig(t)
-	_ = db // DB is used implicitly via config
+	configPath, _ := setupTestDBAndConfig(t)
 
 	// Set GITHUB_TOKEN to enable GitHub operations
 	t.Setenv("GITHUB_TOKEN", "test-token")
@@ -173,8 +173,7 @@ func TestSubmitCmd_CleanWorktreeError(t *testing.T) {
 	// Mock gitOps that returns "nothing to commit"
 	gitMock := &mockGitOps{
 		commitFunc: func(worktreePath string, opts gitops.CommitOpts) (string, error) {
-			sha, err := gitops.Commit(worktreePath, opts) // Use real commit which will fail
-			return sha, err
+			return "", fmt.Errorf("nothing to commit, working tree clean")
 		},
 	}
 

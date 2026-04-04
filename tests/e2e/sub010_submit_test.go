@@ -35,6 +35,7 @@ func TestSUB010_SubmitCommand(t *testing.T) {
 	branch := fmt.Sprintf("feat/e2e-submit-test-%d", time.Now().UnixNano())
 	repo := "messagesgoel-blip/codero"
 	var prNumber int
+	tmpDir := t.TempDir()
 
 	// Cleanup at the end
 	t.Cleanup(func() {
@@ -43,11 +44,10 @@ func TestSUB010_SubmitCommand(t *testing.T) {
 			_ = exec.Command("gh", "pr", "close", fmt.Sprintf("%d", prNumber), "--repo", repo).Run()
 		}
 		t.Logf("Cleanup: deleting remote branch %s", branch)
-		_ = exec.Command("git", "push", "origin", "--delete", branch).Run()
+		_ = exec.Command("git", "-C", tmpDir, "push", "origin", "--delete", branch).Run()
 	})
 
 	// Step 1: Setup - create a temp git worktree with a file
-	tmpDir := t.TempDir()
 	setupGitWorktree(t, tmpDir, branch)
 
 	// Write initial file

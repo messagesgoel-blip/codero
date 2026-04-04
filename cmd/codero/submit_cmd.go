@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
 	"strings"
@@ -209,13 +208,15 @@ func runSubmit(ctx context.Context, cmd *cobra.Command, configPath string, opts 
 	// Update assignment substatus to submitted (optional, skip gracefully if no session)
 	sessionID := resolveSessionIDFromEnv()
 	if sessionID != "" {
-		_, err := db.Unwrap().ExecContext(ctx,
+		res, err := db.Unwrap().ExecContext(ctx,
 			`UPDATE agent_assignments SET substatus = 'submitted', updated_at = datetime('now')
 			 WHERE session_id = ? AND ended_at IS NULL`,
 			sessionID,
 		)
-		if err != nil && err != sql.ErrNoRows {
+		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to update assignment: %v\n", err)
+		} else if n, _ := res.RowsAffected(); n == 0 {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: no active assignment found for session %s\n", sessionID)
 		}
 	}
 
