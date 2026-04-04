@@ -36,6 +36,8 @@ type SessionRow struct {
 	Mode            string     `json:"mode"`
 	Status          string     `json:"status"`
 	TmuxSessionName string     `json:"tmux_session_name,omitempty"`
+	Repo            string     `json:"repo,omitempty"`
+	Branch          string     `json:"branch,omitempty"`
 	Checkpoint      string     `json:"checkpoint,omitempty"`
 	InferredStatus  string     `json:"inferred_status,omitempty"`
 	StartedAt       time.Time  `json:"started_at"`

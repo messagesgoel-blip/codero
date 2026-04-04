@@ -40,7 +40,7 @@ func querySessions(ctx context.Context, db *sql.DB, status string, limit, offset
 	}
 
 	// Query rows.
-	query := `SELECT session_id, agent_id, mode, COALESCE(tmux_session_name, ''), COALESCE(inferred_status, 'unknown'), started_at, last_seen_at, ended_at, end_reason FROM agent_sessions` + where +
+	query := `SELECT session_id, agent_id, mode, COALESCE(tmux_session_name, ''), COALESCE(repo, ''), COALESCE(branch, ''), COALESCE(inferred_status, 'unknown'), started_at, last_seen_at, ended_at, end_reason FROM agent_sessions` + where +
 		` ORDER BY started_at DESC LIMIT ? OFFSET ?`
 
 	rows, err := db.QueryContext(ctx, query, limit, offset)
@@ -54,7 +54,7 @@ func querySessions(ctx context.Context, db *sql.DB, status string, limit, offset
 		var s SessionRow
 		var endedAt sql.NullTime
 		var endReason sql.NullString
-		if err := rows.Scan(&s.SessionID, &s.AgentID, &s.Mode, &s.TmuxSessionName, &s.InferredStatus, &s.StartedAt, &s.LastSeenAt, &endedAt, &endReason); err != nil {
+		if err := rows.Scan(&s.SessionID, &s.AgentID, &s.Mode, &s.TmuxSessionName, &s.Repo, &s.Branch, &s.InferredStatus, &s.StartedAt, &s.LastSeenAt, &endedAt, &endReason); err != nil {
 			return nil, 0, fmt.Errorf("querySessions: scan: %w", err)
 		}
 		if endedAt.Valid {
@@ -86,13 +86,13 @@ func querySessionByID(ctx context.Context, db *sql.DB, sessionID string) (*Sessi
 	}
 
 	row := db.QueryRowContext(ctx, `
-		SELECT session_id, agent_id, mode, COALESCE(tmux_session_name, ''), started_at, last_seen_at, ended_at, end_reason
+		SELECT session_id, agent_id, mode, COALESCE(tmux_session_name, ''), COALESCE(repo, ''), COALESCE(branch, ''), started_at, last_seen_at, ended_at, end_reason
 		FROM agent_sessions WHERE session_id = ?`, sessionID)
 
 	var s SessionRow
 	var endedAt sql.NullTime
 	var endReason sql.NullString
-	if err := row.Scan(&s.SessionID, &s.AgentID, &s.Mode, &s.TmuxSessionName, &s.StartedAt, &s.LastSeenAt, &endedAt, &endReason); err != nil {
+	if err := row.Scan(&s.SessionID, &s.AgentID, &s.Mode, &s.TmuxSessionName, &s.Repo, &s.Branch, &s.StartedAt, &s.LastSeenAt, &endedAt, &endReason); err != nil {
 		return nil, err
 	}
 	if endedAt.Valid {
