@@ -28,9 +28,10 @@ import (
 // instead of treating the single webhook event as authoritative. This
 // prevents multi-reviewer overwrites and multi-check false positives.
 type EventProcessor struct {
-	db     *state.DB
-	stream *delivery.Stream
-	github GitHubClient // optional; enables aggregated state on review/check events
+	db       *state.DB
+	stream   *delivery.Stream
+	github   GitHubClient    // optional; enables aggregated state on review/check events
+	openclaw *OpenClawClient // optional; enables PTY delivery on review events
 }
 
 // NewEventProcessor creates an EventProcessor with the given dependencies.
@@ -43,6 +44,13 @@ func NewEventProcessor(db *state.DB, stream *delivery.Stream) *EventProcessor {
 // multi-check scenarios are handled correctly.
 func (p *EventProcessor) WithGitHubClient(gh GitHubClient) *EventProcessor {
 	p.github = gh
+	return p
+}
+
+// WithOpenClawClient attaches an OpenClaw adapter client that delivers
+// findings to agent PTYs when a pull_request_review webhook arrives.
+func (p *EventProcessor) WithOpenClawClient(oc *OpenClawClient) *EventProcessor {
+	p.openclaw = oc
 	return p
 }
 
@@ -241,6 +249,39 @@ func (p *EventProcessor) handlePullRequestReview(ctx context.Context, ev GitHubE
 
 	// Best-effort: invalidate feedback cache for the linked task.
 	p.invalidateCacheForBranch(ctx, ev.Repo, branch)
+
+	// OCL-022: Normalize review body into findings and attempt PTY delivery.
+	reviewBody, _ := reviewState["body"].(string)
+	var reviewSource string
+	if user, _ := reviewState["user"].(map[string]any); user != nil {
+		reviewSource, _ = user["login"].(string)
+	}
+	if reviewSource == "" {
+		reviewSource = "unknown-reviewer"
+	}
+
+	runID := ev.DeliveryID
+	findings := normalizeReviewFindings(ev.Repo, branch, reviewBody, stateStr, reviewSource, runID)
+	if len(findings) > 0 {
+		// Create a review_runs parent row so findings FK is satisfied.
+		if err := state.InsertReviewRun(p.db, runID, ev.Repo, branch, headHash, "webhook-review", "completed"); err != nil {
+			loglib.Warn("webhook: insert review run failed",
+				loglib.FieldComponent, "webhook",
+				loglib.FieldRepo, ev.Repo,
+				loglib.FieldBranch, branch,
+				"error", err,
+			)
+		} else if err := state.InsertFindings(p.db, findings); err != nil {
+			loglib.Warn("webhook: insert findings failed",
+				loglib.FieldComponent, "webhook",
+				loglib.FieldRepo, ev.Repo,
+				loglib.FieldBranch, branch,
+				"error", err,
+			)
+		} else {
+			p.maybeDeliverFindings(ctx, ev.Repo, branch, findings)
+		}
+	}
 
 	return nil
 }
@@ -565,4 +606,34 @@ func (p *EventProcessor) updateCILinkAndInvalidateCache(ctx context.Context, rep
 			"error", err,
 		)
 	}
+}
+
+// maybeDeliverFindings looks up an active session for the repo/branch
+// and sends findings to the OpenClaw adapter for PTY delivery.
+// Best-effort: errors are logged but never returned.
+func (p *EventProcessor) maybeDeliverFindings(ctx context.Context, repo, branch string, findings []*state.FindingRecord) {
+	if p.openclaw == nil || len(findings) == 0 {
+		return
+	}
+
+	session, err := state.FindActiveSessionForBranch(ctx, p.db, repo, branch)
+	if err != nil {
+		loglib.Warn("webhook: session lookup for delivery failed",
+			loglib.FieldComponent, "webhook",
+			loglib.FieldRepo, repo,
+			loglib.FieldBranch, branch,
+			"error", err,
+		)
+		return
+	}
+	if session == nil {
+		loglib.Info("webhook: no active session for branch, skipping delivery",
+			loglib.FieldComponent, "webhook",
+			loglib.FieldRepo, repo,
+			loglib.FieldBranch, branch,
+		)
+		return
+	}
+
+	_ = p.openclaw.Deliver(ctx, session.SessionID, findings, "codero-webhook")
 }
