@@ -32,6 +32,7 @@ type observerSession struct {
 	TmuxSessionName string `json:"tmux_session_name"`
 	Repo            string `json:"repo"`
 	Branch          string `json:"branch"`
+	Worktree        string `json:"worktree"`
 	Status          string `json:"status"`
 }
 
@@ -94,6 +95,16 @@ func (o *Observer) tick(ctx context.Context) {
 	if err != nil {
 		log.Printf("observer: fetch sessions: %v", err)
 		return
+	}
+	// Prune seen entries for sessions no longer active to bound map size.
+	active := make(map[string]struct{}, len(sessions))
+	for _, s := range sessions {
+		active[s.SessionID] = struct{}{}
+	}
+	for id := range o.seen {
+		if _, ok := active[id]; !ok {
+			delete(o.seen, id)
+		}
 	}
 	for _, sess := range sessions {
 		if sess.TmuxSessionName == "" {
@@ -168,10 +179,11 @@ func (o *Observer) checkSession(ctx context.Context, sess observerSession) {
 	}
 
 	result := ExecSubmit(ctx, o.cfg.CoderoPath, o.cfg.CoderoConfigPath, submitArgs{
-		Repo:   sess.Repo,
-		Branch: sess.Branch,
-		Title:  title,
-		Body:   body,
+		Worktree: sess.Worktree,
+		Repo:     sess.Repo,
+		Branch:   sess.Branch,
+		Title:    title,
+		Body:     body,
 	})
 
 	status := "success"
@@ -218,7 +230,9 @@ func (o *Observer) writeAudit(entry observerAuditEntry) {
 		log.Printf("observer: audit marshal: %v", err)
 		return
 	}
-	o.auditFile.Write(append(data, '\n'))
+	if _, err := o.auditFile.Write(append(data, '\n')); err != nil {
+		log.Printf("observer: audit write: %v", err)
+	}
 }
 
 func hashContent(s string) string {

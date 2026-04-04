@@ -122,11 +122,6 @@ func extractField(text, key string) string {
 		if strings.HasPrefix(line, prefix) {
 			return strings.TrimSpace(strings.TrimPrefix(line, prefix))
 		}
-		// Also handle "echo 'key: value'" output where the shell echoes the command
-		if strings.Contains(line, prefix) && !strings.HasPrefix(line, "echo") && !strings.HasPrefix(line, "$") {
-			idx := strings.Index(line, prefix)
-			return strings.TrimSpace(line[idx+len(prefix):])
-		}
 	}
 	return ""
 }
