@@ -85,18 +85,19 @@ func TestOCL022_WebhookFindingsDelivery(t *testing.T) {
 	}
 	json.Unmarshal(respBody, &dResp)
 
-	// 5. If delivery succeeded, verify tmux pane contains findings.
-	if dResp.Status == "success" {
-		waitForCondition(t, 5*time.Second, 200*time.Millisecond, "tmux pane contains findings", func() bool {
-			captureOut, err := exec.Command("tmux", "capture-pane", "-t", tmuxSession, "-p").Output()
-			if err != nil {
-				return false
-			}
-			return strings.Contains(string(captureOut), "main.go")
-		})
+	// 5. Assert delivery succeeded and verify tmux pane contains findings.
+	if dResp.Status != "success" {
+		t.Fatalf("expected delivery status 'success', got %q (full response: %s)", dResp.Status, respBody)
 	}
+	waitForCondition(t, 5*time.Second, 200*time.Millisecond, "tmux pane contains findings", func() bool {
+		captureOut, err := exec.Command("tmux", "capture-pane", "-t", tmuxSession, "-p").Output()
+		if err != nil {
+			return false
+		}
+		return strings.Contains(string(captureOut), "main.go")
+	})
 
-	// 6. Verify audit log recorded the delivery.
+	// 6. Verify audit log recorded the delivery with at least one entry.
 	auditReq, _ := http.NewRequestWithContext(ctx, http.MethodGet,
 		adapterBase+"/audit?limit=5", nil)
 	auditResp, err := http.DefaultClient.Do(auditReq)
@@ -106,7 +107,18 @@ func TestOCL022_WebhookFindingsDelivery(t *testing.T) {
 	defer auditResp.Body.Close()
 
 	auditBody, _ := io.ReadAll(auditResp.Body)
-	t.Logf("Audit response: %s", auditBody)
+	var auditResult struct {
+		Entries []struct {
+			Prompt string `json:"prompt"`
+		} `json:"entries"`
+		Total int `json:"total"`
+	}
+	if err := json.Unmarshal(auditBody, &auditResult); err != nil {
+		t.Fatalf("parse audit response: %v (body: %s)", err, auditBody)
+	}
+	if auditResult.Total == 0 {
+		t.Fatalf("expected at least 1 audit entry, got 0 (body: %s)", auditBody)
+	}
 }
 
 // TestOCL022_FindingsEndpointWithPR verifies that the OCL-020 findings endpoint

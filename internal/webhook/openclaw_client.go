@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	loglib "github.com/codero/codero/internal/log"
@@ -65,7 +66,7 @@ func (c *OpenClawClient) Deliver(ctx context.Context, sessionID string, findings
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		c.adapterURL+"/deliver", bytes.NewReader(body))
+		strings.TrimRight(c.adapterURL, "/")+"/deliver", bytes.NewReader(body))
 	if err != nil {
 		loglib.Warn("openclaw: build deliver request failed", "error", err)
 		return nil

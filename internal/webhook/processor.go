@@ -264,7 +264,7 @@ func (p *EventProcessor) handlePullRequestReview(ctx context.Context, ev GitHubE
 	findings := normalizeReviewFindings(ev.Repo, branch, reviewBody, stateStr, reviewSource, runID)
 	if len(findings) > 0 {
 		// Create a review_runs parent row so findings FK is satisfied.
-		if err := state.InsertReviewRun(p.db, runID, ev.Repo, branch, headHash, "webhook-review", "completed"); err != nil {
+		if err := state.InsertReviewRun(ctx, p.db, runID, ev.Repo, branch, headHash, "webhook-review", "completed"); err != nil {
 			loglib.Warn("webhook: insert review run failed",
 				loglib.FieldComponent, "webhook",
 				loglib.FieldRepo, ev.Repo,

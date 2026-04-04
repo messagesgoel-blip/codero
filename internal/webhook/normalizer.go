@@ -11,8 +11,8 @@ import (
 )
 
 var (
-	reFileLineColon = regexp.MustCompile(`(\S+\.\w+):(\d+):?\s+(.+)`)
-	reDashFileLine  = regexp.MustCompile(`^[-*]\s+(\S+\.\w+)\s+line\s+(\d+)\s*(.*)`)
+	reFileLineColon = regexp.MustCompile(`([^\s:]+):(\d+):?\s+(.+)`)
+	reDashFileLine  = regexp.MustCompile(`^[-*]\s+([^\s]+)\s+line\s+(\d+)\s*(.*)`)
 )
 
 const maxFallbackMessageLen = 500
