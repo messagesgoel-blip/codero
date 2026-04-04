@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -76,16 +77,16 @@ func newHandler(cfg adapterConfig) *handler {
 
 func (h *handler) handleQuery(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
-		setCORS(w)
+		setCORS(w, r)
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	if r.Method != http.MethodPost {
-		setCORS(w)
+		setCORS(w, r)
 		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	setCORS(w)
+	setCORS(w, r)
 	start := time.Now()
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<10) // 64 KB limit
 
@@ -208,10 +209,50 @@ func (h *handler) audit(entry auditEntry) {
 	h.auditFile.Write(append(data, '\n'))
 }
 
-func setCORS(w http.ResponseWriter) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+func setCORS(w http.ResponseWriter, r *http.Request) {
+	origin := r.Header.Get("Origin")
+	if origin != "" {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+	}
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Vary", "Origin")
+}
+
+// handleAudit serves GET /audit?limit=N, returning recent audit entries.
+func (h *handler) handleAudit(w http.ResponseWriter, r *http.Request) {
+	setCORS(w, r)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	limit := 50
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			if n > 200 {
+				n = 200
+			}
+			limit = n
+		}
+	}
+
+	entries, err := readAuditEntries(h.cfg.AuditLogPath, limit)
+	if err != nil {
+		log.Printf("audit read: %v", err)
+		writeErr(w, http.StatusInternalServerError, "failed to read audit log")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"entries": entries,
+		"total":   len(entries),
+	})
 }
 
 func writeErr(w http.ResponseWriter, status int, msg string) {

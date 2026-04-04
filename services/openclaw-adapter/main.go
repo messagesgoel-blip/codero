@@ -49,6 +49,7 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 	mux.HandleFunc("/query", h.handleQuery)
+	mux.HandleFunc("/audit", h.handleAudit)
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
