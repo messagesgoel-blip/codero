@@ -136,10 +136,7 @@ function wireChat(container, prefix) {
     });
   }
 
-  // Load audit history on initial render
-  loadAuditHistory(prefix);
-
-  // Refresh audit on toggle open
+  // Lazy-load audit history only when the details section is opened
   const auditDetails = container.querySelector('.chat-audit-section');
   if (auditDetails) {
     auditDetails.addEventListener('toggle', () => {
@@ -313,7 +310,10 @@ function loadAuditHistory(prefix) {
   }
 
   apiFetch('/api/v1/openclaw/audit?limit=20')
-    .then(r => r.json())
+    .then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
     .then(data => {
       const entries = data.entries || [];
       if (entries.length === 0) { setEmpty('No queries yet'); return; }

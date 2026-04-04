@@ -20,7 +20,9 @@ func TestReadAuditEntries_MissingFile(t *testing.T) {
 
 func TestReadAuditEntries_EmptyFile(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "audit.jsonl")
-	os.WriteFile(f, []byte{}, 0644)
+	if err := os.WriteFile(f, []byte{}, 0644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
 	entries, err := readAuditEntries(f, 10)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -39,10 +41,15 @@ func TestReadAuditEntries_SingleEntry(t *testing.T) {
 		StateAvailable: true,
 		DurationMs:     42,
 	}
-	data, _ := json.Marshal(e)
+	data, err := json.Marshal(e)
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
 
 	f := filepath.Join(t.TempDir(), "audit.jsonl")
-	os.WriteFile(f, append(data, '\n'), 0644)
+	if err := os.WriteFile(f, append(data, '\n'), 0644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
 
 	entries, err := readAuditEntries(f, 10)
 	if err != nil {
@@ -59,14 +66,22 @@ func TestReadAuditEntries_SingleEntry(t *testing.T) {
 func TestReadAuditEntries_NewestFirst(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "audit.jsonl")
-	file, _ := os.Create(f)
+	file, err := os.Create(f)
+	if err != nil {
+		t.Fatalf("create fixture: %v", err)
+	}
 	for i := 0; i < 5; i++ {
 		e := auditEntry{
 			Timestamp: time.Date(2025, 1, 1, 0, i, 0, 0, time.UTC),
 			Prompt:    "q" + string(rune('A'+i)),
 		}
-		data, _ := json.Marshal(e)
-		file.Write(append(data, '\n'))
+		data, err := json.Marshal(e)
+		if err != nil {
+			t.Fatalf("marshal fixture: %v", err)
+		}
+		if _, err := file.Write(append(data, '\n')); err != nil {
+			t.Fatalf("write fixture: %v", err)
+		}
 	}
 	file.Close()
 
@@ -89,11 +104,19 @@ func TestReadAuditEntries_NewestFirst(t *testing.T) {
 func TestReadAuditEntries_LimitRespected(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "audit.jsonl")
-	file, _ := os.Create(f)
+	file, err := os.Create(f)
+	if err != nil {
+		t.Fatalf("create fixture: %v", err)
+	}
 	for i := 0; i < 10; i++ {
 		e := auditEntry{Timestamp: time.Now().UTC(), Prompt: "q"}
-		data, _ := json.Marshal(e)
-		file.Write(append(data, '\n'))
+		data, err := json.Marshal(e)
+		if err != nil {
+			t.Fatalf("marshal fixture: %v", err)
+		}
+		if _, err := file.Write(append(data, '\n')); err != nil {
+			t.Fatalf("write fixture: %v", err)
+		}
 	}
 	file.Close()
 
@@ -110,9 +133,14 @@ func TestReadAuditEntries_SkipsMalformed(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "audit.jsonl")
 	e := auditEntry{Timestamp: time.Now().UTC(), Prompt: "valid"}
-	data, _ := json.Marshal(e)
+	data, err := json.Marshal(e)
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
 	content := string(data) + "\n{invalid json\n" + string(data) + "\n"
-	os.WriteFile(f, []byte(content), 0644)
+	if err := os.WriteFile(f, []byte(content), 0644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
 
 	entries, err := readAuditEntries(f, 10)
 	if err != nil {

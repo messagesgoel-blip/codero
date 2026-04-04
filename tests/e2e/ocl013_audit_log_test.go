@@ -32,12 +32,13 @@ func TestOCL013_AuditLogEndToEnd(t *testing.T) {
 		body, _ := json.Marshal(map[string]string{"prompt": p})
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, adapter+"/query", bytes.NewReader(body))
-		cancel()
 		if err != nil {
+			cancel()
 			t.Fatalf("build request: %v", err)
 		}
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := http.DefaultClient.Do(req)
+		cancel()
 		if err != nil {
 			t.Fatalf("POST /query %q: %v", p, err)
 		}
