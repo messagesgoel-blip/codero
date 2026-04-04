@@ -84,3 +84,18 @@ func RecordPrecommitResult(ctx context.Context, db *DB, repo, branch, headHash, 
 	}
 	return nil
 }
+
+// InsertReviewRun creates a review_runs row that can serve as a FK parent
+// for findings inserted from webhook review events.
+func InsertReviewRun(ctx context.Context, db *DB, id, repo, branch, headHash, provider, status string) error {
+	now := time.Now().UTC()
+	_, err := db.sql.ExecContext(ctx,
+		`INSERT INTO review_runs (id, repo, branch, head_hash, provider, status, started_at, finished_at, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, repo, branch, headHash, provider, status, now, now, now,
+	)
+	if err != nil {
+		return fmt.Errorf("insert review run: %w", err)
+	}
+	return nil
+}

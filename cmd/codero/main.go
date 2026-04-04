@@ -472,6 +472,13 @@ func daemonCmd(configPath *string) *cobra.Command {
 			if cfg.Webhook.Enabled {
 				dedup := webhook.NewDeduplicator(db, client)
 				proc := webhook.NewEventProcessor(db, stream).WithGitHubClient(gh)
+				if adapterURL := os.Getenv("CODERO_OPENCLAW_ADAPTER_URL"); adapterURL != "" {
+					proc = proc.WithOpenClawClient(webhook.NewOpenClawClient(adapterURL, nil))
+					loglib.Info("codero: OpenClaw delivery enabled",
+						loglib.FieldEventType, loglib.EventStartup,
+						"adapter_url", adapterURL,
+					)
+				}
 				handler := webhook.NewHandler(cfg.Webhook.Secret, dedup, proc)
 				addr := fmt.Sprintf(":%d", cfg.Webhook.Port)
 				srv := webhook.NewServer(addr, handler)

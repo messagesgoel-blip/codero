@@ -485,6 +485,34 @@ func ListActiveAgentSessions(ctx context.Context, db *DB) ([]AgentSession, error
 	return scanAgentSessions(rows)
 }
 
+// FindActiveSessionForBranch returns the first active session matching the
+// given repo and branch. Returns nil, nil if no match is found.
+// The repo match is flexible: it matches either "owner/repo" or just "repo"
+// (the trailing component after the last slash).
+func FindActiveSessionForBranch(ctx context.Context, db *DB, repo, branch string) (*AgentSession, error) {
+	shortRepo := repo
+	if idx := strings.LastIndex(repo, "/"); idx >= 0 {
+		shortRepo = repo[idx+1:]
+	}
+
+	const q = `
+		SELECT session_id, agent_id, mode, tmux_session_name, started_at, last_seen_at, last_progress_at, last_io_at, ended_at, end_reason, inferred_status, inferred_status_updated_at
+		FROM agent_sessions
+		WHERE ended_at IS NULL AND branch = ? AND (repo = ? OR repo = ?)
+		ORDER BY last_seen_at DESC
+		LIMIT 1`
+
+	row := db.sql.QueryRowContext(ctx, q, branch, repo, shortRepo)
+	s, err := scanAgentSession(row)
+	if err != nil {
+		if errors.Is(err, ErrAgentSessionNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("find active session for branch: %w", err)
+	}
+	return s, nil
+}
+
 // ListExpiredAgentSessions returns sessions whose last_seen_at has passed the TTL.
 func ListExpiredAgentSessions(ctx context.Context, db *DB, ttl time.Duration) ([]AgentSession, error) {
 	threshold := time.Now().UTC().Add(-ttl).Truncate(time.Second)

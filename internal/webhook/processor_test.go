@@ -3,6 +3,8 @@ package webhook
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
@@ -401,5 +403,145 @@ func TestProcessEvent_Review_InvalidatesFeedbackCache(t *testing.T) {
 	}
 	if !errors.Is(err, state.ErrFeedbackCacheNotFound) {
 		t.Fatalf("expected ErrFeedbackCacheNotFound, got %v", err)
+	}
+}
+
+// --- OCL-022: Findings storage & delivery tests ---
+
+func TestEventProcessor_PRReview_FindingsStored(t *testing.T) {
+	db, _ := setupProcessorDB(t, "owner/repo", "feat", state.StateReviewApproved)
+	stream := setupStream(t, db)
+	proc := NewEventProcessor(db, stream)
+
+	payload := map[string]any{
+		"action": "submitted",
+		"review": map[string]any{
+			"state": "changes_requested",
+			"body":  "main.go:10: unused variable x",
+			"user":  map[string]any{"login": "coderabbitai[bot]"},
+		},
+		"pull_request": map[string]any{
+			"head": map[string]any{"ref": "feat", "sha": "abc"},
+		},
+	}
+	ev := makeEvent("pull_request_review", "owner/repo", payload)
+
+	if err := proc.ProcessEvent(context.Background(), ev); err != nil {
+		t.Fatalf("ProcessEvent: %v", err)
+	}
+
+	findings, err := state.ListFindings(db, "owner/repo", "feat")
+	if err != nil {
+		t.Fatalf("ListFindings: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("findings count: got %d, want 1", len(findings))
+	}
+	if findings[0].Severity != "error" {
+		t.Errorf("severity: got %q, want error", findings[0].Severity)
+	}
+	if findings[0].Source != "coderabbitai[bot]" {
+		t.Errorf("source: got %q, want coderabbitai[bot]", findings[0].Source)
+	}
+}
+
+func TestEventProcessor_PRReview_DeliverCalledWithSession(t *testing.T) {
+	db, _ := setupProcessorDB(t, "owner/repo", "feat", state.StateReviewApproved)
+	stream := setupStream(t, db)
+
+	// Insert active session with repo+branch.
+	raw := db.Unwrap()
+	_, err := raw.Exec(
+		`INSERT INTO agent_sessions (session_id, agent_id, mode, tmux_session_name, repo, branch)
+		 VALUES ('sess-1', 'agent-1', 'claude', 'tmux-1', 'owner/repo', 'feat')`)
+	if err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+
+	var deliverCalled bool
+	mockAdapter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		deliverCalled = true
+	}))
+	defer mockAdapter.Close()
+
+	oc := NewOpenClawClient(mockAdapter.URL, mockAdapter.Client())
+	proc := NewEventProcessor(db, stream).WithOpenClawClient(oc)
+
+	payload := map[string]any{
+		"action": "submitted",
+		"review": map[string]any{
+			"state": "changes_requested",
+			"body":  "main.go:10: unused variable x",
+			"user":  map[string]any{"login": "coderabbitai[bot]"},
+		},
+		"pull_request": map[string]any{
+			"head": map[string]any{"ref": "feat", "sha": "abc"},
+		},
+	}
+	ev := makeEvent("pull_request_review", "owner/repo", payload)
+
+	if err := proc.ProcessEvent(context.Background(), ev); err != nil {
+		t.Fatalf("ProcessEvent: %v", err)
+	}
+	if !deliverCalled {
+		t.Fatal("expected Deliver to be called when active session exists")
+	}
+}
+
+func TestEventProcessor_PRReview_NoSessionNoDelivery(t *testing.T) {
+	db, _ := setupProcessorDB(t, "owner/repo", "feat", state.StateReviewApproved)
+	stream := setupStream(t, db)
+
+	deliverCalled := false
+	mockAdapter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		deliverCalled = true
+	}))
+	defer mockAdapter.Close()
+
+	oc := NewOpenClawClient(mockAdapter.URL, mockAdapter.Client())
+	proc := NewEventProcessor(db, stream).WithOpenClawClient(oc)
+
+	payload := map[string]any{
+		"action": "submitted",
+		"review": map[string]any{
+			"state": "changes_requested",
+			"body":  "main.go:10: unused variable",
+			"user":  map[string]any{"login": "reviewer"},
+		},
+		"pull_request": map[string]any{
+			"head": map[string]any{"ref": "feat", "sha": "abc"},
+		},
+	}
+	ev := makeEvent("pull_request_review", "owner/repo", payload)
+
+	if err := proc.ProcessEvent(context.Background(), ev); err != nil {
+		t.Fatalf("ProcessEvent: %v", err)
+	}
+	if deliverCalled {
+		t.Fatal("Deliver should NOT be called when no active session exists")
+	}
+}
+
+func TestEventProcessor_PRReview_NilOpenClaw_NoPanic(t *testing.T) {
+	db, _ := setupProcessorDB(t, "owner/repo", "feat", state.StateReviewApproved)
+	stream := setupStream(t, db)
+	proc := NewEventProcessor(db, stream) // NO WithOpenClawClient
+
+	payload := map[string]any{
+		"action": "submitted",
+		"review": map[string]any{
+			"state": "changes_requested",
+			"body":  "main.go:10: unused variable",
+			"user":  map[string]any{"login": "reviewer"},
+		},
+		"pull_request": map[string]any{
+			"head": map[string]any{"ref": "feat", "sha": "abc"},
+		},
+	}
+	ev := makeEvent("pull_request_review", "owner/repo", payload)
+
+	// Should not panic even without OpenClaw client.
+	if err := proc.ProcessEvent(context.Background(), ev); err != nil {
+		t.Fatalf("ProcessEvent: %v", err)
 	}
 }
