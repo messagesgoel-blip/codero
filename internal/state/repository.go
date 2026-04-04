@@ -579,13 +579,18 @@ func InsertFinding(db *DB, f *FindingRecord) error {
 
 // ListFindings returns all findings for a repo+branch ordered by timestamp.
 func ListFindings(db *DB, repo, branch string) ([]FindingRecord, error) {
+	return ListFindingsCtx(context.Background(), db, repo, branch)
+}
+
+// ListFindingsCtx returns all findings for a repo+branch, respecting context cancellation.
+func ListFindingsCtx(ctx context.Context, db *DB, repo, branch string) ([]FindingRecord, error) {
 	const q = `
 		SELECT id, run_id, repo, branch, severity, category, file, line, message, source, rule_id, ts, created_at
 		FROM findings
 		WHERE repo = ? AND branch = ?
 		ORDER BY ts ASC`
 
-	rows, err := db.sql.Query(q, repo, branch)
+	rows, err := db.sql.QueryContext(ctx, q, repo, branch)
 	if err != nil {
 		return nil, fmt.Errorf("list findings: %w", err)
 	}

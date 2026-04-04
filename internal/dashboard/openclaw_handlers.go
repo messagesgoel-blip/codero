@@ -227,9 +227,9 @@ type FindingItem struct {
 // PRMetadata is the optional PR section in the findings response.
 type PRMetadata struct {
 	PRNumber          int    `json:"pr_number"`
-	CIStatus          string `json:"ci_status"`
-	Approved          bool   `json:"approved"`
-	UnresolvedThreads int    `json:"unresolved_threads"`
+	CIStatus          string `json:"ci_status,omitempty"`
+	Approved          *bool  `json:"approved,omitempty"`
+	UnresolvedThreads *int   `json:"unresolved_threads,omitempty"`
 }
 
 // severityRank returns a sort rank: error=0, warning=1, info=2, other=3.
@@ -274,7 +274,7 @@ func (h *Handler) handleOpenClawFindings(w http.ResponseWriter, r *http.Request)
 	ctx := r.Context()
 
 	// Fetch findings from DB.
-	records, err := state.ListFindings(state.NewDB(h.db), repo, branch)
+	records, err := state.ListFindingsCtx(ctx, state.NewDB(h.db), repo, branch)
 	if err != nil {
 		loglib.Warn("openclaw findings: list error",
 			loglib.FieldComponent, "openclaw", "error", err)

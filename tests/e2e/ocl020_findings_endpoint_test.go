@@ -160,7 +160,10 @@ func TestOCL020_FindingsEndpoint_ResponseShape(t *testing.T) {
 		t.Error("findings should be an array (possibly empty), got nil")
 	}
 
-	// If findings exist, verify severity ordering (error < warning < info).
+	// If findings exist, verify severity ordering (error < warning < info)
+	// and timestamp ordering within same severity bucket.
+	// Note: seeding is non-deterministic (depends on live precommit data);
+	// sort verification only runs when findings are present.
 	if len(fr.Findings) > 1 {
 		for i := 1; i < len(fr.Findings); i++ {
 			prevRank := sevRank(fr.Findings[i-1].Severity)
@@ -169,7 +172,14 @@ func TestOCL020_FindingsEndpoint_ResponseShape(t *testing.T) {
 				t.Errorf("findings not sorted by severity: %q (rank %d) before %q (rank %d) at index %d",
 					fr.Findings[i-1].Severity, prevRank, fr.Findings[i].Severity, currRank, i)
 			}
+			// Within same severity, timestamps should be non-decreasing.
+			if prevRank == currRank && fr.Findings[i-1].Ts > fr.Findings[i].Ts {
+				t.Errorf("findings with same severity %q not sorted by timestamp at index %d: %s > %s",
+					fr.Findings[i].Severity, i, fr.Findings[i-1].Ts, fr.Findings[i].Ts)
+			}
 		}
+	} else {
+		t.Log("no findings on main branch to verify sort order; sort correctness covered by unit tests")
 	}
 }
 
