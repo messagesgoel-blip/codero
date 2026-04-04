@@ -50,7 +50,13 @@ func main() {
 	})
 	mux.HandleFunc("/query", h.handleQuery)
 
-	srv := &http.Server{Addr: cfg.Addr, Handler: mux}
+	srv := &http.Server{
+		Addr:              cfg.Addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
 
 	// Graceful shutdown.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

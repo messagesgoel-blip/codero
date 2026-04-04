@@ -87,6 +87,7 @@ func (h *handler) handleQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	setCORS(w)
 	start := time.Now()
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10) // 64 KB limit
 
 	var req queryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

@@ -17,6 +17,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -99,8 +100,20 @@ func TestOCL011_AdapterQueryWithSeededData(t *testing.T) {
 		t.Fatalf("pr track: %v\n%s", err, out)
 	}
 
-	// Allow state to propagate.
-	time.Sleep(2 * time.Second)
+	// Poll until seeded data appears in state endpoint.
+	stateURL := testAPIURL() + "/api/v1/openclaw/state"
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(stateURL)
+		if err == nil {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if strings.Contains(string(body), agentID) {
+				break
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 
 	// Query 1: Ask about sessions.
 	r1 := adapterQuery(t, "What sessions are active?")

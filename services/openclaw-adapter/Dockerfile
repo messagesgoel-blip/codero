@@ -14,7 +14,7 @@ RUN CGO_ENABLED=0 GOOS=linux \
 FROM debian:bookworm-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get install -y --no-install-recommends ca-certificates wget \
     && rm -rf /var/lib/apt/lists/*
 
 RUN addgroup --system openclaw && \
