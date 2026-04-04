@@ -40,8 +40,14 @@ func querySessions(ctx context.Context, db *sql.DB, status string, limit, offset
 	}
 
 	// Query rows.
-	query := `SELECT session_id, agent_id, mode, COALESCE(tmux_session_name, ''), COALESCE(inferred_status, 'unknown'), started_at, last_seen_at, ended_at, end_reason FROM agent_sessions` + where +
-		` ORDER BY started_at DESC LIMIT ? OFFSET ?`
+	query := `SELECT s.session_id, s.agent_id, s.mode,
+		COALESCE(s.tmux_session_name, ''), COALESCE(s.repo, ''), COALESCE(s.branch, ''),
+		COALESCE((SELECT a.worktree FROM agent_assignments a
+		           WHERE a.session_id = s.session_id AND a.ended_at IS NULL
+		           ORDER BY a.started_at DESC LIMIT 1), '') AS worktree,
+		COALESCE(s.inferred_status, 'unknown'), s.started_at, s.last_seen_at, s.ended_at, s.end_reason
+		FROM agent_sessions s` + where +
+		` ORDER BY s.started_at DESC LIMIT ? OFFSET ?`
 
 	rows, err := db.QueryContext(ctx, query, limit, offset)
 	if err != nil {
@@ -54,7 +60,7 @@ func querySessions(ctx context.Context, db *sql.DB, status string, limit, offset
 		var s SessionRow
 		var endedAt sql.NullTime
 		var endReason sql.NullString
-		if err := rows.Scan(&s.SessionID, &s.AgentID, &s.Mode, &s.TmuxSessionName, &s.InferredStatus, &s.StartedAt, &s.LastSeenAt, &endedAt, &endReason); err != nil {
+		if err := rows.Scan(&s.SessionID, &s.AgentID, &s.Mode, &s.TmuxSessionName, &s.Repo, &s.Branch, &s.Worktree, &s.InferredStatus, &s.StartedAt, &s.LastSeenAt, &endedAt, &endReason); err != nil {
 			return nil, 0, fmt.Errorf("querySessions: scan: %w", err)
 		}
 		if endedAt.Valid {
@@ -86,14 +92,14 @@ func querySessionByID(ctx context.Context, db *sql.DB, sessionID string) (*Sessi
 	}
 
 	row := db.QueryRowContext(ctx, `
-		SELECT session_id, agent_id, mode, COALESCE(tmux_session_name, ''), started_at, last_seen_at, ended_at, end_reason
+		SELECT session_id, agent_id, mode, COALESCE(tmux_session_name, ''), COALESCE(repo, ''), COALESCE(branch, ''), started_at, last_seen_at, ended_at, end_reason
 		FROM agent_sessions WHERE session_id = ?`, sessionID)
 
 	var s SessionRow
 	var endedAt sql.NullTime
 	var endReason sql.NullString
-	if err := row.Scan(&s.SessionID, &s.AgentID, &s.Mode, &s.TmuxSessionName, &s.StartedAt, &s.LastSeenAt, &endedAt, &endReason); err != nil {
-		return nil, err
+	if err := row.Scan(&s.SessionID, &s.AgentID, &s.Mode, &s.TmuxSessionName, &s.Repo, &s.Branch, &s.StartedAt, &s.LastSeenAt, &endedAt, &endReason); err != nil {
+		return nil, fmt.Errorf("querySessionByID: scan: %w", err)
 	}
 	if endedAt.Valid {
 		t := endedAt.Time

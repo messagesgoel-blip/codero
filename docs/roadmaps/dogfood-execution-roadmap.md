@@ -4,7 +4,7 @@ Status: **active**
 Owner: sanjay
 Updated: 2026-04-04
 Supersedes: `agent-task-execution-roadmap.md` (SUB-001 through FIN-001)
-Next task: SUB-012
+Next task: REV-010
 
 ## Context
 
@@ -579,7 +579,7 @@ simplified version of SUB-002 — fewer fields than the spec, enough for dedup a
 
 ---
 
-### SUB-012: OpenClaw observes TASK_COMPLETE and triggers submit
+### SUB-012: OpenClaw observes TASK_COMPLETE and triggers submit ✅
 
 **What:** When an agent outputs `TASK_COMPLETE` in its PTY, OpenClaw observes it, extracts
 the structured summary block, and calls `codero submit` with the extracted metadata.
