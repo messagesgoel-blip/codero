@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"net/http"
+	"sort"
 	"time"
 
 	loglib "github.com/codero/codero/internal/log"
@@ -199,4 +200,117 @@ func floatToStr(f float64) string {
 	intPart := int(f)
 	frac := int((f - float64(intPart)) * 10)
 	return sign + intToStr(intPart) + "." + intToStr(frac)
+}
+
+// ─── OCL-020: OpenClaw findings endpoint ─────────────────────────────────
+
+// FindingsResponse is the JSON envelope for GET /api/v1/openclaw/findings.
+type FindingsResponse struct {
+	Repo       string        `json:"repo"`
+	Branch     string        `json:"branch"`
+	Findings   []FindingItem `json:"findings"`
+	PRMetadata *PRMetadata   `json:"pr_metadata"`
+}
+
+// FindingItem is one finding in the response.
+type FindingItem struct {
+	Severity string    `json:"severity"`
+	Category string    `json:"category"`
+	File     string    `json:"file"`
+	Line     int       `json:"line"`
+	Message  string    `json:"message"`
+	Source   string    `json:"source"`
+	RuleID   string    `json:"rule_id"`
+	Ts       time.Time `json:"ts"`
+}
+
+// PRMetadata is the optional PR section in the findings response.
+type PRMetadata struct {
+	PRNumber          int    `json:"pr_number"`
+	CIStatus          string `json:"ci_status"`
+	Approved          bool   `json:"approved"`
+	UnresolvedThreads int    `json:"unresolved_threads"`
+}
+
+// severityRank returns a sort rank: error=0, warning=1, info=2, other=3.
+func severityRank(s string) int {
+	switch s {
+	case "error":
+		return 0
+	case "warning":
+		return 1
+	case "info":
+		return 2
+	default:
+		return 3
+	}
+}
+
+// sortFindings sorts by severity (error→warning→info) then timestamp ascending.
+func sortFindings(items []FindingItem) {
+	sort.SliceStable(items, func(i, j int) bool {
+		ri, rj := severityRank(items[i].Severity), severityRank(items[j].Severity)
+		if ri != rj {
+			return ri < rj
+		}
+		return items[i].Ts.Before(items[j].Ts)
+	})
+}
+
+func (h *Handler) handleOpenClawFindings(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "")
+		return
+	}
+	setCORSHeaders(w)
+
+	repo := r.URL.Query().Get("repo")
+	branch := r.URL.Query().Get("branch")
+	if repo == "" || branch == "" {
+		writeError(w, http.StatusBadRequest, "repo and branch query parameters are required", "")
+		return
+	}
+
+	ctx := r.Context()
+
+	// Fetch findings from DB.
+	records, err := state.ListFindings(state.NewDB(h.db), repo, branch)
+	if err != nil {
+		loglib.Warn("openclaw findings: list error",
+			loglib.FieldComponent, "openclaw", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list findings", "")
+		return
+	}
+
+	// Convert to response items.
+	items := make([]FindingItem, len(records))
+	for i, rec := range records {
+		items[i] = FindingItem{
+			Severity: rec.Severity,
+			Category: rec.Category,
+			File:     rec.File,
+			Line:     rec.Line,
+			Message:  rec.Message,
+			Source:   rec.Source,
+			RuleID:   rec.RuleID,
+			Ts:       rec.Timestamp,
+		}
+	}
+	sortFindings(items)
+
+	// Look up PR metadata.
+	var prMeta *PRMetadata
+	prNumber := lookupPRNumber(ctx, h.db, repo, branch)
+	if prNumber > 0 {
+		prMeta = &PRMetadata{
+			PRNumber: prNumber,
+		}
+	}
+
+	writeJSON(w, http.StatusOK, FindingsResponse{
+		Repo:       repo,
+		Branch:     branch,
+		Findings:   items,
+		PRMetadata: prMeta,
+	})
 }

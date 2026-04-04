@@ -125,6 +125,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 	// OCL-013: OpenClaw audit log proxy
 	mux.HandleFunc("/api/v1/openclaw/audit", h.handleOpenClawAudit)
+
+	// OCL-020: OpenClaw findings endpoint
+	mux.HandleFunc("/api/v1/openclaw/findings", h.handleOpenClawFindings)
 }
 
 // handleOverview serves GET /api/v1/dashboard/overview.
