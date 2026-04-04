@@ -37,7 +37,7 @@ type Server struct {
 	githubHealth GitHubHealthSource
 	rawDB        *sql.DB
 	sessionStore *session.Store
-	
+
 	// Session recovery service for continuity across restarts
 	sessionRecovery *SessionRecoveryService
 }

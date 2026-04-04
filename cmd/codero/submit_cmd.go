@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	ghclient "github.com/codero/codero/internal/github"
 	"github.com/codero/codero/internal/gitops"
 	"github.com/codero/codero/internal/state"
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
@@ -23,6 +25,8 @@ type GitHubSubmitter interface {
 type GitOps interface {
 	Commit(worktreePath string, opts gitops.CommitOpts) (string, error)
 	Push(worktreePath, remote, branch string) error
+	DiffHash(worktreePath string) (string, error)
+	HeadSHA(worktreePath string) (string, error)
 }
 
 // realGitOps implements GitOps using real git operations.
@@ -34,6 +38,14 @@ func (g realGitOps) Commit(worktreePath string, opts gitops.CommitOpts) (string,
 
 func (g realGitOps) Push(worktreePath, remote, branch string) error {
 	return gitops.Push(worktreePath, remote, branch)
+}
+
+func (g realGitOps) DiffHash(worktreePath string) (string, error) {
+	return gitops.DiffHash(worktreePath)
+}
+
+func (g realGitOps) HeadSHA(worktreePath string) (string, error) {
+	return gitops.HeadSHA(worktreePath)
 }
 
 // submitCmd returns the "codero submit" command that performs the full git+PR flow:
@@ -138,6 +150,50 @@ func runSubmit(ctx context.Context, cmd *cobra.Command, configPath string, opts 
 		git = realGitOps{}
 	}
 
+	// Compute diff hash before commit — if empty, worktree is clean
+	diffHash, err := git.DiffHash(opts.worktree)
+	if err != nil {
+		return fmt.Errorf("compute diff hash: %w", err)
+	}
+	if diffHash == "" {
+		return fmt.Errorf("no changes to submit: worktree is clean")
+	}
+
+	// Get HEAD SHA before the new commit
+	headSHA, err := git.HeadSHA(opts.worktree)
+	if err != nil {
+		return fmt.Errorf("get HEAD SHA: %w", err)
+	}
+
+	// Resolve assignment ID and session ID for dedup record
+	sessionID := resolveSessionIDFromEnv()
+	var assignmentID string
+	if sessionID != "" {
+		row := db.Unwrap().QueryRowContext(ctx,
+			`SELECT assignment_id FROM agent_assignments WHERE session_id = ? AND ended_at IS NULL LIMIT 1`,
+			sessionID)
+		_ = row.Scan(&assignmentID) // ignore error — empty string means no assignment
+	}
+
+	// Create submission record before committing (dedup check)
+	submissionID := uuid.New().String()
+	rec := state.SubmissionRecord{
+		SubmissionID: submissionID,
+		AssignmentID: assignmentID,
+		SessionID:    sessionID,
+		Repo:         opts.repo,
+		Branch:       opts.branch,
+		HeadSHA:      headSHA,
+		DiffHash:     diffHash,
+		State:        "submitted",
+	}
+	if err := state.CreateSubmission(ctx, db, rec); err != nil {
+		if errors.Is(err, state.ErrDuplicateSubmission) {
+			return fmt.Errorf("duplicate submission: this exact diff has already been submitted — make new changes first")
+		}
+		return fmt.Errorf("create submission record: %w", err)
+	}
+
 	// Commit staged changes
 	commitMsg := gitops.FormatMessage("submit", 1, opts.title)
 	sha, err := git.Commit(opts.worktree, gitops.CommitOpts{
@@ -206,7 +262,7 @@ func runSubmit(ctx context.Context, cmd *cobra.Command, configPath string, opts 
 	}
 
 	// Update assignment substatus to submitted (optional, skip gracefully if no session)
-	sessionID := resolveSessionIDFromEnv()
+	// sessionID was resolved earlier in the function
 	if sessionID != "" {
 		res, err := db.Unwrap().ExecContext(ctx,
 			`UPDATE agent_assignments SET substatus = 'submitted', updated_at = datetime('now')

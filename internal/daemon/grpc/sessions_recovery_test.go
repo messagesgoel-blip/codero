@@ -51,7 +51,7 @@ func TestSessionRecoveryService(t *testing.T) {
 		now := time.Now()
 		activeSessionID := "active-session-123"
 		endedSessionID := "ended-session-456"
-		
+
 		// Active session (not ended)
 		_, err = db.ExecContext(ctx, `
 			INSERT INTO agent_sessions (
