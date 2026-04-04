@@ -91,6 +91,10 @@ function buildChatUI(prefix) {
         <textarea id="${esc(prefix)}-input" class="chat-input" placeholder="Ask something..." rows="1" ${disabled}></textarea>
         <button id="${esc(prefix)}-send" class="btn btn-primary chat-send" ${disabled}>${btnLabel}</button>
       </div>
+      <details class="chat-audit-section">
+        <summary class="chat-audit-toggle">Query history</summary>
+        <div class="chat-audit-list" id="${esc(prefix)}-audit-list">Loading...</div>
+      </details>
     </div>`;
 }
 
@@ -129,6 +133,17 @@ function wireChat(container, prefix) {
       const prompt = btn.dataset.prompt;
       if (input) input.value = prompt;
       sendMessage(input);
+    });
+  }
+
+  // Load audit history on initial render
+  loadAuditHistory(prefix);
+
+  // Refresh audit on toggle open
+  const auditDetails = container.querySelector('.chat-audit-section');
+  if (auditDetails) {
+    auditDetails.addEventListener('toggle', () => {
+      if (auditDetails.open) loadAuditHistory(prefix);
     });
   }
 }
@@ -279,6 +294,50 @@ function formatMessage(content) {
   // Newlines
   safe = safe.replace(/\n/g, '<br>');
   return safe;
+}
+
+// ---------------------------------------------------------------------------
+// Query history (audit log)
+// ---------------------------------------------------------------------------
+
+function loadAuditHistory(prefix) {
+  const listEl = document.getElementById(prefix + '-audit-list');
+  if (!listEl) return;
+
+  function setEmpty(msg) {
+    listEl.textContent = '';
+    const d = document.createElement('div');
+    d.className = 'chat-audit-empty';
+    d.textContent = msg;
+    listEl.appendChild(d);
+  }
+
+  apiFetch('/api/v1/openclaw/audit?limit=20')
+    .then(r => r.json())
+    .then(data => {
+      const entries = data.entries || [];
+      if (entries.length === 0) { setEmpty('No queries yet'); return; }
+      listEl.textContent = '';
+      for (const e of entries) {
+        const row = document.createElement('div');
+        row.className = 'chat-audit-entry';
+        const ts = document.createElement('span');
+        ts.className = 'chat-audit-ts';
+        ts.textContent = new Date(e.ts).toLocaleString();
+        const prompt = document.createElement('span');
+        prompt.className = 'chat-audit-prompt';
+        prompt.textContent = e.prompt || '';
+        const resp = document.createElement('span');
+        resp.className = 'chat-audit-resp';
+        const respText = (e.response || '').substring(0, 120);
+        resp.textContent = respText + (e.response && e.response.length > 120 ? '…' : '');
+        row.appendChild(ts);
+        row.appendChild(prompt);
+        row.appendChild(resp);
+        listEl.appendChild(row);
+      }
+    })
+    .catch(() => { setEmpty('Query history unavailable'); });
 }
 
 function scrollToBottom(el) {
