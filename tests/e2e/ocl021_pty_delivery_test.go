@@ -65,7 +65,19 @@ func TestOCL021_PTYDelivery(t *testing.T) {
 		codero("session", "end", "--session-id="+sessionID, "--agent-id="+agentID)
 	})
 
-	time.Sleep(500 * time.Millisecond)
+	// Wait for session to be visible in the dashboard API.
+	waitForCondition(t, 5*time.Second, 100*time.Millisecond, "session visible", func() bool {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
+			testAPIURL()+"/api/v1/dashboard/sessions/"+sessionID, nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil || resp.StatusCode != http.StatusOK {
+			return false
+		}
+		resp.Body.Close()
+		return true
+	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -114,16 +126,20 @@ func TestOCL021_PTYDelivery(t *testing.T) {
 
 	// 4. If delivery succeeded (bridge available), capture tmux pane output.
 	if dResp.Status == "success" {
-		time.Sleep(1 * time.Second)
+		waitForCondition(t, 5*time.Second, 100*time.Millisecond, "tmux pane contains findings", func() bool {
+			captureCmd := exec.Command("tmux", "capture-pane", "-t", tmuxSession, "-p")
+			captureOut, err := captureCmd.Output()
+			if err != nil {
+				return false
+			}
+			return strings.Contains(string(captureOut), "main.go:10")
+		})
 		captureCmd := exec.Command("tmux", "capture-pane", "-t", tmuxSession, "-p")
 		captureOut, err := captureCmd.Output()
 		if err != nil {
 			t.Fatalf("tmux capture-pane failed: %v", err)
 		}
 		paneText := string(captureOut)
-		if !strings.Contains(paneText, "main.go:10") {
-			t.Errorf("expected 'main.go:10' in pane output, got:\n%s", paneText)
-		}
 		if !strings.Contains(paneText, "unused variable x") {
 			t.Errorf("expected 'unused variable x' in pane output, got:\n%s", paneText)
 		}
@@ -152,7 +168,11 @@ func TestOCL021_PTYDelivery(t *testing.T) {
 
 	// 6. Kill tmux session and try delivery again — should fail.
 	exec.Command("tmux", "kill-session", "-t", tmuxSession).Run()
-	time.Sleep(500 * time.Millisecond)
+	waitForCondition(t, 3*time.Second, 100*time.Millisecond, "tmux session gone", func() bool {
+		out, _ := exec.Command("tmux", "has-session", "-t", tmuxSession).CombinedOutput()
+		_ = out
+		return exec.Command("tmux", "has-session", "-t", tmuxSession).Run() != nil
+	})
 
 	deliverBody2, _ := json.Marshal(map[string]interface{}{
 		"session_id": sessionID,
@@ -216,4 +236,17 @@ func TestOCL021_Deliver_SessionNotFound(t *testing.T) {
 		respBody, _ := io.ReadAll(resp.Body)
 		t.Errorf("expected 404 for nonexistent session, got %d: %s", resp.StatusCode, respBody)
 	}
+}
+
+// waitForCondition polls fn every interval until it returns true or timeout expires.
+func waitForCondition(t *testing.T, timeout, interval time.Duration, desc string, fn func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if fn() {
+			return
+		}
+		time.Sleep(interval)
+	}
+	t.Fatalf("waitForCondition(%s): timed out after %s", desc, timeout)
 }
