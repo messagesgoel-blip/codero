@@ -312,6 +312,26 @@ func (c *Client) PostComment(ctx context.Context, repo string, prNumber int, bod
 	return nil
 }
 
+// RequestReviewers requests reviews from the specified GitHub users on a PR.
+// Ignores "Review cannot be requested from pull request author" errors.
+func (c *Client) RequestReviewers(ctx context.Context, repo string, prNumber int, reviewers []string) error {
+	if len(reviewers) == 0 {
+		return nil
+	}
+	owner, repoName, _ := strings.Cut(repo, "/")
+	_, _, err := c.gh().PullRequests.RequestReviewers(ctx, owner, repoName, prNumber, gogithub.ReviewersRequest{
+		Reviewers: reviewers,
+	})
+	if err != nil {
+		// Ignore "Review cannot be requested from pull request author" errors
+		if strings.Contains(err.Error(), "Review cannot be requested") {
+			return nil
+		}
+		return fmt.Errorf("request reviewers: %w", err)
+	}
+	return nil
+}
+
 // GetBranchProtection returns branch protection rules for the given branch.
 func (c *Client) GetBranchProtection(ctx context.Context, repo, branch string) (*gogithub.Protection, error) {
 	owner, repoName, _ := strings.Cut(repo, "/")
