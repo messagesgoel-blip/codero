@@ -144,23 +144,21 @@ func TestOCL012_ChatEndpointProxies(t *testing.T) {
 
 	respBody, _ := io.ReadAll(resp.Body)
 
-	// Accept 200 (proxy working, adapter responded) or 502 (proxy working, adapter not running)
-	if resp.StatusCode != 200 && resp.StatusCode != 502 {
-		t.Fatalf("expected 200 or 502, got %d: %s", resp.StatusCode, respBody)
+	// In live mode the adapter should be running, so expect 200.
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, respBody)
 	}
 
-	// If 200, verify response has "response" field
-	if resp.StatusCode == 200 {
-		var result map[string]interface{}
-		if err := json.Unmarshal(respBody, &result); err != nil {
-			t.Fatalf("parse response: %v (body: %s)", err, respBody)
-		}
-		if result["response"] == nil {
-			t.Error("expected response field in 200 response")
-		}
+	// Verify response has "response" field
+	var result map[string]interface{}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		t.Fatalf("parse response: %v (body: %s)", err, respBody)
+	}
+	if result["response"] == nil {
+		t.Error("expected response field in 200 response")
 	}
 
-	t.Logf("Chat endpoint proxy status: %d (expected 200 or 502)", resp.StatusCode)
+	t.Logf("Chat endpoint proxy status: %d", resp.StatusCode)
 }
 
 func TestOCL012_ChatHistoryGone(t *testing.T) {
