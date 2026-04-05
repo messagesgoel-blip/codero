@@ -116,6 +116,113 @@ func TestActiveSessions_AssignmentSubstatusDrivesActivityState(t *testing.T) {
 	}
 }
 
+func TestActiveSessions_LegacyBranchStateUsesCanonicalProjectionValues(t *testing.T) {
+	db := openDashboardQueryTestDB(t)
+	now := time.Now().UTC()
+
+	_, err := db.Exec(`INSERT INTO branch_states
+		(id, repo, branch, head_hash, state, retry_count, max_retries, approved, ci_green,
+		 pending_events, unresolved_threads, owner_session_id, owner_session_last_seen,
+		 queue_priority, submission_time, created_at, updated_at, owner_agent)
+		VALUES (?,?,?,?,?,0,3,0,0,0,0,?,?,?,?,?,?,?)`,
+		"legacy-branch", "acme/api", "feat/COD-302-legacy", "abc123", "waiting",
+		"sess-legacy", now, 0, now.Add(-15*time.Minute), now.Add(-15*time.Minute), now.Add(-15*time.Minute), "",
+	)
+	if err != nil {
+		t.Fatalf("seed branch state: %v", err)
+	}
+
+	sessions, err := queryActiveSessionsFromBranchStates(context.Background(), db)
+	if err != nil {
+		t.Fatalf("queryActiveSessionsFromBranchStates: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("len(sessions) = %d, want 1", len(sessions))
+	}
+	if sessions[0].AgentID != "" {
+		t.Fatalf("agent_id = %q, want empty when owner_agent is missing", sessions[0].AgentID)
+	}
+	if sessions[0].OwnerAgent != "" {
+		t.Fatalf("owner_agent = %q, want empty when owner_agent is missing", sessions[0].OwnerAgent)
+	}
+	if sessions[0].LifecycleState != "blocked" {
+		t.Fatalf("lifecycle_state = %q, want blocked", sessions[0].LifecycleState)
+	}
+	if sessions[0].ActivityState != "syncing" {
+		t.Fatalf("activity_state = %q, want syncing", sessions[0].ActivityState)
+	}
+}
+
+func TestQuerySessions_MixedPaginationAdvancesIntoEndedRows(t *testing.T) {
+	db := openDashboardQueryTestDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	seedAgentSessionForQueryTest(t, db, "sess-active-1", "agent-a", now, now.Add(-5*time.Minute))
+	seedAgentSessionForQueryTest(t, db, "sess-active-2", "agent-b", now.Add(-10*time.Second), now.Add(-6*time.Minute))
+
+	for i, sessionID := range []string{"sess-ended-1", "sess-ended-2", "sess-ended-3"} {
+		startedAt := now.Add(time.Duration(-20-i) * time.Minute)
+		endedAt := startedAt.Add(5 * time.Minute)
+		if _, err := db.Exec(`INSERT INTO agent_sessions
+			(session_id, agent_id, mode, started_at, last_seen_at, ended_at, end_reason)
+			VALUES (?,?,?,?,?,?,?)`,
+			sessionID, "agent-ended", "cli", startedAt, endedAt, endedAt, "completed"); err != nil {
+			t.Fatalf("seed ended session %s: %v", sessionID, err)
+		}
+	}
+
+	rows, total, err := querySessions(ctx, db, "", 2, 2)
+	if err != nil {
+		t.Fatalf("querySessions: %v", err)
+	}
+	if total != 5 {
+		t.Fatalf("total = %d, want 5", total)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("len(rows) = %d, want 2", len(rows))
+	}
+	if rows[0].SessionID != "sess-ended-1" || rows[1].SessionID != "sess-ended-2" {
+		t.Fatalf("session_ids = %q, %q; want sess-ended-1, sess-ended-2", rows[0].SessionID, rows[1].SessionID)
+	}
+}
+
+func TestQuerySessionByID_PropagatesActiveProjectionErrors(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(`
+		CREATE TABLE agent_sessions (
+			session_id TEXT PRIMARY KEY,
+			agent_id TEXT NOT NULL,
+			mode TEXT NOT NULL DEFAULT '',
+			tmux_session_name TEXT NOT NULL DEFAULT '',
+			repo TEXT NOT NULL DEFAULT '',
+			branch TEXT NOT NULL DEFAULT '',
+			started_at DATETIME NOT NULL,
+			last_seen_at DATETIME NOT NULL,
+			ended_at DATETIME,
+			end_reason TEXT NOT NULL DEFAULT ''
+		);
+	`); err != nil {
+		t.Fatalf("create agent_sessions: %v", err)
+	}
+	now := time.Now().UTC()
+	if _, err := db.Exec(`
+		INSERT INTO agent_sessions (session_id, agent_id, mode, tmux_session_name, repo, branch, started_at, last_seen_at, ended_at, end_reason)
+		VALUES (?, ?, ?, '', ?, ?, ?, ?, NULL, '')`,
+		"sess-broken", "agent-x", "cli", "acme/api", "feat/COD-303-broken", now.Add(-10*time.Minute), now); err != nil {
+		t.Fatalf("seed agent_sessions: %v", err)
+	}
+
+	if _, err := querySessionByID(context.Background(), db, "sess-broken"); err == nil {
+		t.Fatal("expected querySessionByID to return the active projection error")
+	}
+}
+
 func TestQueryAgentRoster_ScansSQLiteTimestampAggregate(t *testing.T) {
 	db := openDashboardQueryTestDB(t)
 	now := time.Now().UTC().Truncate(time.Second)

@@ -257,6 +257,37 @@ func MarkSessionRecovered(ctx context.Context, db *DB, sessionID string, recover
 	return nil
 }
 
+// MarkSessionRecoveredWithLastSeen records recovery metadata and the current
+// heartbeat in one transaction so restart adoption cannot partially apply.
+func MarkSessionRecoveredWithLastSeen(ctx context.Context, db *DB, sessionID string, lastSeenAt, recoveredAt time.Time) error {
+	if recoveredAt.IsZero() {
+		recoveredAt = time.Now().UTC()
+	}
+	if lastSeenAt.IsZero() {
+		lastSeenAt = recoveredAt
+	}
+
+	tx, err := db.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("mark session recovered: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET last_seen_at = ?,
+		    last_recovered_at = ?
+		WHERE session_id = ?
+		  AND ended_at IS NULL`,
+		lastSeenAt, recoveredAt, sessionID); err != nil {
+		return fmt.Errorf("mark session recovered: update session: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("mark session recovered: commit: %w", err)
+	}
+	return nil
+}
+
 // UpdateSessionOutputBytes sets the cumulative output_bytes on a session.
 // The value is a running total reported by the agent wrapper on each heartbeat.
 // Uses GREATEST to ensure the value is monotonic (no regressions on out-of-order updates).
@@ -1026,10 +1057,10 @@ func PromoteSessionToTrackedAssignment(ctx context.Context, db *DB, sessionID st
 
 	var branchExists int
 	if err := db.sql.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM branch_states
-		WHERE repo = ? AND branch = ?`,
-		repo, branch,
+			SELECT COUNT(*)
+			FROM branch_states
+			WHERE (repo = ? OR repo LIKE ?) AND branch = ?`,
+		repo, "%/"+repo, branch,
 	).Scan(&branchExists); err != nil {
 		return fmt.Errorf("promote session: check branch state: %w", err)
 	}

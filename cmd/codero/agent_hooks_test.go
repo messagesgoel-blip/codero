@@ -322,6 +322,9 @@ func TestBuildHeartbeatFragments(t *testing.T) {
 	if f.RepoDetect == "" {
 		t.Error("RepoDetect is empty")
 	}
+	if !strings.Contains(f.RepoDetect, `_gw="${CODERO_WORKTREE:-$PWD}"`) {
+		t.Error("RepoDetect should initialize _gw from CODERO_WORKTREE before falling back to PWD")
+	}
 	if !strings.Contains(f.RepoDetect, `CODERO_WORKTREE`) {
 		t.Error("RepoDetect should prefer CODERO_WORKTREE when available")
 	}

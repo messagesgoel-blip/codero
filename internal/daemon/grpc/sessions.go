@@ -183,8 +183,8 @@ func (s *sessionService) Heartbeat(ctx context.Context, req *daemonv1.HeartbeatR
 		repo := firstMD(md, "x-repo")
 		branch := firstMD(md, "x-branch")
 		if repo != "" || branch != "" {
-			source := firstMD(md, "x-attribution-source")
-			if source == "" {
+			source := state.NormalizeAttributionSource(firstMD(md, "x-attribution-source"))
+			if source == "" || source == state.AttributionSourceUnknown {
 				source = state.AttributionSourceExplicitHeartbeat
 			}
 			if err := state.UpdateSessionRepoBranchAttribution(ctx, s.server.db, req.SessionId, repo, branch, source); err != nil {

@@ -1233,6 +1233,13 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 			if repo != "" || branch != "" {
 				if err := state.UpdateSessionRepoBranchAttribution(cmd.Context(), store.DB(), sessionID, repo, branch, normalizedAttributionSource); err != nil {
 					loglib.Warn("heartbeat: repo/branch update failed", "error", err)
+				} else if err := state.PromoteSessionToTrackedAssignment(cmd.Context(), store.DB(), sessionID); err != nil && !errors.Is(err, state.ErrAgentSessionNotFound) {
+					loglib.Warn("heartbeat: session assignment promotion failed",
+						"session_id", sessionID,
+						"repo", repo,
+						"branch", branch,
+						"error", err,
+					)
 				}
 			}
 			if outputBytes > 0 {

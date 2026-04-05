@@ -542,16 +542,17 @@ func queryActiveSessionsFromBranchStates(ctx context.Context, db *sql.DB) ([]Act
 			elapsed = 0
 		}
 
-		agentID := resolveOwnerAgent(ownerAgent, branch)
+		ownerAgent = strings.TrimSpace(ownerAgent)
+		agentID := resolveOwnerAgent(ownerAgent)
 		out = append(out, ActiveSession{
 			SessionID:             sessionID,
 			AgentID:               agentID,
 			Repo:                  repo,
 			Branch:                branch,
 			PRNumber:              prNumber,
-			OwnerAgent:            agentID,
-			LifecycleState:        "active",
-			ActivityState:         sessionActivityState(state),
+			OwnerAgent:            ownerAgent,
+			LifecycleState:        legacySessionLifecycleState(state),
+			ActivityState:         legacySessionActivityState(state),
 			AttachmentState:       "attached",
 			AttributionSource:     "assignment_state",
 			AttributionConfidence: "medium",
@@ -968,14 +969,23 @@ func startedAtForSession(submissionTime, createdAt, lastSeen sql.NullTime) time.
 	}
 }
 
-func sessionActivityState(state string) string {
-	switch state {
+func legacySessionLifecycleState(state string) string {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "blocked", "queued_cli", "cli_reviewing", "waiting", "expired":
+		return "blocked"
+	default:
+		return "active"
+	}
+}
+
+func legacySessionActivityState(state string) string {
+	switch strings.ToLower(strings.TrimSpace(state)) {
 	case "blocked":
 		return "blocked"
 	case "queued_cli", "cli_reviewing", "waiting", "expired":
-		return "waiting"
+		return "syncing"
 	default:
-		return "active"
+		return "thinking"
 	}
 }
 
@@ -1114,16 +1124,9 @@ func resolveTaskFromAssignment(taskID, branch string) *ActiveTask {
 	return branchTask
 }
 
-// resolveOwnerAgent returns the agent label for a session. When agentFromDB is
-// non-empty it is returned directly. Otherwise returns "unknown".
-func resolveOwnerAgent(agentFromDB, branch string) string {
-	if agentFromDB != "" {
-		return agentFromDB
-	}
-	if branch != "" {
-		return branch
-	}
-	return "unknown"
+// resolveOwnerAgent returns the persisted owner/launch profile ID for a session.
+func resolveOwnerAgent(agentFromDB string) string {
+	return strings.TrimSpace(agentFromDB)
 }
 
 func lookupPRNumber(ctx context.Context, db *sql.DB, repo, branch string) int {

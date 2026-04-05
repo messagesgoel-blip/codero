@@ -44,22 +44,56 @@ func querySessions(ctx context.Context, db *sql.DB, status string, limit, offset
 
 		// Mixed active+ended list: preserve existing ended-session query path and
 		// prepend canonical active runtime projections.
-		ended, endedTotal, err := querySessionsLegacy(ctx, db, "ended", limit, 0)
-		if err != nil {
-			return nil, 0, err
-		}
-		combined := append([]SessionRow{}, projected...)
-		combined = append(combined, ended...)
-		total += endedTotal
-		if offset > 0 {
-			if offset >= len(combined) {
-				return []SessionRow{}, total, nil
+		if limit <= 0 {
+			ended, endedTotal, err := querySessionsLegacy(ctx, db, "ended", limit, 0)
+			if err != nil {
+				return nil, 0, err
 			}
-			combined = combined[offset:]
+			combined := append([]SessionRow{}, projected...)
+			combined = append(combined, ended...)
+			total += endedTotal
+			if offset > 0 {
+				if offset >= len(combined) {
+					return []SessionRow{}, total, nil
+				}
+				combined = combined[offset:]
+			}
+			return combined, total, nil
 		}
-		if limit > 0 && len(combined) > limit {
-			combined = combined[:limit]
+
+		activeStart := 0
+		if offset > 0 && offset < len(projected) {
+			activeStart = offset
+		} else if offset >= len(projected) {
+			activeStart = len(projected)
 		}
+		activeEnd := activeStart + limit
+		if activeEnd > len(projected) {
+			activeEnd = len(projected)
+		}
+		combined := append([]SessionRow{}, projected[activeStart:activeEnd]...)
+
+		endedOffset := 0
+		if offset > len(projected) {
+			endedOffset = offset - len(projected)
+		}
+		endedLimit := limit - len(combined)
+		var endedTotal int
+		if endedLimit > 0 {
+			ended, legacyTotal, err := querySessionsLegacy(ctx, db, "ended", endedLimit, endedOffset)
+			if err != nil {
+				return nil, 0, err
+			}
+			combined = append(combined, ended...)
+			endedTotal = legacyTotal
+		} else {
+			_, legacyTotal, err := querySessionsLegacy(ctx, db, "ended", 0, 0)
+			if err != nil {
+				return nil, 0, err
+			}
+			endedTotal = legacyTotal
+		}
+		total += endedTotal
 		return combined, total, nil
 	}
 
@@ -141,12 +175,13 @@ func querySessionsLegacy(ctx context.Context, db *sql.DB, status string, limit, 
 
 func querySessionByID(ctx context.Context, db *sql.DB, sessionID string) (*SessionRow, error) {
 	active, err := queryActiveSessions(ctx, db, 0)
-	if err == nil {
-		for _, session := range active {
-			if session.SessionID == sessionID {
-				row := sessionRowFromActiveSession(session)
-				return &row, nil
-			}
+	if err != nil {
+		return nil, err
+	}
+	for _, session := range active {
+		if session.SessionID == sessionID {
+			row := sessionRowFromActiveSession(session)
+			return &row, nil
 		}
 	}
 	hasTable, err := tableExists(ctx, db, "agent_sessions")

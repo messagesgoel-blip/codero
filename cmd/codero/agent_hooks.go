@@ -98,8 +98,9 @@ func buildHeartbeatFragments() heartbeatFragments {
 		`_sd="${TMPDIR:-/tmp}/codero-$_sk"; ` +
 		`fi; ` +
 		`mkdir -p "$_sd" 2>/dev/null || true; chmod 700 "$_sd" 2>/dev/null || true; `
-	repoDetect := `_gw="$PWD"; ` +
-		`git -C "$_gw" rev-parse --is-inside-work-tree >/dev/null 2>&1 || _gw="${CODERO_WORKTREE:-$PWD}"; ` +
+	repoDetect := `_gw="${CODERO_WORKTREE:-$PWD}"; ` +
+		`[ -d "$_gw" ] || _gw="$PWD"; ` +
+		`git -C "$_gw" rev-parse --is-inside-work-tree >/dev/null 2>&1 || _gw="$PWD"; ` +
 		`[ -d "$_gw" ] || _gw="$PWD"; ` +
 		`_cr=$(git -C "$_gw" remote get-url origin 2>/dev/null | sed 's|.*/||;s|\.git$||'); ` +
 		`[ -z "$_cr" ] && _cr=$(git -C "$_gw" rev-parse --show-toplevel 2>/dev/null) && _cr=$(basename "$_cr") || true; ` +

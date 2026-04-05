@@ -171,7 +171,7 @@ func buildRuntimeProjection(
 		Branch:                  canonicalBranch,
 		Worktree:                assignment.Worktree,
 		PRNumber:                prNumber,
-		OwnerAgent:              resolveOwnerAgent(s.AgentID, canonicalBranch),
+		OwnerAgent:              resolveOwnerAgent(s.AgentID),
 		Task:                    task,
 		AttachmentState:         attachmentState,
 		AttributionSource:       attributionSource,

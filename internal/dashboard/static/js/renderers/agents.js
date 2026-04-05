@@ -90,14 +90,14 @@ function _buildAgentProfiles(agents, sessions, trackingConfig) {
     const inferredCount = liveSessions.filter(s => s.attachmentState === 'inferred').length;
     const duplicateCount = liveCount > 1 ? liveCount - 1 : 0;
     const pressure = _profilePressure(roster?.activePressure, liveSessions);
-    const tracked = config ? !config.disabled : roster?.status !== 'disabled';
-    const installed = config ? !!config.installed : true;
+    const tracked = config ? !config.disabled : (roster ? roster.status !== 'disabled' : false);
+    const installed = config ? !!config.installed : false;
     const lastUsed = _latestTimestamp([
       roster?.lastSeen,
       ...liveSessions.map(session => session.lastActivityAt || session.lastHeartbeat || session.startedAt),
     ]);
     const source = config ? 'managed' : 'observed';
-    const status = liveCount > 0 ? 'live' : (roster?.status || (config ? 'idle' : 'observed'));
+    const status = liveCount > 0 ? 'live' : (roster ? roster.status : (config ? 'idle' : 'observed'));
 
     rows.push({
       _id: agentID,

@@ -151,14 +151,7 @@ func (s *SessionRecoveryService) recoverSession(ctx context.Context, session *st
 
 	// Update last seen time to current time to indicate the session is being recovered
 	now := time.Now().UTC()
-	if _, err := s.db.ExecContext(ctx, `
-		UPDATE agent_sessions 
-		SET last_seen_at = ?
-		WHERE session_id = ? AND ended_at IS NULL
-	`, now, session.SessionID); err != nil {
-		return fmt.Errorf("update last seen time: %w", err)
-	}
-	if err := state.MarkSessionRecovered(ctx, state.NewDB(s.db), session.SessionID, now); err != nil {
+	if err := state.MarkSessionRecoveredWithLastSeen(ctx, state.NewDB(s.db), session.SessionID, now, now); err != nil {
 		return fmt.Errorf("mark session recovered: %w", err)
 	}
 

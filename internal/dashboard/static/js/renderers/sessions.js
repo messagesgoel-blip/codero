@@ -74,14 +74,9 @@ export function renderSessions() {
   const assignments = store.select('assignments') || [];
   const archives = store.select('archives') || [];
 
-  const filterVal = (_filter.repo || '').toLowerCase();
   const totalCount = _tab === 'active' ? sessions.length : archives.length;
-  const filteredCount = filterVal
-    ? (_tab === 'active' ? sessions : archives).filter(s =>
-        (s.repo || '').toLowerCase().includes(filterVal) ||
-        (s.branch || '').toLowerCase().includes(filterVal) ||
-        (s.agent || s.ownerAgent || '').toLowerCase().includes(filterVal)).length
-    : totalCount;
+  const filteredCount = (_tab === 'active' ? sessions : archives)
+    .filter(s => _matchesSessionFilter(s, _tab === 'active')).length;
 
   const parts = [
     _renderTabBar(totalCount, filteredCount),
@@ -195,6 +190,22 @@ function _sessionBucket(session) {
   return 'other';
 }
 
+function _matchesSessionFilter(session, includeStatusFilter = true) {
+  const filterVal = (_filter.repo || '').toLowerCase();
+  if (filterVal) {
+    const matchesText =
+      (session.repo || '').toLowerCase().includes(filterVal) ||
+      (session.branch || '').toLowerCase().includes(filterVal) ||
+      (session.agent || session.ownerAgent || '').toLowerCase().includes(filterVal) ||
+      (session.id || '').toLowerCase().includes(filterVal);
+    if (!matchesText) return false;
+  }
+  if (includeStatusFilter && _statusFilter && _sessionBucket(session) !== _statusFilter) {
+    return false;
+  }
+  return true;
+}
+
 function _renderSessionsTable(sessions, assignments) {
   const assignmentsBySession = new Map();
   for (const a of assignments) {
@@ -205,17 +216,7 @@ function _renderSessionsTable(sessions, assignments) {
   }
 
   // Client-side filter: text + status
-  const filterVal = (_filter.repo || '').toLowerCase();
-  let filtered = filterVal
-    ? sessions.filter(s =>
-        (s.repo || '').toLowerCase().includes(filterVal) ||
-        (s.branch || '').toLowerCase().includes(filterVal) ||
-        (s.agent || s.ownerAgent || '').toLowerCase().includes(filterVal) ||
-        (s.id || '').toLowerCase().includes(filterVal))
-    : sessions;
-  if (_statusFilter) {
-    filtered = filtered.filter(s => _sessionBucket(s) === _statusFilter);
-  }
+  let filtered = sessions.filter(s => _matchesSessionFilter(s, true));
   // Attention-first sort
   const statusOrder = { waiting: 0, working: 1, orphaned: 2, idle: 3, other: 4 };
   filtered = [...filtered].sort((a, b) => {
@@ -295,7 +296,8 @@ function _renderSessionsTable(sessions, assignments) {
       key: 'lastIOAt',
       label: 'Last Activity',
       render: r => {
-        const io = r.lastIOAt ? `<span style="display:block">${esc(relativeTime(r.lastIOAt))}</span>` : '<span style="color:var(--fg-muted)">—</span>';
+        const ts = r.lastActivityAt || r.lastIOAt;
+        const io = ts ? `<span style="display:block">${esc(relativeTime(ts))}</span>` : '<span style="color:var(--fg-muted)">—</span>';
         const out = r.outputMb ? `<span style="font-size:0.65rem;color:var(--fg-muted)">out: ${esc(r.outputMb.toFixed(1))} MB</span>` : '';
         const pressure = r.contextPressure && r.contextPressure !== 'normal'
           ? `<span style="font-size:0.65rem;color:var(--warning)">pressure: ${esc(r.contextPressure)}</span>`
@@ -588,13 +590,7 @@ function _bindExpandToggles() {
 // --- History tab --- (remains largely same but updated result chips)
 
 function _renderHistoryTab(archives) {
-  const filterVal = (_filter.repo || '').toLowerCase();
-  const filtered = filterVal
-    ? archives.filter(a =>
-        (a.repo || '').toLowerCase().includes(filterVal) ||
-        (a.branch || '').toLowerCase().includes(filterVal) ||
-        (a.agent || a.ownerAgent || '').toLowerCase().includes(filterVal))
-    : archives;
+  const filtered = archives.filter(a => _matchesSessionFilter(a, false));
 
   return _renderTimingAnalytics(filtered) + _renderHistoryTable(filtered);
 }
