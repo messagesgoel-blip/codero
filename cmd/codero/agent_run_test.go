@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	daemongrpc "github.com/codero/codero/internal/daemon/grpc"
 )
 
 func TestSeedHookScratchState(t *testing.T) {
@@ -60,5 +64,103 @@ func TestParseGitDiffVolume_CountsBinaryChangesOncePerFile(t *testing.T) {
 	const want int64 = 29
 	if got != want {
 		t.Fatalf("parseGitDiffVolume = %d, want %d", got, want)
+	}
+}
+
+func TestCollectGitActivitySnapshot_NoHeadIncludesUntrackedFiles(t *testing.T) {
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("alpha\nbeta\n"), 0o644); err != nil {
+		t.Fatalf("write new.txt: %v", err)
+	}
+
+	statuses, diffSize, err := collectGitActivitySnapshot(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("collectGitActivitySnapshot: %v", err)
+	}
+	if statuses["new.txt"] != "??" {
+		t.Fatalf("status for new.txt = %q, want ??", statuses["new.txt"])
+	}
+	if diffSize != 2 {
+		t.Fatalf("diffSize = %d, want 2", diffSize)
+	}
+}
+
+func TestCollectGitActivitySnapshot_WithHeadIncludesUntrackedFiles(t *testing.T) {
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	runGit(t, dir, "config", "user.name", "Test User")
+	runGit(t, dir, "config", "user.email", "test@example.com")
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("tracked\n"), 0o644); err != nil {
+		t.Fatalf("write tracked.txt: %v", err)
+	}
+	runGit(t, dir, "add", "tracked.txt")
+	runGit(t, dir, "commit", "-m", "initial")
+
+	if err := os.WriteFile(filepath.Join(dir, "fresh.txt"), []byte("one\ntwo\nthree\n"), 0o644); err != nil {
+		t.Fatalf("write fresh.txt: %v", err)
+	}
+
+	statuses, diffSize, err := collectGitActivitySnapshot(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("collectGitActivitySnapshot: %v", err)
+	}
+	if statuses["fresh.txt"] != "??" {
+		t.Fatalf("status for fresh.txt = %q, want ??", statuses["fresh.txt"])
+	}
+	if diffSize != 3 {
+		t.Fatalf("diffSize = %d, want 3", diffSize)
+	}
+}
+
+func TestSendHeartbeatSample_UsesTelemetryHeartbeatWhenCountersExist(t *testing.T) {
+	client := &fakeHeartbeatClient{}
+	tracker := newActivityTracker("")
+	tracker.recordOutput([]byte("hello\nworld\n"))
+	tracker.recordProcEvent()
+
+	if err := sendHeartbeatSample(context.Background(), client, "sess-1", "hb-secret", tracker); err != nil {
+		t.Fatalf("sendHeartbeatSample: %v", err)
+	}
+	if client.heartbeatCalls != 0 {
+		t.Fatalf("heartbeatCalls = %d, want 0", client.heartbeatCalls)
+	}
+	if client.heartbeatWithContextCalls != 1 {
+		t.Fatalf("heartbeatWithContextCalls = %d, want 1", client.heartbeatWithContextCalls)
+	}
+	if !client.lastMarkProgress {
+		t.Fatal("lastMarkProgress = false, want true")
+	}
+	if client.lastContext.RuntimeBytes == 0 || client.lastContext.OutputLines != 2 || client.lastContext.ProcEvents != 1 {
+		t.Fatalf("unexpected heartbeat context: %+v", client.lastContext)
+	}
+}
+
+type fakeHeartbeatClient struct {
+	heartbeatCalls            int
+	heartbeatWithContextCalls int
+	lastMarkProgress          bool
+	lastContext               daemongrpc.HeartbeatContext
+}
+
+func (f *fakeHeartbeatClient) Heartbeat(_ context.Context, _, _ string, markProgress bool) error {
+	f.heartbeatCalls++
+	f.lastMarkProgress = markProgress
+	return nil
+}
+
+func (f *fakeHeartbeatClient) HeartbeatWithContext(_ context.Context, _, _ string, markProgress bool, hctx daemongrpc.HeartbeatContext) error {
+	f.heartbeatWithContextCalls++
+	f.lastMarkProgress = markProgress
+	f.lastContext = hctx
+	return nil
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
 }

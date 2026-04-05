@@ -209,13 +209,65 @@ func collectGitActivitySnapshot(ctx context.Context, root string) (map[string]st
 	}
 	statuses := parseGitStatusSnapshot(statusOut)
 
-	diffCmd := exec.CommandContext(ctx, "git", "-C", root, "diff", "HEAD", "--numstat", "--")
-	diffOut, err := diffCmd.Output()
-	if err != nil {
-		return nil, 0, err
+	return statuses, collectGitDiffVolume(ctx, root, statuses), nil
+}
+
+func collectGitDiffVolume(ctx context.Context, root string, statuses map[string]string) int64 {
+	diffOut, err := gitDiffNumstat(ctx, root, "HEAD", "--numstat", "--")
+	if err == nil {
+		return parseGitDiffVolume(diffOut) + estimateUntrackedDiffVolume(root, statuses)
 	}
 
-	return statuses, parseGitDiffVolume(diffOut), nil
+	// Repos without a HEAD still need best-effort activity from staged, unstaged,
+	// and untracked files instead of flattening to zero.
+	var total int64
+	for _, args := range [][]string{
+		{"--cached", "--numstat", "--root", "--"},
+		{"--numstat", "--"},
+	} {
+		out, diffErr := gitDiffNumstat(ctx, root, args...)
+		if diffErr == nil {
+			total += parseGitDiffVolume(out)
+		}
+	}
+	return total + estimateUntrackedDiffVolume(root, statuses)
+}
+
+func gitDiffNumstat(ctx context.Context, root string, args ...string) ([]byte, error) {
+	cmdArgs := append([]string{"-C", root, "diff"}, args...)
+	return exec.CommandContext(ctx, "git", cmdArgs...).Output()
+}
+
+func estimateUntrackedDiffVolume(root string, statuses map[string]string) int64 {
+	var total int64
+	for path, status := range statuses {
+		if status != "??" {
+			continue
+		}
+		total += estimateFileDiffVolume(filepath.Join(root, path))
+	}
+	return total
+}
+
+func estimateFileDiffVolume(path string) int64 {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 1
+	}
+	if len(data) == 0 {
+		return 1
+	}
+	if bytes.IndexByte(data, 0) >= 0 {
+		return 1
+	}
+	lines := int64(bytes.Count(data, []byte{'\n'}))
+	if data[len(data)-1] != '\n' {
+		lines++
+	}
+	if lines <= 0 {
+		return 1
+	}
+	return lines
 }
 
 func parseGitStatusSnapshot(out []byte) map[string]string {
@@ -478,6 +530,9 @@ func runAgentWithTracking(ctx context.Context, agentID, mode, taskID, repoOverri
 	// Run child process
 	exitCode := runChild(binaryPath, binaryArgs, sessionID, agentID, daemonAddr, tracker, tailFile)
 
+	flushCtx, flushCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	_ = sendHeartbeatSample(flushCtx, client, sessionID, secret, tracker)
+	flushCancel()
 	hbCancel()
 	status := "completed"
 	substatus := "terminal_finished"
@@ -510,6 +565,28 @@ func (e exitCodeError) Error() string { return fmt.Sprintf("child exited with co
 // that one silent interval is enough to flip to heartbeat-only mode.
 const progressWindow = 60 * time.Second
 
+type heartbeatClient interface {
+	Heartbeat(ctx context.Context, sessionID, heartbeatSecret string, markProgress bool) error
+	HeartbeatWithContext(ctx context.Context, sessionID, heartbeatSecret string, markProgress bool, hctx daemongrpc.HeartbeatContext) error
+}
+
+func sendHeartbeatSample(ctx context.Context, client heartbeatClient, sessionID, secret string, tracker *activityTracker) error {
+	markProgress := tracker.hasRecentActivity(progressWindow)
+	sampleCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	snap := tracker.snapshot(sampleCtx)
+	cancel()
+	if snap.isZero() {
+		return client.Heartbeat(ctx, sessionID, secret, markProgress)
+	}
+	return client.HeartbeatWithContext(ctx, sessionID, secret, markProgress, daemongrpc.HeartbeatContext{
+		RuntimeBytes: snap.RuntimeBytes,
+		OutputLines:  snap.OutputLines,
+		FileWrites:   snap.FileWrites,
+		DiffChanges:  snap.DiffChanges,
+		ProcEvents:   snap.ProcEvents,
+	})
+}
+
 // heartbeatLoop sends heartbeats every 30s until the context is cancelled.
 // markProgress is true only when the child produced recent I/O output.
 func heartbeatLoop(ctx context.Context, client *daemongrpc.SessionClient, sessionID, secret string, tracker *activityTracker) {
@@ -520,21 +597,7 @@ func heartbeatLoop(ctx context.Context, client *daemongrpc.SessionClient, sessio
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			markProgress := tracker.hasRecentActivity(progressWindow)
-			sampleCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			snap := tracker.snapshot(sampleCtx)
-			cancel()
-			if snap.isZero() {
-				_ = client.Heartbeat(ctx, sessionID, secret, markProgress)
-				continue
-			}
-			_ = client.HeartbeatWithContext(ctx, sessionID, secret, markProgress, daemongrpc.HeartbeatContext{
-				RuntimeBytes: snap.RuntimeBytes,
-				OutputLines:  snap.OutputLines,
-				FileWrites:   snap.FileWrites,
-				DiffChanges:  snap.DiffChanges,
-				ProcEvents:   snap.ProcEvents,
-			})
+			_ = sendHeartbeatSample(ctx, client, sessionID, secret, tracker)
 		}
 	}
 }
