@@ -310,6 +310,9 @@ func TestBuildHeartbeatFragments(t *testing.T) {
 	if f.ScratchInit == "" {
 		t.Error("ScratchInit is empty")
 	}
+	if !strings.Contains(f.ScratchInit, `CODERO_HOOK_SCRATCH_DIR`) {
+		t.Error("ScratchInit should prefer CODERO_HOOK_SCRATCH_DIR when available")
+	}
 	if strings.Contains(f.ScratchInit, `CODERO_SESSION_ID:-unknown`) {
 		t.Error("ScratchInit should not fall back to a shared 'unknown' scratch key")
 	}

@@ -86,13 +86,17 @@ type heartbeatFragments struct {
 }
 
 func buildHeartbeatFragments() heartbeatFragments {
-	scratchInit := `_sk="${CODERO_SESSION_ID:-}"; ` +
+	scratchInit := `_sd="${CODERO_HOOK_SCRATCH_DIR:-}"; ` +
+		`if [ -z "$_sd" ]; then ` +
+		`_sk="${CODERO_SESSION_ID:-}"; ` +
 		`if [ -z "$_sk" ]; then ` +
 		`_tty=$(tty 2>/dev/null || echo notty); ` +
 		`_tty=$(printf '%s' "$_tty" | tr -c '[:alnum:]' '_'); ` +
 		`_sk="${CODERO_AGENT_ID:-unknown}-ppid${PPID:-0}-$_tty"; ` +
 		`fi; ` +
+		`_sk=$(printf '%s' "$_sk" | tr -c '[:alnum:]' '_'); ` +
 		`_sd="${TMPDIR:-/tmp}/codero-$_sk"; ` +
+		`fi; ` +
 		`mkdir -p "$_sd" 2>/dev/null || true; chmod 700 "$_sd" 2>/dev/null || true; `
 	repoDetect := `_gw="${CODERO_WORKTREE:-$PWD}"; ` +
 		`[ -d "$_gw" ] || _gw="$PWD"; ` +

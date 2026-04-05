@@ -53,6 +53,20 @@ func TestSeedHookScratchState(t *testing.T) {
 	}
 }
 
+func TestHookScratchDirSanitizesSessionID(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("TMPDIR", tmpDir)
+
+	sessionID := "../slashy/session"
+	dir := hookScratchDir(sessionID)
+	if !strings.HasPrefix(dir, tmpDir+string(os.PathSeparator)) {
+		t.Fatalf("hookScratchDir(%q) escaped temp dir: %q", sessionID, dir)
+	}
+	if strings.Contains(dir, "..") || strings.Contains(dir, "slashy") || strings.Contains(dir, "session") {
+		t.Fatalf("hookScratchDir(%q) leaked raw session content in %q", sessionID, dir)
+	}
+}
+
 func TestParseGitDiffVolume_CountsBinaryChangesOncePerFile(t *testing.T) {
 	out := []byte(strings.Join([]string{
 		"10\t5\ttext.txt",
@@ -169,7 +183,7 @@ func TestSendHeartbeatSample_UsesTelemetryHeartbeatWhenCountersExist(t *testing.
 	if !client.lastMarkProgress {
 		t.Fatal("lastMarkProgress = false, want true")
 	}
-	if client.lastContext.RuntimeBytes == 0 || client.lastContext.OutputLines != 2 || client.lastContext.ProcEvents != 1 {
+	if client.lastContext.RuntimeBytes == 0 || client.lastContext.OutputBytes == 0 || client.lastContext.OutputLines != 2 || client.lastContext.ProcEvents != 1 {
 		t.Fatalf("unexpected heartbeat context: %+v", client.lastContext)
 	}
 }

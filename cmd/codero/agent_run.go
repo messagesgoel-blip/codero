@@ -4,6 +4,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -44,8 +46,13 @@ func tailPath(sessionID string) string {
 	return p
 }
 
+func hookScratchKey(sessionID string) string {
+	sum := sha256.Sum256([]byte(sessionID))
+	return hex.EncodeToString(sum[:16])
+}
+
 func hookScratchDir(sessionID string) string {
-	return filepath.Join(os.TempDir(), "codero-"+sessionID)
+	return filepath.Join(os.TempDir(), "codero-"+hookScratchKey(sessionID))
 }
 
 func seedHookScratchState(sessionID, secret string) error {
@@ -53,15 +60,26 @@ func seedHookScratchState(sessionID, secret string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("ensure hook scratch dir: %w", err)
 	}
-	if err := os.Chmod(dir, 0o700); err != nil {
-		return fmt.Errorf("chmod hook scratch dir: %w", err)
+	rollback := func(prefix string, err error) error {
+		if cleanupErr := os.RemoveAll(dir); cleanupErr != nil {
+			return fmt.Errorf("%s: %w (cleanup: %v)", prefix, err, cleanupErr)
+		}
+		return fmt.Errorf("%s: %w", prefix, err)
 	}
-	for name, value := range map[string]string{
-		"session-id": sessionID,
-		"secret":     secret,
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return rollback("chmod hook scratch dir", err)
+	}
+	for _, entry := range []struct {
+		name  string
+		value string
+	}{
+		{name: "session-id", value: sessionID},
+		{name: "secret", value: secret},
 	} {
+		name := entry.name
+		value := entry.value
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(value), 0o600); err != nil {
-			return fmt.Errorf("write hook scratch %s: %w", name, err)
+			return rollback(fmt.Sprintf("write hook scratch %s", name), err)
 		}
 	}
 	return nil
@@ -69,6 +87,7 @@ func seedHookScratchState(sessionID, secret string) error {
 
 type activitySnapshot struct {
 	RuntimeBytes int64
+	OutputBytes  int64
 	OutputLines  int64
 	FileWrites   int64
 	DiffChanges  int64
@@ -77,6 +96,7 @@ type activitySnapshot struct {
 
 func (s activitySnapshot) isZero() bool {
 	return s.RuntimeBytes <= 0 &&
+		s.OutputBytes <= 0 &&
 		s.OutputLines <= 0 &&
 		s.FileWrites <= 0 &&
 		s.DiffChanges <= 0 &&
@@ -88,6 +108,7 @@ func (s activitySnapshot) isZero() bool {
 type activityTracker struct {
 	lastActivity atomic.Int64 // unix timestamp of last I/O
 	runtimeBytes atomic.Int64
+	outputBytes  atomic.Int64
 	outputLines  atomic.Int64
 	procEvents   atomic.Int64
 	worktree     *worktreeActivityTracker
@@ -114,6 +135,7 @@ func (t *activityTracker) recordOutput(p []byte) {
 	}
 	t.lastActivity.Store(time.Now().Unix())
 	t.runtimeBytes.Add(int64(len(p)))
+	t.outputBytes.Add(int64(len(p)))
 	t.outputLines.Add(int64(bytes.Count(p, []byte{'\n'})))
 }
 
@@ -130,6 +152,7 @@ func (t *activityTracker) hasRecentActivity(window time.Duration) bool {
 func (t *activityTracker) snapshot(ctx context.Context) activitySnapshot {
 	snap := activitySnapshot{
 		RuntimeBytes: t.runtimeBytes.Load(),
+		OutputBytes:  t.outputBytes.Load(),
 		OutputLines:  t.outputLines.Load(),
 		ProcEvents:   t.procEvents.Load(),
 	}
@@ -195,15 +218,13 @@ func detectGitRoot(worktree string) string {
 }
 
 func (t *worktreeActivityTracker) snapshot(ctx context.Context) (int64, int64) {
-	statuses, diffSize, err := collectGitActivitySnapshot(ctx, t.root)
-	if err != nil {
-		t.mu.Lock()
-		defer t.mu.Unlock()
-		return t.fileWrites, t.diffChanges
-	}
-
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	statuses, diffSize, err := collectGitActivitySnapshot(ctx, t.root)
+	if err != nil {
+		return t.fileWrites, t.diffChanges
+	}
 
 	if !t.initialized {
 		t.initialized = true
@@ -656,6 +677,7 @@ func sendHeartbeatSample(ctx context.Context, client heartbeatClient, sessionID,
 	}
 	return client.HeartbeatWithContext(ctx, sessionID, secret, markProgress, daemongrpc.HeartbeatContext{
 		RuntimeBytes: snap.RuntimeBytes,
+		OutputBytes:  snap.OutputBytes,
 		OutputLines:  snap.OutputLines,
 		FileWrites:   snap.FileWrites,
 		DiffChanges:  snap.DiffChanges,
@@ -707,6 +729,7 @@ func runChild(binaryPath string, args []string, sessionID, agentID, daemonAddr s
 		"CODERO_SESSION_ID="+sessionID,
 		"CODERO_AGENT_ID="+agentID,
 		"CODERO_DAEMON_ADDR="+daemonAddr,
+		"CODERO_HOOK_SCRATCH_DIR="+hookScratchDir(sessionID),
 		"CODERO_WORKTREE="+resolveFallbackWorktree(),
 	)
 
