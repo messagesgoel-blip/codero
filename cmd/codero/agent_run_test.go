@@ -67,6 +67,44 @@ func TestParseGitDiffVolume_CountsBinaryChangesOncePerFile(t *testing.T) {
 	}
 }
 
+func TestEstimateFileDiffVolume_SpecialFilesReturnOne(t *testing.T) {
+	dir := t.TempDir()
+	subdir := filepath.Join(dir, "subdir")
+	if err := os.Mkdir(subdir, 0o755); err != nil {
+		t.Fatalf("mkdir subdir: %v", err)
+	}
+	if got := estimateFileDiffVolume(subdir); got != 1 {
+		t.Fatalf("estimateFileDiffVolume(dir) = %d, want 1", got)
+	}
+
+	target := filepath.Join(dir, "target.txt")
+	if err := os.WriteFile(target, []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	link := filepath.Join(dir, "link.txt")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	if got := estimateFileDiffVolume(link); got != 1 {
+		t.Fatalf("estimateFileDiffVolume(symlink) = %d, want 1", got)
+	}
+}
+
+func TestEstimateFileDiffVolume_CapsLargeFiles(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "large.txt")
+	var builder strings.Builder
+	for i := 0; i < maxEstimatedDiffLines+50; i++ {
+		builder.WriteString("line\n")
+	}
+	if err := os.WriteFile(path, []byte(builder.String()), 0o644); err != nil {
+		t.Fatalf("write large.txt: %v", err)
+	}
+	if got := estimateFileDiffVolume(path); got != maxEstimatedDiffLines {
+		t.Fatalf("estimateFileDiffVolume(large) = %d, want %d", got, maxEstimatedDiffLines)
+	}
+}
+
 func TestCollectGitActivitySnapshot_NoHeadIncludesUntrackedFiles(t *testing.T) {
 	dir := t.TempDir()
 	runGit(t, dir, "init")

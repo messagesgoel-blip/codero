@@ -274,23 +274,67 @@ func estimateUntrackedDiffVolume(root string, statuses map[string]string) int64 
 	return total
 }
 
+const (
+	maxEstimatedDiffBytes = 256 * 1024
+	maxEstimatedDiffLines = 10_000
+)
+
 func estimateFileDiffVolume(path string) int64 {
-	data, err := os.ReadFile(path)
+	info, err := os.Lstat(path)
 	if err != nil {
 		return 1
 	}
-	if len(data) == 0 {
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
 		return 1
 	}
-	if bytes.IndexByte(data, 0) >= 0 {
+
+	file, err := os.Open(path)
+	if err != nil {
 		return 1
 	}
-	lines := int64(bytes.Count(data, []byte{'\n'}))
-	if data[len(data)-1] != '\n' {
+	defer file.Close()
+
+	reader := io.LimitReader(file, maxEstimatedDiffBytes)
+	buf := make([]byte, 32*1024)
+	var (
+		lines   int64
+		last    byte
+		sawData bool
+	)
+
+	for {
+		n, readErr := reader.Read(buf)
+		if n > 0 {
+			chunk := buf[:n]
+			sawData = true
+			if bytes.IndexByte(chunk, 0) >= 0 {
+				return 1
+			}
+			lines += int64(bytes.Count(chunk, []byte{'\n'}))
+			if lines >= maxEstimatedDiffLines {
+				return maxEstimatedDiffLines
+			}
+			last = chunk[n-1]
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return 1
+		}
+	}
+
+	if !sawData {
+		return 1
+	}
+	if last != '\n' {
 		lines++
 	}
 	if lines <= 0 {
 		return 1
+	}
+	if lines > maxEstimatedDiffLines {
+		return maxEstimatedDiffLines
 	}
 	return lines
 }
@@ -542,6 +586,13 @@ func runAgentWithTracking(ctx context.Context, agentID, mode, taskID, repoOverri
 	}
 	if err := seedHookScratchState(sessionID, secret); err != nil {
 		fmt.Fprintf(os.Stderr, "codero: hook scratch seed failed: %v\n", err)
+	} else {
+		scratchDir := hookScratchDir(sessionID)
+		defer func() {
+			if err := os.RemoveAll(scratchDir); err != nil {
+				fmt.Fprintf(os.Stderr, "codero: hook scratch cleanup failed: %v\n", err)
+			}
+		}()
 	}
 
 	// Activity tracker — heartbeat marks progress only when the child produces output.
