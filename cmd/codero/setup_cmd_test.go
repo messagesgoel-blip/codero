@@ -247,7 +247,7 @@ func TestWriteUserConfig_ForcePreservesExistingMetadata(t *testing.T) {
 		t.Fatalf("save existing user config: %v", err)
 	}
 
-	result, err := writeUserConfig("127.0.0.1:8110", true)
+	result, err := writeUserConfig("127.0.0.1:8111", true)
 	if err != nil {
 		t.Fatalf("writeUserConfig force: %v", err)
 	}
@@ -259,8 +259,8 @@ func TestWriteUserConfig_ForcePreservesExistingMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load rewritten user config: %v", err)
 	}
-	if uc.DaemonAddr != "127.0.0.1:8110" {
-		t.Fatalf("daemon_addr = %q, want %q", uc.DaemonAddr, "127.0.0.1:8110")
+	if uc.DaemonAddr != "127.0.0.1:8111" {
+		t.Fatalf("daemon_addr = %q, want %q", uc.DaemonAddr, "127.0.0.1:8111")
 	}
 	if !reflect.DeepEqual(uc.Wrappers, existing.Wrappers) {
 		t.Fatalf("wrappers not preserved: got %#v want %#v", uc.Wrappers, existing.Wrappers)
@@ -291,4 +291,20 @@ func firstLine(s string) string {
 		return s[:idx]
 	}
 	return s
+}
+
+func TestFindRealBinary_KiloCodePrefersKiloAlias(t *testing.T) {
+	shimDir := t.TempDir()
+	binDir := t.TempDir()
+	realBin := filepath.Join(binDir, "kilo")
+	if err := os.WriteFile(realBin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("create fake binary: %v", err)
+	}
+
+	t.Setenv("PATH", binDir)
+
+	got := findRealBinary("kilocode", shimDir)
+	if got != realBin {
+		t.Fatalf("findRealBinary(kilocode)=%q, want %q", got, realBin)
+	}
 }

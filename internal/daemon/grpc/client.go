@@ -29,7 +29,7 @@ type SessionClient struct {
 	client daemonv1.SessionServiceClient
 }
 
-// NewSessionClient connects to the daemon at addr (e.g. "127.0.0.1:8110").
+// NewSessionClient connects to the daemon at addr (e.g. "127.0.0.1:8111").
 func NewSessionClient(addr string) (*SessionClient, error) {
 	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -196,7 +196,13 @@ type HeartbeatContext struct {
 	InferredStatus  string
 	Repo            string
 	Branch          string
+	RuntimeBytes    int64
 	OutputBytes     int64
+	OutputLines     int64
+	ToolCalls       int64
+	FileWrites      int64
+	DiffChanges     int64
+	ProcEvents      int64
 	ContextPressure string // "normal", "warning", "critical"
 	CompactIncr     bool   // if true, increments compact_count by 1
 }
@@ -219,6 +225,24 @@ func (c *SessionClient) HeartbeatWithContext(ctx context.Context, sessionID, hea
 	}
 	if hctx.OutputBytes > 0 {
 		ctx = metadata.AppendToOutgoingContext(ctx, "x-output-bytes", strconv.FormatInt(hctx.OutputBytes, 10))
+	}
+	if hctx.RuntimeBytes > 0 {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-runtime-bytes", strconv.FormatInt(hctx.RuntimeBytes, 10))
+	}
+	if hctx.OutputLines > 0 {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-output-lines", strconv.FormatInt(hctx.OutputLines, 10))
+	}
+	if hctx.ToolCalls > 0 {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-tool-calls", strconv.FormatInt(hctx.ToolCalls, 10))
+	}
+	if hctx.FileWrites > 0 {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-file-writes", strconv.FormatInt(hctx.FileWrites, 10))
+	}
+	if hctx.DiffChanges > 0 {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-diff-changes", strconv.FormatInt(hctx.DiffChanges, 10))
+	}
+	if hctx.ProcEvents > 0 {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-proc-events", strconv.FormatInt(hctx.ProcEvents, 10))
 	}
 	if hctx.ContextPressure != "" {
 		ctx = metadata.AppendToOutgoingContext(ctx, "x-context-pressure", hctx.ContextPressure)

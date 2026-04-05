@@ -1094,7 +1094,13 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 		inferredStatus  string
 		repo            string
 		branch          string
+		runtimeBytes    int64
 		outputBytes     int64
+		outputLines     int64
+		toolCalls       int64
+		fileWrites      int64
+		diffChanges     int64
+		procEvents      int64
 		contextPressure string
 		compactIncr     bool
 	)
@@ -1125,6 +1131,24 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 			if outputBytes < 0 {
 				return fmt.Errorf("--output-bytes cannot be negative")
 			}
+			if runtimeBytes < 0 {
+				return fmt.Errorf("--runtime-bytes cannot be negative")
+			}
+			if outputLines < 0 {
+				return fmt.Errorf("--output-lines cannot be negative")
+			}
+			if toolCalls < 0 {
+				return fmt.Errorf("--tool-calls cannot be negative")
+			}
+			if fileWrites < 0 {
+				return fmt.Errorf("--file-writes cannot be negative")
+			}
+			if diffChanges < 0 {
+				return fmt.Errorf("--diff-changes cannot be negative")
+			}
+			if procEvents < 0 {
+				return fmt.Errorf("--proc-events cannot be negative")
+			}
 
 			// Normalize and validate context-pressure before transport selection
 			// so typos fail fast on both gRPC and direct-DB paths.
@@ -1139,7 +1163,10 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 				}
 			}
 
-			hasContext := repo != "" || branch != "" || normalizedStatus != "" || outputBytes > 0 || normalizedPressure != "" || compactIncr
+			hasContext := repo != "" || branch != "" || normalizedStatus != "" ||
+				runtimeBytes > 0 || outputBytes > 0 || outputLines > 0 || toolCalls > 0 ||
+				fileWrites > 0 || diffChanges > 0 || procEvents > 0 ||
+				normalizedPressure != "" || compactIncr
 
 			if daemonAddr := resolveDaemonAddr(cmd); daemonAddr != "" {
 				client, err := daemongrpc.NewSessionClient(daemonAddr)
@@ -1152,7 +1179,13 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 						InferredStatus:  normalizedStatus,
 						Repo:            repo,
 						Branch:          branch,
+						RuntimeBytes:    runtimeBytes,
 						OutputBytes:     outputBytes,
+						OutputLines:     outputLines,
+						ToolCalls:       toolCalls,
+						FileWrites:      fileWrites,
+						DiffChanges:     diffChanges,
+						ProcEvents:      procEvents,
 						ContextPressure: normalizedPressure,
 						CompactIncr:     compactIncr,
 					}
@@ -1194,7 +1227,18 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 				if err := state.UpdateSessionOutputBytes(cmd.Context(), store.DB(), sessionID, outputBytes); err != nil {
 					loglib.Warn("heartbeat: output bytes update failed", "error", err)
 				}
-				if err := state.RecordActivitySample(cmd.Context(), store.DB(), sessionID, outputBytes); err != nil {
+			}
+			counters := state.ActivityCounters{
+				RuntimeBytes: runtimeBytes,
+				OutputBytes:  outputBytes,
+				OutputLines:  outputLines,
+				ToolCalls:    toolCalls,
+				FileWrites:   fileWrites,
+				DiffChanges:  diffChanges,
+				ProcEvents:   procEvents,
+			}
+			if !counters.IsZero() {
+				if err := state.RecordActivitySample(cmd.Context(), store.DB(), sessionID, counters); err != nil {
 					loglib.Warn("heartbeat: activity sample failed", "error", err)
 				}
 			}
@@ -1218,7 +1262,13 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&inferredStatus, "status", "", "agent status: working, waiting_for_input, idle, unknown")
 	cmd.Flags().StringVar(&repo, "repo", "", "repository name the agent is working in")
 	cmd.Flags().StringVar(&branch, "branch", "", "branch name the agent is working on")
+	cmd.Flags().Int64Var(&runtimeBytes, "runtime-bytes", 0, "cumulative PTY/stdout bytes observed by the wrapper")
 	cmd.Flags().Int64Var(&outputBytes, "output-bytes", 0, "cumulative output bytes for the session")
+	cmd.Flags().Int64Var(&outputLines, "output-lines", 0, "cumulative PTY/stdout line count for the session")
+	cmd.Flags().Int64Var(&toolCalls, "tool-calls", 0, "cumulative native tool-call count for the session")
+	cmd.Flags().Int64Var(&fileWrites, "file-writes", 0, "cumulative worktree file-write events for the session")
+	cmd.Flags().Int64Var(&diffChanges, "diff-changes", 0, "cumulative git diff change volume for the session")
+	cmd.Flags().Int64Var(&procEvents, "proc-events", 0, "cumulative subprocess lifecycle events for the session")
 	cmd.Flags().StringVar(&contextPressure, "context-pressure", "", "context pressure level: normal, warning, critical")
 	cmd.Flags().BoolVar(&compactIncr, "compact", false, "increment compact count by 1 (context was compacted)")
 

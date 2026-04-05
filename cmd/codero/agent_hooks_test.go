@@ -134,6 +134,48 @@ func TestInstallClaudeHooks_PreservesOtherKeys(t *testing.T) {
 	}
 }
 
+func TestInstallMergedJSONConfig_DeepMergesHooksObject(t *testing.T) {
+	dir := t.TempDir()
+	settingsPath := filepath.Join(dir, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	existing := map[string]interface{}{
+		"hooks": map[string]interface{}{
+			"Stop": []interface{}{"keep-me"},
+		},
+		"theme": "dark",
+	}
+	data, _ := json.MarshalIndent(existing, "", "  ")
+	if err := os.WriteFile(settingsPath, data, 0o644); err != nil {
+		t.Fatalf("write existing settings: %v", err)
+	}
+
+	if _, err := installMergedJSONConfig(settingsPath, generateClaudeHooks(), false, false); err != nil {
+		t.Fatalf("installMergedJSONConfig: %v", err)
+	}
+
+	result, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings after install: %v", err)
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal(result, &got); err != nil {
+		t.Fatalf("parse settings: %v", err)
+	}
+	hooksMap, ok := got["hooks"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("hooks section missing or wrong type: %T", got["hooks"])
+	}
+	if _, ok := hooksMap["Stop"]; !ok {
+		t.Fatal("existing nested hooks entry was replaced instead of preserved")
+	}
+	if _, ok := hooksMap["PreToolUse"]; !ok {
+		t.Fatal("new nested hooks entry missing after merge")
+	}
+}
+
 // TestInstallClaudeHooks_CreatesDir verifies that installClaudeHooks creates
 // the parent directory (e.g. ~/.claude/) if it does not already exist.
 func TestInstallClaudeHooks_CreatesDir(t *testing.T) {
@@ -265,14 +307,35 @@ func TestAgentHooksCmd_PersistsHookMetadata(t *testing.T) {
 // TestBuildHeartbeatFragments verifies the shared fragments are non-empty.
 func TestBuildHeartbeatFragments(t *testing.T) {
 	f := buildHeartbeatFragments()
+	if f.ScratchInit == "" {
+		t.Error("ScratchInit is empty")
+	}
+	if !strings.Contains(f.ScratchInit, `CODERO_HOOK_SCRATCH_DIR`) {
+		t.Error("ScratchInit should prefer CODERO_HOOK_SCRATCH_DIR when available")
+	}
+	if strings.Contains(f.ScratchInit, `CODERO_SESSION_ID:-unknown`) {
+		t.Error("ScratchInit should not fall back to a shared 'unknown' scratch key")
+	}
+	if !strings.Contains(f.ScratchInit, `PPID`) {
+		t.Error("ScratchInit should include a per-process fallback key")
+	}
 	if f.RepoDetect == "" {
 		t.Error("RepoDetect is empty")
+	}
+	if !strings.Contains(f.RepoDetect, `CODERO_WORKTREE`) {
+		t.Error("RepoDetect should prefer CODERO_WORKTREE when available")
 	}
 	if f.OutputTrack == "" {
 		t.Error("OutputTrack is empty")
 	}
+	if f.ToolTrack == "" {
+		t.Error("ToolTrack is empty")
+	}
 	if f.PostToolAccum == "" {
 		t.Error("PostToolAccum is empty")
+	}
+	if f.PreToolCount == "" {
+		t.Error("PreToolCount is empty")
 	}
 	if f.AutoRecover == "" {
 		t.Error("AutoRecover is empty")
@@ -283,20 +346,23 @@ func TestBuildHeartbeatFragments(t *testing.T) {
 func TestAssembleHeartbeat(t *testing.T) {
 	f := buildHeartbeatFragments()
 
-	working := assembleHeartbeat(f, "working", false)
+	working := assembleHeartbeat(f, "working", false, true)
 	if !strings.Contains(working, "--status=working") {
 		t.Error("working heartbeat missing --status=working")
 	}
 	if strings.Contains(working, "wc -c") {
 		t.Error("non-accum heartbeat should not contain wc -c")
 	}
+	if !strings.Contains(working, "--tool-calls=") {
+		t.Error("working heartbeat missing --tool-calls")
+	}
 
-	workingPost := assembleHeartbeat(f, "working", true)
+	workingPost := assembleHeartbeat(f, "working", true, false)
 	if !strings.Contains(workingPost, "wc -c") {
 		t.Error("accum heartbeat should contain wc -c for byte counting")
 	}
 
-	waiting := assembleHeartbeat(f, "waiting_for_input", false)
+	waiting := assembleHeartbeat(f, "waiting_for_input", false, false)
 	if !strings.Contains(waiting, "--status=waiting_for_input") {
 		t.Error("waiting heartbeat missing --status=waiting_for_input")
 	}

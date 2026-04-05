@@ -38,7 +38,7 @@ exec codero agent run --agent-id claude -- "` + realBin + `" "$@"
 
 	uc := &UserConfig{
 		Version:    1,
-		DaemonAddr: "127.0.0.1:8110",
+		DaemonAddr: "127.0.0.1:8111",
 		Wrappers: map[string]WrapperConfig{
 			"claude": {
 				AgentKind:         AgentKindClaude,
@@ -147,7 +147,7 @@ exec codero agent run --agent-id codex -- "` + realBin + `" "$@"
 
 	uc := &UserConfig{
 		Version:    1,
-		DaemonAddr: "127.0.0.1:8110",
+		DaemonAddr: "127.0.0.1:8111",
 		Registry: AgentRegistry{
 			LastScan: time.Now().UTC().Add(-48 * time.Hour),
 		},
@@ -369,6 +369,8 @@ func TestInferAgentKind(t *testing.T) {
 		{name: "profile prefix", agentID: "claude-pro", want: AgentKindClaude},
 		{name: "binary basename", realBinary: "/usr/local/bin/copilot", want: AgentKindCopilot},
 		{name: "exact kind", agentID: "gemini", want: AgentKindGemini},
+		{name: "kilo alias", realBinary: "/usr/local/bin/kilo", want: AgentKindKiloCode},
+		{name: "kilo prefix", agentID: "kilo-worker", want: AgentKindKiloCode},
 		{name: "unknown", agentID: "custom-agent", want: ""},
 	}
 
