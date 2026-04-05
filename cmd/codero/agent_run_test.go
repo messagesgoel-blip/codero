@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -45,5 +46,19 @@ func TestSeedHookScratchState(t *testing.T) {
 		if got := fileInfo.Mode().Perm(); got != 0o600 {
 			t.Fatalf("%s perms = %o, want 600", name, got)
 		}
+	}
+}
+
+func TestParseGitDiffVolume_CountsBinaryChangesOncePerFile(t *testing.T) {
+	out := []byte(strings.Join([]string{
+		"10\t5\ttext.txt",
+		"-\t-\tbinary.dat",
+		"-\t12\tmixed.bin",
+	}, "\n"))
+
+	got := parseGitDiffVolume(out)
+	const want int64 = 29
+	if got != want {
+		t.Fatalf("parseGitDiffVolume = %d, want %d", got, want)
 	}
 }

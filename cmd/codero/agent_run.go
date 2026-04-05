@@ -236,7 +236,8 @@ func parseGitStatusSnapshot(out []byte) map[string]string {
 }
 
 func parseGitDiffVolume(out []byte) int64 {
-	var total int64
+	var totalLines int64
+	var fileCount int64
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -246,18 +247,22 @@ func parseGitDiffVolume(out []byte) int64 {
 		if len(parts) < 2 {
 			continue
 		}
+		binaryChange := false
 		for _, part := range parts[:2] {
 			if part == "-" {
-				total++
+				binaryChange = true
 				continue
 			}
 			n, err := strconv.ParseInt(part, 10, 64)
 			if err == nil && n > 0 {
-				total += n
+				totalLines += n
 			}
 		}
+		if binaryChange {
+			fileCount++
+		}
 	}
-	return total
+	return totalLines + fileCount
 }
 
 func statusDeltaCount(prev, next map[string]string) int64 {
@@ -629,14 +634,14 @@ func runChildPTY(child *exec.Cmd, tracker *activityTracker, tailFile *os.File) i
 	signal.Stop(winchCh)
 	close(winchCh)
 
-	if err := child.Wait(); err != nil {
-		tracker.recordProcEvent()
+	err = child.Wait()
+	tracker.recordProcEvent()
+	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return exitErr.ExitCode()
 		}
 		// PTY EOF before Wait is normal; ignore.
 	}
-	tracker.recordProcEvent()
 	return 0
 }
 
