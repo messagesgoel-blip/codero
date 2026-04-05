@@ -1,11 +1,11 @@
-// agents.js — Agents page renderer: open agents, available agents, and env var tracking.
+// agents.js — Agents page renderer: profile inventory, aliases, setup, and runtime summary.
 
 import store from '../store.js';
 import { loadAgents, loadSessions, loadTrackingConfig, toggleAgentTracking, updateAgentEnvVars } from '../api.js';
 import {
-  esc, html, statusChip, relativeTime, formatDuration, setHtml, $,
+  esc, statusChip, relativeTime, setHtml, $,
 } from '../utils.js';
-import { dataTable, glassCard, skeleton, showModal, toast } from '../components.js';
+import { dataTable, glassCard, metricCard, skeleton, showModal, toast } from '../components.js';
 
 // --- Internal state ---
 let _initialized = false;
@@ -40,11 +40,12 @@ export function renderAgents() {
   const agents = store.select('agents') || [];
   const sessions = store.select('sessions') || [];
   const trackingConfig = store.select('trackingConfig');
+  const profiles = _buildAgentProfiles(agents, sessions, trackingConfig);
 
   const parts = [
-    _renderOpenAgents(sessions),
+    _renderProfileSummary(profiles, sessions),
     '<div style="height:16px"></div>',
-    _renderAvailableAgents(agents, sessions, trackingConfig)
+    _renderAgentProfiles(profiles),
   ];
   setHtml(container, parts.join(''));
 
@@ -52,155 +53,208 @@ export function renderAgents() {
   _bindEnvVarButtons(trackingConfig);
 }
 
-// --- Private renderers ---
+function _buildAgentProfiles(agents, sessions, trackingConfig) {
+  const rosterByID = new Map((agents || []).map(agent => [agent.agentId, agent]));
+  const configAgents = (trackingConfig && trackingConfig.agents) || [];
+  const configByID = new Map(configAgents.map(agent => [agent.agent_id, agent]));
+  const liveSessionsByID = new Map();
 
-function _renderOpenAgents(sessions) {
-  // Only active sessions
-  const activeSessions = sessions.filter(s => s.status === 'active' || !s.endedAt);
-  
-  const columns = [
-    { key: 'agentId', label: 'Agent', render: r => {
-        const agent = esc(r.agentId || r.ownerAgent || '—');
-        const family = r.family ? `<span class="mode-badge" style="margin-left:6px">${esc(r.family)}</span>` : '';
-        return `${agent}${family}`;
-      }
-    },
-    { key: 'repo', label: 'Repo / Branch / Task', render: r => {
-        const repo = esc(r.repo || '—');
-        const branch = esc(r.branch || '');
-        const pr = r.prNumber ? ` <a href="https://github.com/${repo}/pull/${r.prNumber}" target="_blank" class="pr-link">#${r.prNumber}</a>` : '';
-        const task = r.task && r.task.id ? `<div style="margin-top:4px;color:var(--fg-muted);font-size:11px">${esc(r.task.id)}</div>` : '';
-        return `${branch ? `${repo} / <code>${branch}</code>${pr}` : repo}${task}`;
-      }
-    },
-    { key: 'runtime', label: 'Runtime', render: r => {
-        const mode = r.mode ? `<span class="mode-badge">${esc(r.mode)}</span>` : '';
-        const launch = r.launchMode ? `<span class="mode-badge" style="margin-left:4px">${esc(r.launchMode)}</span>` : '';
-        const lifecycle = statusChip(r.lifecycleState || 'unknown');
-        const attachment = statusChip(r.attachmentState || 'unknown');
-        return `${mode}${launch}<div style="margin-top:6px">${lifecycle} ${attachment}</div>`;
-      }
-    },
-    { key: 'activity', label: 'Activity', render: r => {
-        const activity = statusChip(r.activityState || 'unknown');
-        const inferred = r.inferredStatus ? `<div style="margin-top:6px;color:var(--fg-muted);font-size:11px">${esc(r.inferredStatus)}</div>` : '';
-        return `${activity}${inferred}`;
-      }
-    },
-    { key: 'attribution', label: 'Attribution', render: r => {
-        const source = statusChip(r.attributionSource || 'unknown');
-        const confidence = r.attributionConfidence ? `<div style="margin-top:6px;color:var(--fg-muted);font-size:11px">${esc(r.attributionConfidence)}</div>` : '';
-        return `${source}${confidence}`;
-      }
-    },
-    { key: 'lastActivity', label: 'Last Activity', render: r => r.lastActivityAt ? esc(relativeTime(r.lastActivityAt)) : '<span style="color:var(--fg-muted)">—</span>' },
-    { key: 'outputMb', label: 'Output', render: r => {
-        const output = r.outputMb > 0 ? `${r.outputMb.toFixed(2)} MB` : '—';
-        const times = `<div style="margin-top:6px;color:var(--fg-muted);font-size:11px">active ${esc(formatDuration(r.workingDurationSec || 0))} · idle ${esc(formatDuration(r.idleDurationSec || 0))}</div>`;
-        return `${output}${times}`;
-      }
+  for (const session of sessions || []) {
+    const agentID = session.agentId || session.agent || session.ownerAgent;
+    if (!agentID) continue;
+    if (!liveSessionsByID.has(agentID)) {
+      liveSessionsByID.set(agentID, []);
     }
-  ];
+    liveSessionsByID.get(agentID).push(session);
+  }
 
-  const rows = activeSessions.map(s => ({
-    _id: s.sessionId || s.id,
-    agentId: s.agentId || s.ownerAgent,
-    family: s.family,
-    launchMode: s.launchMode,
-    repo: s.repo,
-    branch: s.branch,
-    prNumber: s.prNumber || s.pr_number,
-    mode: s.mode,
-    lifecycleState: s.lifecycleState || s.lifecycle_state,
-    attachmentState: s.attachmentState || s.attachment_state,
-    attributionSource: s.attributionSource || s.attribution_source,
-    attributionConfidence: s.attributionConfidence || s.attribution_confidence,
-    activityState: s.state || s.activityState || s.activity_state,
-    task: s.task,
-    lastActivityAt: s.lastActivityAt || s.last_activity_at || null,
-    contextPressure: s.contextPressure || s.context_pressure,
-    outputMb: s.outputMb || s.output_mb || 0,
-    workingDurationSec: s.workingDurationSec || s.working_duration_sec || 0,
-    idleDurationSec: s.idleDurationSec || s.idle_duration_sec || 0,
-    inferredStatus: s.inferredStatus || s.inferred_status
-  }));
+  const ids = new Set([
+    ...rosterByID.keys(),
+    ...configByID.keys(),
+    ...liveSessionsByID.keys(),
+  ]);
 
-  const tableHtml = dataTable('open-agents-table', columns, rows, { empty: 'No open agents' });
-  return glassCard('Open Agents', tableHtml, { padding: 'none', class: 'card-agents' });
+  const rows = [];
+  for (const agentID of ids) {
+    const config = configByID.get(agentID) || null;
+    const roster = rosterByID.get(agentID) || null;
+    const liveSessions = liveSessionsByID.get(agentID) || [];
+    const aliases = _uniqueStrings([
+      ...(config?.aliases || []),
+      config?.primary_alias || '',
+      config?.shim_name || '',
+    ]);
+    const primaryAlias = config?.primary_alias || config?.shim_name || aliases[0] || '';
+    const liveCount = liveSessions.length;
+    const orphanedCount = liveSessions.filter(s => s.attachmentState === 'orphaned').length;
+    const inferredCount = liveSessions.filter(s => s.attachmentState === 'inferred').length;
+    const duplicateCount = liveCount > 1 ? liveCount - 1 : 0;
+    const pressure = _profilePressure(roster?.activePressure, liveSessions);
+    const tracked = config ? !config.disabled : roster?.status !== 'disabled';
+    const installed = config ? !!config.installed : true;
+    const lastUsed = _latestTimestamp([
+      roster?.lastSeen,
+      ...liveSessions.map(session => session.lastActivityAt || session.lastHeartbeat || session.startedAt),
+    ]);
+    const source = config ? 'managed' : 'observed';
+    const status = liveCount > 0 ? 'live' : (roster?.status || (config ? 'idle' : 'observed'));
+
+    rows.push({
+      _id: agentID,
+      agentId: agentID,
+      family: config?.agent_kind || '',
+      source,
+      aliases,
+      primaryAlias,
+      installed,
+      tracked,
+      permissionProfile: config?.permission_profile || '',
+      homeStrategy: config?.home_strategy || '',
+      homeDir: config?.home_dir || '',
+      liveCount,
+      orphanedCount,
+      inferredCount,
+      duplicateCount,
+      pressure,
+      lastUsed,
+      status,
+    });
+  }
+
+  rows.sort((a, b) => {
+    if (b.liveCount !== a.liveCount) return b.liveCount - a.liveCount;
+    if (a.installed !== b.installed) return a.installed ? -1 : 1;
+    return a.agentId.localeCompare(b.agentId);
+  });
+  return rows;
 }
 
-function _renderAvailableAgents(agents, sessions, trackingConfig) {
-  const configAgents = (trackingConfig && trackingConfig.agents) || [];
-  
-  // Create a map of open agents to filter them out from available
-  const activeSessions = sessions.filter(s => s.status === 'active' || !s.endedAt);
-  const openAgentIds = new Set(activeSessions.map(s => s.agentId || s.ownerAgent));
-  
-  // Combine agents from roster and config
-  const availableMap = new Map();
-  
-  // From config
-  for (const c of configAgents) {
-    if (!openAgentIds.has(c.agent_id)) {
-      availableMap.set(c.agent_id, {
-        agentId: c.agent_id,
-        alias: c.shim_name,
-        tracked: !c.disabled,
-        installed: c.installed,
-        envVars: c.env_vars || {},
-        lastUsed: null
-      });
-    }
-  }
-  
-  // From roster (for last used)
-  for (const a of agents) {
-    if (!openAgentIds.has(a.agentId)) {
-      if (!availableMap.has(a.agentId)) {
-        availableMap.set(a.agentId, {
-          agentId: a.agentId,
-          alias: a.agentId,
-          tracked: a.status !== 'disabled',
-          installed: true,
-          envVars: {},
-          lastUsed: a.lastSeen
-        });
-      } else {
-        availableMap.get(a.agentId).lastUsed = a.lastSeen;
-      }
-    }
-  }
+function _renderProfileSummary(profiles, sessions) {
+  const liveProfiles = profiles.filter(profile => profile.liveCount > 0).length;
+  const duplicateProfiles = profiles.filter(profile => profile.duplicateCount > 0).length;
+  const constrainedProfiles = profiles.filter(profile => profile.pressure && profile.pressure !== 'normal').length;
+  const disabledProfiles = profiles.filter(profile => !profile.tracked).length;
 
-  const rows = Array.from(availableMap.values());
+  const metrics = `
+    <div class="metric-strip">
+      ${metricCard(String(profiles.length), 'Profiles', 'var(--accent-warm)')}
+      ${metricCard(String(sessions.length), 'Live Sessions', 'var(--success)')}
+      ${metricCard(String(liveProfiles), 'Live Agents', 'var(--info)')}
+      ${metricCard(String(duplicateProfiles), 'Duplicate Instances', duplicateProfiles > 0 ? 'var(--warning)' : 'var(--fg-muted)')}
+      ${metricCard(String(constrainedProfiles), 'Constrained', constrainedProfiles > 0 ? 'var(--warning)' : 'var(--fg-muted)')}
+      ${metricCard(String(disabledProfiles), 'Disabled', disabledProfiles > 0 ? 'var(--destructive)' : 'var(--fg-muted)')}
+    </div>`;
 
+  const explainer = `
+    <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap">
+      <div style="max-width:720px">
+        <div style="font-weight:600;margin-bottom:6px">Agent profiles are setup entities. Sessions are runtime entities.</div>
+        <div style="color:var(--fg-muted);font-size:12px;line-height:1.5">
+          Use this page to inspect profile identity, aliases, permission/home configuration, tracking, env vars, and whether a profile currently has duplicate live instances.
+          Use <code>Sessions</code> for the per-runtime view.
+        </div>
+      </div>
+    </div>`;
+
+  return glassCard('Agent Profiles', `${explainer}<div style="height:12px"></div>${metrics}`, { class: 'card-agents' });
+}
+
+function _renderAgentProfiles(profiles) {
   const columns = [
-    { key: 'agentId', label: 'Agent', render: r => {
-        let label = `<span style="font-weight:500">${esc(r.agentId)}</span>`;
-        if (r.alias && r.alias !== r.agentId) {
-          label += ` <span style="color:var(--fg-muted);font-size:11px">(${esc(r.alias)})</span>`;
+    {
+      key: 'agentId',
+      label: 'Profile',
+      render: profile => {
+        let label = `<span style="font-weight:600">${esc(profile.agentId)}</span>`;
+        if (profile.family) {
+          label += ` <span class="mode-badge" style="margin-left:6px">${esc(profile.family)}</span>`;
         }
-        if (!r.installed) {
-          label += ` <span style="color:var(--destructive);font-size:10px;margin-left:4px" title="Binary not found">&#x2717; missing</span>`;
+        label += ` <span style="color:var(--fg-muted);font-size:11px;margin-left:6px">${esc(profile.source)}</span>`;
+        if (!profile.installed) {
+          label += ` <span style="color:var(--destructive);font-size:10px;margin-left:6px" title="Binary not found">&#x2717; missing</span>`;
         }
         return label;
-      }
+      },
     },
-    { key: 'lastUsed', label: 'Last Used', render: r => r.lastUsed ? esc(relativeTime(r.lastUsed)) : '<span style="color:var(--fg-muted)">—</span>' },
-    { key: 'tracked', label: 'Tracked', render: r => `
+    {
+      key: 'aliases',
+      label: 'Aliases',
+      render: profile => {
+        if (!profile.aliases.length) {
+          return '<span style="color:var(--fg-muted)">—</span>';
+        }
+        const extras = profile.aliases.filter(alias => alias !== profile.primaryAlias);
+        const primary = profile.primaryAlias ? `<code>${esc(profile.primaryAlias)}</code>` : '<span style="color:var(--fg-muted)">—</span>';
+        const secondary = extras.length
+          ? `<div style="margin-top:6px;color:var(--fg-muted);font-size:11px">${esc(extras.join(', '))}</div>`
+          : '';
+        return `${primary}${secondary}`;
+      },
+    },
+    {
+      key: 'setup',
+      label: 'Setup',
+      render: profile => {
+        const badges = [];
+        if (profile.permissionProfile) badges.push(statusChip(profile.permissionProfile));
+        if (profile.homeStrategy) badges.push(statusChip(profile.homeStrategy));
+        if (!badges.length) badges.push('<span style="color:var(--fg-muted)">—</span>');
+        const homeDir = profile.homeDir
+          ? `<div style="margin-top:6px;color:var(--fg-muted);font-size:11px" title="${esc(profile.homeDir)}">${esc(_abbrevPath(profile.homeDir))}</div>`
+          : '';
+        return `${badges.join(' ')}${homeDir}`;
+      },
+    },
+    {
+      key: 'runtime',
+      label: 'Runtime Summary',
+      render: profile => {
+        const status = statusChip(profile.status);
+        const live = `<div style="margin-top:6px">${profile.liveCount > 0 ? `${profile.liveCount} live session${profile.liveCount === 1 ? '' : 's'}` : '<span style="color:var(--fg-muted)">no live sessions</span>'}</div>`;
+        const flags = [];
+        if (profile.duplicateCount > 0) flags.push(statusChip('duplicate'));
+        if (profile.orphanedCount > 0) flags.push(statusChip('orphaned'));
+        if (profile.inferredCount > 0) flags.push(statusChip('inferred'));
+        const lastUsed = profile.lastUsed
+          ? `<div style="margin-top:6px;color:var(--fg-muted);font-size:11px">last used ${esc(relativeTime(profile.lastUsed))}</div>`
+          : '';
+        return `${status}${live}${flags.length ? `<div style="margin-top:6px">${flags.join(' ')}</div>` : ''}${lastUsed}`;
+      },
+    },
+    {
+      key: 'pressure',
+      label: 'Pressure',
+      render: profile => {
+        const pressure = profile.pressure || 'normal';
+        const explanation = pressure === 'normal'
+          ? 'healthy'
+          : pressure === 'critical'
+            ? 'operator attention'
+            : 'watch closely';
+        return `${statusChip(pressure)}<div style="margin-top:6px;color:var(--fg-muted);font-size:11px">${esc(explanation)}</div>`;
+      },
+    },
+    {
+      key: 'tracked',
+      label: 'Tracked',
+      render: profile => `
         <label class="tracking-toggle" style="display:flex;align-items:center;cursor:pointer;">
-          <input type="checkbox" data-agent="${esc(r.agentId)}" ${r.tracked ? 'checked' : ''} style="cursor:pointer;margin-right:6px">
-          <span style="font-size:12px">${r.tracked ? 'Yes' : 'No'}</span>
+          <input type="checkbox" data-agent="${esc(profile.agentId)}" ${profile.tracked ? 'checked' : ''} style="cursor:pointer;margin-right:6px">
+          <span style="font-size:12px">${profile.tracked ? 'Yes' : 'No'}</span>
         </label>
-      `
+      `,
     },
-    { key: 'actions', label: '', render: r => `
-        <button class="btn-ghost btn-env" data-agent="${esc(r.agentId)}" style="font-size:11px;border:1px solid var(--border);border-radius:4px">Env Vars</button>
-      `
-    }
+    {
+      key: 'actions',
+      label: '',
+      render: profile => `
+        <button class="btn-ghost btn-env" data-agent="${esc(profile.agentId)}" style="font-size:11px;border:1px solid var(--border);border-radius:4px">Env Vars</button>
+      `,
+    },
   ];
 
-  const tableHtml = dataTable('available-agents-table', columns, rows, { empty: 'No available agents' });
-  return glassCard('Available Agents', tableHtml, { padding: 'none', class: 'card-agents' });
+  const tableHtml = dataTable('agent-profiles-table', columns, profiles, { empty: 'No agent profiles discovered' });
+  return glassCard('Profiles And Configuration', tableHtml, { padding: 'none', class: 'card-agents' });
 }
 
 function _bindTrackingToggles() {
@@ -231,7 +285,7 @@ function _bindEnvVarButtons(trackingConfig) {
       const agents = (trackingConfig && trackingConfig.agents) || [];
       const agent = agents.find(a => a.agent_id === agentId);
       const envVars = (agent && agent.env_vars) ? { ...agent.env_vars } : {};
-      
+
       let varsHtml = Object.entries(envVars).map(([k, v]) => `
         <div style="display:flex;gap:8px;margin-bottom:8px;" class="env-row">
           <input type="text" value="${esc(k)}" class="env-key" placeholder="KEY" style="flex:1;padding:6px;background:var(--bg-surface-1);border:1px solid var(--border);color:var(--fg-primary);border-radius:4px;">
@@ -239,7 +293,7 @@ function _bindEnvVarButtons(trackingConfig) {
           <button type="button" class="btn-destructive env-del" style="padding:4px 8px;border-radius:4px;">&times;</button>
         </div>
       `).join('');
-      
+
       if (!varsHtml) {
         varsHtml = `
         <div style="display:flex;gap:8px;margin-bottom:8px;" class="env-row">
@@ -258,43 +312,82 @@ function _bindEnvVarButtons(trackingConfig) {
 
       const action = await showModal(`Env Vars: ${esc(agentId)}`, bodyHtml, [
         { id: 'cancel', label: 'Cancel' },
-        { id: 'save', label: 'Save', primary: true }
+        { id: 'save', label: 'Save', primary: true },
       ]);
-      
-      if (action === 'save') {
-        const newVars = {};
-        document.querySelectorAll('.env-row').forEach(row => {
-          const k = row.querySelector('.env-key').value.trim();
-          const v = row.querySelector('.env-val').value.trim();
-          if (k) newVars[k] = v;
-        });
-        try {
-          await updateAgentEnvVars(agentId, newVars);
-          toast('Env vars updated successfully', 'success');
-          refreshAgents();
-        } catch (err) {
-          toast('Failed to update env vars', 'error');
-        }
+
+      if (action !== 'save') return;
+
+      const rows = document.querySelectorAll('#env-var-list .env-row');
+      const next = {};
+      for (const row of rows) {
+        const k = row.querySelector('.env-key')?.value?.trim();
+        const v = row.querySelector('.env-val')?.value ?? '';
+        if (k) next[k] = v;
+      }
+
+      try {
+        await updateAgentEnvVars(agentId, next);
+        toast(`Updated env vars for ${agentId}`, 'success');
+        refreshAgents();
+      } catch (err) {
+        toast(`Failed to update env vars: ${err.message}`, 'error');
       }
     });
   }
 }
 
-// Global delegated event listener for dynamically added modal buttons
+function _profilePressure(rosterPressure, liveSessions) {
+  const all = [rosterPressure, ...liveSessions.map(session => session.contextPressure)].filter(Boolean);
+  if (all.includes('critical')) return 'critical';
+  if (all.includes('warning')) return 'warning';
+  return 'normal';
+}
+
+function _latestTimestamp(values) {
+  const timestamps = values
+    .filter(Boolean)
+    .map(value => new Date(value))
+    .filter(value => !Number.isNaN(value.getTime()))
+    .sort((a, b) => b.getTime() - a.getTime());
+  return timestamps.length ? timestamps[0].toISOString() : null;
+}
+
+function _abbrevPath(path) {
+  if (!path) return '';
+  if (path.length <= 42) return path;
+  const parts = path.split('/').filter(Boolean);
+  if (parts.length <= 2) return `…${path.slice(-40)}`;
+  return `…/${parts.slice(-2).join('/')}`;
+}
+
+function _uniqueStrings(values) {
+  const seen = new Set();
+  const out = [];
+  for (const value of values) {
+    const trimmed = String(value || '').trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+}
+
+// Global delegated event listener for dynamic modal controls.
 document.addEventListener('click', (e) => {
   if (e.target.id === 'add-env-var') {
     const list = document.getElementById('env-var-list');
+    if (!list) return;
     const row = document.createElement('div');
     row.className = 'env-row';
     row.style.cssText = 'display:flex;gap:8px;margin-bottom:8px;';
-    // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method
     row.innerHTML = `
       <input type="text" class="env-key" placeholder="KEY" style="flex:1;padding:6px;background:var(--bg-surface-1);border:1px solid var(--border);color:var(--fg-primary);border-radius:4px;">
       <input type="text" class="env-val" placeholder="VALUE" style="flex:2;padding:6px;background:var(--bg-surface-1);border:1px solid var(--border);color:var(--fg-primary);border-radius:4px;">
       <button type="button" class="btn-destructive env-del" style="padding:4px 8px;border-radius:4px;">&times;</button>
     `;
     list.appendChild(row);
-  } else if (e.target.classList.contains('env-del')) {
-    e.target.closest('.env-row').remove();
+  } else if (e.target.classList && e.target.classList.contains('env-del')) {
+    const row = e.target.closest('.env-row');
+    if (row) row.remove();
   }
 });

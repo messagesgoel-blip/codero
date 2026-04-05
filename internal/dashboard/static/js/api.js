@@ -190,10 +190,12 @@ function normalizeOverview(raw) {
 
 function normalizeSessions(raw) {
   return (raw.sessions || []).map(s => ({
-    id: s.session_id, agent: s.agent_id, repo: s.repo, branch: s.branch,
+    id: s.session_id, sessionId: s.session_id,
+    agent: s.agent_id, agentId: s.agent_id, repo: s.repo, branch: s.branch,
     family: s.family || '', launchMode: s.launch_mode || '',
     worktree: s.worktree, prNumber: s.pr_number, mode: s.mode,
-    state: s.activity_state, lifecycleState: s.lifecycle_state || '',
+    activityState: s.activity_state || '', state: s.activity_state || '',
+    lifecycleState: s.lifecycle_state || '',
     attachmentState: s.attachment_state || '',
     attributionSource: s.attribution_source || '',
     attributionConfidence: s.attribution_confidence || '',
@@ -208,6 +210,7 @@ function normalizeSessions(raw) {
     inferredStatusUpdatedAt: s.inferred_status_updated_at || null,
     workingDurationSec: s.working_duration_sec ?? 0,
     idleDurationSec: s.idle_duration_sec ?? 0,
+    outputMb: s.output_mb ?? 0,
     outputMB: s.output_mb ?? 0,
   }));
 }

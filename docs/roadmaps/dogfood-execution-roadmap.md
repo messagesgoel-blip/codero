@@ -33,6 +33,10 @@ Home-launched or externally launched agents now adopt into inferred runtime stat
 promote into tracked branch/task attachment when enough repo/branch context becomes available,
 without losing session history.
 
+Operator surface distinction is now explicit:
+- `Sessions` is the runtime-instance view for live session identity, lifecycle, activity, attachment, and attribution
+- `Agents` is the profile/setup view for aliases, permission/home strategy, tracking, env vars, and duplicate-instance visibility
+
 ### Actor Authority (Unchanged)
 
 | Actor | Can | Cannot |

@@ -1,5 +1,5 @@
-// sessions.js — Sessions page renderer.
-// Redesigned with 3-layer info architecture: Row -> Peek -> Deep Dive.
+// sessions.js — Sessions page renderer for live runtime instances.
+// One agent profile can own multiple concurrent sessions.
 
 import store from '../store.js';
 import {
@@ -17,7 +17,7 @@ import {
 // --- Tab + filter state ---
 let _tab = 'active';   // 'active' | 'history'
 let _filter = { repo: '', branch: '' };
-let _statusFilter = ''; // '' | 'working' | 'waiting_for_input' | 'idle'
+let _statusFilter = ''; // '' | 'working' | 'waiting' | 'idle' | 'orphaned'
 
 // --- Internal state ---
 let _initialized = false;
@@ -102,7 +102,7 @@ function _renderTabBar(totalCount, filteredCount) {
   const activeBtn = `<button class="tab-btn${_tab === 'active' ? ' active' : ''}" data-tab="active">Active</button>`;
   const historyBtn = `<button class="tab-btn${_tab === 'history' ? ' active' : ''}" data-tab="history">History</button>`;
   const filterVal = _filter.repo || _filter.branch || '';
-  const filterInput = `<input class="filter-input" id="sessions-filter" placeholder="filter repo / branch…" value="${esc(filterVal)}">`;
+  const filterInput = `<input class="filter-input" id="sessions-filter" placeholder="filter session, agent, repo / branch…" value="${esc(filterVal)}">`;
   const clearBtn = filterVal
     ? `<button type="button" class="filter-clear-btn" id="sessions-filter-clear" title="Clear filter" aria-label="Clear sessions filter">&#x2715;</button>`
     : '';
@@ -141,34 +141,58 @@ function _bindTabBar() {
 // --- Active tab ---
 
 function _renderActiveTab(sessions, assignments) {
-  const activeSessions = sessions.filter(s => s.state === 'active').length;
-  const stalledSessions = sessions.filter(s => s.state === 'stalled').length;
-  const waitingSessions = sessions.filter(s => s.inferredStatus === 'waiting_for_input').length;
+  const workingSessions = sessions.filter(s => _sessionBucket(s) === 'working').length;
+  const waitingSessions = sessions.filter(s => _sessionBucket(s) === 'waiting').length;
+  const orphanedSessions = sessions.filter(s => s.attachmentState === 'orphaned').length;
+  const attachedSessions = sessions.filter(s => s.attachmentState === 'attached').length;
   const strip = [
-    metricCard(String(sessions.length), 'Sessions', 'var(--accent-warm)'),
-    metricCard(String(activeSessions), 'Active', 'var(--success)'),
+    metricCard(String(sessions.length), 'Runtime Sessions', 'var(--accent-warm)'),
+    metricCard(String(workingSessions), 'Working', 'var(--success)'),
     metricCard(String(waitingSessions), 'Waiting', waitingSessions > 0 ? 'var(--warning)' : 'var(--fg-muted)'),
-    metricCard(String(stalledSessions), 'Stalled', stalledSessions > 0 ? 'var(--warning)' : 'var(--fg-muted)'),
-    metricCard(String(assignments.length), 'Assignments', 'var(--info)'),
+    metricCard(String(attachedSessions), 'Attached', 'var(--info)'),
+    metricCard(String(orphanedSessions), 'Orphaned', orphanedSessions > 0 ? 'var(--warning)' : 'var(--fg-muted)'),
+    metricCard(String(assignments.length), 'Assignments', 'var(--fg-muted)'),
   ];
   const metricsHtml = `<div class="metric-strip">${strip.join('')}</div>`;
-  return metricsHtml + _renderStatusFilterStrip(sessions) + _renderSessionsTable(sessions, assignments);
+  const explainer = glassCard('Runtime Instances', `
+    <div style="font-weight:600;margin-bottom:6px">Sessions are runtime instances. Agents are reusable profiles.</div>
+    <div style="color:var(--fg-muted);font-size:12px;line-height:1.5">
+      This page tracks live session identity, runtime lifecycle, attachment, attribution, and activity.
+      Configure aliases, permission/home strategy, and tracking on the <code>Agents</code> page.
+    </div>
+  `, { class: 'card-sessions', padding: 'sm' });
+  return explainer + '<div style="height:16px"></div>' + metricsHtml + _renderStatusFilterStrip(sessions) + _renderSessionsTable(sessions, assignments);
 }
 
 function _renderStatusFilterStrip(sessions) {
-  const counts = { working: 0, waiting_for_input: 0, idle: 0 };
+  const counts = { working: 0, waiting: 0, idle: 0, orphaned: 0 };
   for (const s of sessions) {
-    const st = s.inferredStatus || 'unknown';
+    const st = _sessionBucket(s);
     if (counts[st] !== undefined) counts[st]++;
   }
   const allCls = !_statusFilter ? 'active' : '';
   const chips = [
     `<button class="repo-filter-chip ${allCls}" data-status="">All</button>`,
     `<button class="repo-filter-chip ${_statusFilter === 'working' ? 'active' : ''}" data-status="working">Working (${counts.working})</button>`,
-    `<button class="repo-filter-chip ${_statusFilter === 'waiting_for_input' ? 'active' : ''}" data-status="waiting_for_input">Waiting (${counts.waiting_for_input})</button>`,
+    `<button class="repo-filter-chip ${_statusFilter === 'waiting' ? 'active' : ''}" data-status="waiting">Waiting (${counts.waiting})</button>`,
     `<button class="repo-filter-chip ${_statusFilter === 'idle' ? 'active' : ''}" data-status="idle">Idle (${counts.idle})</button>`,
+    `<button class="repo-filter-chip ${_statusFilter === 'orphaned' ? 'active' : ''}" data-status="orphaned">Orphaned (${counts.orphaned})</button>`,
   ];
   return `<div class="status-filter-strip">${chips.join('')}</div>`;
+}
+
+function _sessionBucket(session) {
+  if (!session) return 'other';
+  if (session.attachmentState === 'orphaned') return 'orphaned';
+
+  const activity = String(session.activityState || session.state || '').toLowerCase();
+  const inferred = String(session.inferredStatus || '').toLowerCase();
+
+  if (activity === 'waiting_input' || inferred === 'waiting_for_input') return 'waiting';
+  if (activity === 'idle' || inferred === 'idle') return 'idle';
+  if (['starting', 'thinking', 'editing', 'running_command', 'syncing', 'blocked'].includes(activity)) return 'working';
+  if (inferred === 'working') return 'working';
+  return 'other';
 }
 
 function _renderSessionsTable(sessions, assignments) {
@@ -186,16 +210,17 @@ function _renderSessionsTable(sessions, assignments) {
     ? sessions.filter(s =>
         (s.repo || '').toLowerCase().includes(filterVal) ||
         (s.branch || '').toLowerCase().includes(filterVal) ||
-        (s.agent || s.ownerAgent || '').toLowerCase().includes(filterVal))
+        (s.agent || s.ownerAgent || '').toLowerCase().includes(filterVal) ||
+        (s.id || '').toLowerCase().includes(filterVal))
     : sessions;
   if (_statusFilter) {
-    filtered = filtered.filter(s => (s.inferredStatus || 'unknown') === _statusFilter);
+    filtered = filtered.filter(s => _sessionBucket(s) === _statusFilter);
   }
   // Attention-first sort
-  const statusOrder = { waiting_for_input: 0, working: 1, idle: 2, unknown: 3 };
+  const statusOrder = { waiting: 0, working: 1, orphaned: 2, idle: 3, other: 4 };
   filtered = [...filtered].sort((a, b) => {
-    const sa = statusOrder[a.inferredStatus || 'unknown'] ?? 3;
-    const sb = statusOrder[b.inferredStatus || 'unknown'] ?? 3;
+    const sa = statusOrder[_sessionBucket(a)] ?? 4;
+    const sb = statusOrder[_sessionBucket(b)] ?? 4;
     if (sa !== sb) return sa - sb;
     if (sa === 0) return new Date(a.startedAt || 0) - new Date(b.startedAt || 0);
     return new Date(b.startedAt || 0) - new Date(a.startedAt || 0);
@@ -205,67 +230,77 @@ function _renderSessionsTable(sessions, assignments) {
     {
       key: 'agent',
       label: 'Agent',
-      render: r => html`${r.agent || r.ownerAgent || '—'}`,
-    },
-    {
-      key: 'repo',
-      label: 'Repo / Branch',
       render: r => {
-        const repo = esc(r.repo || '—');
-        const branch = esc(r.branch || '');
-        return branch ? `${repo} / <code>${branch}</code>` : repo;
+        const agent = esc(r.agent || r.ownerAgent || '—');
+        const family = r.family ? ` <span class="mode-badge" style="margin-left:6px">${esc(r.family)}</span>` : '';
+        return `${agent}${family}`;
       },
     },
     {
-      key: 'mode',
-      label: 'Mode',
-      render: r => r.mode ? `<span class="mode-badge">${esc(r.mode)}</span>` : '<span style="color:var(--fg-muted)">—</span>',
+      key: 'session',
+      label: 'Session',
+      render: r => {
+        const sessionID = r.id ? `<code>${esc(truncId(r.id, 12))}</code>` : '<span style="color:var(--fg-muted)">—</span>';
+        const launch = r.launchMode ? `<div style="margin-top:6px">${statusChip(r.launchMode)}</div>` : '';
+        return `${sessionID}${launch}`;
+      },
     },
     {
-      key: 'inferredStatus',
-      label: 'Status',
+      key: 'repo',
+      label: 'Repo / Branch / Task',
       render: r => {
-        const s = r.inferredStatus || 'unknown';
-        const map = {
-          working:           { cls: 'status-working', label: 'Working' },
-          waiting_for_input: { cls: 'status-waiting', label: 'Waiting' },
-          idle:              { cls: 'status-idle',    label: 'Idle' },
-          unknown:           { cls: 'status-unknown', label: '—' },
-        };
-        const e = map[s] || map.unknown;
-        let label = esc(e.label);
-        const updatedAt = r.inferredStatusUpdatedAt;
-        if (s === 'waiting_for_input' && updatedAt) {
-          const waitingAge = (Date.now() - new Date(updatedAt).getTime()) / 60000;
-          if (waitingAge > 10) label += ' <span class="stale-badge">stale</span>';
-        }
-        return `<span class="agent-status ${e.cls}">${label}</span>`;
+        const repo = esc(r.repo || '—');
+        const branch = esc(r.branch || '');
+        const task = r.task && r.task.id ? `<div style="margin-top:6px;color:var(--fg-muted);font-size:11px">${esc(r.task.id)}</div>` : '';
+        return `${branch ? `${repo} / <code>${branch}</code>` : repo}${task}`;
+      },
+    },
+    {
+      key: 'runtime',
+      label: 'Runtime',
+      render: r => {
+        const mode = r.mode ? `<span class="mode-badge">${esc(r.mode)}</span>` : '';
+        const lifecycle = statusChip(r.lifecycleState || 'unknown');
+        const attachment = statusChip(r.attachmentState || 'unknown');
+        return `${mode}<div style="margin-top:6px">${lifecycle} ${attachment}</div>`;
+      },
+    },
+    {
+      key: 'activityState',
+      label: 'Activity',
+      render: r => {
+        const activity = statusChip(r.activityState || 'unknown');
+        const inferred = r.inferredStatus ? `<div style="margin-top:6px;color:var(--fg-muted);font-size:11px">${esc(r.inferredStatus)}</div>` : '';
+        return `${activity}${inferred}`;
+      },
+    },
+    {
+      key: 'attribution',
+      label: 'Attribution',
+      render: r => {
+        const source = statusChip(r.attributionSource || 'unknown');
+        const confidence = r.attributionConfidence ? `<div style="margin-top:6px;color:var(--fg-muted);font-size:11px">${esc(r.attributionConfidence)}</div>` : '';
+        return `${source}${confidence}`;
       },
     },
     {
       key: 'activity',
-      label: 'Activity',
+      label: 'Signals',
       class: 'col-sparkline',
-      render: r => `<div class="activity-bar-placeholder" data-activity-for="${esc(r.id)}" style="width:120px;height:20px"></div>`,
-    },
-    {
-      key: 'context',
-      label: 'Context',
       render: r => {
-        const p = r.contextPressure || 'normal';
-        if (p === 'normal') return '<span style="color:var(--fg-muted)">normal</span>';
-        const col = p === 'critical' ? 'var(--destructive)' : 'var(--warning)';
-        const compact = r.compactCount > 0 ? ` \u00d7${r.compactCount}` : '';
-        return `<span style="color:${col};font-weight:600">${esc(p)}${compact}</span>`;
+        return `<div class="activity-bar-placeholder" data-activity-for="${esc(r.id)}" style="width:120px;height:20px"></div>`;
       },
     },
     {
       key: 'lastIOAt',
-      label: 'Activity',
+      label: 'Last Activity',
       render: r => {
         const io = r.lastIOAt ? `<span style="display:block">${esc(relativeTime(r.lastIOAt))}</span>` : '<span style="color:var(--fg-muted)">—</span>';
-        const out = r.outputMB ? `<span style="font-size:0.65rem;color:var(--fg-muted)">out: ${esc(r.outputMB.toFixed(1))} MB</span>` : '';
-        return `<div>${io}${out}</div>`;
+        const out = r.outputMb ? `<span style="font-size:0.65rem;color:var(--fg-muted)">out: ${esc(r.outputMb.toFixed(1))} MB</span>` : '';
+        const pressure = r.contextPressure && r.contextPressure !== 'normal'
+          ? `<span style="font-size:0.65rem;color:var(--warning)">pressure: ${esc(r.contextPressure)}</span>`
+          : '';
+        return `<div>${io}<div>${out}${out && pressure ? ' · ' : ''}${pressure}</div></div>`;
       },
     },
     {
@@ -302,13 +337,21 @@ function _buildExpandContent(session, assigns) {
   // Left: Metadata
   const metaItems = [
     { label: 'Session ID', value: `<code>${esc(truncId(session.id, 12))}</code>` },
-    { label: 'Task', value: esc(session.task || '—') },
+    { label: 'Agent', value: esc(session.agent || session.ownerAgent || '—') },
+    { label: 'Family', value: esc(session.family || '—') },
+    { label: 'Launch', value: esc(session.launchMode || '—') },
+    { label: 'Lifecycle', value: esc(session.lifecycleState || '—') },
+    { label: 'Activity', value: esc(session.activityState || '—') },
+    { label: 'Attachment', value: esc(session.attachmentState || '—') },
+    { label: 'Attribution', value: esc(session.attributionSource || '—') },
+    { label: 'Task', value: esc(session.task?.id || '—') },
     { label: 'Worktree', value: esc(session.worktree || '—') },
     { label: 'PR', value: session.prNumber ? esc('#' + session.prNumber) : '—' },
     { label: 'Started', value: esc(relativeTime(session.startedAt)) },
+    { label: 'Last Activity', value: session.lastActivityAt ? esc(relativeTime(session.lastActivityAt)) : '—' },
     { label: 'Working', value: session.workingDurationSec ? esc(formatDuration(session.workingDurationSec)) : '—' },
     { label: 'Idle', value: session.idleDurationSec ? esc(formatDuration(session.idleDurationSec)) : '—' },
-    { label: 'Output', value: session.outputMB ? esc(session.outputMB.toFixed(2)) + ' MB' : '—' },
+    { label: 'Output', value: session.outputMb ? esc(session.outputMb.toFixed(2)) + ' MB' : '—' },
   ];
   const metaHtml = detailGrid(metaItems);
 

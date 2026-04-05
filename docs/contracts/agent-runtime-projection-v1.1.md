@@ -131,7 +131,12 @@ This keeps session history intact while improving dashboard visibility for non-i
 
 ## Dashboard Semantics
 
-The Agents page should show explicit badges for:
+The dashboard distinguishes between two standalone entities:
+
+- `Agents`: durable launch profiles and setup metadata
+- `Sessions`: live runtime instances created from those profiles
+
+The Sessions page is the canonical runtime surface and should show explicit badges for:
 
 - family
 - launch mode
@@ -141,4 +146,13 @@ The Agents page should show explicit badges for:
 - attribution source
 - attribution confidence
 
-Rows must not pretend tracked certainty when only inference is available.
+The Agents page should focus on profile/setup concerns:
+
+- aliases and primary alias
+- installed vs missing
+- tracked vs disabled
+- permission profile
+- home strategy / home directory
+- duplicate live-instance count and coarse runtime summary
+
+Neither page should pretend tracked certainty when only inference is available.
