@@ -159,6 +159,7 @@ func (f *fakeHeartbeatClient) HeartbeatWithContext(_ context.Context, _, _ strin
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = gitProcessEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)

@@ -157,11 +157,37 @@ func newWorktreeActivityTracker(worktree string) *worktreeActivityTracker {
 	return &worktreeActivityTracker{root: root}
 }
 
+func gitProcessEnv() []string {
+	env := os.Environ()
+	out := make([]string, 0, len(env))
+	for _, entry := range env {
+		if strings.HasPrefix(entry, "GIT_") {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+func gitCommand(root string, args ...string) *exec.Cmd {
+	cmdArgs := append([]string{"-C", root}, args...)
+	cmd := exec.Command("git", cmdArgs...)
+	cmd.Env = gitProcessEnv()
+	return cmd
+}
+
+func gitCommandContext(ctx context.Context, root string, args ...string) *exec.Cmd {
+	cmdArgs := append([]string{"-C", root}, args...)
+	cmd := exec.CommandContext(ctx, "git", cmdArgs...)
+	cmd.Env = gitProcessEnv()
+	return cmd
+}
+
 func detectGitRoot(worktree string) string {
 	if worktree == "" {
 		return ""
 	}
-	out, err := exec.Command("git", "-C", worktree, "rev-parse", "--show-toplevel").Output()
+	out, err := gitCommand(worktree, "rev-parse", "--show-toplevel").Output()
 	if err != nil {
 		return ""
 	}
@@ -202,7 +228,7 @@ func collectGitActivitySnapshot(ctx context.Context, root string) (map[string]st
 		return nil, 0, fmt.Errorf("git root is required")
 	}
 
-	statusCmd := exec.CommandContext(ctx, "git", "-C", root, "status", "--porcelain=v1", "--untracked-files=all")
+	statusCmd := gitCommandContext(ctx, root, "status", "--porcelain=v1", "--untracked-files=all")
 	statusOut, err := statusCmd.Output()
 	if err != nil {
 		return nil, 0, err
@@ -234,8 +260,7 @@ func collectGitDiffVolume(ctx context.Context, root string, statuses map[string]
 }
 
 func gitDiffNumstat(ctx context.Context, root string, args ...string) ([]byte, error) {
-	cmdArgs := append([]string{"-C", root, "diff"}, args...)
-	return exec.CommandContext(ctx, "git", cmdArgs...).Output()
+	return gitCommandContext(ctx, root, append([]string{"diff"}, args...)...).Output()
 }
 
 func estimateUntrackedDiffVolume(root string, statuses map[string]string) int64 {
