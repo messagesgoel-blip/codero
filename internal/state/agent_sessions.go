@@ -171,34 +171,102 @@ func UpdateSessionOutputBytes(ctx context.Context, db *DB, sessionID string, out
 	return nil
 }
 
-// RecordActivitySample upserts an output_bytes sample for the current minute bucket.
-// Called on each heartbeat that carries output_bytes. Samples are keyed by session+minute
-// so multiple heartbeats in the same minute just update the value. Uses GREATEST to ensure
-// monotonic progress (no regressions on out-of-order updates).
-func RecordActivitySample(ctx context.Context, db *DB, sessionID string, outputBytes int64) error {
+// ActivityCounters is one cumulative telemetry snapshot carried on heartbeat.
+// Values are monotonic totals over the life of the session.
+type ActivityCounters struct {
+	RuntimeBytes int64 `json:"runtime_bytes"`
+	OutputBytes  int64 `json:"output_bytes"`
+	OutputLines  int64 `json:"output_lines"`
+	ToolCalls    int64 `json:"tool_calls"`
+	FileWrites   int64 `json:"file_writes"`
+	DiffChanges  int64 `json:"diff_changes"`
+	ProcEvents   int64 `json:"proc_events"`
+}
+
+func (c ActivityCounters) IsZero() bool {
+	return c.RuntimeBytes <= 0 &&
+		c.OutputBytes <= 0 &&
+		c.OutputLines <= 0 &&
+		c.ToolCalls <= 0 &&
+		c.FileWrites <= 0 &&
+		c.DiffChanges <= 0 &&
+		c.ProcEvents <= 0
+}
+
+func clampActivityCounters(c ActivityCounters) ActivityCounters {
+	if c.RuntimeBytes < 0 {
+		c.RuntimeBytes = 0
+	}
+	if c.OutputBytes < 0 {
+		c.OutputBytes = 0
+	}
+	if c.OutputLines < 0 {
+		c.OutputLines = 0
+	}
+	if c.ToolCalls < 0 {
+		c.ToolCalls = 0
+	}
+	if c.FileWrites < 0 {
+		c.FileWrites = 0
+	}
+	if c.DiffChanges < 0 {
+		c.DiffChanges = 0
+	}
+	if c.ProcEvents < 0 {
+		c.ProcEvents = 0
+	}
+	return c
+}
+
+// RecordActivitySample upserts one cumulative telemetry sample for the current
+// minute bucket. Samples are keyed by session+minute so multiple heartbeats in
+// the same minute just update the value. Uses MAX to ensure monotonic progress
+// (no regressions on out-of-order updates).
+func RecordActivitySample(ctx context.Context, db *DB, sessionID string, counters ActivityCounters) error {
+	counters = clampActivityCounters(counters)
+	if counters.IsZero() {
+		return nil
+	}
 	bucket := time.Now().UTC().Format("2006-01-02T15:04")
 	_, err := db.sql.ExecContext(ctx, `
-		INSERT INTO session_activity (session_id, bucket, output_bytes)
-		VALUES (?, ?, ?)
-		ON CONFLICT(session_id, bucket) DO UPDATE SET output_bytes = MAX(COALESCE(session_activity.output_bytes, 0), excluded.output_bytes)`,
-		sessionID, bucket, outputBytes)
+		INSERT INTO session_activity (
+			session_id, bucket, runtime_bytes, output_bytes, output_lines, tool_calls,
+			file_writes, diff_changes, proc_events
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(session_id, bucket) DO UPDATE SET
+			runtime_bytes = MAX(COALESCE(session_activity.runtime_bytes, 0), excluded.runtime_bytes),
+			output_bytes = MAX(COALESCE(session_activity.output_bytes, 0), excluded.output_bytes),
+			output_lines = MAX(COALESCE(session_activity.output_lines, 0), excluded.output_lines),
+			tool_calls = MAX(COALESCE(session_activity.tool_calls, 0), excluded.tool_calls),
+			file_writes = MAX(COALESCE(session_activity.file_writes, 0), excluded.file_writes),
+			diff_changes = MAX(COALESCE(session_activity.diff_changes, 0), excluded.diff_changes),
+			proc_events = MAX(COALESCE(session_activity.proc_events, 0), excluded.proc_events)`,
+		sessionID, bucket, counters.RuntimeBytes, counters.OutputBytes, counters.OutputLines, counters.ToolCalls,
+		counters.FileWrites, counters.DiffChanges, counters.ProcEvents)
 	if err != nil {
 		return fmt.Errorf("record activity sample: %w", err)
 	}
 	return nil
 }
 
-// ActivitySample is a single data point in the output activity timeline.
+// ActivitySample is a single data point in the session telemetry timeline.
 type ActivitySample struct {
-	Bucket      string `json:"bucket"`
-	OutputBytes int64  `json:"output_bytes"`
+	Bucket       string `json:"bucket"`
+	RuntimeBytes int64  `json:"runtime_bytes"`
+	OutputBytes  int64  `json:"output_bytes"`
+	OutputLines  int64  `json:"output_lines"`
+	ToolCalls    int64  `json:"tool_calls"`
+	FileWrites   int64  `json:"file_writes"`
+	DiffChanges  int64  `json:"diff_changes"`
+	ProcEvents   int64  `json:"proc_events"`
 }
 
-// GetActivitySamples returns the last N minutes of output_bytes samples for a session.
+// GetActivitySamples returns the last N minutes of telemetry samples for a session.
 func GetActivitySamples(ctx context.Context, db *DB, sessionID string, minutes int) ([]ActivitySample, error) {
 	cutoff := time.Now().UTC().Add(-time.Duration(minutes) * time.Minute).Format("2006-01-02T15:04")
 	rows, err := db.sql.QueryContext(ctx, `
-		SELECT bucket, output_bytes
+		SELECT bucket, runtime_bytes, output_bytes, output_lines, tool_calls, file_writes, diff_changes, proc_events
 		FROM session_activity
 		WHERE session_id = ? AND bucket >= ?
 		ORDER BY bucket ASC`, sessionID, cutoff)
@@ -210,7 +278,16 @@ func GetActivitySamples(ctx context.Context, db *DB, sessionID string, minutes i
 	var samples []ActivitySample
 	for rows.Next() {
 		var s ActivitySample
-		if err := rows.Scan(&s.Bucket, &s.OutputBytes); err != nil {
+		if err := rows.Scan(
+			&s.Bucket,
+			&s.RuntimeBytes,
+			&s.OutputBytes,
+			&s.OutputLines,
+			&s.ToolCalls,
+			&s.FileWrites,
+			&s.DiffChanges,
+			&s.ProcEvents,
+		); err != nil {
 			return nil, fmt.Errorf("scan activity sample: %w", err)
 		}
 		samples = append(samples, s)

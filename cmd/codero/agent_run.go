@@ -96,6 +96,11 @@ type activityTracker struct {
 func newActivityTracker(worktree string) *activityTracker {
 	t := &activityTracker{worktree: newWorktreeActivityTracker(worktree)}
 	t.lastActivity.Store(time.Now().Unix())
+	if t.worktree != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_, _ = t.worktree.snapshot(ctx)
+		cancel()
+	}
 	return t
 }
 

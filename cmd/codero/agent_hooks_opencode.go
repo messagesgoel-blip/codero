@@ -54,6 +54,7 @@ func generateOpenCodePluginSource(kind string) string {
 	// Backticks close the literal; \${ prevents ${VAR} from being interpreted as
 	// a JS template expression. Single-quote handling is done in jsShellCall.
 	escapeForJS := func(s string) string {
+		s = strings.ReplaceAll(s, "\\", "\\\\")
 		s = strings.ReplaceAll(s, "`", "\\`")
 		s = strings.ReplaceAll(s, "${", "\\${")
 		return s

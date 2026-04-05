@@ -33,7 +33,7 @@ func TestInstallKiloCodePlugin_Create(t *testing.T) {
 
 	status, err := installOpenCodeLikePlugin(pluginPath, legacyPath, generateKiloCodePlugin(), false)
 	if err != nil {
-		t.Fatalf("installTextFile: %v", err)
+		t.Fatalf("installOpenCodeLikePlugin: %v", err)
 	}
 	if status != "created" {
 		t.Fatalf("status=%q, want created", status)

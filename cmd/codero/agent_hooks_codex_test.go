@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -39,10 +40,10 @@ func TestGenerateCodexHooks_ContainsHeartbeat(t *testing.T) {
 		t.Error("hooks JSON suspiciously short")
 	}
 	// The heartbeat command should reference codero session heartbeat.
-	if !contains(s, "codero session heartbeat") {
+	if !strings.Contains(s, "codero session heartbeat") {
 		t.Error("hooks JSON does not contain 'codero session heartbeat'")
 	}
-	if !contains(s, "--tool-calls=") {
+	if !strings.Contains(s, "--tool-calls=") {
 		t.Error("hooks JSON does not contain '--tool-calls='")
 	}
 }
@@ -116,17 +117,4 @@ func TestCodexHooksPath(t *testing.T) {
 	if got != want {
 		t.Errorf("codexHooksPath: got %q, want %q", got, want)
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsStr(s, substr))
-}
-
-func containsStr(s, substr string) bool {
-	for i := 0; i+len(substr) <= len(s); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

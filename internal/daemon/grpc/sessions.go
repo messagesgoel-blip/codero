@@ -173,24 +173,32 @@ func (s *sessionService) Heartbeat(ctx context.Context, req *daemonv1.HeartbeatR
 			}
 		}
 
-		// Output bytes tracking + activity sample.
-		if v := firstMD(md, "x-output-bytes"); v != "" {
-			if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
-				if err := state.UpdateSessionOutputBytes(ctx, s.server.db, req.SessionId, n); err != nil {
-					loglib.Warn("grpc: output bytes update failed",
-						loglib.FieldComponent, "grpc",
-						"session_id", req.SessionId,
-						"error", err,
-					)
-				}
-				// Record activity sample for sparkline (1-min bucket).
-				if err := state.RecordActivitySample(ctx, s.server.db, req.SessionId, n); err != nil {
-					loglib.Warn("grpc: activity sample failed",
-						loglib.FieldComponent, "grpc",
-						"session_id", req.SessionId,
-						"error", err,
-					)
-				}
+		// Output/activity tracking from cumulative runtime counters.
+		counters := state.ActivityCounters{
+			RuntimeBytes: parseInt64MD(md, "x-runtime-bytes"),
+			OutputBytes:  parseInt64MD(md, "x-output-bytes"),
+			OutputLines:  parseInt64MD(md, "x-output-lines"),
+			ToolCalls:    parseInt64MD(md, "x-tool-calls"),
+			FileWrites:   parseInt64MD(md, "x-file-writes"),
+			DiffChanges:  parseInt64MD(md, "x-diff-changes"),
+			ProcEvents:   parseInt64MD(md, "x-proc-events"),
+		}
+		if counters.OutputBytes > 0 {
+			if err := state.UpdateSessionOutputBytes(ctx, s.server.db, req.SessionId, counters.OutputBytes); err != nil {
+				loglib.Warn("grpc: output bytes update failed",
+					loglib.FieldComponent, "grpc",
+					"session_id", req.SessionId,
+					"error", err,
+				)
+			}
+		}
+		if !counters.IsZero() {
+			if err := state.RecordActivitySample(ctx, s.server.db, req.SessionId, counters); err != nil {
+				loglib.Warn("grpc: activity sample failed",
+					loglib.FieldComponent, "grpc",
+					"session_id", req.SessionId,
+					"error", err,
+				)
 			}
 		}
 
@@ -415,4 +423,16 @@ func firstMD(md metadata.MD, key string) string {
 		return vals[0]
 	}
 	return ""
+}
+
+func parseInt64MD(md metadata.MD, key string) int64 {
+	v := firstMD(md, key)
+	if v == "" {
+		return 0
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
 }

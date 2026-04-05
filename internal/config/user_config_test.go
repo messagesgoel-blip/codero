@@ -12,7 +12,7 @@ func TestUserConfigSave_WritesAtomically(t *testing.T) {
 
 	uc := &UserConfig{
 		Version:    1,
-		DaemonAddr: "127.0.0.1:8110",
+		DaemonAddr: "127.0.0.1:8111",
 	}
 	if err := uc.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -26,7 +26,7 @@ func TestUserConfigSave_WritesAtomically(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
-	if !strings.Contains(string(data), "daemon_addr: 127.0.0.1:8110") {
+	if !strings.Contains(string(data), "daemon_addr: 127.0.0.1:8111") {
 		t.Fatalf("saved config missing daemon_addr: %s", data)
 	}
 
@@ -60,7 +60,7 @@ func TestUserConfigSave_PreservesStricterPermissions(t *testing.T) {
 
 	uc := &UserConfig{
 		Version:    1,
-		DaemonAddr: "127.0.0.1:8110",
+		DaemonAddr: "127.0.0.1:8111",
 	}
 	if err := uc.Save(); err != nil {
 		t.Fatalf("Save: %v", err)

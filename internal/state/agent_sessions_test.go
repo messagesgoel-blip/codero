@@ -191,6 +191,42 @@ func TestUpdateAgentSessionHeartbeat_MarkProgress(t *testing.T) {
 	}
 }
 
+func TestRecordActivitySample_RicherCounters(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	if err := RegisterAgentSession(ctx, db, "sess-activity", "agent-1", "", ""); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+
+	if err := RecordActivitySample(ctx, db, "sess-activity", ActivityCounters{
+		RuntimeBytes: 128,
+		OutputBytes:  256,
+		OutputLines:  8,
+		ToolCalls:    1,
+		FileWrites:   2,
+		DiffChanges:  12,
+		ProcEvents:   1,
+	}); err != nil {
+		t.Fatalf("RecordActivitySample: %v", err)
+	}
+
+	samples, err := GetActivitySamples(ctx, db, "sess-activity", 1)
+	if err != nil {
+		t.Fatalf("GetActivitySamples: %v", err)
+	}
+	if len(samples) != 1 {
+		t.Fatalf("samples length = %d, want 1", len(samples))
+	}
+	got := samples[0]
+	if got.RuntimeBytes != 128 || got.OutputBytes != 256 || got.OutputLines != 8 {
+		t.Fatalf("unexpected byte counters: %+v", got)
+	}
+	if got.ToolCalls != 1 || got.FileWrites != 2 || got.DiffChanges != 12 || got.ProcEvents != 1 {
+		t.Fatalf("unexpected activity counters: %+v", got)
+	}
+}
+
 func TestAttachAgentAssignment_Supersede(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()

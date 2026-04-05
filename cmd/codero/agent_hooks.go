@@ -86,7 +86,13 @@ type heartbeatFragments struct {
 }
 
 func buildHeartbeatFragments() heartbeatFragments {
-	scratchInit := `_sd="${TMPDIR:-/tmp}/codero-${CODERO_SESSION_ID:-unknown}"; ` +
+	scratchInit := `_sk="${CODERO_SESSION_ID:-}"; ` +
+		`if [ -z "$_sk" ]; then ` +
+		`_tty=$(tty 2>/dev/null || echo notty); ` +
+		`_tty=$(printf '%s' "$_tty" | tr -c '[:alnum:]' '_'); ` +
+		`_sk="${CODERO_AGENT_ID:-unknown}-ppid${PPID:-0}-$_tty"; ` +
+		`fi; ` +
+		`_sd="${TMPDIR:-/tmp}/codero-$_sk"; ` +
 		`mkdir -p "$_sd" 2>/dev/null || true; chmod 700 "$_sd" 2>/dev/null || true; `
 	repoDetect := `_gw="${CODERO_WORKTREE:-$PWD}"; ` +
 		`[ -d "$_gw" ] || _gw="$PWD"; ` +
@@ -230,13 +236,36 @@ func installClaudeHooks(path string, hooks map[string]interface{}, force bool) (
 	return installMergedJSONConfig(path, hooks, force, false)
 }
 
-// shallowCopy returns a shallow copy of m.
-func shallowCopy(m map[string]interface{}) map[string]interface{} {
+// cloneJSONObject returns a copy of m, recursively cloning nested objects.
+func cloneJSONObject(m map[string]interface{}) map[string]interface{} {
 	out := make(map[string]interface{}, len(m))
 	for k, v := range m {
+		if child, ok := v.(map[string]interface{}); ok {
+			out[k] = cloneJSONObject(child)
+			continue
+		}
 		out[k] = v
 	}
 	return out
+}
+
+func mergeJSONObject(dst, src map[string]interface{}) map[string]interface{} {
+	if dst == nil {
+		dst = make(map[string]interface{}, len(src))
+	}
+	for k, v := range src {
+		srcChild, srcIsObject := v.(map[string]interface{})
+		if !srcIsObject {
+			dst[k] = v
+			continue
+		}
+		if dstChild, ok := dst[k].(map[string]interface{}); ok {
+			dst[k] = mergeJSONObject(dstChild, srcChild)
+			continue
+		}
+		dst[k] = cloneJSONObject(srcChild)
+	}
+	return dst
 }
 
 // installMergedJSONConfig merges top-level keys into an existing JSON config.
@@ -257,10 +286,7 @@ func installMergedJSONConfig(path string, updates map[string]interface{}, force,
 	}
 
 	if !force && fileExisted {
-		merged := shallowCopy(existing)
-		for k, v := range updates {
-			merged[k] = v
-		}
+		merged := mergeJSONObject(cloneJSONObject(existing), updates)
 		mergedJSON, err := json.Marshal(merged)
 		if err != nil {
 			return "", fmt.Errorf("marshal merged settings: %w", err)
@@ -274,9 +300,7 @@ func installMergedJSONConfig(path string, updates map[string]interface{}, force,
 		}
 	}
 
-	for k, v := range updates {
-		existing[k] = v
-	}
+	existing = mergeJSONObject(existing, updates)
 
 	out, err := json.MarshalIndent(existing, "", "  ")
 	if err != nil {
