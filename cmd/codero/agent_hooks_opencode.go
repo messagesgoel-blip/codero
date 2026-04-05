@@ -58,33 +58,42 @@ func generateOpenCodePluginSource(kind string) string {
 		s = strings.ReplaceAll(s, "${", "\\${")
 		return s
 	}
+	shellExec := "await $`cd ${cwd} && bash -lc ${cmd} >/dev/null 2>&1`;"
 
 	return fmt.Sprintf(`// codero-heartbeat.js — managed by codero (do not edit)
 // Regenerate with: codero agent hooks --kind=%s --install
-import { exec } from "node:child_process";
-const fire = (cmd) => exec(cmd, () => {});
+export const CoderoHeartbeatPlugin = async ({ $, directory, worktree }) => {
+const cwd = worktree || directory || process.cwd();
+const fire = async (cmd) => {
+  try {
+    %s
+  } catch {
+    // Hook delivery is best-effort; do not break the agent session.
+  }
+};
 
-export const CoderoHeartbeatPlugin = async () => ({
+return ({
   "tool.execute.before": async () => {
-    fire(%s);
+    await fire(%s);
   },
   "tool.execute.after": async () => {
-    fire(%s);
+    await fire(%s);
   },
   "session.idle": async () => {
-    fire(%s);
+    await fire(%s);
   }
 });
-`, kind,
-		jsShellCall(escapeForJS(working)),
-		jsShellCall(escapeForJS(workingPost)),
-		jsShellCall(escapeForJS(waiting)))
+};
+`, kind, shellExec,
+		jsTemplateLiteral(escapeForJS(working)),
+		jsTemplateLiteral(escapeForJS(workingPost)),
+		jsTemplateLiteral(escapeForJS(waiting)))
 }
 
-// jsShellCall wraps a shell command in a JS template literal bash invocation.
-// Single-quote escaping for shell quoting is handled here (not in escapeForJS).
-func jsShellCall(shellCmd string) string {
-	return "`bash -c '" + strings.ReplaceAll(shellCmd, "'", `'"'"'`) + "'`"
+// jsTemplateLiteral wraps content in a JS template literal.
+// escapeForJS handles the required escaping before values reach this helper.
+func jsTemplateLiteral(s string) string {
+	return "`" + s + "`"
 }
 
 // openCodePluginPath returns the installation path for the OpenCode plugin.

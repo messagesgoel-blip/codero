@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -43,14 +44,57 @@ func tailPath(sessionID string) string {
 	return p
 }
 
-// activityTracker records the last time the child process wrote to stdout/stderr.
-// The heartbeat goroutine reads this to decide whether to mark progress.
-type activityTracker struct {
-	lastActivity atomic.Int64 // unix timestamp of last I/O
+func hookScratchDir(sessionID string) string {
+	return filepath.Join(os.TempDir(), "codero-"+sessionID)
 }
 
-func newActivityTracker() *activityTracker {
-	t := &activityTracker{}
+func seedHookScratchState(sessionID, secret string) error {
+	dir := hookScratchDir(sessionID)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("ensure hook scratch dir: %w", err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return fmt.Errorf("chmod hook scratch dir: %w", err)
+	}
+	for name, value := range map[string]string{
+		"session-id": sessionID,
+		"secret":     secret,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(value), 0o600); err != nil {
+			return fmt.Errorf("write hook scratch %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+type activitySnapshot struct {
+	RuntimeBytes int64
+	OutputLines  int64
+	FileWrites   int64
+	DiffChanges  int64
+	ProcEvents   int64
+}
+
+func (s activitySnapshot) isZero() bool {
+	return s.RuntimeBytes <= 0 &&
+		s.OutputLines <= 0 &&
+		s.FileWrites <= 0 &&
+		s.DiffChanges <= 0 &&
+		s.ProcEvents <= 0
+}
+
+// activityTracker records the last time the child process wrote to stdout/stderr
+// plus cumulative runtime telemetry used for dashboard activity scoring.
+type activityTracker struct {
+	lastActivity atomic.Int64 // unix timestamp of last I/O
+	runtimeBytes atomic.Int64
+	outputLines  atomic.Int64
+	procEvents   atomic.Int64
+	worktree     *worktreeActivityTracker
+}
+
+func newActivityTracker(worktree string) *activityTracker {
+	t := &activityTracker{worktree: newWorktreeActivityTracker(worktree)}
 	t.lastActivity.Store(time.Now().Unix())
 	return t
 }
@@ -58,10 +102,175 @@ func newActivityTracker() *activityTracker {
 // touch records output activity at the current time.
 func (t *activityTracker) touch() { t.lastActivity.Store(time.Now().Unix()) }
 
+func (t *activityTracker) recordOutput(p []byte) {
+	if len(p) == 0 {
+		t.touch()
+		return
+	}
+	t.lastActivity.Store(time.Now().Unix())
+	t.runtimeBytes.Add(int64(len(p)))
+	t.outputLines.Add(int64(bytes.Count(p, []byte{'\n'})))
+}
+
+func (t *activityTracker) recordProcEvent() {
+	t.procEvents.Add(1)
+}
+
 // hasRecentActivity returns true if output was seen within the given window.
 func (t *activityTracker) hasRecentActivity(window time.Duration) bool {
 	last := time.Unix(t.lastActivity.Load(), 0)
 	return time.Since(last) < window
+}
+
+func (t *activityTracker) snapshot(ctx context.Context) activitySnapshot {
+	snap := activitySnapshot{
+		RuntimeBytes: t.runtimeBytes.Load(),
+		OutputLines:  t.outputLines.Load(),
+		ProcEvents:   t.procEvents.Load(),
+	}
+	if t.worktree != nil {
+		snap.FileWrites, snap.DiffChanges = t.worktree.snapshot(ctx)
+	}
+	return snap
+}
+
+type worktreeActivityTracker struct {
+	root         string
+	mu           sync.Mutex
+	initialized  bool
+	lastStatuses map[string]string
+	lastDiff     int64
+	fileWrites   int64
+	diffChanges  int64
+}
+
+func newWorktreeActivityTracker(worktree string) *worktreeActivityTracker {
+	root := detectGitRoot(worktree)
+	if root == "" {
+		return nil
+	}
+	return &worktreeActivityTracker{root: root}
+}
+
+func detectGitRoot(worktree string) string {
+	if worktree == "" {
+		return ""
+	}
+	out, err := exec.Command("git", "-C", worktree, "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func (t *worktreeActivityTracker) snapshot(ctx context.Context) (int64, int64) {
+	statuses, diffSize, err := collectGitActivitySnapshot(ctx, t.root)
+	if err != nil {
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		return t.fileWrites, t.diffChanges
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if !t.initialized {
+		t.initialized = true
+		t.lastStatuses = statuses
+		t.lastDiff = diffSize
+		return t.fileWrites, t.diffChanges
+	}
+
+	t.fileWrites += statusDeltaCount(t.lastStatuses, statuses)
+	delta := diffSize - t.lastDiff
+	if delta < 0 {
+		delta = -delta
+	}
+	t.diffChanges += delta
+	t.lastStatuses = statuses
+	t.lastDiff = diffSize
+	return t.fileWrites, t.diffChanges
+}
+
+func collectGitActivitySnapshot(ctx context.Context, root string) (map[string]string, int64, error) {
+	if root == "" {
+		return nil, 0, fmt.Errorf("git root is required")
+	}
+
+	statusCmd := exec.CommandContext(ctx, "git", "-C", root, "status", "--porcelain=v1", "--untracked-files=all")
+	statusOut, err := statusCmd.Output()
+	if err != nil {
+		return nil, 0, err
+	}
+	statuses := parseGitStatusSnapshot(statusOut)
+
+	diffCmd := exec.CommandContext(ctx, "git", "-C", root, "diff", "HEAD", "--numstat", "--")
+	diffOut, err := diffCmd.Output()
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return statuses, parseGitDiffVolume(diffOut), nil
+}
+
+func parseGitStatusSnapshot(out []byte) map[string]string {
+	statuses := make(map[string]string)
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimRight(line, "\r")
+		if len(line) < 4 {
+			continue
+		}
+		status := line[:2]
+		path := strings.TrimSpace(line[3:])
+		if path == "" {
+			continue
+		}
+		statuses[path] = status
+	}
+	return statuses
+}
+
+func parseGitDiffVolume(out []byte) int64 {
+	var total int64
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) < 2 {
+			continue
+		}
+		for _, part := range parts[:2] {
+			if part == "-" {
+				total++
+				continue
+			}
+			n, err := strconv.ParseInt(part, 10, 64)
+			if err == nil && n > 0 {
+				total += n
+			}
+		}
+	}
+	return total
+}
+
+func statusDeltaCount(prev, next map[string]string) int64 {
+	var count int64
+	seen := make(map[string]struct{}, len(prev)+len(next))
+	for path, status := range prev {
+		seen[path] = struct{}{}
+		if next[path] != status {
+			count++
+		}
+	}
+	for path := range next {
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		count++
+	}
+	return count
 }
 
 // activityWriter wraps an io.Writer and touches the tracker on every write.
@@ -113,7 +322,7 @@ func splitTrailingANSIFragment(b []byte) (stable, carry []byte) {
 }
 
 func (w *activityWriter) Write(p []byte) (int, error) {
-	w.tracker.touch()
+	w.tracker.recordOutput(p)
 	if w.tail != nil && w.written < tailMaxBytes {
 		joined := append(append([]byte(nil), w.ansiCarry...), p...)
 		stable, carry := splitTrailingANSIFragment(joined)
@@ -244,9 +453,12 @@ func runAgentWithTracking(ctx context.Context, agentID, mode, taskID, repoOverri
 	if tailFile != nil {
 		defer tailFile.Close()
 	}
+	if err := seedHookScratchState(sessionID, secret); err != nil {
+		fmt.Fprintf(os.Stderr, "codero: hook scratch seed failed: %v\n", err)
+	}
 
 	// Activity tracker — heartbeat marks progress only when the child produces output.
-	tracker := newActivityTracker()
+	tracker := newActivityTracker(resolveFallbackWorktree())
 
 	// Background heartbeat
 	hbCtx, hbCancel := context.WithCancel(context.Background())
@@ -299,7 +511,20 @@ func heartbeatLoop(ctx context.Context, client *daemongrpc.SessionClient, sessio
 			return
 		case <-ticker.C:
 			markProgress := tracker.hasRecentActivity(progressWindow)
-			_ = client.Heartbeat(ctx, sessionID, secret, markProgress)
+			sampleCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			snap := tracker.snapshot(sampleCtx)
+			cancel()
+			if snap.isZero() {
+				_ = client.Heartbeat(ctx, sessionID, secret, markProgress)
+				continue
+			}
+			_ = client.HeartbeatWithContext(ctx, sessionID, secret, markProgress, daemongrpc.HeartbeatContext{
+				RuntimeBytes: snap.RuntimeBytes,
+				OutputLines:  snap.OutputLines,
+				FileWrites:   snap.FileWrites,
+				DiffChanges:  snap.DiffChanges,
+				ProcEvents:   snap.ProcEvents,
+			})
 		}
 	}
 }
@@ -352,6 +577,7 @@ func runChildPTY(child *exec.Cmd, tracker *activityTracker, tailFile *os.File) i
 		fmt.Fprintf(os.Stderr, "codero: pty start failed: %v\n", err)
 		return 1
 	}
+	tracker.recordProcEvent()
 	defer ptmx.Close()
 
 	// Resize PTY to match the outer terminal.
@@ -399,11 +625,13 @@ func runChildPTY(child *exec.Cmd, tracker *activityTracker, tailFile *os.File) i
 	close(winchCh)
 
 	if err := child.Wait(); err != nil {
+		tracker.recordProcEvent()
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return exitErr.ExitCode()
 		}
 		// PTY EOF before Wait is normal; ignore.
 	}
+	tracker.recordProcEvent()
 	return 0
 }
 
@@ -429,7 +657,9 @@ func runChildPiped(child *exec.Cmd, tracker *activityTracker, tailFile *os.File)
 		}
 	}()
 
+	tracker.recordProcEvent()
 	err := child.Run()
+	tracker.recordProcEvent()
 	signal.Stop(sigCh)
 	close(done)
 

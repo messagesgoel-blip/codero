@@ -88,9 +88,11 @@ type heartbeatFragments struct {
 func buildHeartbeatFragments() heartbeatFragments {
 	scratchInit := `_sd="${TMPDIR:-/tmp}/codero-${CODERO_SESSION_ID:-unknown}"; ` +
 		`mkdir -p "$_sd" 2>/dev/null || true; chmod 700 "$_sd" 2>/dev/null || true; `
-	repoDetect := `_cr=$(git remote get-url origin 2>/dev/null | sed 's|.*/||;s|\.git$||'); ` +
-		`[ -z "$_cr" ] && _cr=$(git rev-parse --show-toplevel 2>/dev/null) && _cr=$(basename "$_cr") || true; ` +
-		`_cb=$(git branch --show-current 2>/dev/null) || _cb=""; `
+	repoDetect := `_gw="${CODERO_WORKTREE:-$PWD}"; ` +
+		`[ -d "$_gw" ] || _gw="$PWD"; ` +
+		`_cr=$(git -C "$_gw" remote get-url origin 2>/dev/null | sed 's|.*/||;s|\.git$||'); ` +
+		`[ -z "$_cr" ] && _cr=$(git -C "$_gw" rev-parse --show-toplevel 2>/dev/null) && _cr=$(basename "$_cr") || true; ` +
+		`_cb=$(git -C "$_gw" branch --show-current 2>/dev/null) || _cb=""; `
 	repoFlags := `$([ -n "$_cr" ] && echo "--repo=$_cr") $([ -n "$_cb" ] && echo "--branch=$_cb")`
 
 	outputTrack := `_ob=0; _of="$_sd/output-bytes"; ` +

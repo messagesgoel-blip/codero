@@ -268,11 +268,20 @@ func TestBuildHeartbeatFragments(t *testing.T) {
 	if f.RepoDetect == "" {
 		t.Error("RepoDetect is empty")
 	}
+	if !strings.Contains(f.RepoDetect, `CODERO_WORKTREE`) {
+		t.Error("RepoDetect should prefer CODERO_WORKTREE when available")
+	}
 	if f.OutputTrack == "" {
 		t.Error("OutputTrack is empty")
 	}
+	if f.ToolTrack == "" {
+		t.Error("ToolTrack is empty")
+	}
 	if f.PostToolAccum == "" {
 		t.Error("PostToolAccum is empty")
+	}
+	if f.PreToolCount == "" {
+		t.Error("PreToolCount is empty")
 	}
 	if f.AutoRecover == "" {
 		t.Error("AutoRecover is empty")
@@ -283,20 +292,23 @@ func TestBuildHeartbeatFragments(t *testing.T) {
 func TestAssembleHeartbeat(t *testing.T) {
 	f := buildHeartbeatFragments()
 
-	working := assembleHeartbeat(f, "working", false)
+	working := assembleHeartbeat(f, "working", false, true)
 	if !strings.Contains(working, "--status=working") {
 		t.Error("working heartbeat missing --status=working")
 	}
 	if strings.Contains(working, "wc -c") {
 		t.Error("non-accum heartbeat should not contain wc -c")
 	}
+	if !strings.Contains(working, "--tool-calls=") {
+		t.Error("working heartbeat missing --tool-calls")
+	}
 
-	workingPost := assembleHeartbeat(f, "working", true)
+	workingPost := assembleHeartbeat(f, "working", true, false)
 	if !strings.Contains(workingPost, "wc -c") {
 		t.Error("accum heartbeat should contain wc -c for byte counting")
 	}
 
-	waiting := assembleHeartbeat(f, "waiting_for_input", false)
+	waiting := assembleHeartbeat(f, "waiting_for_input", false, false)
 	if !strings.Contains(waiting, "--status=waiting_for_input") {
 		t.Error("waiting heartbeat missing --status=waiting_for_input")
 	}

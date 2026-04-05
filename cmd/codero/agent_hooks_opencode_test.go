@@ -25,8 +25,28 @@ func TestGenerateOpenCodePlugin_ContainsEvents(t *testing.T) {
 
 func TestGenerateOpenCodePlugin_ContainsImport(t *testing.T) {
 	plugin := generateOpenCodePlugin()
-	if !strings.Contains(plugin, `import { exec } from "node:child_process"`) {
-		t.Error("plugin missing child_process import")
+	if strings.Contains(plugin, `node:child_process`) {
+		t.Error("plugin should not depend on node:child_process")
+	}
+}
+
+func TestGenerateOpenCodePlugin_UsesSynchronousFire(t *testing.T) {
+	plugin := generateOpenCodePlugin()
+	if !strings.Contains(plugin, "await $`cd ${cwd} && bash -lc ${cmd} >/dev/null 2>&1`") {
+		t.Fatal("plugin missing plugin-shell heartbeat execution")
+	}
+	if strings.Contains(plugin, `node:child_process`) {
+		t.Fatal("plugin still uses child_process execution")
+	}
+}
+
+func TestGenerateOpenCodePlugin_BindsHookCWD(t *testing.T) {
+	plugin := generateOpenCodePlugin()
+	if !strings.Contains(plugin, `async ({ $, directory, worktree }) =>`) {
+		t.Fatal("plugin missing plugin shell and directory/worktree context")
+	}
+	if !strings.Contains(plugin, `const cwd = worktree || directory || process.cwd();`) {
+		t.Fatal("plugin missing cwd fallback")
 	}
 }
 
