@@ -605,10 +605,12 @@ func runAgentWithTracking(ctx context.Context, agentID, mode, taskID, repoOverri
 	if tailFile != nil {
 		defer tailFile.Close()
 	}
+	hookScratch := ""
 	if err := seedHookScratchState(sessionID, secret); err != nil {
 		fmt.Fprintf(os.Stderr, "codero: hook scratch seed failed: %v\n", err)
 	} else {
 		scratchDir := hookScratchDir(sessionID)
+		hookScratch = scratchDir
 		defer func() {
 			if err := os.RemoveAll(scratchDir); err != nil {
 				fmt.Fprintf(os.Stderr, "codero: hook scratch cleanup failed: %v\n", err)
@@ -625,7 +627,7 @@ func runAgentWithTracking(ctx context.Context, agentID, mode, taskID, repoOverri
 	go heartbeatLoop(hbCtx, client, sessionID, secret, tracker)
 
 	// Run child process
-	exitCode := runChild(binaryPath, binaryArgs, sessionID, agentID, daemonAddr, tracker, tailFile)
+	exitCode := runChild(binaryPath, binaryArgs, sessionID, agentID, daemonAddr, hookScratch, tracker, tailFile)
 
 	flushCtx, flushCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	_ = sendHeartbeatSample(flushCtx, client, sessionID, secret, tracker)
@@ -708,9 +710,19 @@ func heartbeatLoop(ctx context.Context, client *daemongrpc.SessionClient, sessio
 // BND-002: Environment is filtered to prevent secret leakage. Agent processes
 // do not receive CODERO_DB_*, CODERO_REDIS_*, GITHUB_TOKEN, or other Codero
 // control-plane credentials.
-func runChild(binaryPath string, args []string, sessionID, agentID, daemonAddr string, tracker *activityTracker, tailFile *os.File) int {
+func runChild(binaryPath string, args []string, sessionID, agentID, daemonAddr, hookScratch string, tracker *activityTracker, tailFile *os.File) int {
 	child := exec.Command(binaryPath, args...) // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+	child.Env = buildRunChildEnv(sessionID, agentID, daemonAddr, hookScratch)
 
+	stdoutIsTTY := term.IsTerminal(int(os.Stdout.Fd()))
+
+	if stdoutIsTTY {
+		return runChildPTY(child, tracker, tailFile)
+	}
+	return runChildPiped(child, tracker, tailFile)
+}
+
+func buildRunChildEnv(sessionID, agentID, daemonAddr, hookScratch string) []string {
 	// BND-002: Filter env to prevent control-plane secrets from leaking to agent.
 	// Uses strict allowlist: only system vars + allowed agent vars pass through.
 	env := session.FilterEnv(session.LayerAgent)
@@ -725,20 +737,16 @@ func runChild(binaryPath string, args []string, sessionID, agentID, daemonAddr s
 			}
 		}
 	}
-	child.Env = append(env,
+	env = append(env,
 		"CODERO_SESSION_ID="+sessionID,
 		"CODERO_AGENT_ID="+agentID,
 		"CODERO_DAEMON_ADDR="+daemonAddr,
-		"CODERO_HOOK_SCRATCH_DIR="+hookScratchDir(sessionID),
 		"CODERO_WORKTREE="+resolveFallbackWorktree(),
 	)
-
-	stdoutIsTTY := term.IsTerminal(int(os.Stdout.Fd()))
-
-	if stdoutIsTTY {
-		return runChildPTY(child, tracker, tailFile)
+	if hookScratch != "" {
+		env = append(env, "CODERO_HOOK_SCRATCH_DIR="+hookScratch)
 	}
-	return runChildPiped(child, tracker, tailFile)
+	return env
 }
 
 // runChildPTY starts the child inside a pseudo-terminal so TUI agents see a real TTY.

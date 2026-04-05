@@ -188,6 +188,31 @@ func TestSendHeartbeatSample_UsesTelemetryHeartbeatWhenCountersExist(t *testing.
 	}
 }
 
+func TestBuildRunChildEnv_OnlyExportsHookScratchOnSuccess(t *testing.T) {
+	t.Setenv("CODERO_SESSION_ID", "stale-session")
+	t.Setenv("CODERO_HOOK_SCRATCH_DIR", "<FAKE:stale-scratch>")
+	t.Setenv("CODERO_WORKTREE", "<FAKE:worktree>")
+
+	withoutScratch := buildRunChildEnv("sess-1", "agent-1", "127.0.0.1:8111", "")
+	for _, entry := range withoutScratch {
+		if strings.HasPrefix(entry, "CODERO_HOOK_SCRATCH_DIR=") {
+			t.Fatalf("unexpected hook scratch export without successful seeding: %q", entry)
+		}
+	}
+
+	withScratch := buildRunChildEnv("sess-1", "agent-1", "127.0.0.1:8111", "<FAKE:codero-scratch>")
+	found := false
+	for _, entry := range withScratch {
+		if entry == "CODERO_HOOK_SCRATCH_DIR=<FAKE:codero-scratch>" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("missing hook scratch export after successful seeding")
+	}
+}
+
 type fakeHeartbeatClient struct {
 	heartbeatCalls            int
 	heartbeatWithContextCalls int
