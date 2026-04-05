@@ -305,7 +305,7 @@ func estimateFileDiffVolume(path string) int64 {
 	if err != nil {
 		return 1
 	}
-	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+	if !info.Mode().IsRegular() {
 		return 1
 	}
 
