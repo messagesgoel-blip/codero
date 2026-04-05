@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	defaultDaemonAddr = "127.0.0.1:8110"
+	defaultDaemonAddr = "127.0.0.1:8111"
 	shimTemplate      = `#!/usr/bin/env bash
 # Codero shim for %s — do not edit (managed by codero setup)
 exec codero agent run --agent-id %s -- %q "$@"
@@ -65,7 +65,7 @@ func runSetup(force bool) error {
 		fmt.Println("not running")
 		fmt.Println("        → Start the codero daemon and rerun setup.")
 		fmt.Printf("        → Expected at %s\n", daemonAddr)
-		fmt.Println("        → See: docker compose up -d (in your codero deploy directory)")
+		fmt.Println("        → See: start the live codero compose stack, then rerun setup.")
 		fmt.Println()
 		fmt.Println("  Setup will continue without daemon verification.")
 		fmt.Println()
@@ -208,21 +208,33 @@ func shimBinDir() (string, error) {
 // findRealBinary scans PATH for the agent binary, excluding the shim dir.
 func findRealBinary(agent, shimDir string) string {
 	pathEnv := os.Getenv("PATH")
+	candidates := agentBinaryCandidates(agent)
 	for _, dir := range filepath.SplitList(pathEnv) {
 		if dir == shimDir {
 			continue
 		}
-		candidate := filepath.Join(dir, agent)
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			// Resolve symlinks
-			resolved, err := filepath.EvalSymlinks(candidate)
-			if err != nil {
-				resolved = candidate
+		for _, binary := range candidates {
+			candidate := filepath.Join(dir, binary)
+			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+				// Resolve symlinks
+				resolved, err := filepath.EvalSymlinks(candidate)
+				if err != nil {
+					resolved = candidate
+				}
+				return resolved
 			}
-			return resolved
 		}
 	}
 	return ""
+}
+
+func agentBinaryCandidates(agent string) []string {
+	switch config.NormalizeAgentKind(agent) {
+	case config.AgentKindKiloCode:
+		return []string{"kilo", "kilocode"}
+	default:
+		return []string{agent}
+	}
 }
 
 func installShim(shimDir, agentKind, profileID, realBinary string, uc *config.UserConfig, force bool) (string, error) {

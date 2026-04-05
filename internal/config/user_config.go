@@ -27,6 +27,7 @@ const (
 	AgentKindClaude   = "claude"
 	AgentKindCodex    = "codex"
 	AgentKindOpenCode = "opencode"
+	AgentKindKiloCode = "kilocode"
 	AgentKindCopilot  = "copilot"
 	AgentKindGemini   = "gemini"
 )
@@ -35,6 +36,7 @@ var supportedAgentKinds = []string{
 	AgentKindClaude,
 	AgentKindCodex,
 	AgentKindOpenCode,
+	AgentKindKiloCode,
 	AgentKindCopilot,
 	AgentKindGemini,
 }
@@ -302,8 +304,10 @@ func SupportedAgentKinds() []string {
 func NormalizeAgentKind(kind string) string {
 	kind = strings.ToLower(strings.TrimSpace(kind))
 	switch kind {
-	case AgentKindClaude, AgentKindCodex, AgentKindOpenCode, AgentKindCopilot, AgentKindGemini:
+	case AgentKindClaude, AgentKindCodex, AgentKindOpenCode, AgentKindKiloCode, AgentKindCopilot, AgentKindGemini:
 		return kind
+	case "kilo":
+		return AgentKindKiloCode
 	default:
 		return ""
 	}
@@ -324,6 +328,9 @@ func InferAgentKind(agentID, realBinary string) string {
 			if strings.HasPrefix(candidate, known+"-") || strings.HasPrefix(candidate, known+"_") {
 				return known
 			}
+		}
+		if strings.HasPrefix(candidate, "kilo-") || strings.HasPrefix(candidate, "kilo_") {
+			return AgentKindKiloCode
 		}
 	}
 	return ""

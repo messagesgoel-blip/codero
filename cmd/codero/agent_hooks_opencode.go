@@ -40,11 +40,15 @@ func handleOpenCodeHooks(print, install, force bool) error { //nolint:unparam //
 // The plugin shells out to bash for heartbeat commands, reusing the same
 // shared shell fragments as Claude and Codex hooks.
 func generateOpenCodePlugin() string {
+	return generateOpenCodePluginSource("opencode")
+}
+
+func generateOpenCodePluginSource(kind string) string {
 	f := buildHeartbeatFragments()
 
-	working := assembleHeartbeat(f, "working", false)
-	workingPost := assembleHeartbeat(f, "working", true)
-	waiting := assembleHeartbeat(f, "waiting_for_input", false)
+	working := assembleHeartbeat(f, "working", false, true)
+	workingPost := assembleHeartbeat(f, "working", true, false)
+	waiting := assembleHeartbeat(f, "waiting_for_input", false, false)
 
 	// escapeForJS escapes characters that are special in JS template literals.
 	// Backticks close the literal; \${ prevents ${VAR} from being interpreted as
@@ -56,7 +60,7 @@ func generateOpenCodePlugin() string {
 	}
 
 	return fmt.Sprintf(`// codero-heartbeat.js — managed by codero (do not edit)
-// Regenerate with: codero agent hooks --kind=opencode --install
+// Regenerate with: codero agent hooks --kind=%s --install
 import { exec } from "node:child_process";
 const fire = (cmd) => exec(cmd, () => {});
 
@@ -71,7 +75,8 @@ export default async () => ({
     fire(%s);
   }
 });
-`, jsShellCall(escapeForJS(working)),
+`, kind,
+		jsShellCall(escapeForJS(working)),
 		jsShellCall(escapeForJS(workingPost)),
 		jsShellCall(escapeForJS(waiting)))
 }
@@ -84,5 +89,13 @@ func jsShellCall(shellCmd string) string {
 
 // openCodePluginPath returns the installation path for the OpenCode plugin.
 func openCodePluginPath(homeDir string) string {
-	return filepath.Join(homeDir, ".config", "opencode", "plugin", "codero-heartbeat.js")
+	return openCodeLikePluginPath(homeDir, "opencode")
+}
+
+func kiloCodePluginPath(homeDir string) string {
+	return openCodeLikePluginPath(homeDir, "kilo")
+}
+
+func openCodeLikePluginPath(homeDir, dir string) string {
+	return filepath.Join(homeDir, ".config", dir, "plugin", "codero-heartbeat.js")
 }

@@ -27,7 +27,10 @@ func agentHooksCmd(_ *string) *cobra.Command {
 Supports multiple agent families via --kind:
   claude    Claude Code hooks (PreToolUse/PostToolUse/Notification)
   codex     Codex CLI hooks.json (PreToolUse/PostToolUse/Stop)
-  opencode  OpenCode JS plugin (tool.execute/session.idle)`,
+  opencode  OpenCode JS plugin (tool.execute/session.idle)
+  kilocode Kilo Code JS plugin (OpenCode-compatible)
+  copilot  GitHub Copilot CLI hooks (session/tool lifecycle)
+  gemini   Gemini CLI settings hooks (BeforeTool/AfterAgent)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !install && !print {
 				print = true // default to print
@@ -35,7 +38,7 @@ Supports multiple agent families via --kind:
 
 			normalized := config.NormalizeAgentKind(kind)
 			if normalized == "" {
-				return fmt.Errorf("unsupported --kind %q; supported: claude, codex, opencode", kind)
+				return fmt.Errorf("unsupported --kind %q; supported: claude, codex, opencode, kilocode, copilot, gemini", kind)
 			}
 
 			switch normalized {
@@ -45,8 +48,14 @@ Supports multiple agent families via --kind:
 				return handleCodexHooks(print, install, force)
 			case config.AgentKindOpenCode:
 				return handleOpenCodeHooks(print, install, force)
+			case config.AgentKindKiloCode:
+				return handleKiloCodeHooks(print, install, force)
+			case config.AgentKindCopilot:
+				return handleCopilotHooks(print, install, force)
+			case config.AgentKindGemini:
+				return handleGeminiHooks(print, install, force)
 			default:
-				return fmt.Errorf("hooks not yet supported for agent kind %q (supported: claude, codex, opencode)", kind)
+				return fmt.Errorf("hooks not yet supported for agent kind %q (supported: claude, codex, opencode, kilocode, copilot, gemini)", kind)
 			}
 		},
 	}
@@ -54,7 +63,7 @@ Supports multiple agent families via --kind:
 	cmd.Flags().BoolVar(&install, "install", false, "install hooks into the agent's config directory")
 	cmd.Flags().BoolVar(&print, "print", false, "print hooks to stdout (default)")
 	cmd.Flags().BoolVar(&force, "force", false, "reinstall hooks even if already up to date")
-	cmd.Flags().StringVar(&kind, "kind", "claude", "agent family: claude, codex, opencode")
+	cmd.Flags().StringVar(&kind, "kind", "claude", "agent family: claude, codex, opencode, kilocode, copilot, gemini")
 
 	return cmd
 }
@@ -64,35 +73,44 @@ Supports multiple agent families via --kind:
 // heartbeatFragments holds reusable shell script building blocks
 // for heartbeat hooks across all agent families.
 type heartbeatFragments struct {
+	ScratchInit   string // creates the per-session scratch directory
 	RepoDetect    string // detects repo name + branch from git
 	RepoFlags     string // --repo=X --branch=Y flag expansion
 	OutputTrack   string // reads accumulated output bytes from counter file
 	OutputFlags   string // --output-bytes=N flag expansion
+	ToolTrack     string // reads accumulated tool call count
+	ToolFlags     string // --tool-calls=N flag expansion
 	PostToolAccum string // accumulates stdin byte count to counter file
+	PreToolCount  string // increments tool call count
 	AutoRecover   string // _hb() function with re-register fallback
 }
 
 func buildHeartbeatFragments() heartbeatFragments {
+	scratchInit := `_sd="${TMPDIR:-/tmp}/codero-${CODERO_SESSION_ID:-unknown}"; ` +
+		`mkdir -p "$_sd" 2>/dev/null || true; chmod 700 "$_sd" 2>/dev/null || true; `
 	repoDetect := `_cr=$(git remote get-url origin 2>/dev/null | sed 's|.*/||;s|\.git$||'); ` +
 		`[ -z "$_cr" ] && _cr=$(git rev-parse --show-toplevel 2>/dev/null) && _cr=$(basename "$_cr") || true; ` +
 		`_cb=$(git branch --show-current 2>/dev/null) || _cb=""; `
 	repoFlags := `$([ -n "$_cr" ] && echo "--repo=$_cr") $([ -n "$_cb" ] && echo "--branch=$_cb")`
 
-	outputTrack := `_ob=0; _sd="${TMPDIR:-/tmp}/codero-${CODERO_SESSION_ID:-unknown}"; ` +
-		`_of="$_sd/output-bytes"; ` +
+	outputTrack := `_ob=0; _of="$_sd/output-bytes"; ` +
 		`[ -f "$_of" ] && _ob=$(cat "$_of" 2>/dev/null || echo 0); `
 	outputFlags := `$([ "$_ob" -gt 0 ] 2>/dev/null && echo "--output-bytes=$_ob")`
 
-	postToolAccum := `_sd="${TMPDIR:-/tmp}/codero-${CODERO_SESSION_ID:-unknown}"; ` +
-		`mkdir -p "$_sd" 2>/dev/null || true; chmod 700 "$_sd" 2>/dev/null || true; ` +
-		`_of="$_sd/output-bytes"; ` +
+	toolTrack := `_tc=0; _tf="$_sd/tool-calls"; ` +
+		`[ -f "$_tf" ] && _tc=$(cat "$_tf" 2>/dev/null || echo 0); `
+	toolFlags := `$([ "$_tc" -gt 0 ] 2>/dev/null && echo "--tool-calls=$_tc")`
+
+	postToolAccum := `_of="$_sd/output-bytes"; ` +
 		`_nb=$(wc -c | tr -d '[:space:]'); ` +
 		`_ob=0; [ -f "$_of" ] && _ob=$(cat "$_of" 2>/dev/null || echo 0); ` +
 		`echo $((_ob + _nb)) > "$_of"; chmod 600 "$_of" 2>/dev/null || true; `
 
+	preToolCount := `_tf="$_sd/tool-calls"; ` +
+		`_tc=0; [ -f "$_tf" ] && _tc=$(cat "$_tf" 2>/dev/null || echo 0); ` +
+		`echo $((_tc + 1)) > "$_tf"; chmod 600 "$_tf" 2>/dev/null || true; `
+
 	autoRecover := `_hb() { ` +
-		`_sd="${TMPDIR:-/tmp}/codero-${CODERO_SESSION_ID:-unknown}"; ` +
-		`mkdir -p "$_sd" 2>/dev/null || true; chmod 700 "$_sd" 2>/dev/null || true; ` +
 		`_sf="$_sd/secret"; _idf="$_sd/session-id"; ` +
 		`_hs="${CODERO_HEARTBEAT_SECRET}"; [ -f "$_sf" ] && _hs=$(cat "$_sf" 2>/dev/null); ` +
 		`_sid="${CODERO_SESSION_ID}"; [ -f "$_idf" ] && _sid=$(cat "$_idf" 2>/dev/null); ` +
@@ -109,11 +127,15 @@ func buildHeartbeatFragments() heartbeatFragments {
 		`}; `
 
 	return heartbeatFragments{
+		ScratchInit:   scratchInit,
 		RepoDetect:    repoDetect,
 		RepoFlags:     repoFlags,
 		OutputTrack:   outputTrack,
 		OutputFlags:   outputFlags,
+		ToolTrack:     toolTrack,
+		ToolFlags:     toolFlags,
 		PostToolAccum: postToolAccum,
+		PreToolCount:  preToolCount,
 		AutoRecover:   autoRecover,
 	}
 }
@@ -121,13 +143,17 @@ func buildHeartbeatFragments() heartbeatFragments {
 // assembleHeartbeat composes a full heartbeat shell command.
 // status is "working" or "waiting_for_input".
 // If includeAccum is true, PostToolUse stdin byte accumulation is prepended.
-func assembleHeartbeat(f heartbeatFragments, status string, includeAccum bool) string {
-	prefix := ""
-	if includeAccum {
-		prefix = f.PostToolAccum
+// If incrementToolCount is true, a per-session tool-call counter is incremented first.
+func assembleHeartbeat(f heartbeatFragments, status string, includeAccum, incrementToolCount bool) string {
+	prefix := f.ScratchInit
+	if incrementToolCount {
+		prefix += f.PreToolCount
 	}
-	return prefix + f.RepoDetect + f.OutputTrack + f.AutoRecover +
-		`_hb --status=` + status + ` --progress ` + f.RepoFlags + " " + f.OutputFlags
+	if includeAccum {
+		prefix += f.PostToolAccum
+	}
+	return prefix + f.RepoDetect + f.OutputTrack + f.ToolTrack + f.AutoRecover +
+		`_hb --status=` + status + ` --progress ` + f.RepoFlags + " " + f.OutputFlags + " " + f.ToolFlags
 }
 
 // --- Claude Code hooks ---
@@ -171,7 +197,7 @@ func generateClaudeHooks() map[string]interface{} {
 				{
 					"matcher": "",
 					"hooks": []map[string]string{
-						{"type": "command", "command": assembleHeartbeat(f, "working", false)},
+						{"type": "command", "command": assembleHeartbeat(f, "working", false, true)},
 					},
 				},
 			},
@@ -179,7 +205,7 @@ func generateClaudeHooks() map[string]interface{} {
 				{
 					"matcher": "",
 					"hooks": []map[string]string{
-						{"type": "command", "command": assembleHeartbeat(f, "working", true)},
+						{"type": "command", "command": assembleHeartbeat(f, "working", true, false)},
 					},
 				},
 			},
@@ -187,7 +213,7 @@ func generateClaudeHooks() map[string]interface{} {
 				{
 					"matcher": "",
 					"hooks": []map[string]string{
-						{"type": "command", "command": assembleHeartbeat(f, "waiting_for_input", false)},
+						{"type": "command", "command": assembleHeartbeat(f, "waiting_for_input", false, false)},
 					},
 				},
 			},
@@ -199,23 +225,38 @@ func generateClaudeHooks() map[string]interface{} {
 // file at path. It returns one of "created", "updated", or "unchanged".
 // If force is true, the hooks section is always rewritten even if identical.
 func installClaudeHooks(path string, hooks map[string]interface{}, force bool) (string, error) {
+	return installMergedJSONConfig(path, hooks, force, false)
+}
+
+// shallowCopy returns a shallow copy of m.
+func shallowCopy(m map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+// installMergedJSONConfig merges top-level keys into an existing JSON config.
+// When allowJSONC is true, comments and trailing commas in the existing file are
+// stripped before parsing.
+func installMergedJSONConfig(path string, updates map[string]interface{}, force, allowJSONC bool) (string, error) {
 	existing := make(map[string]interface{})
 	fileExisted := false
 
 	data, err := os.ReadFile(path)
 	if err == nil {
 		fileExisted = true
-		if err := json.Unmarshal(data, &existing); err != nil {
+		if err := unmarshalJSONObject(data, &existing, allowJSONC); err != nil {
 			return "", fmt.Errorf("parse existing settings at %s: %w", path, err)
 		}
 	} else if !os.IsNotExist(err) {
 		return "", fmt.Errorf("read settings: %w", err)
 	}
 
-	// Idempotency check: compare new hooks JSON with what is already stored.
 	if !force && fileExisted {
 		merged := shallowCopy(existing)
-		for k, v := range hooks {
+		for k, v := range updates {
 			merged[k] = v
 		}
 		mergedJSON, err := json.Marshal(merged)
@@ -231,7 +272,7 @@ func installClaudeHooks(path string, hooks map[string]interface{}, force bool) (
 		}
 	}
 
-	for k, v := range hooks {
+	for k, v := range updates {
 		existing[k] = v
 	}
 
@@ -253,12 +294,127 @@ func installClaudeHooks(path string, hooks map[string]interface{}, force bool) (
 	return "created", nil
 }
 
-// shallowCopy returns a shallow copy of m.
-func shallowCopy(m map[string]interface{}) map[string]interface{} {
-	out := make(map[string]interface{}, len(m))
-	for k, v := range m {
-		out[k] = v
+func unmarshalJSONObject(data []byte, out *map[string]interface{}, allowJSONC bool) error {
+	if allowJSONC {
+		data = normalizeJSONC(data)
 	}
+	if err := json.Unmarshal(data, out); err != nil {
+		return err
+	}
+	if *out == nil {
+		*out = make(map[string]interface{})
+	}
+	return nil
+}
+
+func normalizeJSONC(data []byte) []byte {
+	return stripTrailingCommas(stripJSONComments(data))
+}
+
+func stripJSONComments(data []byte) []byte {
+	out := make([]byte, 0, len(data))
+	inString := false
+	escaped := false
+	inLineComment := false
+	inBlockComment := false
+
+	for i := 0; i < len(data); i++ {
+		ch := data[i]
+		next := byte(0)
+		if i+1 < len(data) {
+			next = data[i+1]
+		}
+
+		switch {
+		case inLineComment:
+			if ch == '\n' {
+				inLineComment = false
+				out = append(out, ch)
+			}
+		case inBlockComment:
+			if ch == '*' && next == '/' {
+				inBlockComment = false
+				i++
+			}
+		case inString:
+			out = append(out, ch)
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if ch == '"' {
+				inString = false
+			}
+		default:
+			if ch == '/' && next == '/' {
+				inLineComment = true
+				i++
+				continue
+			}
+			if ch == '/' && next == '*' {
+				inBlockComment = true
+				i++
+				continue
+			}
+			out = append(out, ch)
+			if ch == '"' {
+				inString = true
+			}
+		}
+	}
+
+	return out
+}
+
+func stripTrailingCommas(data []byte) []byte {
+	out := make([]byte, 0, len(data))
+	inString := false
+	escaped := false
+
+	for i := 0; i < len(data); i++ {
+		ch := data[i]
+		out = append(out, ch)
+
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+
+		if ch == '"' {
+			inString = true
+			continue
+		}
+		if ch != ',' {
+			continue
+		}
+
+		j := i + 1
+		for j < len(data) {
+			switch data[j] {
+			case ' ', '\t', '\n', '\r':
+				j++
+				continue
+			case '}', ']':
+				out = out[:len(out)-1]
+			}
+			break
+		}
+	}
+
 	return out
 }
 
