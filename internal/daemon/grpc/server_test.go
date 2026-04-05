@@ -19,6 +19,20 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+func seedTrackedBranch(t *testing.T, db *state.DB, repo, branch string) {
+	t.Helper()
+	_, err := db.Unwrap().Exec(`
+		INSERT INTO branch_states
+			(id, repo, branch, head_hash, state, retry_count, max_retries, approved, ci_green,
+			 pending_events, unresolved_threads, owner_session_id, queue_priority)
+		VALUES (?,?,?,?,?,0,3,0,0,0,0,'',0)`,
+		repo+"-"+branch, repo, branch, "abc123", "submitted",
+	)
+	if err != nil {
+		t.Fatalf("seedTrackedBranch: %v", err)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -243,6 +257,148 @@ func TestHeartbeat(t *testing.T) {
 	}
 	if hb.ServerTime == nil {
 		t.Fatal("expected non-nil server_time")
+	}
+}
+
+func TestRegisterSession_PersistsLaunchContextAndPromotesTrackedAssignment(t *testing.T) {
+	srv, sessCli, _, _, _, _, _ := testServer(t)
+	ctx := context.Background()
+
+	seedTrackedBranch(t, srv.db, "acme/api", "feat/COD-201-runtime")
+
+	var header metadata.MD
+	resp, err := sessCli.RegisterSession(ctx, &daemonv1.RegisterSessionRequest{
+		AgentId:    "codex-a",
+		ClientKind: "coding",
+		InitialContext: map[string]string{
+			"cwd":            "/workspace/acme-api",
+			"repo":           "acme/api",
+			"branch":         "feat/COD-201-runtime",
+			"session_source": "agent_run",
+			"task_id":        "COD-201",
+		},
+	}, ggrpc.Header(&header))
+	if err != nil {
+		t.Fatalf("RegisterSession: %v", err)
+	}
+
+	var repo, branch, source, confidence string
+	if err := srv.db.Unwrap().QueryRowContext(ctx, `
+		SELECT repo, branch, attribution_source, attribution_confidence
+		FROM agent_sessions
+		WHERE session_id = ?`, resp.SessionId).
+		Scan(&repo, &branch, &source, &confidence); err != nil {
+		t.Fatalf("read session runtime attribution: %v", err)
+	}
+	if repo != "acme/api" || branch != "feat/COD-201-runtime" {
+		t.Fatalf("repo/branch = %q/%q, want launch context values", repo, branch)
+	}
+	if source != state.AttributionSourceLaunchContext || confidence != state.AttributionConfidenceMedium {
+		t.Fatalf("attribution = %q/%q, want launch_context/medium", source, confidence)
+	}
+
+	active, err := state.GetActiveAgentAssignment(ctx, srv.db, resp.SessionId)
+	if err != nil {
+		t.Fatalf("GetActiveAgentAssignment: %v", err)
+	}
+	if active.Repo != "acme/api" || active.Branch != "feat/COD-201-runtime" {
+		t.Fatalf("active assignment repo/branch = %q/%q, want tracked promotion", active.Repo, active.Branch)
+	}
+	if active.TaskID != "COD-201" {
+		t.Fatalf("active assignment task_id = %q, want COD-201", active.TaskID)
+	}
+}
+
+func TestHeartbeat_PromotesLightweightAssignmentFromHookMetadata(t *testing.T) {
+	srv, sessCli, _, _, _, _, _ := testServer(t)
+	ctx := context.Background()
+
+	seedTrackedBranch(t, srv.db, "acme/api", "feat/COD-202-hook")
+
+	var header metadata.MD
+	resp, err := sessCli.RegisterSession(ctx, &daemonv1.RegisterSessionRequest{
+		AgentId:    "gcli-a",
+		ClientKind: "coding",
+		InitialContext: map[string]string{
+			"cwd": "/workspace/home",
+		},
+	}, ggrpc.Header(&header))
+	if err != nil {
+		t.Fatalf("RegisterSession: %v", err)
+	}
+	secrets := header.Get("x-heartbeat-secret")
+	if len(secrets) == 0 || secrets[0] == "" {
+		t.Fatal("expected heartbeat secret header")
+	}
+
+	hbCtx := metadata.NewOutgoingContext(ctx, metadata.Pairs(
+		"x-heartbeat-secret", secrets[0],
+		"x-repo", "acme/api",
+		"x-branch", "feat/COD-202-hook",
+		"x-attribution-source", state.AttributionSourceHookMetadata,
+	))
+	if _, err := sessCli.Heartbeat(hbCtx, &daemonv1.HeartbeatRequest{SessionId: resp.SessionId, MarkProgress: true}); err != nil {
+		t.Fatalf("Heartbeat: %v", err)
+	}
+
+	active, err := state.GetActiveAgentAssignment(ctx, srv.db, resp.SessionId)
+	if err != nil {
+		t.Fatalf("GetActiveAgentAssignment: %v", err)
+	}
+	if active.Repo != "acme/api" || active.Branch != "feat/COD-202-hook" {
+		t.Fatalf("active assignment repo/branch = %q/%q, want promoted tracked branch", active.Repo, active.Branch)
+	}
+
+	var source, confidence string
+	if err := srv.db.Unwrap().QueryRowContext(ctx, `
+		SELECT attribution_source, attribution_confidence
+		FROM agent_sessions
+		WHERE session_id = ?`, resp.SessionId).
+		Scan(&source, &confidence); err != nil {
+		t.Fatalf("read session attribution: %v", err)
+	}
+	if source != state.AttributionSourceHookMetadata || confidence != state.AttributionConfidenceHigh {
+		t.Fatalf("attribution = %q/%q, want hook_metadata/high", source, confidence)
+	}
+}
+
+func TestHeartbeat_InvalidAttributionSourceFallsBackToExplicitHeartbeat(t *testing.T) {
+	srv, sessCli, _, _, _, _, _ := testServer(t)
+	ctx := context.Background()
+
+	var header metadata.MD
+	resp, err := sessCli.RegisterSession(ctx, &daemonv1.RegisterSessionRequest{
+		AgentId:    "codex-a",
+		ClientKind: "coding",
+	}, ggrpc.Header(&header))
+	if err != nil {
+		t.Fatalf("RegisterSession: %v", err)
+	}
+	secrets := header.Get("x-heartbeat-secret")
+	if len(secrets) == 0 || secrets[0] == "" {
+		t.Fatal("expected heartbeat secret header")
+	}
+
+	hbCtx := metadata.NewOutgoingContext(ctx, metadata.Pairs(
+		"x-heartbeat-secret", secrets[0],
+		"x-repo", "acme/api",
+		"x-branch", "feat/COD-203-invalid-source",
+		"x-attribution-source", "not-a-real-source",
+	))
+	if _, err := sessCli.Heartbeat(hbCtx, &daemonv1.HeartbeatRequest{SessionId: resp.SessionId}); err != nil {
+		t.Fatalf("Heartbeat: %v", err)
+	}
+
+	var source, confidence string
+	if err := srv.db.Unwrap().QueryRowContext(ctx, `
+		SELECT attribution_source, attribution_confidence
+		FROM agent_sessions
+		WHERE session_id = ?`, resp.SessionId).
+		Scan(&source, &confidence); err != nil {
+		t.Fatalf("read session attribution: %v", err)
+	}
+	if source != state.AttributionSourceExplicitHeartbeat || confidence != state.AttributionConfidenceHigh {
+		t.Fatalf("attribution = %q/%q, want explicit_heartbeat/high", source, confidence)
 	}
 }
 

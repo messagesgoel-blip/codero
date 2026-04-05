@@ -31,39 +31,55 @@ type SessionListResponse struct {
 
 // SessionRow is a single session in the sessions list.
 type SessionRow struct {
-	SessionID       string     `json:"session_id"`
-	AgentID         string     `json:"agent_id"`
-	Mode            string     `json:"mode"`
-	Status          string     `json:"status"`
-	TmuxSessionName string     `json:"tmux_session_name,omitempty"`
-	Repo            string     `json:"repo,omitempty"`
-	Branch          string     `json:"branch,omitempty"`
-	Worktree        string     `json:"worktree,omitempty"`
-	Checkpoint      string     `json:"checkpoint,omitempty"`
-	InferredStatus  string     `json:"inferred_status,omitempty"`
-	StartedAt       time.Time  `json:"started_at"`
-	LastSeenAt      time.Time  `json:"last_seen_at"`
-	EndedAt         *time.Time `json:"ended_at,omitempty"`
-	EndReason       string     `json:"end_reason,omitempty"`
+	SessionID             string     `json:"session_id"`
+	AgentID               string     `json:"agent_id"`
+	Family                string     `json:"family,omitempty"`
+	LaunchMode            string     `json:"launch_mode,omitempty"`
+	Mode                  string     `json:"mode"`
+	Status                string     `json:"status"`
+	TmuxSessionName       string     `json:"tmux_session_name,omitempty"`
+	Repo                  string     `json:"repo,omitempty"`
+	Branch                string     `json:"branch,omitempty"`
+	Worktree              string     `json:"worktree,omitempty"`
+	Checkpoint            string     `json:"checkpoint,omitempty"`
+	LifecycleState        string     `json:"lifecycle_state,omitempty"`
+	ActivityState         string     `json:"activity_state,omitempty"`
+	AttachmentState       string     `json:"attachment_state,omitempty"`
+	AttributionSource     string     `json:"attribution_source,omitempty"`
+	AttributionConfidence string     `json:"attribution_confidence,omitempty"`
+	InferredStatus        string     `json:"inferred_status,omitempty"`
+	StartedAt             time.Time  `json:"started_at"`
+	LastSeenAt            time.Time  `json:"last_seen_at"`
+	LastActivityAt        *time.Time `json:"last_activity_at,omitempty"`
+	EndedAt               *time.Time `json:"ended_at,omitempty"`
+	EndReason             string     `json:"end_reason,omitempty"`
 }
 
 // SessionDetailResponse is the response for GET /api/v1/dashboard/sessions/{id}.
 type SessionDetailResponse struct {
-	SessionID       string              `json:"session_id"`
-	AgentID         string              `json:"agent_id"`
-	Mode            string              `json:"mode"`
-	Status          string              `json:"status"`
-	TmuxSessionName string              `json:"tmux_session_name,omitempty"`
-	Repo            string              `json:"repo,omitempty"`
-	Branch          string              `json:"branch,omitempty"`
-	Checkpoint      string              `json:"checkpoint,omitempty"`
-	StartedAt       time.Time           `json:"started_at"`
-	LastSeenAt      time.Time           `json:"last_seen_at"`
-	EndedAt         *time.Time          `json:"ended_at,omitempty"`
-	EndReason       string              `json:"end_reason,omitempty"`
-	Assignments     []AssignmentSummary `json:"assignments"`
-	SchemaVersion   string              `json:"schema_version"`
-	GeneratedAt     time.Time           `json:"generated_at"`
+	SessionID             string              `json:"session_id"`
+	AgentID               string              `json:"agent_id"`
+	Family                string              `json:"family,omitempty"`
+	LaunchMode            string              `json:"launch_mode,omitempty"`
+	Mode                  string              `json:"mode"`
+	Status                string              `json:"status"`
+	TmuxSessionName       string              `json:"tmux_session_name,omitempty"`
+	Repo                  string              `json:"repo,omitempty"`
+	Branch                string              `json:"branch,omitempty"`
+	Checkpoint            string              `json:"checkpoint,omitempty"`
+	LifecycleState        string              `json:"lifecycle_state,omitempty"`
+	ActivityState         string              `json:"activity_state,omitempty"`
+	AttachmentState       string              `json:"attachment_state,omitempty"`
+	AttributionSource     string              `json:"attribution_source,omitempty"`
+	AttributionConfidence string              `json:"attribution_confidence,omitempty"`
+	StartedAt             time.Time           `json:"started_at"`
+	LastSeenAt            time.Time           `json:"last_seen_at"`
+	LastActivityAt        *time.Time          `json:"last_activity_at,omitempty"`
+	EndedAt               *time.Time          `json:"ended_at,omitempty"`
+	EndReason             string              `json:"end_reason,omitempty"`
+	Assignments           []AssignmentSummary `json:"assignments"`
+	SchemaVersion         string              `json:"schema_version"`
+	GeneratedAt           time.Time           `json:"generated_at"`
 }
 
 func (h *Handler) handleSessions(w http.ResponseWriter, r *http.Request) {
@@ -119,21 +135,29 @@ func (h *Handler) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, SessionDetailResponse{
-		SessionID:       session.SessionID,
-		AgentID:         session.AgentID,
-		Mode:            session.Mode,
-		Status:          session.Status,
-		TmuxSessionName: session.TmuxSessionName,
-		Repo:            session.Repo,
-		Branch:          session.Branch,
-		Checkpoint:      session.Checkpoint,
-		StartedAt:       session.StartedAt,
-		LastSeenAt:      session.LastSeenAt,
-		EndedAt:         session.EndedAt,
-		EndReason:       session.EndReason,
-		Assignments:     assignments,
-		SchemaVersion:   SchemaVersionV1,
-		GeneratedAt:     time.Now().UTC(),
+		SessionID:             session.SessionID,
+		AgentID:               session.AgentID,
+		Family:                session.Family,
+		LaunchMode:            session.LaunchMode,
+		Mode:                  session.Mode,
+		Status:                session.Status,
+		TmuxSessionName:       session.TmuxSessionName,
+		Repo:                  session.Repo,
+		Branch:                session.Branch,
+		Checkpoint:            session.Checkpoint,
+		LifecycleState:        session.LifecycleState,
+		ActivityState:         session.ActivityState,
+		AttachmentState:       session.AttachmentState,
+		AttributionSource:     session.AttributionSource,
+		AttributionConfidence: session.AttributionConfidence,
+		StartedAt:             session.StartedAt,
+		LastSeenAt:            session.LastSeenAt,
+		LastActivityAt:        session.LastActivityAt,
+		EndedAt:               session.EndedAt,
+		EndReason:             session.EndReason,
+		Assignments:           assignments,
+		SchemaVersion:         SchemaVersionV1,
+		GeneratedAt:           time.Now().UTC(),
 	})
 }
 

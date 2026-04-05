@@ -20,20 +20,21 @@ func TestSessionRecoveryService(t *testing.T) {
 	// Manually run the schema creation SQL since we can't call state.Migrate
 	// This replicates what's in the migration files
 	_, err = db.Exec(`
-		CREATE TABLE agent_sessions (
-			session_id  TEXT     NOT NULL PRIMARY KEY,
-			agent_id    TEXT     NOT NULL,
-			mode        TEXT     NOT NULL DEFAULT '',
-			started_at  DATETIME NOT NULL DEFAULT (datetime('now')),
-			last_seen_at DATETIME NOT NULL DEFAULT (datetime('now')),
-			ended_at    DATETIME,
-			end_reason  TEXT     NOT NULL DEFAULT '',
-			last_progress_at DATETIME,
-			tmux_session_name TEXT NOT NULL DEFAULT '',
-			last_io_at DATETIME,
-			inferred_status TEXT NOT NULL DEFAULT 'unknown',
-			inferred_status_updated_at DATETIME
-		);
+			CREATE TABLE agent_sessions (
+				session_id  TEXT     NOT NULL PRIMARY KEY,
+				agent_id    TEXT     NOT NULL,
+				mode        TEXT     NOT NULL DEFAULT '',
+				started_at  DATETIME NOT NULL DEFAULT (datetime('now')),
+				last_seen_at DATETIME NOT NULL DEFAULT (datetime('now')),
+				ended_at    DATETIME,
+				end_reason  TEXT     NOT NULL DEFAULT '',
+				last_progress_at DATETIME,
+				tmux_session_name TEXT NOT NULL DEFAULT '',
+				last_io_at DATETIME,
+				inferred_status TEXT NOT NULL DEFAULT 'unknown',
+				inferred_status_updated_at DATETIME,
+				last_recovered_at DATETIME
+			);
 
 		CREATE INDEX idx_agent_sessions_agent_id ON agent_sessions (agent_id);
 		CREATE INDEX idx_agent_sessions_last_seen ON agent_sessions (last_seen_at);
@@ -91,6 +92,23 @@ func TestSessionRecoveryService(t *testing.T) {
 		}
 		if !active {
 			t.Errorf("Expected active session to be recoverable, but it was not")
+		}
+		var (
+			recoveredAt   sql.NullTime
+			recoveredSeen time.Time
+		)
+		if err := db.QueryRowContext(ctx, `
+				SELECT last_seen_at, last_recovered_at
+				FROM agent_sessions
+				WHERE session_id = ?`, activeSessionID).
+			Scan(&recoveredSeen, &recoveredAt); err != nil {
+			t.Fatalf("query recovered session fields: %v", err)
+		}
+		if !recoveredAt.Valid {
+			t.Fatal("expected last_recovered_at to be set")
+		}
+		if recoveredSeen.Before(now) {
+			t.Fatalf("last_seen_at = %s, want updated after recovery start %s", recoveredSeen, now)
 		}
 
 		ended, err := service.IsSessionRecoverable(ctx, endedSessionID, "test-agent")

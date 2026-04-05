@@ -91,6 +91,25 @@ func seedAgentSession(t *testing.T, db *sql.DB, sessionID, agentID, mode string,
 	}
 }
 
+func seedSessionRuntimeAttribution(t *testing.T, db *sql.DB, sessionID, repo, branch, source, confidence string) {
+	t.Helper()
+	_, err := db.Exec(`UPDATE agent_sessions
+		SET repo = ?, branch = ?, attribution_source = ?, attribution_confidence = ?
+		WHERE session_id = ?`,
+		repo, branch, source, confidence, sessionID)
+	if err != nil {
+		t.Fatalf("seedSessionRuntimeAttribution: %v", err)
+	}
+}
+
+func seedSessionRecovered(t *testing.T, db *sql.DB, sessionID string, recoveredAt time.Time) {
+	t.Helper()
+	_, err := db.Exec(`UPDATE agent_sessions SET last_recovered_at = ? WHERE session_id = ?`, recoveredAt, sessionID)
+	if err != nil {
+		t.Fatalf("seedSessionRecovered: %v", err)
+	}
+}
+
 // seedAgentAssignment inserts one agent_assignments row.
 func seedAgentAssignment(t *testing.T, db *sql.DB, assignmentID, sessionID, agentID, repo, branch, worktree, taskID string, startedAt time.Time) {
 	t.Helper()
@@ -925,8 +944,14 @@ func TestActiveSessions_WithFreshSession(t *testing.T) {
 	if s.SessionID != "sess-123" || s.AgentID != "agent-1" {
 		t.Fatalf("unexpected session row: %+v", s)
 	}
-	if s.ActivityState != "waiting" {
-		t.Fatalf("activity_state = %q, want waiting", s.ActivityState)
+	if s.ActivityState != "orphaned" {
+		t.Fatalf("activity_state = %q, want orphaned", s.ActivityState)
+	}
+	if s.LifecycleState != "orphaned" {
+		t.Fatalf("lifecycle_state = %q, want orphaned", s.LifecycleState)
+	}
+	if s.AttachmentState != "orphaned" {
+		t.Fatalf("attachment_state = %q, want orphaned", s.AttachmentState)
 	}
 	if s.OwnerAgent != "agent-1" {
 		t.Fatalf("owner_agent = %q, want agent-1", s.OwnerAgent)
@@ -1041,11 +1066,11 @@ func TestActiveSessions_AssignmentSubstatusWaiting(t *testing.T) {
 	if len(resp.Sessions) != 1 {
 		t.Fatalf("sessions length = %d, want 1", len(resp.Sessions))
 	}
-	if resp.Sessions[0].ActivityState != "waiting" {
-		t.Fatalf("activity_state = %q, want waiting", resp.Sessions[0].ActivityState)
+	if resp.Sessions[0].ActivityState != "syncing" {
+		t.Fatalf("activity_state = %q, want syncing", resp.Sessions[0].ActivityState)
 	}
-	if resp.Sessions[0].Task == nil || resp.Sessions[0].Task.Phase != "waiting" {
-		t.Fatalf("task phase = %#v, want waiting", resp.Sessions[0].Task)
+	if resp.Sessions[0].Task == nil || resp.Sessions[0].Task.Phase != "syncing" {
+		t.Fatalf("task phase = %#v, want syncing", resp.Sessions[0].Task)
 	}
 }
 
@@ -1370,9 +1395,73 @@ func TestActiveSessions_TaskContextFallback(t *testing.T) {
 	if resp.Sessions[0].Task != nil {
 		t.Fatalf("task must be nil for unrecognised branch, got %+v", resp.Sessions[0].Task)
 	}
-	// The activity state should reflect an active assignment.
-	if resp.Sessions[0].ActivityState != "active" {
-		t.Errorf("activity_state = %q, want active", resp.Sessions[0].ActivityState)
+	if resp.Sessions[0].AttachmentState != "attached" {
+		t.Errorf("attachment_state = %q, want attached", resp.Sessions[0].AttachmentState)
+	}
+	if resp.Sessions[0].ActivityState != "idle" {
+		t.Errorf("activity_state = %q, want idle", resp.Sessions[0].ActivityState)
+	}
+}
+
+func TestActiveSessions_UsesLaunchContextAttribution(t *testing.T) {
+	h, db := newTestHandler(t)
+	startedAt := time.Now().Add(-8 * time.Minute).UTC()
+	lastSeen := time.Now().Add(-30 * time.Second).UTC()
+	seedAgentSession(t, db, "sess-launch", "codex-a", "coding", startedAt, lastSeen)
+	seedSessionRuntimeAttribution(t, db, "sess-launch", "acme/api", "feat/COD-099-unify-runtime", "launch_context", "medium")
+
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/active-sessions", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.ActiveSessionsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Sessions) != 1 {
+		t.Fatalf("sessions = %d, want 1", len(resp.Sessions))
+	}
+	s := resp.Sessions[0]
+	if s.Repo != "acme/api" || s.Branch != "feat/COD-099-unify-runtime" {
+		t.Fatalf("repo/branch = %q/%q, want launch-context values", s.Repo, s.Branch)
+	}
+	if s.AttributionSource != "launch_context" || s.AttributionConfidence != "medium" {
+		t.Fatalf("attribution = %q/%q, want launch_context/medium", s.AttributionSource, s.AttributionConfidence)
+	}
+	if s.AttachmentState != "inferred" {
+		t.Fatalf("attachment_state = %q, want inferred", s.AttachmentState)
+	}
+	if s.LifecycleState != "attributed" {
+		t.Fatalf("lifecycle_state = %q, want attributed", s.LifecycleState)
+	}
+	if s.Family != "codex" {
+		t.Fatalf("family = %q, want codex", s.Family)
+	}
+}
+
+func TestActiveSessions_RecoveredLifecycle(t *testing.T) {
+	h, db := newTestHandler(t)
+	startedAt := time.Now().Add(-12 * time.Minute).UTC()
+	lastSeen := time.Now().Add(-10 * time.Second).UTC()
+	seedAgentSession(t, db, "sess-recovered", "claude-pro", "coding", startedAt, lastSeen)
+	seedAgentAssignment(t, db, "assign-recovered", "sess-recovered", "claude-pro", "acme/api", "feat/COD-101-recover", "", "COD-101", startedAt)
+	seedSessionRecovered(t, db, "sess-recovered", lastSeen)
+
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/dashboard/active-sessions", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.ActiveSessionsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Sessions) != 1 {
+		t.Fatalf("sessions = %d, want 1", len(resp.Sessions))
+	}
+	if resp.Sessions[0].LifecycleState != "recovered" {
+		t.Fatalf("lifecycle_state = %q, want recovered", resp.Sessions[0].LifecycleState)
 	}
 }
 

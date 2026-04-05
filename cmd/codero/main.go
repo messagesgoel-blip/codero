@@ -1088,21 +1088,22 @@ func sessionConfirmCmd(configPath *string) *cobra.Command {
 
 func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 	var (
-		sessionID       string
-		heartbeatSecret string
-		markProgress    bool
-		inferredStatus  string
-		repo            string
-		branch          string
-		runtimeBytes    int64
-		outputBytes     int64
-		outputLines     int64
-		toolCalls       int64
-		fileWrites      int64
-		diffChanges     int64
-		procEvents      int64
-		contextPressure string
-		compactIncr     bool
+		sessionID         string
+		heartbeatSecret   string
+		markProgress      bool
+		inferredStatus    string
+		attributionSource string
+		repo              string
+		branch            string
+		runtimeBytes      int64
+		outputBytes       int64
+		outputLines       int64
+		toolCalls         int64
+		fileWrites        int64
+		diffChanges       int64
+		procEvents        int64
+		contextPressure   string
+		compactIncr       bool
 	)
 
 	cmd := &cobra.Command{
@@ -1126,6 +1127,16 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 				if normalizedStatus == "" {
 					return fmt.Errorf("invalid --status value %q: accepted values are working, waiting_for_input, idle, unknown (also accepts pretooluse, posttooluse, notification, waiting as aliases)", inferredStatus)
 				}
+			}
+
+			normalizedAttributionSource := ""
+			if attributionSource != "" {
+				normalizedAttributionSource = state.NormalizeAttributionSource(attributionSource)
+				if normalizedAttributionSource == "" {
+					return fmt.Errorf("invalid --attribution-source value %q: accepted values are explicit_heartbeat, hook_metadata, launch_context, assignment_state, unresolved", attributionSource)
+				}
+			} else if repo != "" || branch != "" {
+				normalizedAttributionSource = state.AttributionSourceExplicitHeartbeat
 			}
 
 			if outputBytes < 0 {
@@ -1176,18 +1187,19 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 				defer client.Close()
 				if hasContext {
 					hctx := daemongrpc.HeartbeatContext{
-						InferredStatus:  normalizedStatus,
-						Repo:            repo,
-						Branch:          branch,
-						RuntimeBytes:    runtimeBytes,
-						OutputBytes:     outputBytes,
-						OutputLines:     outputLines,
-						ToolCalls:       toolCalls,
-						FileWrites:      fileWrites,
-						DiffChanges:     diffChanges,
-						ProcEvents:      procEvents,
-						ContextPressure: normalizedPressure,
-						CompactIncr:     compactIncr,
+						InferredStatus:    normalizedStatus,
+						Repo:              repo,
+						Branch:            branch,
+						AttributionSource: normalizedAttributionSource,
+						RuntimeBytes:      runtimeBytes,
+						OutputBytes:       outputBytes,
+						OutputLines:       outputLines,
+						ToolCalls:         toolCalls,
+						FileWrites:        fileWrites,
+						DiffChanges:       diffChanges,
+						ProcEvents:        procEvents,
+						ContextPressure:   normalizedPressure,
+						CompactIncr:       compactIncr,
 					}
 					if err := client.HeartbeatWithContext(cmd.Context(), sessionID, heartbeatSecret, markProgress, hctx); err != nil {
 						return fmt.Errorf("session heartbeat: %w", err)
@@ -1219,8 +1231,15 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 
 			// Metadata writes — only after successful heartbeat authentication.
 			if repo != "" || branch != "" {
-				if err := state.UpdateSessionRepoBranch(cmd.Context(), store.DB(), sessionID, repo, branch); err != nil {
+				if err := state.UpdateSessionRepoBranchAttribution(cmd.Context(), store.DB(), sessionID, repo, branch, normalizedAttributionSource); err != nil {
 					loglib.Warn("heartbeat: repo/branch update failed", "error", err)
+				} else if err := state.PromoteSessionToTrackedAssignment(cmd.Context(), store.DB(), sessionID); err != nil && !errors.Is(err, state.ErrAgentSessionNotFound) {
+					loglib.Warn("heartbeat: session assignment promotion failed",
+						"session_id", sessionID,
+						"repo", repo,
+						"branch", branch,
+						"error", err,
+					)
 				}
 			}
 			if outputBytes > 0 {
@@ -1260,6 +1279,7 @@ func sessionHeartbeatCmd(configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&heartbeatSecret, "heartbeat-secret", "", "heartbeat secret (defaults to CODERO_HEARTBEAT_SECRET)")
 	cmd.Flags().BoolVar(&markProgress, "progress", false, "also refresh session progress_at for active work")
 	cmd.Flags().StringVar(&inferredStatus, "status", "", "agent status: working, waiting_for_input, idle, unknown")
+	cmd.Flags().StringVar(&attributionSource, "attribution-source", "", "runtime attribution source: explicit_heartbeat, hook_metadata, launch_context, assignment_state, unresolved")
 	cmd.Flags().StringVar(&repo, "repo", "", "repository name the agent is working in")
 	cmd.Flags().StringVar(&branch, "branch", "", "branch name the agent is working on")
 	cmd.Flags().Int64Var(&runtimeBytes, "runtime-bytes", 0, "cumulative PTY/stdout bytes observed by the wrapper")

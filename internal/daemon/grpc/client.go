@@ -193,18 +193,19 @@ func (c *SessionClient) HeartbeatWithStatus(ctx context.Context, sessionID, hear
 
 // HeartbeatContext holds optional metadata for a heartbeat call.
 type HeartbeatContext struct {
-	InferredStatus  string
-	Repo            string
-	Branch          string
-	RuntimeBytes    int64
-	OutputBytes     int64
-	OutputLines     int64
-	ToolCalls       int64
-	FileWrites      int64
-	DiffChanges     int64
-	ProcEvents      int64
-	ContextPressure string // "normal", "warning", "critical"
-	CompactIncr     bool   // if true, increments compact_count by 1
+	InferredStatus    string
+	Repo              string
+	Branch            string
+	AttributionSource string
+	RuntimeBytes      int64
+	OutputBytes       int64
+	OutputLines       int64
+	ToolCalls         int64
+	FileWrites        int64
+	DiffChanges       int64
+	ProcEvents        int64
+	ContextPressure   string // "normal", "warning", "critical"
+	CompactIncr       bool   // if true, increments compact_count by 1
 }
 
 // HeartbeatWithContext sends a heartbeat with optional metadata fields.
@@ -222,6 +223,9 @@ func (c *SessionClient) HeartbeatWithContext(ctx context.Context, sessionID, hea
 	}
 	if hctx.Branch != "" {
 		ctx = metadata.AppendToOutgoingContext(ctx, "x-branch", hctx.Branch)
+	}
+	if hctx.AttributionSource != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-attribution-source", hctx.AttributionSource)
 	}
 	if hctx.OutputBytes > 0 {
 		ctx = metadata.AppendToOutgoingContext(ctx, "x-output-bytes", strconv.FormatInt(hctx.OutputBytes, 10))

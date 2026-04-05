@@ -2,7 +2,7 @@
 
 Status: **active**
 Owner: sanjay
-Updated: 2026-04-04
+Updated: 2026-04-05
 Supersedes: `agent-task-execution-roadmap.md` (SUB-001 through FIN-001)
 Next task: REV-010
 
@@ -18,6 +18,24 @@ This roadmap restructures the execution plan to:
 2. **Increase OpenClaw's role** as the advisory/delivery layer without giving it executive powers
 3. **Show visible progress at every step** — each task produces observable dashboard changes
 4. **Find real problems** by running the system under its own development workflow
+
+### Runtime Projection v1.1 (2026-04-05)
+
+The live dashboard now projects active agent runtimes through a single canonical model instead of
+mixing session-first and branch-first heuristics. Live rows now surface:
+- family and launch mode
+- lifecycle state and normalized activity state
+- attachment state (`attached`, `inferred`, `orphaned`)
+- attribution source/confidence for repo/branch/task context
+- last meaningful activity timestamp
+
+Home-launched or externally launched agents now adopt into inferred runtime state first, then
+promote into tracked branch/task attachment when enough repo/branch context becomes available,
+without losing session history.
+
+Operator surface distinction is now explicit:
+- `Sessions` is the runtime-instance view for live session identity, lifecycle, activity, attachment, and attribution
+- `Agents` is the profile/setup view for aliases, permission/home strategy, tracking, env vars, and duplicate-instance visibility
 
 ### Actor Authority (Unchanged)
 

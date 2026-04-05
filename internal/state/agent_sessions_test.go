@@ -66,6 +66,37 @@ func TestRegisterAgentSession_UpsertAndHeartbeat(t *testing.T) {
 	}
 }
 
+func TestMarkSessionRecoveredWithLastSeenUpdatesBothFields(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	if err := RegisterAgentSession(ctx, db, "sess-recovered", "agent-1", "", ""); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := MarkSessionRecoveredWithLastSeen(ctx, db, "sess-recovered", now, now); err != nil {
+		t.Fatalf("MarkSessionRecoveredWithLastSeen: %v", err)
+	}
+
+	var (
+		lastSeen      time.Time
+		lastRecovered sql.NullTime
+	)
+	if err := db.sql.QueryRowContext(ctx, `
+		SELECT last_seen_at, last_recovered_at
+		FROM agent_sessions
+		WHERE session_id = ?`, "sess-recovered").
+		Scan(&lastSeen, &lastRecovered); err != nil {
+		t.Fatalf("query recovered fields: %v", err)
+	}
+	if !lastRecovered.Valid {
+		t.Fatal("expected last_recovered_at to be set")
+	}
+	if lastSeen.Before(now) {
+		t.Fatalf("last_seen_at = %s, want >= %s", lastSeen, now)
+	}
+}
+
 func TestRegisterAgentSession_RevivesEndedSession(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -154,6 +185,40 @@ func TestConfirmAgentSession(t *testing.T) {
 	err = ConfirmAgentSession(ctx, db, "sess-confirm", "agent-1")
 	if !errors.Is(err, ErrAgentSessionAlreadyEnded) {
 		t.Fatalf("ConfirmAgentSession ended session: got %v", err)
+	}
+}
+
+func TestPromoteSessionToTrackedAssignmentMatchesQualifiedRepoSuffix(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	if err := RegisterAgentSession(ctx, db, "sess-promote-short-repo", "agent-1", "", ""); err != nil {
+		t.Fatalf("RegisterAgentSession: %v", err)
+	}
+	if err := UpdateSessionRepoBranchAttribution(ctx, db, "sess-promote-short-repo", "api", "feat/COD-304-short-repo", AttributionSourceExplicitHeartbeat); err != nil {
+		t.Fatalf("UpdateSessionRepoBranchAttribution: %v", err)
+	}
+	if _, err := db.sql.ExecContext(ctx, `
+		INSERT INTO branch_states (
+			id, repo, branch, state, approved, ci_green, pending_events, unresolved_threads,
+			owner_agent, owner_session_id, owner_session_last_seen
+		)
+		VALUES (?, ?, ?, ?, 0, 0, 0, 0, '', '', NULL)`,
+		"branch-short-repo", "acme/api", "feat/COD-304-short-repo", "submitted",
+	); err != nil {
+		t.Fatalf("seed branch state: %v", err)
+	}
+
+	if err := PromoteSessionToTrackedAssignment(ctx, db, "sess-promote-short-repo"); err != nil {
+		t.Fatalf("PromoteSessionToTrackedAssignment: %v", err)
+	}
+
+	active, err := GetActiveAgentAssignment(ctx, db, "sess-promote-short-repo")
+	if err != nil {
+		t.Fatalf("GetActiveAgentAssignment: %v", err)
+	}
+	if active.Repo != "api" || active.Branch != "feat/COD-304-short-repo" {
+		t.Fatalf("active assignment repo/branch = %q/%q, want api/feat/COD-304-short-repo", active.Repo, active.Branch)
 	}
 }
 
