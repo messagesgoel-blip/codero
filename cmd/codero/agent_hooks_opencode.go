@@ -23,7 +23,7 @@ func handleOpenCodeHooks(print, install, force bool) error { //nolint:unparam //
 		return fmt.Errorf("resolve home dir: %w", err)
 	}
 	pluginPath := openCodePluginPath(homeDir)
-	status, err := installTextFile(pluginPath, plugin, force)
+	status, err := installOpenCodeLikePlugin(pluginPath, legacyOpenCodePluginPath(homeDir), plugin, force)
 	if err != nil {
 		return fmt.Errorf("install opencode plugin: %w", err)
 	}
@@ -64,7 +64,7 @@ func generateOpenCodePluginSource(kind string) string {
 import { exec } from "node:child_process";
 const fire = (cmd) => exec(cmd, () => {});
 
-export default async () => ({
+export const CoderoHeartbeatPlugin = async () => ({
   "tool.execute.before": async () => {
     fire(%s);
   },
@@ -97,5 +97,37 @@ func kiloCodePluginPath(homeDir string) string {
 }
 
 func openCodeLikePluginPath(homeDir, dir string) string {
+	return filepath.Join(homeDir, ".config", dir, "plugins", "codero-heartbeat.js")
+}
+
+func legacyOpenCodePluginPath(homeDir string) string {
+	return legacyOpenCodeLikePluginPath(homeDir, "opencode")
+}
+
+func legacyKiloCodePluginPath(homeDir string) string {
+	return legacyOpenCodeLikePluginPath(homeDir, "kilo")
+}
+
+func legacyOpenCodeLikePluginPath(homeDir, dir string) string {
 	return filepath.Join(homeDir, ".config", dir, "plugin", "codero-heartbeat.js")
+}
+
+func installOpenCodeLikePlugin(primaryPath, legacyPath, content string, force bool) (string, error) {
+	primaryStatus, err := installTextFile(primaryPath, content, force)
+	if err != nil {
+		return "", err
+	}
+
+	legacyStatus, err := installTextFile(legacyPath, content, force)
+	if err != nil {
+		return "", err
+	}
+
+	if primaryStatus == "unchanged" && legacyStatus == "unchanged" {
+		return "unchanged", nil
+	}
+	if primaryStatus == "created" && legacyStatus == "created" {
+		return "created", nil
+	}
+	return "updated", nil
 }

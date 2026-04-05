@@ -19,7 +19,7 @@ func handleKiloCodeHooks(print, install, force bool) error { //nolint:unparam //
 		return fmt.Errorf("resolve home dir: %w", err)
 	}
 	pluginPath := kiloCodePluginPath(homeDir)
-	status, err := installTextFile(pluginPath, plugin, force)
+	status, err := installOpenCodeLikePlugin(pluginPath, legacyKiloCodePluginPath(homeDir), plugin, force)
 	if err != nil {
 		return fmt.Errorf("install kilocode plugin: %w", err)
 	}

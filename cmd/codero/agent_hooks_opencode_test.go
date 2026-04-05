@@ -39,10 +39,11 @@ func TestGenerateOpenCodePlugin_ContainsManagedComment(t *testing.T) {
 
 func TestInstallOpenCodePlugin_Create(t *testing.T) {
 	dir := t.TempDir()
-	pluginPath := filepath.Join(dir, ".config", "opencode", "plugin", "codero-heartbeat.js")
+	pluginPath := filepath.Join(dir, ".config", "opencode", "plugins", "codero-heartbeat.js")
+	legacyPath := filepath.Join(dir, ".config", "opencode", "plugin", "codero-heartbeat.js")
 
 	plugin := generateOpenCodePlugin()
-	status, err := installTextFile(pluginPath, plugin, false)
+	status, err := installOpenCodeLikePlugin(pluginPath, legacyPath, plugin, false)
 	if err != nil {
 		t.Fatalf("install: %v", err)
 	}
@@ -57,18 +58,22 @@ func TestInstallOpenCodePlugin_Create(t *testing.T) {
 	if !strings.Contains(string(data), "codero session heartbeat") {
 		t.Error("written file missing heartbeat command")
 	}
+	if _, err := os.Stat(legacyPath); err != nil {
+		t.Fatalf("legacy plugin not created: %v", err)
+	}
 }
 
 func TestInstallOpenCodePlugin_Idempotent(t *testing.T) {
 	dir := t.TempDir()
-	pluginPath := filepath.Join(dir, ".config", "opencode", "plugin", "codero-heartbeat.js")
+	pluginPath := filepath.Join(dir, ".config", "opencode", "plugins", "codero-heartbeat.js")
+	legacyPath := filepath.Join(dir, ".config", "opencode", "plugin", "codero-heartbeat.js")
 
 	plugin := generateOpenCodePlugin()
-	if _, err := installTextFile(pluginPath, plugin, false); err != nil {
+	if _, err := installOpenCodeLikePlugin(pluginPath, legacyPath, plugin, false); err != nil {
 		t.Fatalf("first install: %v", err)
 	}
 
-	status, err := installTextFile(pluginPath, plugin, false)
+	status, err := installOpenCodeLikePlugin(pluginPath, legacyPath, plugin, false)
 	if err != nil {
 		t.Fatalf("second install: %v", err)
 	}
@@ -79,14 +84,15 @@ func TestInstallOpenCodePlugin_Idempotent(t *testing.T) {
 
 func TestInstallOpenCodePlugin_Force(t *testing.T) {
 	dir := t.TempDir()
-	pluginPath := filepath.Join(dir, ".config", "opencode", "plugin", "codero-heartbeat.js")
+	pluginPath := filepath.Join(dir, ".config", "opencode", "plugins", "codero-heartbeat.js")
+	legacyPath := filepath.Join(dir, ".config", "opencode", "plugin", "codero-heartbeat.js")
 
 	plugin := generateOpenCodePlugin()
-	if _, err := installTextFile(pluginPath, plugin, false); err != nil {
+	if _, err := installOpenCodeLikePlugin(pluginPath, legacyPath, plugin, false); err != nil {
 		t.Fatalf("first install: %v", err)
 	}
 
-	status, err := installTextFile(pluginPath, plugin, true)
+	status, err := installOpenCodeLikePlugin(pluginPath, legacyPath, plugin, true)
 	if err != nil {
 		t.Fatalf("force install: %v", err)
 	}
@@ -98,7 +104,7 @@ func TestInstallOpenCodePlugin_Force(t *testing.T) {
 func TestOpenCodePluginPath(t *testing.T) {
 	dir := t.TempDir()
 	got := openCodePluginPath(dir)
-	want := filepath.Join(dir, ".config", "opencode", "plugin", "codero-heartbeat.js")
+	want := filepath.Join(dir, ".config", "opencode", "plugins", "codero-heartbeat.js")
 	if got != want {
 		t.Errorf("openCodePluginPath: got %q, want %q", got, want)
 	}

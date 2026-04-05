@@ -20,7 +20,7 @@ func TestGenerateKiloCodePlugin_ContainsHeartbeat(t *testing.T) {
 func TestKiloCodePluginPath(t *testing.T) {
 	dir := t.TempDir()
 	got := kiloCodePluginPath(dir)
-	want := filepath.Join(dir, ".config", "kilo", "plugin", "codero-heartbeat.js")
+	want := filepath.Join(dir, ".config", "kilo", "plugins", "codero-heartbeat.js")
 	if got != want {
 		t.Fatalf("kiloCodePluginPath=%q, want %q", got, want)
 	}
@@ -28,9 +28,10 @@ func TestKiloCodePluginPath(t *testing.T) {
 
 func TestInstallKiloCodePlugin_Create(t *testing.T) {
 	dir := t.TempDir()
-	pluginPath := filepath.Join(dir, ".config", "kilo", "plugin", "codero-heartbeat.js")
+	pluginPath := filepath.Join(dir, ".config", "kilo", "plugins", "codero-heartbeat.js")
+	legacyPath := filepath.Join(dir, ".config", "kilo", "plugin", "codero-heartbeat.js")
 
-	status, err := installTextFile(pluginPath, generateKiloCodePlugin(), false)
+	status, err := installOpenCodeLikePlugin(pluginPath, legacyPath, generateKiloCodePlugin(), false)
 	if err != nil {
 		t.Fatalf("installTextFile: %v", err)
 	}
@@ -40,5 +41,8 @@ func TestInstallKiloCodePlugin_Create(t *testing.T) {
 
 	if _, err := os.Stat(pluginPath); err != nil {
 		t.Fatalf("plugin not created: %v", err)
+	}
+	if _, err := os.Stat(legacyPath); err != nil {
+		t.Fatalf("legacy plugin not created: %v", err)
 	}
 }
