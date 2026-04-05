@@ -52,7 +52,7 @@ func generateCodexHooks() map[string]interface{} {
 				{
 					"matcher": "",
 					"hooks": []map[string]string{
-						{"type": "command", "command": assembleHeartbeat(f, "working", false)},
+						{"type": "command", "command": assembleHeartbeat(f, "working", false, true)},
 					},
 				},
 			},
@@ -60,14 +60,14 @@ func generateCodexHooks() map[string]interface{} {
 				{
 					"matcher": "",
 					"hooks": []map[string]string{
-						{"type": "command", "command": assembleHeartbeat(f, "working", true)},
+						{"type": "command", "command": assembleHeartbeat(f, "working", true, false)},
 					},
 				},
 			},
 			"Stop": []map[string]interface{}{
 				{
 					"hooks": []map[string]string{
-						{"type": "command", "command": assembleHeartbeat(f, "waiting_for_input", false)},
+						{"type": "command", "command": assembleHeartbeat(f, "waiting_for_input", false, false)},
 					},
 				},
 			},

@@ -42,6 +42,9 @@ func TestGenerateCodexHooks_ContainsHeartbeat(t *testing.T) {
 	if !contains(s, "codero session heartbeat") {
 		t.Error("hooks JSON does not contain 'codero session heartbeat'")
 	}
+	if !contains(s, "--tool-calls=") {
+		t.Error("hooks JSON does not contain '--tool-calls='")
+	}
 }
 
 func TestInstallCodexHooks_Create(t *testing.T) {
