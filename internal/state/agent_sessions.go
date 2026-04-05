@@ -68,6 +68,24 @@ const (
 	InferredStatusIdle            = "idle"
 )
 
+// Runtime attribution source constants.
+const (
+	AttributionSourceUnknown           = "unknown"
+	AttributionSourceExplicitHeartbeat = "explicit_heartbeat"
+	AttributionSourceHookMetadata      = "hook_metadata"
+	AttributionSourceLaunchContext     = "launch_context"
+	AttributionSourceAssignmentState   = "assignment_state"
+	AttributionSourceUnresolved        = "unresolved"
+)
+
+// Runtime attribution confidence constants.
+const (
+	AttributionConfidenceUnknown = "unknown"
+	AttributionConfidenceHigh    = "high"
+	AttributionConfidenceMedium  = "medium"
+	AttributionConfidenceLow     = "low"
+)
+
 // NormalizeStatus maps various status strings to canonical values.
 // Returns empty string for invalid input.
 func NormalizeStatus(s string) string {
@@ -97,6 +115,40 @@ func StatusPrecedence(s string) int {
 		return 1
 	default:
 		return 0
+	}
+}
+
+// NormalizeAttributionSource maps runtime attribution strings to canonical values.
+func NormalizeAttributionSource(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case AttributionSourceExplicitHeartbeat:
+		return AttributionSourceExplicitHeartbeat
+	case AttributionSourceHookMetadata:
+		return AttributionSourceHookMetadata
+	case AttributionSourceLaunchContext:
+		return AttributionSourceLaunchContext
+	case AttributionSourceAssignmentState:
+		return AttributionSourceAssignmentState
+	case AttributionSourceUnresolved:
+		return AttributionSourceUnresolved
+	case "", AttributionSourceUnknown:
+		return AttributionSourceUnknown
+	default:
+		return ""
+	}
+}
+
+// AttributionConfidenceForSource maps an attribution source to a default confidence level.
+func AttributionConfidenceForSource(source string) string {
+	switch NormalizeAttributionSource(source) {
+	case AttributionSourceExplicitHeartbeat, AttributionSourceHookMetadata:
+		return AttributionConfidenceHigh
+	case AttributionSourceLaunchContext, AttributionSourceAssignmentState:
+		return AttributionConfidenceMedium
+	case AttributionSourceUnresolved:
+		return AttributionConfidenceLow
+	default:
+		return AttributionConfidenceUnknown
 	}
 }
 
@@ -148,6 +200,59 @@ func UpdateSessionRepoBranch(ctx context.Context, db *DB, sessionID, repo, branc
 		repo, repo, branch, branch, sessionID)
 	if err != nil {
 		return fmt.Errorf("update session repo/branch: %w", err)
+	}
+	return nil
+}
+
+// UpdateSessionRuntimeAttribution records the current runtime attribution source
+// and confidence for an active session.
+func UpdateSessionRuntimeAttribution(ctx context.Context, db *DB, sessionID, source string) error {
+	normalized := NormalizeAttributionSource(source)
+	if normalized == "" {
+		return fmt.Errorf("update session runtime attribution: invalid source %q", source)
+	}
+	confidence := AttributionConfidenceForSource(normalized)
+	_, err := db.sql.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET attribution_source = ?,
+		    attribution_confidence = ?
+		WHERE session_id = ?
+		  AND ended_at IS NULL`,
+		normalized, confidence, sessionID)
+	if err != nil {
+		return fmt.Errorf("update session runtime attribution: %w", err)
+	}
+	return nil
+}
+
+// UpdateSessionRepoBranchAttribution updates repo/branch and the corresponding
+// attribution metadata in one call.
+func UpdateSessionRepoBranchAttribution(ctx context.Context, db *DB, sessionID, repo, branch, source string) error {
+	if err := UpdateSessionRepoBranch(ctx, db, sessionID, repo, branch); err != nil {
+		return err
+	}
+	if repo == "" && branch == "" {
+		return nil
+	}
+	if source == "" {
+		return nil
+	}
+	return UpdateSessionRuntimeAttribution(ctx, db, sessionID, source)
+}
+
+// MarkSessionRecovered records that a live session was adopted during daemon restart recovery.
+func MarkSessionRecovered(ctx context.Context, db *DB, sessionID string, recoveredAt time.Time) error {
+	if recoveredAt.IsZero() {
+		recoveredAt = time.Now().UTC()
+	}
+	_, err := db.sql.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET last_recovered_at = ?
+		WHERE session_id = ?
+		  AND ended_at IS NULL`,
+		recoveredAt, sessionID)
+	if err != nil {
+		return fmt.Errorf("mark session recovered: %w", err)
 	}
 	return nil
 }
@@ -886,6 +991,76 @@ func GetActiveAgentAssignment(ctx context.Context, db *DB, sessionID string) (*A
 
 	row := db.sql.QueryRowContext(ctx, q, sessionID)
 	return scanAgentAssignment(row)
+}
+
+// PromoteSessionToTrackedAssignment upgrades a lightweight runtime attachment
+// into a full repo+branch assignment when the session has durable repo/branch
+// attribution and the branch already exists in branch_states.
+//
+// This preserves history by superseding the prior lightweight assignment, so
+// later promotion does not lose the earlier unresolved session context.
+func PromoteSessionToTrackedAssignment(ctx context.Context, db *DB, sessionID string) error {
+	if sessionID == "" {
+		return fmt.Errorf("promote session: session_id is required")
+	}
+
+	var (
+		agentID string
+		repo    string
+		branch  string
+	)
+	if err := db.sql.QueryRowContext(ctx, `
+		SELECT agent_id, COALESCE(repo, ''), COALESCE(branch, '')
+		FROM agent_sessions
+		WHERE session_id = ? AND ended_at IS NULL`,
+		sessionID,
+	).Scan(&agentID, &repo, &branch); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrAgentSessionNotFound
+		}
+		return fmt.Errorf("promote session: load session: %w", err)
+	}
+	if repo == "" || branch == "" {
+		return nil
+	}
+
+	var branchExists int
+	if err := db.sql.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM branch_states
+		WHERE repo = ? AND branch = ?`,
+		repo, branch,
+	).Scan(&branchExists); err != nil {
+		return fmt.Errorf("promote session: check branch state: %w", err)
+	}
+	if branchExists == 0 {
+		return nil
+	}
+
+	active, err := GetActiveAgentAssignment(ctx, db, sessionID)
+	if err != nil && !errors.Is(err, ErrAgentAssignmentNotFound) {
+		return fmt.Errorf("promote session: load active assignment: %w", err)
+	}
+	if err == nil && active.Repo == repo && active.Branch == branch {
+		return nil
+	}
+
+	assignment := &AgentAssignment{
+		ID:        uuid.New().String(),
+		SessionID: sessionID,
+		AgentID:   agentID,
+		Repo:      repo,
+		Branch:    branch,
+	}
+	if err == nil && active != nil {
+		assignment.Worktree = active.Worktree
+		assignment.TaskID = active.TaskID
+		assignment.Substatus = active.Substatus
+	}
+	if assignment.Substatus == "" {
+		assignment.Substatus = AssignmentSubstatusInProgress
+	}
+	return AttachAgentAssignment(ctx, db, assignment)
 }
 
 // SetSessionTaskID updates the task_id on the active (non-ended) assignment for

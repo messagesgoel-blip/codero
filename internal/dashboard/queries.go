@@ -374,17 +374,43 @@ func queryActiveSessions(ctx context.Context, db *sql.DB, limit int) ([]ActiveSe
 	return out, nil
 }
 
+type sessionRow struct {
+	SessionID               string
+	AgentID                 string
+	Mode                    string
+	TmuxSessionName         string
+	StartedAt               time.Time
+	LastSeenAt              time.Time
+	LastProgressAt          sql.NullTime
+	LastIOAt                sql.NullTime
+	EndedAt                 sql.NullTime
+	EndReason               string
+	ContextPressure         string
+	CompactCount            int
+	InferredStatus          string
+	InferredStatusUpdatedAt sql.NullTime
+	SessionRepo             string
+	SessionBranch           string
+	OutputBytes             int64
+	AttributionSource       string
+	AttributionConfidence   string
+	LastRecoveredAt         sql.NullTime
+}
+
 func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]ActiveSession, error) {
 	threshold := time.Now().UTC().Add(-scheduler.SessionHeartbeatTTL)
 	rows, err := db.QueryContext(ctx, `
-		SELECT session_id, agent_id, mode, started_at, last_seen_at, last_progress_at, last_io_at,
+		SELECT session_id, agent_id, mode, COALESCE(tmux_session_name, ''), started_at, last_seen_at, last_progress_at, last_io_at, ended_at, COALESCE(end_reason, ''),
 		       COALESCE(context_pressure, 'normal') AS context_pressure,
 		       COALESCE(compact_count, 0) AS compact_count,
 		       COALESCE(inferred_status, 'unknown') AS inferred_status,
 		       inferred_status_updated_at,
 		       COALESCE(repo, '') AS session_repo,
 		       COALESCE(branch, '') AS session_branch,
-		       COALESCE(output_bytes, 0) AS output_bytes
+		       COALESCE(output_bytes, 0) AS output_bytes,
+		       COALESCE(attribution_source, 'unknown') AS attribution_source,
+		       COALESCE(attribution_confidence, 'unknown') AS attribution_confidence,
+		       last_recovered_at
 		FROM agent_sessions
 		WHERE ended_at IS NULL
 		ORDER BY last_seen_at DESC`)
@@ -393,30 +419,13 @@ func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]Ac
 	}
 	defer rows.Close()
 
-	type sessionRow struct {
-		SessionID               string
-		AgentID                 string
-		Mode                    string
-		StartedAt               time.Time
-		LastSeenAt              time.Time
-		LastProgressAt          sql.NullTime
-		LastIOAt                sql.NullTime
-		ContextPressure         string
-		CompactCount            int
-		InferredStatus          string
-		InferredStatusUpdatedAt sql.NullTime
-		SessionRepo             string
-		SessionBranch           string
-		OutputBytes             int64
-	}
-
 	var sessions []sessionRow
 	seenSessions := map[string]bool{}
 	for rows.Next() {
 		var s sessionRow
-		if err := rows.Scan(&s.SessionID, &s.AgentID, &s.Mode, &s.StartedAt, &s.LastSeenAt, &s.LastProgressAt, &s.LastIOAt,
+		if err := rows.Scan(&s.SessionID, &s.AgentID, &s.Mode, &s.TmuxSessionName, &s.StartedAt, &s.LastSeenAt, &s.LastProgressAt, &s.LastIOAt, &s.EndedAt, &s.EndReason,
 			&s.ContextPressure, &s.CompactCount, &s.InferredStatus, &s.InferredStatusUpdatedAt,
-			&s.SessionRepo, &s.SessionBranch, &s.OutputBytes); err != nil {
+			&s.SessionRepo, &s.SessionBranch, &s.OutputBytes, &s.AttributionSource, &s.AttributionConfidence, &s.LastRecoveredAt); err != nil {
 			return nil, fmt.Errorf("queryActiveSessions: agent_sessions scan row: %w", err)
 		}
 		if s.SessionID == "" {
@@ -439,132 +448,48 @@ func queryActiveSessionsFromAgentSessions(ctx context.Context, db *sql.DB) ([]Ac
 	if err != nil {
 		return nil, err
 	}
+	recentActivity, err := loadRecentRuntimeActivity(ctx, db, runtimeActivityWindow)
+	if err != nil {
+		return nil, err
+	}
 
 	var out []ActiveSession
 	for _, s := range sessions {
 		assignment, hasAssignment := assignments[s.SessionID]
-		activityState := "waiting"
-		if hasAssignment {
-			activityState = assignmentActivityStateFromSubstatus(assignment.Substatus)
+		if !hasAssignment {
+			assignment = activeAssignment{}
 		}
-		startedAt := startedAtForSession(
-			sql.NullTime{Time: s.StartedAt, Valid: !s.StartedAt.IsZero()},
-			sql.NullTime{},
-			sql.NullTime{Time: s.LastSeenAt, Valid: !s.LastSeenAt.IsZero()},
-		)
-		elapsed := time.Since(startedAt)
-		if elapsed < 0 {
-			elapsed = 0
-		}
-
-		// WIRE-001: fall back to session-level repo/branch when assignment is empty.
-		sessionRepo := assignment.Repo
-		sessionBranch := assignment.Branch
-		if sessionRepo == "" {
-			sessionRepo = s.SessionRepo
-		}
-		if sessionBranch == "" {
-			sessionBranch = s.SessionBranch
-		}
-
-		// Derive task and PR from the consolidated repo/branch (after fallback).
-		task := resolveTaskFromAssignment(assignment.TaskID, sessionBranch)
-		if task != nil && task.Phase == "" {
-			task.Phase = activityState
-		}
-
-		prNumber := 0
-		if sessionRepo != "" && sessionBranch != "" {
-			prNumber = lookupPRNumber(ctx, db, sessionRepo, sessionBranch)
-		}
-
-		// Detect stalled agents: heartbeat is fresh but no recent progress.
-		// This catches rate-limited or silently blocked agents.
-		// Two cases:
-		//   1. progress_at is set but stale → agent produced output before, now silent.
-		//   2. progress_at is NULL → agent has never produced output; use started_at
-		//      as the reference after a startup grace period to avoid false positives.
-		// Only stall-detect actively working agents using the codero I/O wrapper.
-		// last_io_at is only set by the wrapper; sessions without it (legacy or
-		// unwrapped) are not subject to I/O-based stall detection.
-		// "waiting" covers states like waiting_for_merge_approval where silence
-		// is expected, so only "active" is checked here.
-		if activityState == "active" &&
-			s.LastIOAt.Valid && !s.LastIOAt.Time.IsZero() {
-			heartbeatAge := time.Since(s.LastSeenAt)
-			ioAge := time.Since(s.LastIOAt.Time)
-			if heartbeatAge < stalledHeartbeatThreshold && ioAge > stalledProgressThreshold {
-				activityState = "stalled"
-			}
-		}
-
-		agentID := resolveOwnerAgent(s.AgentID, "")
-
-		// Compute Active/Idle durations based on inferred status
-		var workingSec, idleSec int64
-		if s.InferredStatusUpdatedAt.Valid {
-			statusDuration := time.Since(s.InferredStatusUpdatedAt.Time).Seconds()
-			if statusDuration < 0 {
-				statusDuration = 0
-			}
-			if s.InferredStatus == "idle" || s.InferredStatus == "waiting_for_input" {
-				idleSec = int64(statusDuration)
-				workingSec = int64(elapsed.Seconds()) - idleSec
-			} else if s.InferredStatus == "working" {
-				workingSec = int64(elapsed.Seconds())
-				// We don't have historical idle time without event log parsing, so we approximate
-			}
-		} else {
-			workingSec = int64(elapsed.Seconds())
-		}
-		if workingSec < 0 {
-			workingSec = 0
-		}
-
-		// Compute OutputMB: prefer DB-tracked output_bytes, fall back to tail file.
-		var outputMB float64
-		if s.OutputBytes > 0 {
-			outputMB = float64(s.OutputBytes) / (1024 * 1024)
-		} else {
-			// Sanitize session ID to prevent path traversal.
-			safeID := filepath.Base(s.SessionID)
-			if safeID != s.SessionID || safeID == "." || safeID == ".." || strings.ContainsAny(safeID, `/\`) {
-				safeID = "" // reject suspicious values
-			}
-			if safeID != "" {
-				tailPath := filepath.Join(os.TempDir(), "codero-tails", safeID+".log")
-				if d := os.Getenv("CODERO_TAIL_DIR"); d != "" {
-					tailPath = filepath.Join(d, safeID+".log")
-				}
-				if stat, err := os.Stat(tailPath); err == nil && !stat.IsDir() {
-					outputMB = float64(stat.Size()) / (1024 * 1024)
-				}
-			}
-		}
-
+		projection := buildRuntimeProjection(ctx, db, s, assignment, recentActivity[s.SessionID])
 		out = append(out, ActiveSession{
-			SessionID:               s.SessionID,
-			AgentID:                 agentID,
-			Repo:                    sessionRepo,
-			Branch:                  sessionBranch,
-			Worktree:                assignment.Worktree,
-			PRNumber:                prNumber,
-			OwnerAgent:              agentID,
-			Mode:                    s.Mode,
-			ActivityState:           activityState,
-			Task:                    task,
-			StartedAt:               startedAt,
-			LastHeartbeatAt:         s.LastSeenAt,
-			ProgressAt:              nullTimePtr(s.LastProgressAt),
-			LastIOAt:                nullTimePtr(s.LastIOAt),
-			ElapsedSec:              int64(elapsed.Seconds()),
-			WorkingDurationSec:      workingSec,
-			IdleDurationSec:         idleSec,
-			OutputMB:                outputMB,
-			ContextPressure:         s.ContextPressure,
-			CompactCount:            s.CompactCount,
-			InferredStatus:          s.InferredStatus,
-			InferredStatusUpdatedAt: nullTimePtr(s.InferredStatusUpdatedAt),
+			SessionID:               projection.SessionID,
+			AgentID:                 projection.AgentID,
+			Family:                  projection.Family,
+			LaunchMode:              projection.LaunchMode,
+			Repo:                    projection.Repo,
+			Branch:                  projection.Branch,
+			Worktree:                projection.Worktree,
+			PRNumber:                projection.PRNumber,
+			OwnerAgent:              projection.OwnerAgent,
+			Mode:                    projection.Mode,
+			LifecycleState:          projection.LifecycleState,
+			ActivityState:           projection.ActivityState,
+			AttachmentState:         projection.AttachmentState,
+			AttributionSource:       projection.AttributionSource,
+			AttributionConfidence:   projection.AttributionConfidence,
+			Task:                    projection.Task,
+			StartedAt:               projection.StartedAt,
+			LastHeartbeatAt:         projection.LastHeartbeatAt,
+			LastActivityAt:          projection.LastActivityAt,
+			ProgressAt:              projection.ProgressAt,
+			LastIOAt:                projection.LastIOAt,
+			ElapsedSec:              projection.ElapsedSec,
+			WorkingDurationSec:      projection.WorkingDurationSec,
+			IdleDurationSec:         projection.IdleDurationSec,
+			OutputMB:                projection.OutputMB,
+			ContextPressure:         projection.ContextPressure,
+			CompactCount:            projection.CompactCount,
+			InferredStatus:          projection.InferredStatus,
+			InferredStatusUpdatedAt: projection.InferredStatusUpdatedAt,
 		})
 	}
 	return out, nil
@@ -619,18 +544,22 @@ func queryActiveSessionsFromBranchStates(ctx context.Context, db *sql.DB) ([]Act
 
 		agentID := resolveOwnerAgent(ownerAgent, branch)
 		out = append(out, ActiveSession{
-			SessionID:       sessionID,
-			AgentID:         agentID,
-			Repo:            repo,
-			Branch:          branch,
-			PRNumber:        prNumber,
-			OwnerAgent:      agentID,
-			ActivityState:   sessionActivityState(state),
-			Task:            resolveTaskFromBranch(branch, state),
-			StartedAt:       startedAt,
-			LastHeartbeatAt: lastSeen.Time,
-			ProgressAt:      nil,
-			ElapsedSec:      int64(elapsed.Seconds()),
+			SessionID:             sessionID,
+			AgentID:               agentID,
+			Repo:                  repo,
+			Branch:                branch,
+			PRNumber:              prNumber,
+			OwnerAgent:            agentID,
+			LifecycleState:        "active",
+			ActivityState:         sessionActivityState(state),
+			AttachmentState:       "attached",
+			AttributionSource:     "assignment_state",
+			AttributionConfidence: "medium",
+			Task:                  resolveTaskFromBranch(branch, state),
+			StartedAt:             startedAt,
+			LastHeartbeatAt:       lastSeen.Time,
+			ProgressAt:            nil,
+			ElapsedSec:            int64(elapsed.Seconds()),
 		})
 	}
 	if err := rows.Err(); err != nil {

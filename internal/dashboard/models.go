@@ -80,16 +80,23 @@ type ActiveTask struct {
 type ActiveSession struct {
 	SessionID               string      `json:"session_id"`
 	AgentID                 string      `json:"agent_id"`
+	Family                  string      `json:"family,omitempty"`
+	LaunchMode              string      `json:"launch_mode,omitempty"`
 	Repo                    string      `json:"repo"`
 	Branch                  string      `json:"branch"`
 	Worktree                string      `json:"worktree,omitempty"`
 	PRNumber                int         `json:"pr_number"`
 	OwnerAgent              string      `json:"owner_agent"`
 	Mode                    string      `json:"mode,omitempty"`
+	LifecycleState          string      `json:"lifecycle_state,omitempty"`
 	ActivityState           string      `json:"activity_state"`
+	AttachmentState         string      `json:"attachment_state,omitempty"`
+	AttributionSource       string      `json:"attribution_source,omitempty"`
+	AttributionConfidence   string      `json:"attribution_confidence,omitempty"`
 	Task                    *ActiveTask `json:"task,omitempty"`
 	StartedAt               time.Time   `json:"started_at"`
 	LastHeartbeatAt         time.Time   `json:"last_heartbeat_at"`
+	LastActivityAt          *time.Time  `json:"last_activity_at,omitempty"`
 	ProgressAt              *time.Time  `json:"progress_at,omitempty"`
 	LastIOAt                *time.Time  `json:"last_io_at,omitempty"`
 	ElapsedSec              int64       `json:"elapsed_sec"`

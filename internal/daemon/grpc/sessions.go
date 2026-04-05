@@ -96,7 +96,19 @@ func (s *sessionService) RegisterSession(ctx context.Context, req *daemonv1.Regi
 	// the gate-check pipeline. The dashboard reads agent_sessions + agent_assignments.
 	cwd := req.InitialContext["cwd"]
 	repo := req.InitialContext["repo"]
+	branch := req.InitialContext["branch"]
 	taskID := req.InitialContext["task_id"]
+	if repo != "" || branch != "" {
+		if err := state.UpdateSessionRepoBranchAttribution(ctx, s.server.db, sessionID, repo, branch, state.AttributionSourceLaunchContext); err != nil {
+			loglib.Warn("grpc: initial runtime attribution failed",
+				loglib.FieldComponent, "grpc",
+				"session_id", sessionID,
+				"repo", repo,
+				"branch", branch,
+				"error", err,
+			)
+		}
+	}
 	// Branch is intentionally excluded: wrapper sessions track agent invocations,
 	// not branch-level work. Omitting branch makes compliance Rule-001
 	// (gate-must-pass-before-merge) not applicable, so the session can
@@ -120,6 +132,15 @@ func (s *sessionService) RegisterSession(ctx context.Context, req *daemonv1.Regi
 				"error", err,
 			)
 		}
+	}
+	if err := state.PromoteSessionToTrackedAssignment(ctx, s.server.db, sessionID); err != nil && !errors.Is(err, state.ErrAgentSessionNotFound) {
+		loglib.Warn("grpc: initial assignment promotion failed",
+			loglib.FieldComponent, "grpc",
+			"session_id", sessionID,
+			"repo", repo,
+			"branch", branch,
+			"error", err,
+		)
 	}
 
 	return &daemonv1.RegisterSessionResponse{
@@ -162,8 +183,20 @@ func (s *sessionService) Heartbeat(ctx context.Context, req *daemonv1.HeartbeatR
 		repo := firstMD(md, "x-repo")
 		branch := firstMD(md, "x-branch")
 		if repo != "" || branch != "" {
-			if err := state.UpdateSessionRepoBranch(ctx, s.server.db, req.SessionId, repo, branch); err != nil {
+			source := firstMD(md, "x-attribution-source")
+			if source == "" {
+				source = state.AttributionSourceExplicitHeartbeat
+			}
+			if err := state.UpdateSessionRepoBranchAttribution(ctx, s.server.db, req.SessionId, repo, branch, source); err != nil {
 				loglib.Warn("grpc: session repo/branch update failed",
+					loglib.FieldComponent, "grpc",
+					"session_id", req.SessionId,
+					"repo", repo,
+					"branch", branch,
+					"error", err,
+				)
+			} else if err := state.PromoteSessionToTrackedAssignment(ctx, s.server.db, req.SessionId); err != nil && !errors.Is(err, state.ErrAgentSessionNotFound) {
+				loglib.Warn("grpc: session assignment promotion failed",
 					loglib.FieldComponent, "grpc",
 					"session_id", req.SessionId,
 					"repo", repo,

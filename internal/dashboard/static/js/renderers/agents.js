@@ -59,35 +59,65 @@ function _renderOpenAgents(sessions) {
   const activeSessions = sessions.filter(s => s.status === 'active' || !s.endedAt);
   
   const columns = [
-    { key: 'agentId', label: 'Agent', render: r => esc(r.agentId || r.ownerAgent || '—') },
-    { key: 'repo', label: 'Repo / Branch', render: r => {
+    { key: 'agentId', label: 'Agent', render: r => {
+        const agent = esc(r.agentId || r.ownerAgent || '—');
+        const family = r.family ? `<span class="mode-badge" style="margin-left:6px">${esc(r.family)}</span>` : '';
+        return `${agent}${family}`;
+      }
+    },
+    { key: 'repo', label: 'Repo / Branch / Task', render: r => {
         const repo = esc(r.repo || '—');
         const branch = esc(r.branch || '');
         const pr = r.prNumber ? ` <a href="https://github.com/${repo}/pull/${r.prNumber}" target="_blank" class="pr-link">#${r.prNumber}</a>` : '';
-        return branch ? `${repo} / <code>${branch}</code>${pr}` : repo;
+        const task = r.task && r.task.id ? `<div style="margin-top:4px;color:var(--fg-muted);font-size:11px">${esc(r.task.id)}</div>` : '';
+        return `${branch ? `${repo} / <code>${branch}</code>${pr}` : repo}${task}`;
       }
     },
-    { key: 'mode', label: 'Mode', render: r => r.mode ? `<span class="mode-badge">${esc(r.mode)}</span>` : '—' },
-    { key: 'context', label: 'Context', render: r => {
-        const p = r.contextPressure || 'normal';
-        const col = p === 'critical' ? 'var(--destructive)' : p === 'warning' ? 'var(--warning)' : 'var(--fg-muted)';
-        const icon = p === 'critical' ? '🔴' : p === 'warning' ? '🟡' : '';
-        return `<span style="color:${col}">${icon} ${esc(p)}</span>`;
+    { key: 'runtime', label: 'Runtime', render: r => {
+        const mode = r.mode ? `<span class="mode-badge">${esc(r.mode)}</span>` : '';
+        const launch = r.launchMode ? `<span class="mode-badge" style="margin-left:4px">${esc(r.launchMode)}</span>` : '';
+        const lifecycle = statusChip(r.lifecycleState || 'unknown');
+        const attachment = statusChip(r.attachmentState || 'unknown');
+        return `${mode}${launch}<div style="margin-top:6px">${lifecycle} ${attachment}</div>`;
       }
     },
-    { key: 'outputMb', label: 'Output (MB)', render: r => r.outputMb > 0 ? `${r.outputMb.toFixed(2)} MB` : '—' },
-    { key: 'activeTime', label: 'Active Time', render: r => formatDuration(r.workingDurationSec || 0) },
-    { key: 'idleTime', label: 'Idle Time', render: r => formatDuration(r.idleDurationSec || 0) },
-    { key: 'status', label: 'Status', render: r => statusChip(r.inferredStatus || 'unknown') }
+    { key: 'activity', label: 'Activity', render: r => {
+        const activity = statusChip(r.activityState || 'unknown');
+        const inferred = r.inferredStatus ? `<div style="margin-top:6px;color:var(--fg-muted);font-size:11px">${esc(r.inferredStatus)}</div>` : '';
+        return `${activity}${inferred}`;
+      }
+    },
+    { key: 'attribution', label: 'Attribution', render: r => {
+        const source = statusChip(r.attributionSource || 'unknown');
+        const confidence = r.attributionConfidence ? `<div style="margin-top:6px;color:var(--fg-muted);font-size:11px">${esc(r.attributionConfidence)}</div>` : '';
+        return `${source}${confidence}`;
+      }
+    },
+    { key: 'lastActivity', label: 'Last Activity', render: r => r.lastActivityAt ? esc(relativeTime(r.lastActivityAt)) : '<span style="color:var(--fg-muted)">—</span>' },
+    { key: 'outputMb', label: 'Output', render: r => {
+        const output = r.outputMb > 0 ? `${r.outputMb.toFixed(2)} MB` : '—';
+        const times = `<div style="margin-top:6px;color:var(--fg-muted);font-size:11px">active ${esc(formatDuration(r.workingDurationSec || 0))} · idle ${esc(formatDuration(r.idleDurationSec || 0))}</div>`;
+        return `${output}${times}`;
+      }
+    }
   ];
 
   const rows = activeSessions.map(s => ({
     _id: s.sessionId || s.id,
     agentId: s.agentId || s.ownerAgent,
+    family: s.family,
+    launchMode: s.launchMode,
     repo: s.repo,
     branch: s.branch,
     prNumber: s.prNumber || s.pr_number,
     mode: s.mode,
+    lifecycleState: s.lifecycleState || s.lifecycle_state,
+    attachmentState: s.attachmentState || s.attachment_state,
+    attributionSource: s.attributionSource || s.attribution_source,
+    attributionConfidence: s.attributionConfidence || s.attribution_confidence,
+    activityState: s.state || s.activityState || s.activity_state,
+    task: s.task,
+    lastActivityAt: s.lastActivityAt || s.last_activity_at || null,
     contextPressure: s.contextPressure || s.context_pressure,
     outputMb: s.outputMb || s.output_mb || 0,
     workingDurationSec: s.workingDurationSec || s.working_duration_sec || 0,

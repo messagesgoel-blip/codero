@@ -158,6 +158,9 @@ func (s *SessionRecoveryService) recoverSession(ctx context.Context, session *st
 	`, now, session.SessionID); err != nil {
 		return fmt.Errorf("update last seen time: %w", err)
 	}
+	if err := state.MarkSessionRecovered(ctx, state.NewDB(s.db), session.SessionID, now); err != nil {
+		return fmt.Errorf("mark session recovered: %w", err)
+	}
 
 	if s.logger != nil {
 		s.logger.Info("session recovered successfully",

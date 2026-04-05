@@ -10,6 +10,63 @@ import (
 // ─── §3 Session queries ─────────────────────────────────────────────────
 
 func querySessions(ctx context.Context, db *sql.DB, status string, limit, offset int) ([]SessionRow, int, error) {
+	if status == "" || status == "active" || status == "working" || status == "waiting_for_input" || status == "idle" {
+		active, err := queryActiveSessions(ctx, db, 0)
+		if err != nil {
+			return nil, 0, fmt.Errorf("querySessions: active runtime projection: %w", err)
+		}
+		var projected []SessionRow
+		for _, session := range active {
+			if status == "working" && session.InferredStatus != "working" {
+				continue
+			}
+			if status == "waiting_for_input" && session.InferredStatus != "waiting_for_input" {
+				continue
+			}
+			if status == "idle" && session.InferredStatus != "idle" {
+				continue
+			}
+			projected = append(projected, sessionRowFromActiveSession(session))
+		}
+		total := len(projected)
+		if status != "" {
+			if offset > 0 {
+				if offset >= len(projected) {
+					return []SessionRow{}, total, nil
+				}
+				projected = projected[offset:]
+			}
+			if limit > 0 && len(projected) > limit {
+				projected = projected[:limit]
+			}
+			return projected, total, nil
+		}
+
+		// Mixed active+ended list: preserve existing ended-session query path and
+		// prepend canonical active runtime projections.
+		ended, endedTotal, err := querySessionsLegacy(ctx, db, "ended", limit, 0)
+		if err != nil {
+			return nil, 0, err
+		}
+		combined := append([]SessionRow{}, projected...)
+		combined = append(combined, ended...)
+		total += endedTotal
+		if offset > 0 {
+			if offset >= len(combined) {
+				return []SessionRow{}, total, nil
+			}
+			combined = combined[offset:]
+		}
+		if limit > 0 && len(combined) > limit {
+			combined = combined[:limit]
+		}
+		return combined, total, nil
+	}
+
+	return querySessionsLegacy(ctx, db, status, limit, offset)
+}
+
+func querySessionsLegacy(ctx context.Context, db *sql.DB, status string, limit, offset int) ([]SessionRow, int, error) {
 	hasTable, err := tableExists(ctx, db, "agent_sessions")
 	if err != nil {
 		return nil, 0, err
@@ -83,6 +140,15 @@ func querySessions(ctx context.Context, db *sql.DB, status string, limit, offset
 }
 
 func querySessionByID(ctx context.Context, db *sql.DB, sessionID string) (*SessionRow, error) {
+	active, err := queryActiveSessions(ctx, db, 0)
+	if err == nil {
+		for _, session := range active {
+			if session.SessionID == sessionID {
+				row := sessionRowFromActiveSession(session)
+				return &row, nil
+			}
+		}
+	}
 	hasTable, err := tableExists(ctx, db, "agent_sessions")
 	if err != nil {
 		return nil, err
@@ -113,6 +179,32 @@ func querySessionByID(ctx context.Context, db *sql.DB, sessionID string) (*Sessi
 	}
 	s.Checkpoint = deriveCheckpoint(s.Status, s.EndReason)
 	return &s, nil
+}
+
+func sessionRowFromActiveSession(s ActiveSession) SessionRow {
+	return SessionRow{
+		SessionID:             s.SessionID,
+		AgentID:               s.AgentID,
+		Family:                s.Family,
+		LaunchMode:            s.LaunchMode,
+		Mode:                  s.Mode,
+		Status:                "active",
+		Repo:                  s.Repo,
+		Branch:                s.Branch,
+		Worktree:              s.Worktree,
+		Checkpoint:            deriveCheckpoint("active", ""),
+		LifecycleState:        s.LifecycleState,
+		ActivityState:         s.ActivityState,
+		AttachmentState:       s.AttachmentState,
+		AttributionSource:     s.AttributionSource,
+		AttributionConfidence: s.AttributionConfidence,
+		InferredStatus:        s.InferredStatus,
+		StartedAt:             s.StartedAt,
+		LastSeenAt:            s.LastHeartbeatAt,
+		LastActivityAt:        s.LastActivityAt,
+		EndedAt:               nil,
+		EndReason:             "",
+	}
 }
 
 func queryAssignmentsBySession(ctx context.Context, db *sql.DB, sessionID string) ([]AssignmentSummary, error) {

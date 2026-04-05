@@ -111,8 +111,8 @@ func TestActiveSessions_AssignmentSubstatusDrivesActivityState(t *testing.T) {
 	if len(sessions) != 1 {
 		t.Fatalf("len(sessions) = %d, want 1", len(sessions))
 	}
-	if sessions[0].ActivityState != "waiting" {
-		t.Fatalf("activity_state = %q, want waiting", sessions[0].ActivityState)
+	if sessions[0].ActivityState != "syncing" {
+		t.Fatalf("activity_state = %q, want syncing", sessions[0].ActivityState)
 	}
 }
 
